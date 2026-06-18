@@ -1,9 +1,19 @@
+/*
+@Summary:
+	文件日志输出
+@Date:
+	18 Jun, 2026
+@Author:
+	Frank Ng
+*/
+
 package logging
 
 import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 )
 
 type FileWriter struct {
@@ -13,21 +23,22 @@ type FileWriter struct {
 	maxSize     int64 //字节
 	maxBackups  int
 	currentSize int64
+
+	currentDate string //当前日期
 }
 
 func (fw *FileWriter) Write(p []byte) (n int, err error) {
 	fw.mu.Lock()
 	defer fw.mu.Unlock()
 
-	if fw.currentSize+int64(len(p)) >= fw.maxSize {
-		if err := fw.rotate(); err != nil {
-			return 0, err
-		}
+	// 检查是否需要轮转
+	if err := fw.checkAndRotate(); err != nil {
+		return 0, err
 	}
 
 	n, err = fw.f.Write(p)
 	fw.currentSize += int64(n)
-	return
+	return n, err
 }
 
 func (fw *FileWriter) Close() error {
@@ -40,6 +51,14 @@ func (fw *FileWriter) Close() error {
 
 // =================================== private functions & methods ====================================
 func (fw *FileWriter) openFile() error {
+	if (fw.f != nil) && (fw.f != os.Stderr) {
+		// 关闭旧文件,如果存在
+		err := fw.f.Close()
+		if err != nil {
+			return err
+		}
+	}
+
 	file, err := os.OpenFile(fw.filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
@@ -51,7 +70,20 @@ func (fw *FileWriter) openFile() error {
 	return nil
 }
 
+func (fw *FileWriter) checkAndRotate() error {
+	today := time.Now().Format("2006-01-02") //获取当前日期
+
+	//判断日期是否有变化
+	if today == fw.currentDate {
+		return nil
+	}
+
+	// 日期已经变化,执行轮转
+	return fw.rotate()
+}
+
 func (fw *FileWriter) rotate() error {
+	// 关闭当前的文件
 	if fw.f != nil {
 		err := fw.f.Close()
 		if err != nil {
