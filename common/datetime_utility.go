@@ -1,6 +1,21 @@
+/*******************************************************
+* @Summary:
+*	日期工具类，以及函数定义
+*
+*	这里实现了singleton模式,但是 并不能组织使用者 new DatetimeUtility()
+*	方式创建一个实例。
+* @Author:
+*	Frank Ng
+* @Date:
+* 	Jun 19, 2026
+*******************************************************/
+
 package common
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 type DatetimeItem struct {
 	DatetimeStr string
@@ -26,10 +41,19 @@ type DatetimeUtility struct {
 	timezone *time.Location
 }
 
-func GetDatetimeUtility() *DatetimeUtility {
-	return &DatetimeUtility{
-		timezone: time.Local, // default time zone
-	}
+var (
+	datetimeUtilityInstance *DatetimeUtility
+	datetimeUtilityOnce     sync.Once
+)
+
+func GetDatetimeUtilityInstance() *DatetimeUtility {
+	datetimeUtilityOnce.Do(func() {
+		datetimeUtilityInstance = &DatetimeUtility{
+			timezone: time.Local,
+		}
+	})
+
+	return datetimeUtilityInstance
 }
 
 func (d *DatetimeUtility) GetCurrentDatetime() (*DatetimeItem, error) {
