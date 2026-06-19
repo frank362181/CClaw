@@ -6,17 +6,15 @@ import (
 )
 
 func main() {
-	dt, _ := common.GetDatetimeUtilityInstance().GetCurrentDatetime()
-
-	fmt.Println(dt.DatetimeStr)
-
-	dt1, _ := common.GetDatetimeUtilityInstance().GetCurrentDatetime()
-
-	distance := dt.Distance(*dt1)
-
-	fmt.Println(distance)
 
 	publicIP := common.GetOSUtilityInstance().GetPublicIP()
 
 	fmt.Println(publicIP)
+
+	routerIP := common.GetOSUtilityInstance().GetRouterIP()
+	fmt.Println(routerIP)
+
+	dt, _ := common.GetDatetimeUtilityInstance().GetCurrentDatetime()
+
+	fmt.Println(dt.DatetimeStr)
 }

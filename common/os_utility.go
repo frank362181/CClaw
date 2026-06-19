@@ -74,6 +74,20 @@ func (o *OSUtility) GetCurrentDir() string {
 	return currentDir
 }
 
+func (o *OSUtility) GetExtension(filename string) string {
+	if len(strings.TrimSpace(filename)) == 0 {
+		return ""
+	}
+
+	filename = strings.TrimSpace(filename)
+	index := strings.LastIndex(filename, ".")
+	if index == -1 || index == len(filename)-1 {
+		return ""
+	}
+
+	return strings.ToLower(filename[index+1:]) //全部转换成小写
+}
+
 func (o *OSUtility) GetHostName() string {
 	o.initHostInfo()
 
@@ -120,6 +134,31 @@ func (o *OSUtility) GetPublicIP() string {
 	return ""
 }
 
+// PathExists 判断文件或目录是否存在
+func (o *OSUtility) PathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// DirExists 判断目录是否存在,是目录且存在 return true
+func (o *OSUtility) DirExists(path string) bool {
+	ret, err := os.Stat(path)
+	if err != nil {
+		return false //路径不存在
+	}
+
+	return ret.IsDir()
+}
+
+func (o *OSUtility) CreateDir(path string) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		err := os.MkdirAll(path, 0755) //递归创建
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
 // ================================= private functions & methods ======================================
 func (o *OSUtility) initHostInfo() {
 	o.getHostInfoOnce.Do(func() {
@@ -144,7 +183,7 @@ func (o *OSUtility) getHostInfo() (*hostInfo, error) {
 	valid := false
 	for _, addr := range adds {
 		if aspnet, ok := addr.(*net.IPNet); ok && !aspnet.IP.IsLoopback() {
-			if aspnet.IP.To4() != nil || aspnet.IP.To16() != nil {
+			if aspnet.IP.To4() != nil {
 				hostInfo.HostIPV4 = aspnet.IP.String()
 				valid = true
 			}
