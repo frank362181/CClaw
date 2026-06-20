@@ -5,6 +5,9 @@ package config
 type ConfigurationOperator interface {
 	LoadConfigFile(filename string) error
 
+	GetConfigurationFileName() string
+	Extension() string
+
 	GetStringValue(section string, key string) (string, error)
 	GetIntValue(section string, key string) (int, error)
 	GetBoolValue(section string, key string) (bool, error)

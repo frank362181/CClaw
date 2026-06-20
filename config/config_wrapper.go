@@ -3,7 +3,6 @@ package config
 import (
 	"CClaw/common"
 	"errors"
-	"strconv"
 	"strings"
 	"sync"
 )
@@ -26,8 +25,8 @@ var (
 	configurationHelpers = make(map[string]*ConfigurationHelper)
 )
 
-// GetConfigurationWrapper singleton,应用级别
-func GetConfigurationWrapper(filename string) (*ConfigurationHelper, error) {
+// GetConfigurationHelper singleton,应用级别
+func GetConfigurationHelper(filename string) (*ConfigurationHelper, error) {
 	if len(strings.TrimSpace(filename)) == 0 {
 		return nil, errors.New("filename must not be empty")
 	}
@@ -35,6 +34,7 @@ func GetConfigurationWrapper(filename string) (*ConfigurationHelper, error) {
 
 	mutex.RLock()
 	defer mutex.RUnlock()
+
 	if helper, ok := configurationHelpers[tmpFileName]; ok {
 		return helper, nil
 	}
@@ -48,129 +48,80 @@ func GetConfigurationWrapper(filename string) (*ConfigurationHelper, error) {
 		return helper, nil
 	}
 
-	ext := common.GetOSUtilityInstance().GetExtension(tmpFileName)
+	// add a new helper
+	helper, err := addHelper(filename)
+	if err != nil {
+		return helper, nil
+	}
+
+	return nil, errors.New("can not load the configuration " + filename)
+}
+
+func LookupConfigurationHelper(filename string) (*ConfigurationHelper, error) {
+	filename = strings.TrimSpace(filename)
+	mutex.RLock()
+	defer mutex.RUnlock()
+
+	return findHelper(filename)
+}
+
+func InsertConfigurationHelper(filename string) (*ConfigurationHelper, error) {
+	filename = strings.TrimSpace(filename)
+	if len(filename) == 0 {
+		return nil, errors.New("filename must not be empty")
+	}
+
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	helper, err := findHelper(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	helper, err = addHelper(filename)
+	return helper, err
+}
+
+func InsertConfigurationHelperEx(helper *ConfigurationHelper) bool {
+	if helper == nil {
+		return false
+	}
+
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	_, err := findHelper(helper.configFileName)
+	if err != nil {
+		return false
+	}
+
+	configurationHelpers[helper.configFileName] = helper
+	return true
+}
+
+// ================================= private functions & methods =============================
+
+func findHelper(filename string) (*ConfigurationHelper, error) {
+	if helper, ok := configurationHelpers[filename]; ok {
+		return helper, nil
+	}
+
+	return nil, errors.New("unfound " + filename)
+}
+
+func addHelper(filename string) (*ConfigurationHelper, error) {
+	ext := common.GetOSUtilityInstance().GetExtension(filename)
 	if ext == "" {
-		return nil, errors.New("cannot determine config file type from " + tmpFileName)
+		return nil, errors.New("cannot determine config file type from " + filename)
 	}
 
 	helper := &ConfigurationHelper{
-		configFileName: tmpFileName,
+		configFileName: filename,
 		extension:      ext,
 		loaded:         false,
 		configItems:    make(map[string][]configItem),
 	}
-	configurationHelpers[tmpFileName] = helper
+	configurationHelpers[filename] = helper
 	return helper, nil
-}
-
-func (c *ConfigurationHelper) GetConfigurationFileName() string {
-	return c.configFileName
-}
-
-func (c *ConfigurationHelper) Extension() string {
-	return c.extension
-}
-
-func (c *ConfigurationHelper) LoadConfigFile(filename string) error {
-	//TODO implement me
-	helper, err := GetConfigurationWrapper(filename)
-
-	if err != nil {
-		return err
-	}
-
-	if helper != c {
-		return errors.New("not the same configuration file: " + filename)
-	}
-
-	return nil
-}
-
-func (c *ConfigurationHelper) SaveConfigFile(filename string) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (c *ConfigurationHelper) GetStringValue(section string, key string) (string, error) {
-	value, err := c.findKey(section, key)
-	if err != nil {
-		return "", err
-	}
-
-	return value, nil
-}
-
-func (c *ConfigurationHelper) GetIntValue(section string, key string) (int, error) {
-	value, err := c.findKey(section, key)
-	if err != nil {
-		return 0, err
-	}
-
-	return strconv.Atoi(value)
-}
-
-func (c *ConfigurationHelper) GetBoolValue(section string, key string) (bool, error) {
-	value, err := c.findKey(section, key)
-	if err != nil {
-		return false, err
-	}
-
-	enabled, err := strconv.ParseBool(value)
-	if err != nil {
-		return false, err
-	}
-
-	return enabled, nil
-}
-
-func (c *ConfigurationHelper) GetFloatValue(section string, key string) (float32, error) {
-	value, err := c.findKey(section, key)
-	if err != nil {
-		return 0.0, err
-	}
-
-	f32, err := strconv.ParseFloat(value, 32)
-	if err != nil {
-		return 0.0, err
-	}
-
-	var f32Value float32 = float32(f32)
-	return f32Value, nil
-}
-
-func (c *ConfigurationHelper) GetDoubleValue(section string, key string) (float64, error) {
-	value, err := c.findKey(section, key)
-	if err != nil {
-		return 0, err
-	}
-
-	f64, err := strconv.ParseFloat(value, 64)
-	if err != nil {
-		return 0, err
-	}
-	return f64, nil
-}
-
-// ============================ private functions & methods ==================================
-
-func (c *ConfigurationHelper) findKey(section string, key string) (string, error) {
-	if c.loaded {
-		return "", errors.New("configuration already loaded")
-	}
-
-	section = strings.TrimSpace(section)
-	key = strings.TrimSpace(key)
-	if len(section) == 0 || len(key) == 0 {
-		return "", errors.New("empty section or key")
-	}
-
-	if configItems, ok := c.configItems[section]; ok {
-		for _, configItem := range configItems {
-			if configItem.keyName == key {
-				return configItem.value, nil
-			}
-		}
-	}
-
-	return "", errors.New("key unexists")
 }
