@@ -1,9 +1,10 @@
 package main
 
 import (
-	"cclaw/common"
-	"cclaw/config"
 	"fmt"
+
+	"my.favorite/platformutility/common"
+	"my.favorite/platformutility/config"
 )
 
 func main() {
@@ -24,7 +25,11 @@ func main() {
 	helper, err := config.GetConfigurationHelper(configFileName)
 
 	if err == nil {
-		helper.LoadConfiguration()
+		err = helper.LoadConfiguration()
+		if err != nil {
+			fmt.Println(err.Error())
+			return
+		}
 	}
 
 	tmpServer, _ := helper.GetStringValue("config", "server")

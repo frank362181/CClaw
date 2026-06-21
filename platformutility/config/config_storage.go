@@ -1,8 +1,9 @@
 package config
 
 import (
-	"cclaw/exception"
 	"strings"
+
+	"my.favorite/platformutility/exception"
 )
 
 func (s *ConfigurationStore) Get(section string, key string) (string, error) {

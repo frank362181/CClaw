@@ -1,13 +1,14 @@
 package config
 
 import (
-	"cclaw/common"
-	"cclaw/exception"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"my.favorite/platformutility/common"
+	"my.favorite/platformutility/exception"
 
 	"github.com/go-ini/ini"
 )

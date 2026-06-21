@@ -1,10 +1,11 @@
 package config
 
 import (
-	"cclaw/common"
-	"cclaw/exception"
 	"strings"
 	"sync"
+
+	"my.favorite/platformutility/common"
+	"my.favorite/platformutility/exception"
 )
 
 type ConfigurationStore struct {
