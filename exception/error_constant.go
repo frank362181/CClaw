@@ -4,11 +4,13 @@ const (
 	errorIdParamEmpty = iota + 1
 	errorIdMatch
 	errorIdUnMatch
-	errorFileExtension
+	errorIdFileExtension
 
-	errorUnsupported
+	errorIdUnsupported
 
-	errorUnloadFile = 60 //配置文件载入错误
+	errorIdUnloadFile = iota + 60 //配置文件载入错误
+	errorIdFilePath
+	errorIdConfigRW // 配置文件读写时发生的错误编码
 
-	errorUnknown = 999
+	errorIdUnknown = 999
 )

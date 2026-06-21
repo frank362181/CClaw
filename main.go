@@ -19,12 +19,17 @@ func main() {
 
 	fmt.Println(dt.DatetimeStr)
 
-	configFileName := "nodipreg.ini"
+	configFileName := "/Volumes/Wisdom/MyIdea/CClaw/nodipreg.ini"
 
-	_, err := config.GetConfigurationHelper(configFileName)
+	helper, err := config.GetConfigurationHelper(configFileName)
 
-	if err != nil {
-
+	if err == nil {
+		helper.LoadConfiguration()
 	}
 
+	tmpServer, _ := helper.GetStringValue("config", "server")
+	fmt.Println(tmpServer)
+
+	tmpFileName := "/Volumes/Wisdom/MyIdea/CClaw/cclaw.ini"
+	helper.SaveConfiguration(tmpFileName)
 }

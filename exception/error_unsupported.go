@@ -13,7 +13,7 @@ type UnsupportedException struct {
 var UnsupportedExceptionError = &UnsupportedException{
 	ErrorDescription: ErrorDescription{
 		ErrTxt:   "",
-		ErrId:    errorUnsupported,
+		ErrId:    errorIdUnsupported,
 		FileName: "",
 		LineNo:   -1,
 	},
@@ -24,7 +24,7 @@ func UnsupportedExceptionErrorEx(errTxt string) *UnsupportedException {
 	return &UnsupportedException{
 		ErrorDescription: ErrorDescription{
 			ErrTxt:   errTxt,
-			ErrId:    errorUnsupported,
+			ErrId:    errorIdUnsupported,
 			FileName: file,
 			LineNo:   line,
 		},

@@ -1,8 +1,12 @@
 package config
 
 import (
+	"CClaw/common"
 	"CClaw/exception"
+	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-ini/ini"
@@ -38,7 +42,7 @@ func (i *IniConfigParser) Load(filename string) (*ConfigurationStore, error) {
 
 	for _, section := range iniFile.Sections() {
 		// 跳过默认的 DEFAULT section (ini自带的)
-		if strings.EqualFold(section.Name(), ini.DefaultSection) && len(section.Keys()) == 0 {
+		if strings.EqualFold(section.Name(), ini.DefaultSection) || len(section.Keys()) == 0 {
 			continue
 		}
 
@@ -48,14 +52,14 @@ func (i *IniConfigParser) Load(filename string) (*ConfigurationStore, error) {
 		}
 
 		for _, key := range section.Keys() {
-			store.data[sectionName][key.Name()] = key.String()
+			store.data[sectionName][key.Name()] = key.Value()
 		}
 	}
 
 	return store, nil
 }
 
-func (i *IniConfigParser) Save(filename string, store ConfigurationStore) error {
+func (i *IniConfigParser) Save(filename string, store *ConfigurationStore) error {
 	//TODO implement me
 	filename = strings.TrimSpace(filename)
 	if len(filename) == 0 {
@@ -69,6 +73,38 @@ func (i *IniConfigParser) Save(filename string, store ConfigurationStore) error 
 	// store the config item into file
 	store.mutex.RLock()
 	defer store.mutex.RUnlock()
+
+	//make sure the exists of the DIR
+	dir := filepath.Dir(filename)
+	err := common.GetOSUtilityInstance().CreateDir(dir)
+	if err != nil {
+		return exception.FilePathErrorEx("can not create dir:" + dir)
+	}
+
+	tmpFile := dir + ".tmp" + fmt.Sprintf("%d", common.GetOSUtilityInstance().GetProcessID())
+	f, err := os.OpenFile(tmpFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return exception.FilePathErrorEx("can not open file:" + tmpFile)
+	}
+
+	writeErr := i.writeToWriter(f, store)
+	closeErr := f.Close()
+
+	if writeErr != nil {
+		os.Remove(tmpFile)
+		return writeErr
+	}
+
+	if closeErr != nil {
+		os.Remove(tmpFile)
+		return closeErr
+	}
+
+	//原子替换
+	if err := os.Rename(tmpFile, filename); err != nil {
+		os.Remove(tmpFile)
+		return exception.FilePathErrorEx("can not rename file:" + tmpFile)
+	}
 
 	return nil
 }
@@ -94,4 +130,28 @@ func expandPercentVars(s string) string {
 	}
 
 	return s
+}
+
+func (i *IniConfigParser) writeToWriter(w io.Writer, store *ConfigurationStore) error {
+	iniFile := ini.Empty()
+
+	// 按照section写入
+	for sectionName, keys := range store.data {
+		section, err := iniFile.NewSection(sectionName)
+		if err != nil {
+			return exception.ConfigErrorEx("can not create section:" + sectionName)
+		}
+
+		for key, value := range keys {
+			_, err := section.NewKey(key, value)
+			if err != nil {
+				return exception.ConfigErrorEx("can not create key:" + key)
+			}
+
+			// 如果有注释
+		}
+	}
+
+	_, err := iniFile.WriteTo(w)
+	return err
 }

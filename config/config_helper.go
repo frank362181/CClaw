@@ -1,9 +1,7 @@
 package config
 
 import (
-	"errors"
 	"strconv"
-	"strings"
 )
 
 func (c *ConfigurationHelper) LoadConfiguration() error {
@@ -26,13 +24,13 @@ func (c *ConfigurationHelper) LoadConfiguration() error {
 	return nil
 }
 
-func (c *ConfigurationHelper) SaveConfiguration() error {
+func (c *ConfigurationHelper) SaveConfiguration(filename string) error {
 	parser, err := GetParser(c.extension)
 	if err != nil {
 		return err
 	}
 
-	return parser.Save(c.GetConfigurationFileName(), *c.storage)
+	return parser.Save(filename, c.storage)
 }
 
 func (c *ConfigurationHelper) GetConfigurationFileName() string {
@@ -44,75 +42,87 @@ func (c *ConfigurationHelper) Extension() string {
 }
 
 func (c *ConfigurationHelper) GetStringValue(section string, key string) (string, error) {
-	panic("implement me")
+	return c.storage.Get(section, key)
+}
+
+func (c *ConfigurationHelper) GetStringValueDefault(section string, key string, defaultValue string) (string, error) {
+	return c.storage.GetWithDefault(section, key, defaultValue)
 }
 
 func (c *ConfigurationHelper) GetIntValue(section string, key string) (int, error) {
-	panic("implement me")
+	defaultValue := 0
+	return c.GetIntValueDefault(section, key, defaultValue)
+}
+
+func (c *ConfigurationHelper) GetIntValueDefault(section string, key string, defaultValue int) (int, error) {
+	value, err := c.storage.Get(section, key)
+	if err != nil {
+		return defaultValue, err
+	}
+
+	intValue, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultValue, err
+	}
+
+	return intValue, nil
 }
 
 func (c *ConfigurationHelper) GetBoolValue(section string, key string) (bool, error) {
-	value, err := c.findKey(section, key)
+	defaultValue := true
+	return c.GetBoolValueDefault(section, key, defaultValue)
+}
+
+func (c *ConfigurationHelper) GetBoolValueDefault(section string, key string, defaultValue bool) (bool, error) {
+	value, err := c.storage.Get(section, key)
 	if err != nil {
-		return false, err
+		return defaultValue, err
 	}
 
 	enabled, err := strconv.ParseBool(value)
 	if err != nil {
-		return false, err
+		return defaultValue, err
 	}
 
 	return enabled, nil
 }
 
 func (c *ConfigurationHelper) GetFloatValue(section string, key string) (float32, error) {
-	value, err := c.findKey(section, key)
+	defaultValue := float32(0)
+	return c.GetFloatValueDefault(section, key, defaultValue)
+}
+
+func (c *ConfigurationHelper) GetFloatValueDefault(section string, key string, defaultValue float32) (float32, error) {
+	value, err := c.storage.Get(section, key)
 	if err != nil {
-		return 0.0, err
+		return defaultValue, err
 	}
 
 	f32, err := strconv.ParseFloat(value, 32)
 	if err != nil {
-		return 0.0, err
+		return defaultValue, err
 	}
 
 	var f32Value float32 = float32(f32)
 	return f32Value, nil
 }
 
-func (c *ConfigurationHelper) GetDoubleValue(section string, key string) (float64, error) {
-	value, err := c.findKey(section, key)
+func (c *ConfigurationHelper) GetDouble(section string, key string) (float64, error) {
+	defaultValue := float64(0)
+	return c.GetDoubleValueDefault(section, key, defaultValue)
+}
+
+func (c *ConfigurationHelper) GetDoubleValueDefault(section string, key string, defaultValue float64) (float64, error) {
+	value, err := c.storage.Get(section, key)
 	if err != nil {
-		return 0, err
+		return defaultValue, err
 	}
 
 	f64, err := strconv.ParseFloat(value, 64)
 	if err != nil {
-		return 0, err
+		return defaultValue, err
 	}
 	return f64, nil
 }
 
 // ================================= private functions & methods ====================================
-
-func (c *ConfigurationHelper) findKey(section string, key string) (string, error) {
-	if c.loaded {
-		return "", errors.New("configuration already loaded")
-	}
-
-	section = strings.TrimSpace(section)
-	key = strings.TrimSpace(key)
-	if len(section) == 0 || len(key) == 0 {
-		return "", errors.New("empty section or key")
-	}
-
-	//if configItems, ok := c.configItems[section]; ok {
-	//	for _, configItem := range configItems {
-	//		if configItem.keyName == key {
-	//			return configItem.value, nil
-	//		}
-	//	}
-	//}
-
-	return "", errors.New("key unexists")
-}

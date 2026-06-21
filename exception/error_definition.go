@@ -37,7 +37,7 @@ func (err *ErrorDescription) Is(target error) bool {
 
 var FileExtensionError = &ErrorDescription{
 	ErrTxt:   "",
-	ErrId:    errorFileExtension,
+	ErrId:    errorIdFileExtension,
 	FileName: "",
 	LineNo:   -1,
 }
@@ -46,7 +46,7 @@ func FileExtensionErrorEx(errTxt string) *ErrorDescription {
 	_, file, line, _ := runtime.Caller(1)
 	return &ErrorDescription{
 		ErrTxt:   errTxt,
-		ErrId:    errorFileExtension,
+		ErrId:    errorIdFileExtension,
 		FileName: file,
 		LineNo:   line,
 	}
@@ -54,7 +54,7 @@ func FileExtensionErrorEx(errTxt string) *ErrorDescription {
 
 var UnloadFileError = &ErrorDescription{
 	ErrTxt:   "",
-	ErrId:    errorUnloadFile,
+	ErrId:    errorIdUnloadFile,
 	FileName: "",
 	LineNo:   -1,
 }
@@ -63,7 +63,7 @@ func UnloadFileErrorEx(errTxt string) *ErrorDescription {
 	_, file, line, _ := runtime.Caller(1)
 	return &ErrorDescription{
 		ErrTxt:   errTxt,
-		ErrId:    errorUnloadFile,
+		ErrId:    errorIdUnloadFile,
 		FileName: file,
 		LineNo:   line,
 	}
@@ -71,7 +71,7 @@ func UnloadFileErrorEx(errTxt string) *ErrorDescription {
 
 var UnknownError = &ErrorDescription{
 	ErrTxt:   "",
-	ErrId:    errorUnknown,
+	ErrId:    errorIdUnknown,
 	FileName: "",
 	LineNo:   -1,
 }
@@ -80,7 +80,7 @@ func UnknownErrorEx(errTxt string) *ErrorDescription {
 	_, file, line, _ := runtime.Caller(1)
 	return &ErrorDescription{
 		ErrTxt:   errTxt,
-		ErrId:    errorUnknown,
+		ErrId:    errorIdUnknown,
 		FileName: file,
 		LineNo:   line,
 	}

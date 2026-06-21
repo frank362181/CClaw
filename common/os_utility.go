@@ -150,13 +150,15 @@ func (o *OSUtility) DirExists(path string) bool {
 	return ret.IsDir()
 }
 
-func (o *OSUtility) CreateDir(path string) {
+func (o *OSUtility) CreateDir(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		err := os.MkdirAll(path, 0755) //递归创建
 		if err != nil {
-			panic(err)
+			return err
 		}
 	}
+
+	return nil
 }
 
 // ================================= private functions & methods ======================================

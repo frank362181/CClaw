@@ -6,6 +6,6 @@ func (p *PropertiesConfigParser) Load(filename string) (*ConfigurationStore, err
 	panic("implement me")
 }
 
-func (p *PropertiesConfigParser) Save(filename string, store ConfigurationStore) error {
+func (p *PropertiesConfigParser) Save(filename string, store *ConfigurationStore) error {
 	panic("implement me")
 }
