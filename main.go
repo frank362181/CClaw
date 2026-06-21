@@ -1,8 +1,8 @@
 package main
 
 import (
-	"CClaw/common"
-	"CClaw/config"
+	"cclaw/common"
+	"cclaw/config"
 	"fmt"
 )
 
