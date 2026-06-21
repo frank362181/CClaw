@@ -1,7 +1,7 @@
 package config
 
 import (
-	"CClaw/exception"
+	"cclaw/exception"
 	"strings"
 )
 

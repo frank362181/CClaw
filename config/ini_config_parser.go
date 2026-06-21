@@ -1,8 +1,8 @@
 package config
 
 import (
-	"CClaw/common"
-	"CClaw/exception"
+	"cclaw/common"
+	"cclaw/exception"
 	"fmt"
 	"io"
 	"os"
