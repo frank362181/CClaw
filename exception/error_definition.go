@@ -16,39 +16,72 @@ import (
 	"runtime"
 )
 
-// =================== found error =========================
-type foundError struct {
-	errText string
-	errID   int
+type ErrorDescription struct {
+	ErrTxt   string
+	ErrId    int
+	FileName string //错误发生的文件
+	LineNo   int    //错误发生的行号
 }
 
-var FoundError = &foundError{errText: "found", errID: 1}
+func (err *ErrorDescription) Error() string {
+	return fmt.Sprintf("ERROR: [%s:%d]:%d: %s", err.FileName, err.LineNo, err.ErrId, err.ErrTxt)
+}
 
-func (e *foundError) Error() string {
+func (err *ErrorDescription) Is(target error) bool {
+	if ed, ok := errors.AsType[*ErrorDescription](target); ok {
+		return ed.ErrId == err.ErrId
+	}
+
+	return false
+}
+
+var FileExtensionError = &ErrorDescription{
+	ErrTxt:   "",
+	ErrId:    errorFileExtension,
+	FileName: "",
+	LineNo:   -1,
+}
+
+func FileExtensionErrorEx(errTxt string) *ErrorDescription {
 	_, file, line, _ := runtime.Caller(1)
-	return fmt.Sprintf("found error: [%s:%d]:%d: %s", file, line, e.errID, e.errText)
+	return &ErrorDescription{
+		ErrTxt:   errTxt,
+		ErrId:    errorFileExtension,
+		FileName: file,
+		LineNo:   line,
+	}
 }
 
-func (e *foundError) Is(err error) bool {
-	return errors.Is(err, e)
+var UnloadFileError = &ErrorDescription{
+	ErrTxt:   "",
+	ErrId:    errorUnloadFile,
+	FileName: "",
+	LineNo:   -1,
 }
 
-// =================== not found error ======================
-type notFoundError struct {
-	errText string //错误的文本
-	errID   int    //错误编码
-}
-
-var NotFoundError = &notFoundError{
-	errText: "unfound",
-	errID:   2,
-}
-
-func (e *notFoundError) Error() string {
+func UnloadFileErrorEx(errTxt string) *ErrorDescription {
 	_, file, line, _ := runtime.Caller(1)
-	return fmt.Sprintf("found error: [%s:%d]:%d: %s", file, line, e.errID, e.errText)
+	return &ErrorDescription{
+		ErrTxt:   errTxt,
+		ErrId:    errorUnloadFile,
+		FileName: file,
+		LineNo:   line,
+	}
 }
 
-func (e *notFoundError) Is(err error) bool {
-	return errors.Is(err, e)
+var UnknownError = &ErrorDescription{
+	ErrTxt:   "",
+	ErrId:    errorUnknown,
+	FileName: "",
+	LineNo:   -1,
+}
+
+func UnknownErrorEx(errTxt string) *ErrorDescription {
+	_, file, line, _ := runtime.Caller(1)
+	return &ErrorDescription{
+		ErrTxt:   errTxt,
+		ErrId:    errorUnknown,
+		FileName: file,
+		LineNo:   line,
+	}
 }

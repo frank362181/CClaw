@@ -6,6 +6,35 @@ import (
 	"strings"
 )
 
+func (c *ConfigurationHelper) LoadConfiguration() error {
+	//此时已经设置了配置文件
+	if c.loaded {
+		return nil
+	}
+
+	parser, err := GetParser(c.extension)
+	if err != nil {
+		return err
+	}
+
+	store, err := parser.Load(c.GetConfigurationFileName())
+	if err != nil {
+		return err
+	}
+
+	c.storage = store
+	return nil
+}
+
+func (c *ConfigurationHelper) SaveConfiguration() error {
+	parser, err := GetParser(c.extension)
+	if err != nil {
+		return err
+	}
+
+	return parser.Save(c.GetConfigurationFileName(), *c.storage)
+}
+
 func (c *ConfigurationHelper) GetConfigurationFileName() string {
 	return c.configFileName
 }
@@ -14,47 +43,12 @@ func (c *ConfigurationHelper) Extension() string {
 	return c.extension
 }
 
-func (c *ConfigurationHelper) LoadConfigFile(filename string) error {
-	//TODO implement me
-	helper, err := LookupConfigurationHelper(filename)
-	if err == nil && helper != nil && helper.configFileName != c.configFileName {
-		//此时已经存在,但指向另外要给配置文件
-		return errors.New("not the same configuration helper")
-	}
-
-	if helper == nil {
-		return
-	}
-
-	if helper != nil && helper.loaded {
-		return nil
-	}
-
-	// load the configuration file
-
-}
-
-func (c *ConfigurationHelper) SaveConfigFile(filename string) error {
-	//TODO implement me
+func (c *ConfigurationHelper) GetStringValue(section string, key string) (string, error) {
 	panic("implement me")
 }
 
-func (c *ConfigurationHelper) GetStringValue(section string, key string) (string, error) {
-	value, err := c.findKey(section, key)
-	if err != nil {
-		return "", err
-	}
-
-	return value, nil
-}
-
 func (c *ConfigurationHelper) GetIntValue(section string, key string) (int, error) {
-	value, err := c.findKey(section, key)
-	if err != nil {
-		return 0, err
-	}
-
-	return strconv.Atoi(value)
+	panic("implement me")
 }
 
 func (c *ConfigurationHelper) GetBoolValue(section string, key string) (bool, error) {
@@ -112,13 +106,13 @@ func (c *ConfigurationHelper) findKey(section string, key string) (string, error
 		return "", errors.New("empty section or key")
 	}
 
-	if configItems, ok := c.configItems[section]; ok {
-		for _, configItem := range configItems {
-			if configItem.keyName == key {
-				return configItem.value, nil
-			}
-		}
-	}
+	//if configItems, ok := c.configItems[section]; ok {
+	//	for _, configItem := range configItems {
+	//		if configItem.keyName == key {
+	//			return configItem.value, nil
+	//		}
+	//	}
+	//}
 
 	return "", errors.New("key unexists")
 }

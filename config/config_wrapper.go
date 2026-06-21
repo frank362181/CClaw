@@ -2,14 +2,14 @@ package config
 
 import (
 	"CClaw/common"
-	"errors"
+	"CClaw/exception"
 	"strings"
 	"sync"
 )
 
-type configItem struct {
-	keyName string
-	value   string
+type ConfigurationStore struct {
+	mutex sync.RWMutex
+	data  map[string]map[string]string //存储配置信息
 }
 
 type ConfigurationHelper struct {
@@ -17,7 +17,14 @@ type ConfigurationHelper struct {
 	extension      string //配置文件类型
 	loaded         bool   //是否已经加载
 
-	configItems map[string][]configItem //存放配置项目
+	storage *ConfigurationStore
+}
+
+var parsers = map[string]ConfigurationParser{
+	//载入不同配置文件的配置类
+	"ini":        &IniConfigParser{},
+	"properties": &PropertiesConfigParser{},
+	"yaml":       &YamlConfigParser{},
 }
 
 var (
@@ -27,34 +34,34 @@ var (
 
 // GetConfigurationHelper singleton,应用级别
 func GetConfigurationHelper(filename string) (*ConfigurationHelper, error) {
-	if len(strings.TrimSpace(filename)) == 0 {
-		return nil, errors.New("filename must not be empty")
+	filename = strings.TrimSpace(filename)
+	if len(filename) == 0 {
+		return nil, exception.ParameterEmptyErrorEx("filename must not be empty")
 	}
-	tmpFileName := strings.TrimSpace(filename)
 
 	mutex.RLock()
-	defer mutex.RUnlock()
-
-	if helper, ok := configurationHelpers[tmpFileName]; ok {
+	if helper, ok := configurationHelpers[filename]; ok {
+		mutex.RUnlock()
 		return helper, nil
 	}
+	mutex.RUnlock()
 
 	// 不存在 create a new
 	mutex.Lock()
 	defer mutex.Unlock()
 
 	//double check
-	if helper, ok := configurationHelpers[tmpFileName]; ok {
+	if helper, ok := configurationHelpers[filename]; ok {
 		return helper, nil
 	}
 
 	// add a new helper
 	helper, err := addHelper(filename)
-	if err != nil {
+	if err == nil {
 		return helper, nil
 	}
 
-	return nil, errors.New("can not load the configuration " + filename)
+	return nil, exception.UnknownErrorEx("unknown error happened: " + filename)
 }
 
 func LookupConfigurationHelper(filename string) (*ConfigurationHelper, error) {
@@ -68,7 +75,7 @@ func LookupConfigurationHelper(filename string) (*ConfigurationHelper, error) {
 func InsertConfigurationHelper(filename string) (*ConfigurationHelper, error) {
 	filename = strings.TrimSpace(filename)
 	if len(filename) == 0 {
-		return nil, errors.New("filename must not be empty")
+		return nil, exception.ParameterEmptyErrorEx("filename must not be empty")
 	}
 
 	mutex.Lock()
@@ -100,6 +107,13 @@ func InsertConfigurationHelperEx(helper *ConfigurationHelper) bool {
 	return true
 }
 
+func GetParser(ext string) (ConfigurationParser, error) {
+	if p, ok := parsers[ext]; ok {
+		return p, nil
+	}
+	return nil, exception.UnknownErrorEx("config file unsupported: " + ext)
+}
+
 // ================================= private functions & methods =============================
 
 func findHelper(filename string) (*ConfigurationHelper, error) {
@@ -107,20 +121,20 @@ func findHelper(filename string) (*ConfigurationHelper, error) {
 		return helper, nil
 	}
 
-	return nil, errors.New("unfound " + filename)
+	return nil, exception.UnMatchErrorEx("configuration not found: " + filename)
 }
 
 func addHelper(filename string) (*ConfigurationHelper, error) {
 	ext := common.GetOSUtilityInstance().GetExtension(filename)
 	if ext == "" {
-		return nil, errors.New("cannot determine config file type from " + filename)
+		return nil, exception.FileExtensionErrorEx("cannot determine config file type from " + filename)
 	}
 
 	helper := &ConfigurationHelper{
 		configFileName: filename,
 		extension:      ext,
 		loaded:         false,
-		configItems:    make(map[string][]configItem),
+		storage:        &ConfigurationStore{data: make(map[string]map[string]string)},
 	}
 	configurationHelpers[filename] = helper
 	return helper, nil

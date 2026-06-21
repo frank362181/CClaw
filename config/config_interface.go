@@ -1,18 +1,15 @@
 package config
 
-// 配置项目
+// 解析结果的读写器
 
-type ConfigurationOperator interface {
-	LoadConfigFile(filename string) error
+type ConfigurationStorage interface {
+	Get(key string) interface{}
+	Set(key string, value interface{}) error
+}
 
-	GetConfigurationFileName() string
-	Extension() string
+// 不同配置文件的解析器
 
-	GetStringValue(section string, key string) (string, error)
-	GetIntValue(section string, key string) (int, error)
-	GetBoolValue(section string, key string) (bool, error)
-	GetFloatValue(section string, key string) (float32, error)
-	GetDoubleValue(section string, key string) (float64, error)
-
-	SaveConfigFile(filename string) error
+type ConfigurationParser interface {
+	Load(filename string) (*ConfigurationStore, error)
+	Save(filename string, store ConfigurationStore) error
 }
