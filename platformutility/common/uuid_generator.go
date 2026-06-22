@@ -1,5 +1,5 @@
 /*
-UUID生成器
+UUID生成器,全局唯一,外部应用调用 GenerateUUID即可
 */
 
 package common
@@ -11,24 +11,20 @@ import (
 	"sync"
 )
 
-var (
-	instance *UUIDGenerator
-	once     sync.Once
-)
+var uuidInstance = GetSingleton(func() *uuidGenerator {
+	return buildUUIDGenerator()
+}).Instance()
 
-type UUIDGenerator struct {
+type uuidGenerator struct {
 	pool sync.Pool
 }
 
-func GetUUIDGenerator() *UUIDGenerator {
-	once.Do(func() {
-		instance = buildUUIDGenerator()
-	})
-
-	return instance
+func GenerateUUID() string {
+	return uuidInstance.generateUUID()
 }
 
-func (g *UUIDGenerator) GenerateUUID() string {
+// =========================== private functions & methods =====================================
+func (g *uuidGenerator) generateUUID() string {
 	// 从池中获取数组指针
 	buf := g.pool.Get().(*[36]byte)
 	defer g.pool.Put(buf)
@@ -59,10 +55,9 @@ func (g *UUIDGenerator) GenerateUUID() string {
 	return string(buf[:])
 }
 
-// =========================== private functions & methods =====================================
 // BuildUUIDGenerator 构建 UUID 生成器
-func buildUUIDGenerator() *UUIDGenerator {
-	return &UUIDGenerator{
+func buildUUIDGenerator() *uuidGenerator {
+	return &uuidGenerator{
 		pool: sync.Pool{
 			New: func() interface{} {
 				// 预分配 36 字节数组 用来存放 UUID

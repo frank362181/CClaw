@@ -1,40 +1,19 @@
 package main
 
 import (
-	"fmt"
+	"os"
 
 	"my.favorite/platformutility/common"
-	"my.favorite/platformutility/config"
+	"my.favorite/router/router"
 )
 
 func main() {
-
-	publicIP := common.GetOSUtilityInstance().GetPublicIP()
-
-	fmt.Println(publicIP)
-
-	routerIP := common.GetOSUtilityInstance().GetRouterIP()
-	fmt.Println(routerIP)
-
-	dt, _ := common.GetDatetimeUtilityInstance().GetCurrentDatetime()
-
-	fmt.Println(dt.DatetimeStr)
-
-	configFileName := "/Volumes/Wisdom/MyIdea/CClaw/nodipreg.ini"
-
-	helper, err := config.GetConfigurationHelper(configFileName)
-
-	if err == nil {
-		err = helper.LoadConfiguration()
-		if err != nil {
-			fmt.Println(err.Error())
-			return
-		}
+	configFileName := common.GetOSUtilityInstance().GetCurrentDir() + "/cclaw.ini"
+	err := router.StartServer(configFileName)
+	if err != nil {
+		os.Exit(-1)
 	}
 
-	tmpServer, _ := helper.GetStringValue("config", "server")
-	fmt.Println(tmpServer)
-
-	tmpFileName := "/Volumes/Wisdom/MyIdea/CClaw/cclaw.ini"
-	helper.SaveConfiguration(tmpFileName)
+	// exit gracefully
+	router.ExitGracefully()
 }

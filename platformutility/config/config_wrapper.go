@@ -8,19 +8,6 @@ import (
 	"my.favorite/platformutility/exception"
 )
 
-type ConfigurationStore struct {
-	mutex sync.RWMutex
-	data  map[string]map[string]string //存储配置信息
-}
-
-type ConfigurationHelper struct {
-	configFileName string //配置文件名称
-	extension      string //配置文件类型
-	loaded         bool   //是否已经加载
-
-	storage *ConfigurationStore
-}
-
 var parsers = map[string]ConfigurationParser{
 	//载入不同配置文件的配置类
 	"ini":        &IniConfigParser{},
@@ -135,7 +122,7 @@ func addHelper(filename string) (*ConfigurationHelper, error) {
 		configFileName: filename,
 		extension:      ext,
 		loaded:         false,
-		storage:        &ConfigurationStore{data: make(map[string]map[string]string)},
+		storage:        &configurationStore{data: make(map[string]map[string]string)},
 	}
 	configurationHelpers[filename] = helper
 	return helper, nil

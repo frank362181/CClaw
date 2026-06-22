@@ -7,7 +7,7 @@
 	Frank Ng
 */
 
-package logging
+package loggingwriter
 
 import (
 	"sync"

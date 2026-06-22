@@ -13,7 +13,6 @@
 package common
 
 import (
-	"sync"
 	"time"
 )
 
@@ -41,18 +40,11 @@ type DatetimeUtility struct {
 	timezone *time.Location
 }
 
-var (
-	datetimeUtilityInstance *DatetimeUtility
-	datetimeUtilityOnce     sync.Once
-)
+var datetimeUtilityInstance = GetSingleton(func() *DatetimeUtility {
+	return &DatetimeUtility{timezone: time.Local}
+}).Instance()
 
 func GetDatetimeUtilityInstance() *DatetimeUtility {
-	datetimeUtilityOnce.Do(func() {
-		datetimeUtilityInstance = &DatetimeUtility{
-			timezone: time.Local,
-		}
-	})
-
 	return datetimeUtilityInstance
 }
 

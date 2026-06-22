@@ -1,36 +1,17 @@
-/*
-@Summary:
-	异步日志输出工具
-@Date:
-	18 Jun, 2026
-@Author:
-	Frank Ng
-*/
-
-package logging
+package loggingwriter
 
 import (
 	"fmt"
 	"io"
 	"os"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
-var (
-	instance *AsyncLogger
-	once     sync.Once
-)
-
-func GetAsyncLogger(outer io.Writer, flushInterval int, bufferSize int, format string) *AsyncLogger {
-	once.Do(func() {
-		instance = buildAsyncLoggingWriter(outer, flushInterval, bufferSize, format)
-	})
-
-	return instance
+func OpenLogger(outer io.Writer, flushInterval int, bufferSize int, format string) *AsyncLogger {
+	return buildAsyncLoggingWriter(outer, flushInterval, bufferSize, format)
 }
 
 // Close 优雅关闭,刷新日志
@@ -38,7 +19,10 @@ func (al *AsyncLogger) Close() {
 	close(al.flushChannel)
 	al.waitGroup.Wait()
 	al.sync()
-	al.Logger.Sync()
+	err := al.Logger.Sync()
+	if err != nil {
+		return
+	}
 }
 
 // ============================= private functions & methods =======================================
@@ -96,9 +80,9 @@ func (al *AsyncLogger) periodicFlush(flushInterval int) {
 	for {
 		select {
 		case <-ticker.C:
-			al.Sync()
+			al.sync()
 		case <-al.flushChannel:
-			al.Sync()
+			al.sync()
 			return
 		}
 	}
@@ -107,6 +91,9 @@ func (al *AsyncLogger) periodicFlush(flushInterval int) {
 func (al *AsyncLogger) sync() {
 	if err := al.writeSyncer.Sync(); err != nil {
 		// 极少情况下出错,兜底
-		fmt.Fprintf(os.Stderr, "async logger sync error: %v\n", err)
+		_, err := fmt.Fprintf(os.Stderr, "async logger sync error: %v\n", err)
+		if err != nil {
+			return
+		}
 	}
 }

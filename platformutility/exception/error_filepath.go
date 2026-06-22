@@ -41,3 +41,45 @@ func (e *FilePathErrorDescription) Is(target error) bool {
 	}
 	return false
 }
+
+var FileExtensionError = &FilePathErrorDescription{
+	ErrorDescription{
+		ErrTxt:   "",
+		ErrId:    errorIdFileExtension,
+		FileName: "",
+		LineNo:   -1,
+	},
+}
+
+func FileExtensionErrorEx(errTxt string) *FilePathErrorDescription {
+	_, file, line, _ := runtime.Caller(1)
+	return &FilePathErrorDescription{
+		ErrorDescription{
+			ErrTxt:   errTxt,
+			ErrId:    errorIdFileExtension,
+			FileName: file,
+			LineNo:   line,
+		},
+	}
+}
+
+var UnloadFileError = &FilePathErrorDescription{
+	ErrorDescription{
+		ErrTxt:   "",
+		ErrId:    errorIdUnloadFile,
+		FileName: "",
+		LineNo:   -1,
+	},
+}
+
+func UnloadFileErrorEx(errTxt string) *FilePathErrorDescription {
+	_, file, line, _ := runtime.Caller(1)
+	return &FilePathErrorDescription{
+		ErrorDescription{
+			ErrTxt:   errTxt,
+			ErrId:    errorIdUnloadFile,
+			FileName: file,
+			LineNo:   line,
+		},
+	}
+}

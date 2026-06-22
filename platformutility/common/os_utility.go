@@ -11,6 +11,7 @@ package common
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -36,17 +37,12 @@ type OSUtility struct {
 	getHostInfoErr error // optional, to store the error information
 }
 
-var (
-	osUtilityInstance     *OSUtility
-	osUtilityInstanceOnce sync.Once
-)
+var osUtilityInstance = GetSingleton(func() *OSUtility {
+	return buildOSUtilityInstance()
+}).Instance()
 
 // GetOSUtilityInstance GetOSUtility singleton
 func GetOSUtilityInstance() *OSUtility {
-	osUtilityInstanceOnce.Do(func() {
-		osUtilityInstance = &OSUtility{}
-	})
-
 	return osUtilityInstance
 }
 
@@ -150,6 +146,22 @@ func (o *OSUtility) DirExists(path string) bool {
 	return ret.IsDir()
 }
 
+func (o *OSUtility) FileExists(filename string) bool {
+	_, err := os.Stat(filename)
+	if err == nil {
+		return true //文件或目录存在
+	}
+
+	if errors.Is(err, os.ErrNotExist) {
+		return false //确实不存在
+	}
+
+	/*其他错误(如权限不足),通常被认为不能确定是否存在
+	* 需要按照 false 返回
+	 */
+	return false
+}
+
 func (o *OSUtility) CreateDir(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		err := os.MkdirAll(path, 0755) //递归创建
@@ -162,6 +174,10 @@ func (o *OSUtility) CreateDir(path string) error {
 }
 
 // ================================= private functions & methods ======================================
+func buildOSUtilityInstance() *OSUtility {
+	return &OSUtility{}
+}
+
 func (o *OSUtility) initHostInfo() {
 	o.getHostInfoOnce.Do(func() {
 		o.hostInfo, o.getHostInfoErr = o.getHostInfo()

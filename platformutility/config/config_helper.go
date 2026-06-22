@@ -103,7 +103,7 @@ func (c *ConfigurationHelper) GetFloatValueDefault(section string, key string, d
 		return defaultValue, err
 	}
 
-	var f32Value float32 = float32(f32)
+	var f32Value = float32(f32)
 	return f32Value, nil
 }
 

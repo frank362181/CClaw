@@ -16,7 +16,7 @@ import (
 type IniConfigParser struct{}
 
 // Load :load the ini configuration file and parse it
-func (i *IniConfigParser) Load(filename string) (*ConfigurationStore, error) {
+func (i *IniConfigParser) Load(filename string) (*configurationStore, error) {
 	//TODO implement me
 	iniFile, err := ini.LoadSources(ini.LoadOptions{
 		Insensitive:                false,
@@ -37,7 +37,7 @@ func (i *IniConfigParser) Load(filename string) (*ConfigurationStore, error) {
 		return expanded
 	}
 
-	store := &ConfigurationStore{
+	store := &configurationStore{
 		data: make(map[string]map[string]string),
 	}
 
@@ -60,7 +60,7 @@ func (i *IniConfigParser) Load(filename string) (*ConfigurationStore, error) {
 	return store, nil
 }
 
-func (i *IniConfigParser) Save(filename string, store *ConfigurationStore) error {
+func (i *IniConfigParser) Save(filename string, store *configurationStore) error {
 	//TODO implement me
 	filename = strings.TrimSpace(filename)
 	if len(filename) == 0 {
@@ -133,7 +133,7 @@ func expandPercentVars(s string) string {
 	return s
 }
 
-func (i *IniConfigParser) writeToWriter(w io.Writer, store *ConfigurationStore) error {
+func (i *IniConfigParser) writeToWriter(w io.Writer, store *configurationStore) error {
 	iniFile := ini.Empty()
 
 	// 按照section写入

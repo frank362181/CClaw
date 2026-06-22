@@ -35,35 +35,18 @@ func (err *ErrorDescription) Is(target error) bool {
 	return false
 }
 
-var FileExtensionError = &ErrorDescription{
+var UnstartServerError = &ErrorDescription{
 	ErrTxt:   "",
-	ErrId:    errorIdFileExtension,
+	ErrId:    errorIdUnstartServer,
 	FileName: "",
 	LineNo:   -1,
 }
 
-func FileExtensionErrorEx(errTxt string) *ErrorDescription {
+func UnstartServerErrorEx(errTxt string) *ErrorDescription {
 	_, file, line, _ := runtime.Caller(1)
 	return &ErrorDescription{
 		ErrTxt:   errTxt,
-		ErrId:    errorIdFileExtension,
-		FileName: file,
-		LineNo:   line,
-	}
-}
-
-var UnloadFileError = &ErrorDescription{
-	ErrTxt:   "",
-	ErrId:    errorIdUnloadFile,
-	FileName: "",
-	LineNo:   -1,
-}
-
-func UnloadFileErrorEx(errTxt string) *ErrorDescription {
-	_, file, line, _ := runtime.Caller(1)
-	return &ErrorDescription{
-		ErrTxt:   errTxt,
-		ErrId:    errorIdUnloadFile,
+		ErrId:    errorIdUnstartServer,
 		FileName: file,
 		LineNo:   line,
 	}
