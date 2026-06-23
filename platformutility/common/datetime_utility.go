@@ -48,9 +48,9 @@ func GetDatetimeUtilityInstance() *DatetimeUtility {
 	return datetimeUtilityInstance
 }
 
-func (d *DatetimeUtility) GetCurrentDatetime() (*DatetimeItem, error) {
+func (d *DatetimeUtility) GetCurrentDatetime() *DatetimeItem {
 	datetimeItem := getCurrentDatetime(d.timezone)
-	return datetimeItem, nil
+	return datetimeItem
 }
 
 func (d *DatetimeItem) Equals(right DatetimeItem) bool {

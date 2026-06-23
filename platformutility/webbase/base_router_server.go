@@ -1,4 +1,4 @@
-package router
+package webbase
 
 import (
 	"context"
@@ -9,26 +9,18 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/exception"
+	"my.favorite/platformutility/webbase/middleware"
 )
 
-var (
-	svrRouter = common.GetSingleton(func() *gin.Engine {
-		return buildGinEngine()
-	}).Instance()
-
-	server http.Server
-)
-
-func SetupFilter(handlerFunc gin.HandlerFunc) {
-	svrRouter.Use()
+func (router *BaseRouter) SetupFilter(filter middleware.BaseFilter) error {
+	return nil
 }
 
-// StartServer 启动 Web Service
-func StartServer(configFileName string) error {
+// StartupServer 启动 Web Service
+func (router *BaseRouter) StartupServer(configFileName string) error {
 	// 1. read the configuration
 	helper, err := config.GetConfigurationHelper(configFileName)
 	if err != nil {
@@ -61,9 +53,9 @@ func StartServer(configFileName string) error {
 		return exception.FilePathErrorEx("key file not exists:" + keyFile)
 	}
 
-	server := &http.Server{
+	router.Server = &http.Server{
 		Addr:           ":" + serverPort, // port for listening
-		Handler:        svrRouter,
+		Handler:        router.GinEngine,
 		ReadTimeout:    time.Duration(readTimeout) * time.Second,
 		WriteTimeout:   time.Duration(writeTimeout) * time.Second,
 		IdleTimeout:    time.Duration(idleTimeout) * time.Second,
@@ -72,7 +64,7 @@ func StartServer(configFileName string) error {
 
 	// 3 start the server
 	go func() {
-		err := server.ListenAndServeTLS(certFile, keyFile)
+		err := router.Server.ListenAndServeTLS(certFile, keyFile)
 		if err != nil {
 			os.Exit(-1)
 		}
@@ -81,7 +73,7 @@ func StartServer(configFileName string) error {
 	return nil
 }
 
-func ExitGracefully() {
+func (router *BaseRouter) ShutdownServer() error {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
@@ -89,12 +81,9 @@ func ExitGracefully() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := server.Shutdown(ctx); err != nil {
+	if err := router.Server.Shutdown(ctx); err != nil {
 		fmt.Println("Server Shutdown:", err)
 	}
-}
 
-// ==============================  private functions & methods ==================================
-func buildGinEngine() *gin.Engine {
-	return gin.New()
+	return nil
 }
