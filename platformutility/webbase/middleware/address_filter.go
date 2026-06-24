@@ -23,26 +23,25 @@ func (af *AddressFilterFilter) SetupAddress() error {
 func (af *AddressFilterFilter) DoFilter() gin.HandlerFunc {
 	return func(c *gin.Context) {
 
-		relativeURL := c.Request.URL.Path
-		method := c.Request.Method
+		requestInfo := af.getRequestInfo(c)
 
 		// 1. 检查URL模式是否匹配
-		if af.isUrlPatternMatched(relativeURL, method) {
+		if af.isUrlPatternMatched(requestInfo.RelativeURL, requestInfo.RequestMethod) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"code":   http.StatusForbidden,
-				"url":    relativeURL,
-				"method": method,
+				"code":   ConstUrlPatternUnMatched,
+				"url":    requestInfo.RelativeURL,
+				"method": requestInfo.RequestMethod,
 				"data":   nil,
 			})
 			return
 		}
 
 		// 2. 检查URL黑名单
-		if af.isBlackHit(relativeURL) {
+		if af.isBlackHit(requestInfo.RelativeURL) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"code":   http.StatusForbidden,
-				"url":    relativeURL,
-				"method": method,
+				"code":   ConstBlackUrl,
+				"url":    requestInfo.RelativeURL,
+				"method": requestInfo.RequestMethod,
 				"data":   nil,
 			})
 			return
@@ -52,9 +51,9 @@ func (af *AddressFilterFilter) DoFilter() gin.HandlerFunc {
 		clientIP := c.ClientIP()
 		if af.isIpHit(clientIP) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"code":   http.StatusForbidden,
-				"url":    relativeURL,
-				"method": method,
+				"code":   ConstBlackIp,
+				"url":    requestInfo.RelativeURL,
+				"method": requestInfo.RequestMethod,
 				"data":   nil,
 			})
 			return

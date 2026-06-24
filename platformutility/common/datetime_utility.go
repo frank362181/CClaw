@@ -49,34 +49,44 @@ func GetDatetimeUtilityInstance() *DatetimeUtility {
 }
 
 func (d *DatetimeUtility) GetCurrentDatetime() *DatetimeItem {
-	datetimeItem := getCurrentDatetime(d.timezone)
+	datetimeItem := d.getCurrentDatetime()
 	return datetimeItem
 }
 
-func (d *DatetimeItem) Equals(right DatetimeItem) bool {
+func (d *DatetimeItem) Equals(right *DatetimeItem) bool {
 	return d.Timestamp == right.Timestamp
 }
 
 // Distance /*
 // > 0 表示未来时间比当前时间晚
 // < 0 未来时间比当前时间早*/
-func (d *DatetimeItem) Distance(other DatetimeItem) int64 {
-	return other.MilliTimestamp - d.MilliTimestamp
+func (d *DatetimeItem) Distance(other *DatetimeItem, distance int64) int64 {
+	return d.MilliTimestamp - other.MilliTimestamp - distance
 }
 
-func (d *DatetimeItem) IsBefore(other DatetimeItem) bool {
+func (d *DatetimeItem) IsBefore(other *DatetimeItem) bool {
 	return d.MilliTimestamp < other.MilliTimestamp
 }
 
-func (d *DatetimeItem) IsAfter(other DatetimeItem) bool {
+func (d *DatetimeItem) IsAfter(other *DatetimeItem) bool {
 	return d.MilliTimestamp > other.MilliTimestamp
+}
+
+func (d *DatetimeItem) BeforeNow(distance int64) bool {
+	currentNow := datetimeUtilityInstance.getCurrentDatetime()
+	return currentNow.Distance(d, distance) > 0
+}
+
+func (d *DatetimeItem) AfterNow(distance int64) bool {
+	currentNow := datetimeUtilityInstance.getCurrentDatetime()
+	return currentNow.Distance(d, distance) < 0
 }
 
 // ============================= private functions & methods ==============================
 
 // GetCurrentDatetime 获取当前系统时间
-func getCurrentDatetime(loc *time.Location) *DatetimeItem {
-	now := time.Now().In(loc)
+func (d *DatetimeUtility) getCurrentDatetime() *DatetimeItem {
+	now := time.Now().In(d.timezone)
 
 	return &DatetimeItem{
 		DatetimeStr: now.Format("2006-01-02 15:04:05"),
