@@ -2,19 +2,20 @@
 * 对请求进行预处理的filter
  */
 
-package middleware
+package filter
 
 import (
 	"github.com/gin-gonic/gin"
+	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
 type RequestPreprocessFilter struct {
-	BaseFilter
+	basic.BaseFilter
 }
 
 func (rf *RequestPreprocessFilter) DoFilter() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		rf.getRequestInfo(c)
+		basic.GetBaseRequester().GetOrCreateRequestInfo(c)
 
 		// 放行
 		c.Next()

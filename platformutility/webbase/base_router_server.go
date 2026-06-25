@@ -12,10 +12,10 @@ import (
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/exception"
-	"my.favorite/platformutility/webbase/middleware"
+	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
-func (router *BaseRouter) SetupFilter(filter middleware.BaseFilter) error {
+func (router *BaseRouter) SetupFilter(filter basic.IFilter) error {
 	return nil
 }
 

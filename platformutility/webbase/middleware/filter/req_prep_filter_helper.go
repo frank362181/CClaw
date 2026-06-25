@@ -1,14 +1,18 @@
-package middleware
+package filter
 
 import (
+	"fmt"
+
 	"my.favorite/platformutility/common"
+	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
 func GetRequestPreprocessFilter(order int) *RequestPreprocessFilter {
 	reqPreprocessFilter := common.GetSingleton(func() *RequestPreprocessFilter {
 		return &RequestPreprocessFilter{
-			BaseFilter: BaseFilter{
-				Order: order,
+			BaseFilter: basic.BaseFilter{
+				Order:      order,
+				FilterName: fmt.Sprintf("reqPreprocessFilter_%d", order),
 			},
 		}
 	}).Instance()

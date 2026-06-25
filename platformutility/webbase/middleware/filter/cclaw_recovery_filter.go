@@ -1,0 +1,35 @@
+package filter
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"my.favorite/platformutility/webbase/middleware/basic"
+)
+
+type CclawRecoveryFilter struct {
+	basic.BaseFilter
+}
+
+func (cf *CclawRecoveryFilter) DoFilter() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		defer func() {
+			if err := recover(); err != nil {
+				// 获取堆栈上的信息
+				//stackString := string(debug.Stack())
+
+				// 此时可打印或输出日志
+
+				// 如果作为filter列表的一份子已经abort，则可不需要执行
+				if !c.IsAborted() {
+					basic.GetBaseResponser().AbortWithError(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg)
+				}
+
+				// defer执行完成后调用链会继续返回
+			}
+		}()
+
+		basic.GetBaseRequester().GetOrCreateRequestInfo(c)
+		c.Next()
+	}
+}

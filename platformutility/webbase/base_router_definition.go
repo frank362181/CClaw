@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"my.favorite/platformutility/webbase/middleware"
+	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
 type BaseRouter struct {
@@ -12,8 +12,8 @@ type BaseRouter struct {
 	Server    *http.Server
 }
 
-type BaseRouterInterface interface {
-	SetupFilter(filter middleware.BaseFilter) error
+type IBaseRouter interface {
+	SetupFilter(filter basic.IFilter) error
 	StartupServer(configFileName string) error
 	ShutdownServer() error
 }
