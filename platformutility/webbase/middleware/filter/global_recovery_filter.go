@@ -7,11 +7,11 @@ import (
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
-type CclawRecoveryFilter struct {
+type GlobalRecoveryFilter struct {
 	basic.BaseFilter
 }
 
-func (cf *CclawRecoveryFilter) DoFilter() gin.HandlerFunc {
+func (cf *GlobalRecoveryFilter) DoFilter() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
