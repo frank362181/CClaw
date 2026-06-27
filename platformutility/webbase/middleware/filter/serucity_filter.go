@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"my.favorite/platformutility/common"
+	"my.favorite/platformutility/common/hash"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
@@ -87,7 +88,7 @@ func (sf *SecurityFilter) antiTampering(r *basic.RequestInfo, c *gin.Context) bo
 	tempStr1 := strconv.FormatInt(r.QueryStringTimestamp, 10)
 	tempStr2 := r.Nonce
 
-	signature := common.GetCryptoInstance().MD5(bodyString + tempStr1 + tempStr2)
+	signature := hash.MD5(bodyString + tempStr1 + tempStr2)
 	if strings.EqualFold(signature, r.Signature) {
 		//此时要放行
 		return false

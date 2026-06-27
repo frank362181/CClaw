@@ -11,13 +11,27 @@ import (
 type AddressFilter struct {
 	basic.BaseFilter // 继承基础struct
 
-	URLPatterns  []string //URL的模式
+	AllowedUrl   []string // 允许被放行的URl
 	URLBlackList []string //URL黑名单
 	IPBlackList  []string //IP 黑名单
 }
 
-func (af *AddressFilter) SetupAddress() error {
-	return nil
+func (af *AddressFilter) SetupAllowedUrl(allowedUrls ...string) {
+	for _, url := range allowedUrls {
+		af.AllowedUrl = append(af.AllowedUrl, url)
+	}
+}
+
+func (af *AddressFilter) SetupUrlBlackList(blackUrls ...string) {
+	for _, url := range blackUrls {
+		af.URLBlackList = append(af.URLBlackList, url)
+	}
+}
+
+func (af *AddressFilter) SetupIpBlackList(blackIps ...string) {
+	for _, ip := range blackIps {
+		af.IPBlackList = append(af.IPBlackList, ip)
+	}
 }
 
 // DoFilter filter的核心方法
@@ -27,7 +41,7 @@ func (af *AddressFilter) DoFilter() gin.HandlerFunc {
 		requestInfo := basic.GetBaseRequester().GetOrCreateRequestInfo(c)
 
 		// 1. 检查URL模式是否匹配
-		if af.isUrlPatternMatched(requestInfo.RelativeURL, requestInfo.RequestMethod) {
+		if !af.isAllowedUrl(requestInfo.RelativeURL, requestInfo.RequestMethod) {
 			basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstUrlPatternUnMatched, basic.ConstUrlPatternUnMatchedMsg)
 			return
 		}
@@ -52,19 +66,64 @@ func (af *AddressFilter) DoFilter() gin.HandlerFunc {
 
 // ========================== private functions & methods ======================================
 
-func (af *AddressFilter) isUrlPatternMatched(relativeUrl string, method string) bool {
+// 命中这些url pattern直接放行
+var allowedUrlPatterns = [...]string{
+	"/heartbeat",
+	"/v2/api-docs.*",
+	"/doc.html",
+	"/index.html",
+	"/manifest.json",
+	"/robots.txt",
+	"/swagger-resources/.*",
+	"/configuration/security",
+	"/service-worker.js",
+	"/favicon.ico",
+	"/swagger-resources",
+	"/precache-manifest.eea302037a9c2783bdf341d6c2dd2ca2.js",
+	"/swagger-ui.html/.*",
+	"/webjars/.*",
+	"/file/.*", // 文件访问过滤
+}
+
+func (af *AddressFilter) isAllowedUrl(relativeUrl string, method string) bool {
 	// OPTIONS 直接放行(预检请求)
 	if strings.EqualFold(method, http.MethodOptions) {
-		return false
+		return true
 	}
 
-	return true
+	// 允许的url
+	for _, allowedUrl := range af.AllowedUrl {
+		if strings.EqualFold(relativeUrl, allowedUrl) {
+			return true
+		}
+	}
+
+	// 模式匹配,放行
+	for _, pattern := range allowedUrlPatterns {
+		if strings.EqualFold(relativeUrl, pattern) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (af *AddressFilter) isBlackHit(relativeUrl string) bool {
+	for _, blackUrl := range af.URLBlackList {
+		if strings.EqualFold(relativeUrl, blackUrl) {
+			return true
+		}
+	}
+
 	return false
 }
 
 func (af *AddressFilter) isIpHit(ip string) bool {
+	for _, blackIp := range af.IPBlackList {
+		if strings.EqualFold(ip, blackIp) {
+			return true
+		}
+	}
+
 	return false
 }
