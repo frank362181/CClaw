@@ -7,15 +7,15 @@ import (
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
-func GetSecurityFilter(order int) *SecurityFilter {
-	securityFilter := common.GetSingleton(func() *SecurityFilter {
-		return &SecurityFilter{
-			BaseFilter: basic.BaseFilter{
-				Order:      order,
-				FilterName: fmt.Sprintf("securityFilter_%d", order),
-			},
-		}
-	}).Instance()
+var securityFilter = common.GetSingleton(func() *SecurityFilter {
+	return &SecurityFilter{
+		BaseFilter: basic.BaseFilter{
+			Order:      basic.FilterOrderSecurity,
+			FilterName: fmt.Sprintf("securityFilter_%d", basic.FilterOrderSecurity),
+		},
+	}
+}).Instance()
 
+func GetSecurityFilter() *SecurityFilter {
 	return securityFilter
 }

@@ -1,5 +1,5 @@
 // Package webbase
-// 采用棉线对象的思维模式,当前文件相当于包公开函数创建一对象
+// 采用OOD/OOP 思维模式,当前文件相当于包公开函数创建一对象
 // webbase_router.go则是对象内的函数
 
 package webbase
@@ -7,16 +7,22 @@ package webbase
 import (
 	"github.com/gin-gonic/gin"
 	"my.favorite/platformutility/common"
+	"my.favorite/platformutility/webbase/middleware"
 )
 
 // ================================= public functions & methods ===============================
 
-func GetBaseRouter() *BaseRouter {
-	webBaseRouter := common.GetSingleton(func() *BaseRouter {
-		return &BaseRouter{
-			GinEngine: gin.New(),
-		}
-	}).Instance()
+var baseRouter = common.GetSingleton(func() *BaseRouter {
+	return &BaseRouter{
+		GinEngine:            gin.New(),
+		Server:               nil,
+		filterInterceptorMgr: middleware.GetFilterInterceptorMgr(),
 
-	return webBaseRouter
+		certFile: "",
+		keyFile:  "",
+	}
+}).Instance()
+
+func GetBaseRouter() *BaseRouter {
+	return baseRouter
 }

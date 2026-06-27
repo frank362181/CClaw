@@ -7,16 +7,15 @@ import (
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
-func GetAddressFilter(order int) *AddressFilter {
-	addressFilter := common.GetSingleton(func() *AddressFilter {
-		tmpFilter := &AddressFilter{
-			BaseFilter: basic.BaseFilter{
-				Order:      order,
-				FilterName: fmt.Sprintf("addressFilter_%d", order),
-			},
-		}
-		return tmpFilter
-	}).Instance()
+var addressFilter = common.GetSingleton(func() *AddressFilter {
+	return &AddressFilter{
+		BaseFilter: basic.BaseFilter{
+			Order:      basic.FilterOrderAddress,
+			FilterName: fmt.Sprintf("addressFilter_%d", basic.FilterOrderAddress),
+		},
+	}
+}).Instance()
 
+func GetAddressFilter() *AddressFilter {
 	return addressFilter
 }

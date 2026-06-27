@@ -2,7 +2,7 @@
 * @Summary:
 *	日期工具类，以及函数定义
 *
-*	这里实现了singleton模式,但是 并不能组织使用者 new DatetimeUtility()
+*	这里实现了singleton模式,但是 并不能阻止使用者 new DatetimeUtility()
 *	方式创建一个实例。
 * @Author:
 *	Frank Ng

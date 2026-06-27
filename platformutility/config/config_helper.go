@@ -69,8 +69,7 @@ func (c *ConfigurationHelper) GetIntValueDefault(section string, key string, def
 }
 
 func (c *ConfigurationHelper) GetBoolValue(section string, key string) (bool, error) {
-	defaultValue := true
-	return c.GetBoolValueDefault(section, key, defaultValue)
+	return c.GetBoolValueDefault(section, key, true)
 }
 
 func (c *ConfigurationHelper) GetBoolValueDefault(section string, key string, defaultValue bool) (bool, error) {

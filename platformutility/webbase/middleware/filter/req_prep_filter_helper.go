@@ -7,15 +7,15 @@ import (
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
-func GetRequestPreprocessFilter(order int) *RequestPreprocessFilter {
-	reqPreprocessFilter := common.GetSingleton(func() *RequestPreprocessFilter {
-		return &RequestPreprocessFilter{
-			BaseFilter: basic.BaseFilter{
-				Order:      order,
-				FilterName: fmt.Sprintf("reqPreprocessFilter_%d", order),
-			},
-		}
-	}).Instance()
+var requestPreprocessFilter = common.GetSingleton(func() *RequestPreprocessFilter {
+	return &RequestPreprocessFilter{
+		BaseFilter: basic.BaseFilter{
+			Order:      basic.FilterOrderReqPre,
+			FilterName: fmt.Sprintf("reqPreprocessFilter_%d", basic.FilterOrderReqPre),
+		},
+	}
+}).Instance()
 
-	return reqPreprocessFilter
+func GetRequestPreprocessFilter() *RequestPreprocessFilter {
+	return requestPreprocessFilter
 }

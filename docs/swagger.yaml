@@ -1,0 +1,14 @@
+basePath: /api/v1
+host: localhost:8443
+info:
+  contact: {}
+  description: 系统应用入口
+  title: 企业级AI助手操作系统
+  version: "1.0"
+paths: {}
+securityDefinitions:
+  ApiKeyAuth:
+    in: header
+    name: AUTHORIZATION
+    type: apiKey
+swagger: "2.0"

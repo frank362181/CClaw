@@ -1,0 +1,19 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "系统应用入口",
+        "title": "企业级AI助手操作系统",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "localhost:8443",
+    "basePath": "/api/v1",
+    "paths": {},
+    "securityDefinitions": {
+        "ApiKeyAuth": {
+            "type": "apiKey",
+            "name": "AUTHORIZATION",
+            "in": "header"
+        }
+    }
+}

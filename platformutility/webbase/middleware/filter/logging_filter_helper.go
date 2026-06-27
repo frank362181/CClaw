@@ -12,15 +12,15 @@ import (
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
-func GetLoggingFilter(order int) *LoggingFilter {
-	loggingFilter := common.GetSingleton(func() *LoggingFilter {
-		return &LoggingFilter{
-			BaseFilter: basic.BaseFilter{
-				Order:      order,
-				FilterName: fmt.Sprintf("loggingFilter_%d", order),
-			},
-		}
-	}).Instance()
+var loggingFilter = common.GetSingleton(func() *LoggingFilter {
+	return &LoggingFilter{
+		BaseFilter: basic.BaseFilter{
+			Order:      basic.FilterOrderLogging,
+			FilterName: fmt.Sprintf("loggingFilter_%d", basic.FilterOrderLogging),
+		},
+	}
+}).Instance()
 
+func GetLoggingFilter() *LoggingFilter {
 	return loggingFilter
 }

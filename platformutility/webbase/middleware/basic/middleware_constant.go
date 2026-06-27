@@ -6,6 +6,14 @@ package basic
 
 // ================= 请求判断所需的常量
 
+const (
+	FilterOrderRecovery = iota + 1 //最外层的Filter
+	FilterOrderLogging             // 日志filter
+	FilterOrderReqPre              //预处理
+	FilterOrderAddress             //地址处理
+	FilterOrderSecurity            //安全处理
+)
+
 const ConstClientServerGap int64 = 5 * 60 //服务端与请求端最大的时间间隔
 
 // 定义http中header,request的属性的常量
@@ -29,7 +37,9 @@ const (
 	ConstGapGreaterStd           = ConstErrorCode + 4
 	ConstNonceInvalid            = ConstErrorCode + 5
 	ConstSignatureUnMatched      = ConstErrorCode + 6
-	ConstInternalServerError     = ConstErrorCode + 999
+	ConstInternalServerError     = ConstErrorCode + 700
+
+	ConstSSLError = ConstErrorCode + 701
 )
 
 const (

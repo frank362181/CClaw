@@ -17,7 +17,7 @@ func GetBaseResponser() *GlobalResponsor {
 
 func (resp *GlobalResponsor) Success(c *gin.Context, httpStatus int, code int, msg string, data interface{}) {
 	jsonObj := resp.createJsonObject(c, code, msg, data)
-	c.AbortWithStatusJSON(httpStatus, jsonObj)
+	c.JSON(httpStatus, jsonObj)
 }
 
 func (resp *GlobalResponsor) AbortWithError(c *gin.Context, httpStatus int, code int, msg string) {
@@ -35,26 +35,30 @@ func (resp *GlobalResponsor) AbortWithError(c *gin.Context, httpStatus int, code
 *	data:表示返回的数据
  */
 func (resp *GlobalResponsor) createJsonObject(c *gin.Context, code int, msg string, data interface{}) interface{} {
-	reqInfo, err := c.Get(ConstRequestId)
-	reqId := ""
+	reqInfo, err := c.Get(ConstRequestTotal)
+	if err {
+		r := reqInfo.(*RequestInfo)
+		respMsg := &CommonResponseMsg{
+			ReqID:                r.RequestId,
+			ReqMethod:            r.RequestMethod,
+			RespCode:             code,
+			RespMsg:              msg,
+			ReqReceivedTimestamp: r.QueryStringTimestamp,
+			ResponseTimestamp:    common.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp,
+			Data:                 data,
+		}
 
-	if !err {
-		reqId = "-1" //表示无效的ID
+		return respMsg
 	}
 
-	reqId = reqInfo.(*RequestInfo).RequestId
-	reqReceivedTimestamp := reqInfo.(*RequestInfo).QueryStringTimestamp
-	reqMethod := reqInfo.(*RequestInfo).RequestMethod
-
-	respMsg := CommonResponseMsg{
-		ReqID:                reqId,
-		ReqMethod:            reqMethod,
+	respMsg := &CommonResponseMsg{
+		ReqID:                "",
+		ReqMethod:            "",
 		RespCode:             code,
 		RespMsg:              msg,
-		ReqReceivedTimestamp: reqReceivedTimestamp,
+		ReqReceivedTimestamp: -1,
 		ResponseTimestamp:    common.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp,
 		Data:                 data,
 	}
-
 	return respMsg
 }
