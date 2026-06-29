@@ -10,10 +10,10 @@
 
 package loggingwriter
 
-import "os"
+import "io"
 
 type ConsoleWriter struct {
-	*os.File
+	io.Writer
 }
 
 func (cw *ConsoleWriter) Sync() error {

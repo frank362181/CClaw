@@ -11,6 +11,7 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"my.favorite/agentos/contnroller"
+	"my.favorite/agentos/service"
 	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/logging"
 	"my.favorite/platformutility/webbase"
@@ -81,9 +82,11 @@ func SetupHealthController() {
 }
 
 func SetupLoggingController() {
+	loginService := service.GetLoginService()
+
 	urlFunMap := make(map[string]gin.HandlerFunc)
-	urlFunMap[webbase.RelativeLoginUrl] = contnroller.GetLoginController(nil).Login
-	urlFunMap[webbase.RelativeLogoutUrl] = contnroller.GetLoginController(nil).Logout
+	urlFunMap[webbase.RelativeLoginUrl] = contnroller.GetLoginController(loginService).Login
+	urlFunMap[webbase.RelativeLogoutUrl] = contnroller.GetLoginController(loginService).Logout
 
 	err := baseRouter.SetupControllerEx(webbase.HttpMethodGet|webbase.HttpMethodPost, basic.APIGroupRequire, urlFunMap, nil)
 	if err != nil {

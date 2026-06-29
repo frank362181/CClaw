@@ -10,14 +10,16 @@ import (
 var loginController = common.GetSingleton(func() *LoginController {
 	return &LoginController{
 		BaseController: controller.BaseController{
-			Type: basic.APIGroupRequire,
-			Name: "loggingController",
+			Type:    basic.APIGroupRequire,
+			Name:    "loggingController",
+			Service: nil,
 		},
 	}
 }).Instance()
 
 // GetLoginController 注入一个服务实现类
-func GetLoginController(service *service.IService) *LoginController {
+func GetLoginController(service service.IService) *LoginController {
 	loginController.Service = service
+
 	return loginController
 }

@@ -23,6 +23,11 @@ func (resp *GlobalResponsor) Success(c *gin.Context, httpStatus int, code int, m
 	c.JSON(httpStatus, jsonObj)
 }
 
+func (resp *GlobalResponsor) WriteWithError(c *gin.Context, httpStatus int, code int, msg string, data interface{}) {
+	jsonObj := resp.createJsonObject(c, code, msg, data)
+	c.JSON(httpStatus, jsonObj)
+}
+
 func (resp *GlobalResponsor) AbortWithError(c *gin.Context, httpStatus int, code int, msg string, data interface{}) {
 	jsonObj := resp.createJsonObject(c, code, msg, data)
 	c.AbortWithStatusJSON(httpStatus, jsonObj)

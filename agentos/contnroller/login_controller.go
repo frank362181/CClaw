@@ -1,7 +1,16 @@
 package contnroller
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
+	agentoscommon "my.favorite/agentos/common"
+	"my.favorite/agentos/model"
+	"my.favorite/agentos/service"
+	"my.favorite/platformutility/common"
+	"my.favorite/platformutility/common/hash"
+	"my.favorite/platformutility/webbase/middleware/basic"
+
 	"my.favorite/platformutility/webbase/middleware/controller"
 )
 
@@ -24,7 +33,28 @@ type LoginController struct {
 // @Failure      400  {object} basic.CommonResponseMsg
 // @Router       /login [post]
 func (lc *LoginController) Login(c *gin.Context) {
-	return
+	ls := lc.GetService().(*service.LoginService)
+	if ls == nil {
+		basic.GetBaseResponser().WriteWithError(c, http.StatusOK, agentoscommon.ConstErrorLoginParameter, agentoscommon.ConstErrorLoginParameterMsg, nil)
+		return
+	}
+
+	var lq model.LoginRequestModel
+	err := c.ShouldBindBodyWithJSON(&lq)
+	if err != nil {
+		basic.GetBaseResponser().WriteWithError(c, http.StatusOK, agentoscommon.ConstErrorLoginParameter, agentoscommon.ConstErrorLoginParameterMsg, err.Error())
+		return
+	}
+
+	err = ls.Login(&lq)
+	if err != nil {
+		basic.GetBaseResponser().WriteWithError(c, http.StatusOK, agentoscommon.ConstErrorLoginParameter, agentoscommon.ConstErrorLoginParameterMsg, err.Error())
+		return
+	}
+
+	token, _ := hash.SHA256(lq.Username + lq.Password + common.GetDatetimeUtilityInstance().GetCurrentDatetime().DatetimeStr) //根据username + password + 当前日期
+	resp := model.GenerationLoginResponse(lq.Username, token)
+	basic.GetBaseResponser().Success(c, http.StatusOK, agentoscommon.ConstErrorNone, agentoscommon.ConstErrorNoneMsg, resp)
 }
 
 // Logout (用户登出)

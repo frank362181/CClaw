@@ -11,6 +11,7 @@ package logging
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -25,11 +26,14 @@ import (
 // 定义标准输出的日志输出
 var stdoutInstance = common.GetSingleton(func() *loggingwriter.AsyncLogger {
 	if common.IsWindows() {
-		w := &loggingwriter.ConsoleWriter{File: os.Stdout}
-		return loggingwriter.OpenLogger(w, 1, 256*1024, "json")
+
+		//w := &loggingwriter.ConsoleWriter{ Writer: os.Stdout}
+		//return loggingwriter.OpenLogger(w, 1, 256*1024, "json")
 	}
 
-	return loggingwriter.OpenLogger(os.Stdout, 1, 256*1024, "json")
+	var tempIo io.Writer = os.Stdout
+	temp := &loggingwriter.ConsoleWriter{Writer: tempIo}
+	return loggingwriter.OpenLogger(temp, 1, 256*1024, "json")
 }).Instance()
 
 // 定义文件日志输出
@@ -141,17 +145,18 @@ func formatLog(v ...interface{}) string {
 	}
 
 	_, file, line, ok := runtime.Caller(2) //跳过2层到真正调用打印日志的调用方所在文件
-	if ok {
-		// 提取文件名,去掉路径
-		short := file
-		for i := len(file) - 1; i > 0; i-- {
-			if file[i] == '/' || file[i] == '\\' {
-				short = file[i+1:]
-				break
-			}
-		}
-		msg = fmt.Sprintf("%s:%d %s", short, line, msg)
+	if !ok {
+		return msg
 	}
 
+	// 提取文件名,去掉路径
+	short := file
+	for i := len(file) - 1; i > 0; i-- {
+		if file[i] == '/' || file[i] == '\\' {
+			short = file[i+1:]
+			break
+		}
+	}
+	msg = fmt.Sprintf("%s:%d %s", short, line, msg)
 	return msg
 }

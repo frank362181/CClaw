@@ -35,7 +35,7 @@ func GenerationLoginResponse(username string, token string) interface{} {
 		Username:      username,
 		Token:         token,
 		GenAt:         common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,
-		ExpiredLength: 30 * 60,
+		ExpiredLength: 30 * 60, //default expired length, 1800 seconds
 	}
 
 	return loginResponse
