@@ -13,14 +13,17 @@ import (
 // ================================= public functions & methods ===============================
 
 var baseRouter = common.GetSingleton(func() *BaseRouter {
-	return &BaseRouter{
+	router := &BaseRouter{
 		GinEngine:            gin.New(),
 		Server:               nil,
+		RGroup:               make(map[string]*gin.RouterGroup),
 		filterInterceptorMgr: middleware.GetFilterInterceptorMgr(),
-
-		certFile: "",
-		keyFile:  "",
+		certFile:             "",
+		keyFile:              "",
 	}
+
+	gin.SetMode(gin.ReleaseMode)
+	return router
 }).Instance()
 
 func GetBaseRouter() *BaseRouter {

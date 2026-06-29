@@ -19,10 +19,7 @@ func (al *AsyncLogger) Close() {
 	close(al.flushChannel)
 	al.waitGroup.Wait()
 	al.sync()
-	err := al.Logger.Sync()
-	if err != nil {
-		return
-	}
+	_ = al.Logger.Sync()
 }
 
 // ============================= private functions & methods =======================================
@@ -34,7 +31,7 @@ func buildAsyncLoggingWriter(outer io.Writer, flushInterval int, bufferSize int,
 	bufferWriter := &zapcore.BufferedWriteSyncer{
 		WS:            writer,
 		Size:          bufferSize,
-		FlushInterval: 0,
+		FlushInterval: 0, //关闭了自刷新
 	}
 
 	// encoding setting
@@ -52,14 +49,14 @@ func buildAsyncLoggingWriter(outer io.Writer, flushInterval int, bufferSize int,
 	}
 
 	// 4. 仅仅记录INFO以上级别的日志
-	core := zapcore.NewCore(encoder, bufferWriter, zapcore.InfoLevel)
+	core := zapcore.NewCore(encoder, bufferWriter, zapcore.DebugLevel)
 
 	// 5. 构建 Logger
-	logger := zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
+	logger := zap.New(core, zap.AddStacktrace(zapcore.ErrorLevel))
 
 	al := &AsyncLogger{
 		Logger:       logger,
-		writeSyncer:  writer,
+		writeSyncer:  bufferWriter,
 		flushChannel: make(chan struct{}),
 	}
 

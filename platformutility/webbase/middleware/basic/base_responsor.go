@@ -1,8 +1,11 @@
 package basic
 
 import (
+	"encoding/json"
+
 	"github.com/gin-gonic/gin"
 	"my.favorite/platformutility/common"
+	"my.favorite/platformutility/logging"
 )
 
 type GlobalResponsor struct{}
@@ -20,8 +23,8 @@ func (resp *GlobalResponsor) Success(c *gin.Context, httpStatus int, code int, m
 	c.JSON(httpStatus, jsonObj)
 }
 
-func (resp *GlobalResponsor) AbortWithError(c *gin.Context, httpStatus int, code int, msg string) {
-	jsonObj := resp.createJsonObject(c, code, msg, nil)
+func (resp *GlobalResponsor) AbortWithError(c *gin.Context, httpStatus int, code int, msg string, data interface{}) {
+	jsonObj := resp.createJsonObject(c, code, msg, data)
 	c.AbortWithStatusJSON(httpStatus, jsonObj)
 }
 
@@ -39,26 +42,39 @@ func (resp *GlobalResponsor) createJsonObject(c *gin.Context, code int, msg stri
 	if err {
 		r := reqInfo.(*RequestInfo)
 		respMsg := &CommonResponseMsg{
-			ReqID:                r.RequestId,
-			ReqMethod:            r.RequestMethod,
-			RespCode:             code,
-			RespMsg:              msg,
-			ReqReceivedTimestamp: r.QueryStringTimestamp,
-			ResponseTimestamp:    common.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp,
-			Data:                 data,
+			ReqID:             r.RequestId,
+			ReqUrl:            r.RelativeURL,
+			ReqMethod:         r.RequestMethod,
+			RespCode:          code,
+			RespMsg:           msg,
+			ReqAtTimestamp:    r.ReqAtdTimestamp,
+			ResponseTimestamp: common.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp,
+			Data:              data,
 		}
 
+		resp.printLog(respMsg)
 		return respMsg
 	}
 
 	respMsg := &CommonResponseMsg{
-		ReqID:                "",
-		ReqMethod:            "",
-		RespCode:             code,
-		RespMsg:              msg,
-		ReqReceivedTimestamp: -1,
-		ResponseTimestamp:    common.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp,
-		Data:                 data,
+		ReqID:             "",
+		ReqUrl:            "",
+		ReqMethod:         "",
+		RespCode:          code,
+		RespMsg:           msg,
+		ReqAtTimestamp:    -1,
+		ResponseTimestamp: common.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp,
+		Data:              data,
 	}
+
+	resp.printLog(respMsg)
 	return respMsg
+}
+
+func (resp *GlobalResponsor) printLog(msg interface{}) {
+	if jsonBytes, err := json.Marshal(msg); err == nil {
+		logging.LogInfo(string(jsonBytes))
+	} else {
+		logging.LogInfo(msg)
+	}
 }

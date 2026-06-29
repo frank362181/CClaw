@@ -122,7 +122,7 @@ func addHelper(filename string) (*ConfigurationHelper, error) {
 		configFileName: filename,
 		extension:      ext,
 		loaded:         false,
-		storage:        &configurationStore{data: make(map[string]map[string]string)},
+		storage:        &ConfigurationStore{data: make(map[string]map[string]string)},
 	}
 	configurationHelpers[filename] = helper
 	return helper, nil

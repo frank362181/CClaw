@@ -4,7 +4,7 @@ import "sync"
 
 // 解析结果的读写器
 
-type configurationStore struct {
+type ConfigurationStore struct {
 	mutex sync.RWMutex
 	data  map[string]map[string]string //存储配置信息
 }
@@ -14,7 +14,7 @@ type ConfigurationHelper struct {
 	extension      string //配置文件类型
 	loaded         bool   //是否已经加载
 
-	storage *configurationStore
+	storage *ConfigurationStore
 }
 
 type ConfigurationStorage interface {
@@ -29,6 +29,6 @@ type ConfigurationStorage interface {
 // 不同配置文件的解析器
 
 type ConfigurationParser interface {
-	Load(filename string) (*configurationStore, error)
-	Save(filename string, store *configurationStore) error
+	Load(filename string) (*ConfigurationStore, error)
+	Save(filename string, store *ConfigurationStore) error
 }

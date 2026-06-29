@@ -16,7 +16,7 @@ import (
 type IniConfigParser struct{}
 
 // Load :load the ini configuration file and parse it
-func (i *IniConfigParser) Load(filename string) (*configurationStore, error) {
+func (i *IniConfigParser) Load(filename string) (*ConfigurationStore, error) {
 	//TODO implement me
 	iniFile, err := ini.LoadSources(ini.LoadOptions{
 		Insensitive:                false,
@@ -37,7 +37,7 @@ func (i *IniConfigParser) Load(filename string) (*configurationStore, error) {
 		return expanded
 	}
 
-	store := &configurationStore{
+	store := &ConfigurationStore{
 		data: make(map[string]map[string]string),
 	}
 
@@ -60,8 +60,8 @@ func (i *IniConfigParser) Load(filename string) (*configurationStore, error) {
 	return store, nil
 }
 
-func (i *IniConfigParser) Save(filename string, store *configurationStore) error {
-	//TODO implement me
+func (i *IniConfigParser) Save(filename string, store *ConfigurationStore) error {
+	// TODO implement me
 	filename = strings.TrimSpace(filename)
 	if len(filename) == 0 {
 		return exception.ParameterEmptyErrorEx("parameter must not be empty")
@@ -77,12 +77,12 @@ func (i *IniConfigParser) Save(filename string, store *configurationStore) error
 
 	//make sure the exists of the DIR
 	dir := filepath.Dir(filename)
-	err := common.GetOSUtilityInstance().CreateDir(dir)
+	err := common.CreateDir(dir)
 	if err != nil {
 		return exception.FilePathErrorEx("can not create dir:" + dir)
 	}
 
-	tmpFile := dir + ".tmp" + fmt.Sprintf("%d", common.GetOSUtilityInstance().GetProcessID())
+	tmpFile := dir + ".tmp" + fmt.Sprintf("%d", common.GetProcessID())
 	f, err := os.OpenFile(tmpFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return exception.FilePathErrorEx("can not open file:" + tmpFile)
@@ -92,18 +92,27 @@ func (i *IniConfigParser) Save(filename string, store *configurationStore) error
 	closeErr := f.Close()
 
 	if writeErr != nil {
-		os.Remove(tmpFile)
+		err := os.Remove(tmpFile)
+		if err != nil {
+			return err
+		}
 		return writeErr
 	}
 
 	if closeErr != nil {
-		os.Remove(tmpFile)
+		err := os.Remove(tmpFile)
+		if err != nil {
+			return err
+		}
 		return closeErr
 	}
 
 	//原子替换
 	if err := os.Rename(tmpFile, filename); err != nil {
-		os.Remove(tmpFile)
+		err := os.Remove(tmpFile)
+		if err != nil {
+			return err
+		}
 		return exception.FilePathErrorEx("can not rename file:" + tmpFile)
 	}
 
@@ -133,7 +142,7 @@ func expandPercentVars(s string) string {
 	return s
 }
 
-func (i *IniConfigParser) writeToWriter(w io.Writer, store *configurationStore) error {
+func (i *IniConfigParser) writeToWriter(w io.Writer, store *ConfigurationStore) error {
 	iniFile := ini.Empty()
 
 	// 按照section写入

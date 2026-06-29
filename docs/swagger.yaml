@@ -1,11 +1,138 @@
-basePath: /api/v1
+basePath: /api
+definitions:
+  basic.CommonResponseMsg:
+    properties:
+      data:
+        description: 具体的相应内容
+      req_at_timestamp:
+        type: integer
+      req_id:
+        type: string
+      req_method:
+        description: 用户请求的方法
+        type: string
+      req_url:
+        type: string
+      resp_code:
+        description: 响应码,业务层级
+        type: integer
+      resp_msg:
+        description: 响应的消息
+        type: string
+      resp_timestamp:
+        type: integer
+    type: object
 host: localhost:8443
 info:
   contact: {}
-  description: 系统应用入口
+  description: API服务入口
   title: 企业级AI助手操作系统
-  version: "1.0"
-paths: {}
+  version: 1.0.0
+paths:
+  /heartbeat:
+    get:
+      consumes:
+      - application/json
+      description: 返回健康检测结果，JSON
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponseMsg'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponseMsg'
+      summary: 健康检测函数
+      tags:
+      - 健康检测
+  /login:
+    post:
+      consumes:
+      - application/json
+      description: 实现用户登录功能
+      parameters:
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: header
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: header
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponseMsg'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponseMsg'
+      summary: 用户登入API
+      tags:
+      - 用户登入登出
+  /logout:
+    get:
+      consumes:
+      - application/json
+      description: 实现用户登出功能
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: Nonce
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: Timestamp
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: Signature
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponseMsg'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponseMsg'
+      summary: 用户登出API
+      tags:
+      - 用户登入登出
 securityDefinitions:
   ApiKeyAuth:
     in: header

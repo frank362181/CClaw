@@ -1,5 +1,6 @@
 /*
 * 对请求进行预处理的filter
+* 此时如果要对requestInfo进行处理,一定要记得将其放回到context中
  */
 
 package filter

@@ -6,12 +6,12 @@ import (
 	"my.favorite/platformutility/exception"
 )
 
-func (s *configurationStore) Get(section string, key string) (string, error) {
+func (s *ConfigurationStore) Get(section string, key string) (string, error) {
 	defaultValue := ""
 	return s.GetWithDefault(section, key, defaultValue)
 }
 
-func (s *configurationStore) GetWithDefault(section string, key string, defaultValue string) (string, error) {
+func (s *ConfigurationStore) GetWithDefault(section string, key string, defaultValue string) (string, error) {
 	section = strings.TrimSpace(section)
 	key = strings.TrimSpace(key)
 	if len(section) == 0 || len(key) == 0 {
@@ -23,7 +23,7 @@ func (s *configurationStore) GetWithDefault(section string, key string, defaultV
 	return s.getValueWithDefault(section, key, defaultValue)
 }
 
-func (s *configurationStore) Set(section string, key string, newValue string) error {
+func (s *ConfigurationStore) Set(section string, key string, newValue string) error {
 	//TODO implement me
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -36,7 +36,7 @@ func (s *configurationStore) Set(section string, key string, newValue string) er
 	return nil
 }
 
-func (s *configurationStore) DeleteKey(section string, key string) {
+func (s *ConfigurationStore) DeleteKey(section string, key string) {
 	//TODO implement me
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -46,7 +46,7 @@ func (s *configurationStore) DeleteKey(section string, key string) {
 	}
 }
 
-func (s *configurationStore) DeleteSection(section string) {
+func (s *ConfigurationStore) DeleteSection(section string) {
 	//TODO implement me
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -55,7 +55,7 @@ func (s *configurationStore) DeleteSection(section string) {
 
 // ===================== private functions & methods ===========================
 
-func (s *configurationStore) getValueWithDefault(section string, key string, defaultValue string) (string, error) {
+func (s *ConfigurationStore) getValueWithDefault(section string, key string, defaultValue string) (string, error) {
 	if sec, ok := s.data[section]; ok {
 		return sec[key], nil
 	}

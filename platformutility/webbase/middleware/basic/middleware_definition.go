@@ -15,26 +15,28 @@ type RequestInfo struct {
 	RequestMethod string
 
 	RelativeURL string
+	RequestPath string
 	QueryString string
 	QueryParams url.Values
 
-	ArrivedTimestamp int64 //请求达到的时间
+	ReqAtdTimestamp int64 //请求达到的时间
 
 	Nonce string
 
 	//querystring中timestamp的时间戳,请求端放入的,必须是unsigned long(1970-1-1 00:00:00以来的秒数)
-	QueryStringTimestamp int64
+	QueryTimestamp int64
 
 	Signature string
 }
 
 type CommonResponseMsg struct {
-	ReqID                string `json:"req_id"`
-	ReqMethod            string `json:"req_method"` //用户请求的方法
-	RespCode             int    `json:"resp_code"`  //响应码,业务层级
-	RespMsg              string `json:"resp_msg"`   //响应的消息
-	ReqReceivedTimestamp int64  `json:"req_received_timestamp"`
-	ResponseTimestamp    int64  `json:"resp_timestamp"`
+	ReqID             string `json:"req_id"`
+	ReqUrl            string `json:"req_url"`
+	ReqMethod         string `json:"req_method"` //用户请求的方法
+	RespCode          int    `json:"resp_code"`  //响应码,业务层级
+	RespMsg           string `json:"resp_msg"`   //响应的消息
+	ReqAtTimestamp    int64  `json:"req_at_timestamp"`
+	ResponseTimestamp int64  `json:"resp_timestamp"`
 
 	Data interface{} `json:"data"` //具体的相应内容
 }

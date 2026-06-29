@@ -20,6 +20,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+
+	"my.favorite/platformutility/exception"
 )
 
 type hostInfo struct {
@@ -46,16 +48,21 @@ func GetOSUtilityInstance() *OSUtility {
 	return osUtilityInstance
 }
 
-func (o *OSUtility) GetCores() int {
+func IsWindows() bool {
+	osType := getOSType()
+	return strings.ToLower(osType) == "windows"
+}
+
+func GetCores() int {
 	return runtime.NumCPU()
 }
 
-func (o *OSUtility) GetProcessID() int {
+func GetProcessID() int {
 	return os.Getpid()
 }
 
 func (o *OSUtility) GetCurrentDir() string {
-	tmpDir, err := os.Executable()
+	tmpDir, err := os.Getwd()
 	if err != nil {
 		panic(err)
 	}
@@ -66,7 +73,7 @@ func (o *OSUtility) GetCurrentDir() string {
 		panic(err)
 	}
 
-	currentDir := filepath.Dir(realPath)
+	currentDir := realPath
 	return currentDir
 }
 
@@ -83,6 +90,73 @@ func (o *OSUtility) GetExtension(filename string) string {
 
 	return strings.ToLower(filename[index+1:]) //全部转换成小写
 }
+
+// PathExists 判断文件或目录是否存在
+func PathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// DirExists 判断目录是否存在,是目录且存在 return true
+func DirExists(path string) bool {
+	ret, err := os.Stat(path)
+	if err != nil {
+		return false //路径不存在
+	}
+
+	return ret.IsDir()
+}
+
+func FileExists(filename string) bool {
+	_, err := os.Stat(filename)
+	if err == nil {
+		return true //文件或目录存在
+	}
+
+	if errors.Is(err, os.ErrNotExist) {
+		return false //确实不存在
+	}
+
+	/*其他错误(如权限不足),通常被认为不能确定是否存在
+	* 需要按照 false 返回
+	 */
+	return false
+}
+
+func CreateDir(path string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		err := os.MkdirAll(path, 0755) //递归创建
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func CreateFile(filename string) (*os.File, error) {
+	if FileExists(filename) {
+		return nil, exception.FilePathErrorEx("file already exists")
+	}
+
+	tempFile, err := os.Create(filename)
+	if err != nil {
+		return nil, exception.FilePathErrorEx(err.Error())
+	}
+
+	return tempFile, nil
+}
+
+func Close(file *os.File) {
+	if file != nil {
+		err := file.Close()
+		if err != nil {
+			return
+		}
+	}
+}
+
+// =================================== member of object ======================
 
 func (o *OSUtility) GetHostName() string {
 	o.initHostInfo()
@@ -130,52 +204,30 @@ func (o *OSUtility) GetPublicIP() string {
 	return ""
 }
 
-// PathExists 判断文件或目录是否存在
-func (o *OSUtility) PathExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-// DirExists 判断目录是否存在,是目录且存在 return true
-func (o *OSUtility) DirExists(path string) bool {
-	ret, err := os.Stat(path)
-	if err != nil {
-		return false //路径不存在
-	}
-
-	return ret.IsDir()
-}
-
-func (o *OSUtility) FileExists(filename string) bool {
-	_, err := os.Stat(filename)
-	if err == nil {
-		return true //文件或目录存在
-	}
-
-	if errors.Is(err, os.ErrNotExist) {
-		return false //确实不存在
-	}
-
-	/*其他错误(如权限不足),通常被认为不能确定是否存在
-	* 需要按照 false 返回
-	 */
-	return false
-}
-
-func (o *OSUtility) CreateDir(path string) error {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		err := os.MkdirAll(path, 0755) //递归创建
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // ================================= private functions & methods ======================================
 func buildOSUtilityInstance() *OSUtility {
 	return &OSUtility{}
+}
+
+func getOSType() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "windows"
+	case "darwin":
+		return "MacOS"
+	case "linux":
+		return "Linux"
+	case "freebsd":
+		return "freebsd"
+	case "openbsd":
+		return "openbsd"
+	case "plan9":
+		return "plan9"
+	case "solaris":
+		return "solaris"
+	default:
+		return "unknown"
+	}
 }
 
 func (o *OSUtility) initHostInfo() {

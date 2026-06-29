@@ -2,6 +2,7 @@ package filter
 
 import (
 	"github.com/gin-gonic/gin"
+	"my.favorite/platformutility/logging"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
@@ -11,7 +12,11 @@ type LoggingFilter struct {
 
 func (lf *LoggingFilter) DoFilter() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		basic.GetBaseRequester().GetOrCreateRequestInfo(c)
+		r := basic.GetBaseRequester().GetOrCreateRequestInfo(c)
+
+		//打印日志
+		logging.LogInfo("remote IP:"+r.RemoteIp+" access the URL: "+r.RelativeURL+" at: ", r.ReqAtdTimestamp)
+
 		c.Next()
 	}
 }

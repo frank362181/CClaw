@@ -28,23 +28,24 @@ func (req *GlobalRequester) getRequestInfo(c *gin.Context) *RequestInfo {
 		requestInfo := &RequestInfo{
 			RequestId:     common.GenerateUUID(),
 			RemoteIp:      c.ClientIP(),
-			RequestURL:    c.Request.URL.String(),
+			RequestURL:    GetFullUrl(c),
 			RequestMethod: c.Request.Method,
-			RelativeURL:   c.Request.URL.Path,
+			RelativeURL:   c.Request.URL.String(),
+			RequestPath:   c.Request.URL.Path,
 
-			ArrivedTimestamp: common.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp,
-			QueryString:      c.Request.URL.RawQuery,
-			QueryParams:      c.Request.URL.Query(),
+			ReqAtdTimestamp: common.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp,
+			QueryString:     c.Request.URL.RawQuery,
+			QueryParams:     c.Request.URL.Query(),
 
-			Nonce:     c.Query(ConstNonce),
+			Nonce:     c.Query(ConstQueryNonce),
 			Signature: c.Query(ConstSignature),
 		}
 
-		u64, err := strconv.ParseInt(c.Query(ConstQueryStringTimestamp), 10, 64)
+		u64, err := strconv.ParseInt(c.Query(ConstQueryTimestamp), 10, 64)
 		if err != nil {
-			requestInfo.QueryStringTimestamp = 1 //此时一定有问题,即请求端必须在query string中设置 TIMESTAMP=? 且为整数
+			requestInfo.QueryTimestamp = 0 //此时没有设置,未必有问题,有些API 不需要设置
 		} else {
-			requestInfo.QueryStringTimestamp = u64
+			requestInfo.QueryTimestamp = u64
 		}
 
 		//存入到Gin上下文

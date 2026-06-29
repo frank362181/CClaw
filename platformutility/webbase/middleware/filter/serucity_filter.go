@@ -20,29 +20,43 @@ import (
 
 type SecurityFilter struct {
 	basic.BaseFilter
+
+	deSecurity []string //不需要做安全检查的URL
+}
+
+func (sf *SecurityFilter) SetupSecurityFilter(urls []string) {
+	for _, url := range urls {
+		sf.deSecurity = append(sf.deSecurity, url)
+	}
 }
 
 func (sf *SecurityFilter) DoFilter() gin.HandlerFunc {
 	return func(c *gin.Context) {
-
 		requestInfo := basic.GetBaseRequester().GetOrCreateRequestInfo(c)
+		// whether security checking or not
+		if sf.needSecurity(requestInfo.RequestPath) {
+			//headerTimestamp := c.GetHeader(basic.ConstHeaderTimestamp)
+			//if headerTimestamp == "" {
+			//	basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstHeaderTimestampUnexists, basic.ConstHeaderTimestampUnMatchMsg)
+			//	return
+			//}
+			// 1 replay attack
+			//if sf.replayAttack1(requestInfo) {
+			//	basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstGapGreaterStd, basic.ConstGapGreatStdMsg)
+			//	return
+			//}
 
-		// 1 replay attack
-		if sf.replayAttack1(requestInfo) {
-			basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstGapGreaterStd, basic.ConstGapGreatStdMsg)
-			return
-		}
+			// 2 replay attach
+			if sf.replayAttack2(requestInfo) {
+				basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstNonceInvalid, basic.ConstNonceInvalidMsg, nil)
+				return
+			}
 
-		// 2 replay attach
-		if sf.replayAttack2(requestInfo) {
-			basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstNonceInvalid, basic.ConstNonceInvalidMsg)
-			return
-		}
-
-		// 3. 对内容进行signature判断
-		if sf.antiTampering(requestInfo, c) {
-			basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstSignatureUnMatched, basic.ConstSignatureUnMatchMsg)
-			return
+			// 3. 对内容进行signature判断
+			//if sf.antiTampering(requestInfo, c) {
+			//	basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstSignatureUnMatched, basic.ConstSignatureUnMatchMsg)
+			//	return
+			//}
 		}
 
 		// 放行
@@ -52,12 +66,24 @@ func (sf *SecurityFilter) DoFilter() gin.HandlerFunc {
 
 // ================================= private functions & methods ====================================
 
+func (sf *SecurityFilter) needSecurity(url string) bool {
+	url = strings.ToLower(url)
+	for _, v := range sf.deSecurity {
+		if strings.EqualFold(url, v) {
+			//不需要安全检查
+			return false
+		}
+	}
+
+	return true
+}
+
 /*
 * 判断客户端请求的时间与服务端是否超过指定的阈值
  */
-func (sf *SecurityFilter) replayAttack1(requestInfo *basic.RequestInfo) bool {
+func (sf *SecurityFilter) replayAttack1(originalTimestamp int64) bool {
 	currentNow := common.GetDatetimeUtilityInstance().GetCurrentDatetime()
-	if currentNow.Timestamp-requestInfo.QueryStringTimestamp > basic.ConstClientServerGap {
+	if currentNow.Timestamp-originalTimestamp > basic.ConstClientServerGap {
 		return true
 	}
 
@@ -85,7 +111,7 @@ func (sf *SecurityFilter) antiTampering(r *basic.RequestInfo, c *gin.Context) bo
 	}
 
 	bodyString := *(*string)(unsafe.Pointer(&bodyBytes)) //要确保bodyBytes数据不会被修改
-	tempStr1 := strconv.FormatInt(r.QueryStringTimestamp, 10)
+	tempStr1 := strconv.FormatInt(r.QueryTimestamp, 10)
 	tempStr2 := r.Nonce
 
 	signature := hash.MD5(bodyString + tempStr1 + tempStr2)
