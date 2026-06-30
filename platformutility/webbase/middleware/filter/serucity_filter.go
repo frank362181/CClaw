@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/common/hash"
+	"my.favorite/platformutility/webbase"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
@@ -69,7 +70,8 @@ func (sf *SecurityFilter) DoFilter() gin.HandlerFunc {
 func (sf *SecurityFilter) needSecurity(url string) bool {
 	url = strings.ToLower(url)
 	for _, v := range sf.deSecurity {
-		if strings.EqualFold(url, v) {
+		tempUrl := webbase.BasePath + "/" + v
+		if strings.EqualFold(url, tempUrl) {
 			//不需要安全检查
 			return false
 		}

@@ -24,7 +24,7 @@ type IBaseRouter interface {
 	SetupFilter(filters ...basic.IFilter) error
 
 	SetupController(httpMethod int16, relativeUrl string, handler gin.HandlerFunc) error
-	SetupControllerEx(httpMethod int16, apiGroup string, urlFuncMap map[string]gin.HandlerFunc, interceptors *basic.IFilter) error
+	SetupControllerEx(httpMethod int16, apiGroup string, urlFuncMap map[string]gin.HandlerFunc, interceptors basic.IFilter) error
 
 	// SetupServer config the configuration for the server
 	SetupServer(configHelper *config.ConfigurationHelper) error

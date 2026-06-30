@@ -1,4 +1,4 @@
-package service
+package agentosservice
 
 import (
 	"my.favorite/platformutility/common"

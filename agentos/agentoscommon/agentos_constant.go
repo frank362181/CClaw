@@ -1,4 +1,4 @@
-package common
+package agentoscommon
 
 import "my.favorite/platformutility/webbase/middleware/basic"
 
@@ -7,9 +7,11 @@ import "my.favorite/platformutility/webbase/middleware/basic"
 const (
 	ConstErrorNone           = iota
 	ConstErrorLoginParameter = iota + 1 + basic.ConstErrorMax
+	ConstErrorInvalidToken
 )
 
 const (
 	ConstErrorNoneMsg           = "success"
 	ConstErrorLoginParameterMsg = "登录参数错误"
+	ConstErrorInvalidTokenMsg   = "Token无效,请登录"
 )

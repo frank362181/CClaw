@@ -26,14 +26,13 @@ import (
 // 定义标准输出的日志输出
 var stdoutInstance = common.GetSingleton(func() *loggingwriter.AsyncLogger {
 	if common.IsWindows() {
-
-		//w := &loggingwriter.ConsoleWriter{ Writer: os.Stdout}
-		//return loggingwriter.OpenLogger(w, 1, 256*1024, "json")
+		w := &loggingwriter.ConsoleWriter{File: os.Stdout}
+		return loggingwriter.OpenLogger(w, 1, 256*1024, "json")
 	}
 
 	var tempIo io.Writer = os.Stdout
-	temp := &loggingwriter.ConsoleWriter{Writer: tempIo}
-	return loggingwriter.OpenLogger(temp, 1, 256*1024, "json")
+	//temp := &loggingwriter.ConsoleWriter{tempIo}
+	return loggingwriter.OpenLogger(tempIo, 1, 256*1024, "json")
 }).Instance()
 
 // 定义文件日志输出

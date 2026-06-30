@@ -86,6 +86,15 @@
                         "name": "SIGNATURE",
                         "in": "query",
                         "required": true
+                    },
+                    {
+                        "description": "登录用户名和密码",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.LoginRequestModel"
+                        }
                     }
                 ],
                 "responses": {
@@ -128,21 +137,21 @@
                     {
                         "type": "string",
                         "description": "盐",
-                        "name": "Nonce",
+                        "name": "NONCE",
                         "in": "query",
                         "required": true
                     },
                     {
                         "type": "string",
                         "description": "数值,表示请求端请求的时间(秒数)",
-                        "name": "Timestamp",
+                        "name": "TIMESTAMP",
                         "in": "query",
                         "required": true
                     },
                     {
                         "type": "string",
                         "description": "对请求内容的签名秒数",
-                        "name": "Signature",
+                        "name": "SIGNATURE",
                         "in": "query",
                         "required": true
                     }
@@ -181,6 +190,9 @@
                     "description": "用户请求的方法",
                     "type": "string"
                 },
+                "req_relative_url": {
+                    "type": "string"
+                },
                 "req_url": {
                     "type": "string"
                 },
@@ -194,6 +206,17 @@
                 },
                 "resp_timestamp": {
                     "type": "integer"
+                }
+            }
+        },
+        "model.LoginRequestModel": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
                 }
             }
         }

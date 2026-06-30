@@ -7,15 +7,16 @@ import (
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
-func GetInterceptors(order int) *Interceptors {
-	interceptors := common.GetSingleton(func() *Interceptors {
-		return &Interceptors{
-			BaseFilter: basic.BaseFilter{
-				Order:      order,
-				FilterName: fmt.Sprintf("Interceptors_%d", order),
-			},
-		}
-	}).Instance()
+var interceptors = common.GetSingleton(func() *Interceptors {
+	return &Interceptors{
+		BaseFilter: basic.BaseFilter{
+			Order:      99,
+			FilterName: fmt.Sprintf("Interceptors_%d", 99),
+		},
+		chains: make(map[string]basic.IInterceptor),
+	}
+}).Instance()
 
+func GetInterceptors() *Interceptors {
 	return interceptors
 }

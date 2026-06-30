@@ -11,6 +11,8 @@ definitions:
       req_method:
         description: 用户请求的方法
         type: string
+      req_relative_url:
+        type: string
       req_url:
         type: string
       resp_code:
@@ -21,6 +23,13 @@ definitions:
         type: string
       resp_timestamp:
         type: integer
+    type: object
+  model.LoginRequestModel:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
     type: object
 host: localhost:8443
 info:
@@ -79,6 +88,12 @@ paths:
         name: SIGNATURE
         required: true
         type: string
+      - description: 登录用户名和密码
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/model.LoginRequestModel'
       produces:
       - application/json
       responses:
@@ -106,17 +121,17 @@ paths:
         type: string
       - description: 盐
         in: query
-        name: Nonce
+        name: NONCE
         required: true
         type: string
       - description: 数值,表示请求端请求的时间(秒数)
         in: query
-        name: Timestamp
+        name: TIMESTAMP
         required: true
         type: string
       - description: 对请求内容的签名秒数
         in: query
-        name: Signature
+        name: SIGNATURE
         required: true
         type: string
       produces:

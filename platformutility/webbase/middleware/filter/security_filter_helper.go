@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"my.favorite/platformutility/common"
-	"my.favorite/platformutility/webbase"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
@@ -16,12 +15,12 @@ var securityFilter = common.GetSingleton(func() *SecurityFilter {
 		},
 	}
 
-	deSecurityUrls := []string{
-		webbase.HealthUrl,
-		webbase.LogoutUrl,
-	}
-
-	securityFilter.SetupSecurityFilter(deSecurityUrls)
+	//deSecurityUrls := []string{
+	//	webbase.HealthUrl,
+	//	webbase.LogoutUrl,
+	//}
+	//
+	//securityFilter.SetupSecurityFilter(deSecurityUrls)
 	return securityFilter
 }).Instance()
 

@@ -6,28 +6,52 @@ package interceptor
 
 import (
 	"github.com/gin-gonic/gin"
+	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
 type Interceptors struct {
 	basic.BaseFilter
 
-	chains map[string]basic.IInterceptor
+	interceptorsKey []string
+	chains          map[string]basic.IInterceptor
 }
 
-func (interceptors *Interceptors) DoFilter() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// 利用defer 确保无论如何退出路径，所有的AfterComplete 都会执行
-		defer func() {
-			//遍历 chains
+func (in *Interceptors) RegistryInterceptor(inter basic.IInterceptor) error {
+	if inter == nil {
+		return exception.ParameterEmptyErrorEx("parameter interface is nil")
+	}
 
+	if _, ok := in.chains[inter.GetInterceptorName()]; ok {
+		return exception.MatchErrorEx("interceptor already exist: " + inter.GetInterceptorName())
+	}
+
+	in.interceptorsKey = append(in.interceptorsKey, inter.GetInterceptorName())
+	in.chains[inter.GetInterceptorName()] = inter
+	return nil
+}
+
+func (in *Interceptors) DoFilter() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		defer func() {
+			for _, inter := range in.chains {
+				inter.AfterCompletion(c)
+			}
 		}()
 
 		// 1. 顺序执行前置拦截
+		for _, inter := range in.chains {
+			if !inter.PreHandle(c) {
+				return
+			}
+		}
 
 		// 2. 执行整整的逻辑
 		c.Next()
 
 		// 3. 逆序执行 后置拦截
+		for i := len(in.interceptorsKey) - 1; i >= 0; i-- {
+			in.chains[in.interceptorsKey[i]].PostHandle(c)
+		}
 	}
 }

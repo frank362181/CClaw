@@ -1,4 +1,4 @@
-package contnroller
+package agentoscontroller
 
 import (
 	"my.favorite/platformutility/common"

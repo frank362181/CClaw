@@ -8,7 +8,7 @@ import (
 	"my.favorite/platformutility/exception"
 )
 
-var parsers = map[string]ConfigurationParser{
+var parsers = map[string]IConfigurationParser{
 	//载入不同配置文件的配置类
 	"ini":        &IniConfigParser{},
 	"properties": &PropertiesConfigParser{},
@@ -95,7 +95,7 @@ func InsertConfigurationHelperEx(helper *ConfigurationHelper) bool {
 	return true
 }
 
-func GetParser(ext string) (ConfigurationParser, error) {
+func GetParser(ext string) (IConfigurationParser, error) {
 	if p, ok := parsers[ext]; ok {
 		return p, nil
 	}

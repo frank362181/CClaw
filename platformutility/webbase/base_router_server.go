@@ -43,7 +43,7 @@ func (router *BaseRouter) SetupController(httpMethod int16, relativeUrl string, 
 	return nil
 }
 
-func (router *BaseRouter) SetupControllerEx(httpMethod int16, apiGroup string, urlFuncMap map[string]gin.HandlerFunc, interceptors *basic.IFilter) error {
+func (router *BaseRouter) SetupControllerEx(httpMethod int16, apiGroup string, urlFuncMap map[string]gin.HandlerFunc, interceptors basic.IFilter) error {
 	method := GetHttpMethod(httpMethod)
 	if method == -1 {
 		return exception.UnMatchErrorEx("http method unexists")
@@ -162,10 +162,10 @@ func (router *BaseRouter) setupController_(httpMethod int16, relativeUrl string,
 	}
 }
 
-func (router *BaseRouter) setupControllerEx_(httpMethod int16, apiGroup string, urlFuncMap map[string]gin.HandlerFunc, inceptors *basic.IFilter) error {
+func (router *BaseRouter) setupControllerEx_(httpMethod int16, apiGroup string, urlFuncMap map[string]gin.HandlerFunc, inceptors basic.IFilter) error {
 	var tempFilter gin.HandlerFunc = nil
 	if inceptors != nil {
-		tempFilter = (*inceptors).DoFilter()
+		tempFilter = inceptors.DoFilter()
 	}
 	if _, ok := router.RGroup[apiGroup]; !ok {
 		r := router.GinEngine.Group(BasePath, tempFilter)

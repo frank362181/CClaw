@@ -1,12 +1,12 @@
-package contnroller
+package agentoscontroller
 
 import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	agentoscommon "my.favorite/agentos/common"
+	"my.favorite/agentos/agentoscommon"
+	"my.favorite/agentos/agentosservice"
 	"my.favorite/agentos/model"
-	"my.favorite/agentos/service"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/common/hash"
 	"my.favorite/platformutility/webbase/middleware/basic"
@@ -29,18 +29,19 @@ type LoginController struct {
 // @Param        NONCE query string true "盐"
 // @Param		 TIMESTAMP query string true "数值,表示请求端请求的时间(秒数)"
 // @Param		 SIGNATURE query string true "对请求内容的签名秒数"
+// @Param		 body      body  model.LoginRequestModel true "登录用户名和密码"
 // @Success      200  {object} basic.CommonResponseMsg
 // @Failure      400  {object} basic.CommonResponseMsg
 // @Router       /login [post]
 func (lc *LoginController) Login(c *gin.Context) {
-	ls := lc.GetService().(*service.LoginService)
+	ls := lc.GetService().(*agentosservice.LoginService)
 	if ls == nil {
 		basic.GetBaseResponser().WriteWithError(c, http.StatusOK, agentoscommon.ConstErrorLoginParameter, agentoscommon.ConstErrorLoginParameterMsg, nil)
 		return
 	}
 
 	var lq model.LoginRequestModel
-	err := c.ShouldBindBodyWithJSON(&lq)
+	err := c.ShouldBindBodyWithJSON(&lq) //这里将body读取之后,后面如果想要再次读取将会失败
 	if err != nil {
 		basic.GetBaseResponser().WriteWithError(c, http.StatusOK, agentoscommon.ConstErrorLoginParameter, agentoscommon.ConstErrorLoginParameterMsg, err.Error())
 		return
@@ -64,9 +65,9 @@ func (lc *LoginController) Login(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param		 AUTHORIZATION header string true "Login成功返回后得到的token"
-// @Param        Nonce query string true "盐"
-// @Param		 Timestamp query string true "数值,表示请求端请求的时间(秒数)"
-// @Param		 Signature query string true "对请求内容的签名秒数"
+// @Param        NONCE query string true "盐"
+// @Param		 TIMESTAMP query string true "数值,表示请求端请求的时间(秒数)"
+// @Param		 SIGNATURE query string true "对请求内容的签名秒数"
 // @Success      200  {object} basic.CommonResponseMsg
 // @Failure      400  {object} basic.CommonResponseMsg
 // @Router       /logout [get] [post]

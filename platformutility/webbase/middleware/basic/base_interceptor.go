@@ -8,6 +8,9 @@ type BaseInterceptor struct {
 }
 
 type IInterceptor interface {
+	GetOrder() int
+	GetInterceptorName() string
+
 	// PreHandle  前置处理
 	PreHandle(c *gin.Context) bool
 
@@ -25,3 +28,11 @@ func (interceptor *BaseInterceptor) GetOrder() int {
 func (interceptor *BaseInterceptor) GetInterceptorName() string {
 	return interceptor.InterceptorName
 }
+
+func (interceptor *BaseInterceptor) PreHandle(c *gin.Context) bool {
+	return true
+}
+
+func (interceptor *BaseInterceptor) PostHandle(c *gin.Context) {}
+
+func (interceptor *BaseInterceptor) AfterCompletion(c *gin.Context) {}

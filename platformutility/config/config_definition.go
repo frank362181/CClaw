@@ -17,7 +17,7 @@ type ConfigurationHelper struct {
 	storage *ConfigurationStore
 }
 
-type ConfigurationStorage interface {
+type IConfigurationStorage interface {
 	Get(section string, key string) (string, error)
 	GetWithDefault(section string, key string, defaultValue string) (string, error)
 	Set(section string, key string, newValue string) error
@@ -28,7 +28,7 @@ type ConfigurationStorage interface {
 
 // 不同配置文件的解析器
 
-type ConfigurationParser interface {
+type IConfigurationParser interface {
 	Load(filename string) (*ConfigurationStore, error)
 	Save(filename string, store *ConfigurationStore) error
 }

@@ -10,14 +10,16 @@ import (
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
-	"my.favorite/agentos/contnroller"
-	"my.favorite/agentos/service"
+	"my.favorite/agentos/agentoscontroller"
+	"my.favorite/agentos/agentosinterceptor"
+	"my.favorite/agentos/agentosservice"
 	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/logging"
 	"my.favorite/platformutility/webbase"
 	"my.favorite/platformutility/webbase/middleware/basic"
 	"my.favorite/platformutility/webbase/middleware/controller"
 	"my.favorite/platformutility/webbase/middleware/filter"
+	"my.favorite/platformutility/webbase/middleware/interceptor"
 )
 
 var baseRouter = webbase.GetBaseRouter()
@@ -56,7 +58,14 @@ func SetupGlobalFilter() {
 	loggingFilter := filter.GetLoggingFilter()
 	reqPreprocessFilter := filter.GetRequestPreprocessFilter()
 	addressFilter := filter.GetAddressFilter()
+	tempStr, _ := configHelper.GetStringValueDefault("security", "allowedUrl", "")
+	urls := strings.Split(tempStr, ",")
+	addressFilter.SetupAllowedUrls(urls) // set allowed URLs
+
 	securityFilter := filter.GetSecurityFilter()
+	tempStr, _ = configHelper.GetStringValueDefault("security", "deSecurityUrl", "")
+	urls = strings.Split(tempStr, ",")
+	securityFilter.SetupSecurityFilter(urls) //set security URLS
 
 	SetupFilter(corsFilter, loggingFilter, reqPreprocessFilter, addressFilter, securityFilter)
 }
@@ -75,6 +84,7 @@ func SetupHealthController() {
 	err := baseRouter.SetupControllerEx(webbase.HttpMethodGet, basic.APIGroupCommon, urlFuncMap, nil)
 	if err != nil {
 		logging.LogError(err.Error())
+		urlFuncMap = nil
 		return
 	}
 
@@ -82,15 +92,30 @@ func SetupHealthController() {
 }
 
 func SetupLoggingController() {
-	loginService := service.GetLoginService()
+	loginService := agentosservice.GetLoginService()
 
 	urlFunMap := make(map[string]gin.HandlerFunc)
-	urlFunMap[webbase.RelativeLoginUrl] = contnroller.GetLoginController(loginService).Login
-	urlFunMap[webbase.RelativeLogoutUrl] = contnroller.GetLoginController(loginService).Logout
 
-	err := baseRouter.SetupControllerEx(webbase.HttpMethodGet|webbase.HttpMethodPost, basic.APIGroupRequire, urlFunMap, nil)
+	urlFunMap[webbase.RelativeLoginUrl] = agentoscontroller.GetLoginController(loginService).Login
+	urlFunMap[webbase.RelativeLogoutUrl] = agentoscontroller.GetLoginController(loginService).Logout
+
+	authInter := agentosinterceptor.GetAuthenticationInterceptor()
+	tempStr, _ := configHelper.GetStringValueDefault("security", "unWantedToken", "")
+	urls := strings.Split(tempStr, ",")
+	authInter.SetupUnwantedTokenUrls(urls)
+
+	interceptors := interceptor.GetInterceptors()
+	err := interceptors.RegistryInterceptor(authInter)
 	if err != nil {
 		logging.LogError(err.Error())
+		urlFunMap = nil
+		return
+	}
+
+	err = baseRouter.SetupControllerEx(webbase.HttpMethodGet|webbase.HttpMethodPost, basic.APIGroupRequire, urlFunMap, interceptors)
+	if err != nil {
+		logging.LogError(err.Error())
+		urlFunMap = nil
 		return
 	}
 

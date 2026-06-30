@@ -20,12 +20,12 @@ func GetBaseResponser() *GlobalResponsor {
 
 func (resp *GlobalResponsor) Success(c *gin.Context, httpStatus int, code int, msg string, data interface{}) {
 	jsonObj := resp.createJsonObject(c, code, msg, data)
-	c.JSON(httpStatus, jsonObj)
+	c.PureJSON(httpStatus, jsonObj)
 }
 
 func (resp *GlobalResponsor) WriteWithError(c *gin.Context, httpStatus int, code int, msg string, data interface{}) {
 	jsonObj := resp.createJsonObject(c, code, msg, data)
-	c.JSON(httpStatus, jsonObj)
+	c.PureJSON(httpStatus, jsonObj)
 }
 
 func (resp *GlobalResponsor) AbortWithError(c *gin.Context, httpStatus int, code int, msg string, data interface{}) {
@@ -48,7 +48,7 @@ func (resp *GlobalResponsor) createJsonObject(c *gin.Context, code int, msg stri
 		r := reqInfo.(*RequestInfo)
 		respMsg := &CommonResponseMsg{
 			ReqID:             r.RequestId,
-			ReqUrl:            r.RelativeURL,
+			ReqRelativeUrl:    r.RequestPath,
 			ReqMethod:         r.RequestMethod,
 			RespCode:          code,
 			RespMsg:           msg,
@@ -63,7 +63,7 @@ func (resp *GlobalResponsor) createJsonObject(c *gin.Context, code int, msg stri
 
 	respMsg := &CommonResponseMsg{
 		ReqID:             "",
-		ReqUrl:            "",
+		ReqRelativeUrl:    "",
 		ReqMethod:         "",
 		RespCode:          code,
 		RespMsg:           msg,

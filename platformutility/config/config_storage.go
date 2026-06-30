@@ -7,8 +7,7 @@ import (
 )
 
 func (s *ConfigurationStore) Get(section string, key string) (string, error) {
-	defaultValue := ""
-	return s.GetWithDefault(section, key, defaultValue)
+	return s.GetWithDefault(section, key, "")
 }
 
 func (s *ConfigurationStore) GetWithDefault(section string, key string, defaultValue string) (string, error) {
@@ -19,7 +18,7 @@ func (s *ConfigurationStore) GetWithDefault(section string, key string, defaultV
 	}
 
 	s.mutex.RLock()
-	s.mutex.RUnlock()
+	defer s.mutex.RUnlock()
 	return s.getValueWithDefault(section, key, defaultValue)
 }
 
@@ -57,7 +56,9 @@ func (s *ConfigurationStore) DeleteSection(section string) {
 
 func (s *ConfigurationStore) getValueWithDefault(section string, key string, defaultValue string) (string, error) {
 	if sec, ok := s.data[section]; ok {
-		return sec[key], nil
+		if val, ok := sec[key]; ok {
+			return val, nil
+		}
 	}
 
 	return defaultValue, nil
