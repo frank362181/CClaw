@@ -31,8 +31,7 @@ type RequestInfo struct {
 
 type CommonResponseMsg struct {
 	ReqID             string `json:"req_id"`
-	ReqUrl            string `json:"req_url"`
-	ReqRelativeUrl    string `json:"req_relative_url"`
+	ReqPath           string `json:"req_path"`
 	ReqMethod         string `json:"req_method"` //用户请求的方法
 	RespCode          int    `json:"resp_code"`  //响应码,业务层级
 	RespMsg           string `json:"resp_msg"`   //响应的消息

@@ -92,14 +92,14 @@ func SetupHealthController() {
 }
 
 func SetupLoggingController() {
-	loginService := agentosservice.GetLoginService()
+	loginService := agentosservice.GetLoginService() //创建实现登录的业务逻辑对象
+	loginController := agentoscontroller.GetLoginController(loginService)
 
 	urlFunMap := make(map[string]gin.HandlerFunc)
+	urlFunMap[webbase.RelativeLoginUrl] = loginController.Login
+	urlFunMap[webbase.RelativeLogoutUrl] = loginController.Logout
 
-	urlFunMap[webbase.RelativeLoginUrl] = agentoscontroller.GetLoginController(loginService).Login
-	urlFunMap[webbase.RelativeLogoutUrl] = agentoscontroller.GetLoginController(loginService).Logout
-
-	authInter := agentosinterceptor.GetAuthenticationInterceptor()
+	authInter := agentosinterceptor.GetAuthenticationInterceptor(loginService)
 	tempStr, _ := configHelper.GetStringValueDefault("security", "unWantedToken", "")
 	urls := strings.Split(tempStr, ",")
 	authInter.SetupUnwantedTokenUrls(urls)

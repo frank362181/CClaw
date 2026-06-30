@@ -139,7 +139,7 @@ func (router *BaseRouter) Shutdown() error {
 	defer cancel()
 
 	if err := router.Server.Shutdown(ctx); err != nil {
-		logging.LogError("Server Shutdown with error: ", err)
+		logging.LogError("Server force to Shutdown with error: ", err)
 	}
 
 	logging.LogInfo("server shutdown complete")
@@ -167,8 +167,8 @@ func (router *BaseRouter) setupControllerEx_(httpMethod int16, apiGroup string, 
 	if inceptors != nil {
 		tempFilter = inceptors.DoFilter()
 	}
+	r := router.GinEngine.Group(BasePath, tempFilter)
 	if _, ok := router.RGroup[apiGroup]; !ok {
-		r := router.GinEngine.Group(BasePath, tempFilter)
 		router.RGroup[apiGroup] = r
 	}
 

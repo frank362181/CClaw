@@ -18,16 +18,20 @@ func GetBaseResponser() *GlobalResponsor {
 	return globalResponsor
 }
 
+// Success 用于表示业务成功
 func (resp *GlobalResponsor) Success(c *gin.Context, httpStatus int, code int, msg string, data interface{}) {
 	jsonObj := resp.createJsonObject(c, code, msg, data)
 	c.PureJSON(httpStatus, jsonObj)
 }
 
-func (resp *GlobalResponsor) WriteWithError(c *gin.Context, httpStatus int, code int, msg string, data interface{}) {
+// WriteWithErrorAndAbort 用于表示业务执行失败,但并不影响系统正常运行
+func (resp *GlobalResponsor) WriteWithErrorAndAbort(c *gin.Context, httpStatus int, code int, msg string, data interface{}) {
 	jsonObj := resp.createJsonObject(c, code, msg, data)
 	c.PureJSON(httpStatus, jsonObj)
+	c.Abort() //不能忽略
 }
 
+// AbortWithError 一般表示系统级错误,如http的系统错误等
 func (resp *GlobalResponsor) AbortWithError(c *gin.Context, httpStatus int, code int, msg string, data interface{}) {
 	jsonObj := resp.createJsonObject(c, code, msg, data)
 	c.AbortWithStatusJSON(httpStatus, jsonObj)
@@ -48,7 +52,7 @@ func (resp *GlobalResponsor) createJsonObject(c *gin.Context, code int, msg stri
 		r := reqInfo.(*RequestInfo)
 		respMsg := &CommonResponseMsg{
 			ReqID:             r.RequestId,
-			ReqRelativeUrl:    r.RequestPath,
+			ReqPath:           r.RequestPath,
 			ReqMethod:         r.RequestMethod,
 			RespCode:          code,
 			RespMsg:           msg,
@@ -63,7 +67,7 @@ func (resp *GlobalResponsor) createJsonObject(c *gin.Context, code int, msg stri
 
 	respMsg := &CommonResponseMsg{
 		ReqID:             "",
-		ReqRelativeUrl:    "",
+		ReqPath:           "",
 		ReqMethod:         "",
 		RespCode:          code,
 		RespMsg:           msg,

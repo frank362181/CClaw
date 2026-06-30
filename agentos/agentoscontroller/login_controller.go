@@ -36,20 +36,21 @@ type LoginController struct {
 func (lc *LoginController) Login(c *gin.Context) {
 	ls := lc.GetService().(*agentosservice.LoginService)
 	if ls == nil {
-		basic.GetBaseResponser().WriteWithError(c, http.StatusOK, agentoscommon.ConstErrorLoginParameter, agentoscommon.ConstErrorLoginParameterMsg, nil)
+		//内部服务器错误
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
 		return
 	}
 
 	var lq model.LoginRequestModel
 	err := c.ShouldBindBodyWithJSON(&lq) //这里将body读取之后,后面如果想要再次读取将会失败
 	if err != nil {
-		basic.GetBaseResponser().WriteWithError(c, http.StatusOK, agentoscommon.ConstErrorLoginParameter, agentoscommon.ConstErrorLoginParameterMsg, err.Error())
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, agentoscommon.ConstErrorLoginParameter, agentoscommon.ConstErrorLoginParameterMsg, err.Error())
 		return
 	}
 
 	err = ls.Login(&lq)
 	if err != nil {
-		basic.GetBaseResponser().WriteWithError(c, http.StatusOK, agentoscommon.ConstErrorLoginParameter, agentoscommon.ConstErrorLoginParameterMsg, err.Error())
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, agentoscommon.ConstErrorLoginParameter, agentoscommon.ConstErrorLoginParameterMsg, err.Error())
 		return
 	}
 
@@ -72,5 +73,17 @@ func (lc *LoginController) Login(c *gin.Context) {
 // @Failure      400  {object} basic.CommonResponseMsg
 // @Router       /logout [get] [post]
 func (lc *LoginController) Logout(c *gin.Context) {
-	return
+	ls := lc.GetService().(*agentosservice.LoginService)
+	if ls == nil {
+		//内部服务器错误
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
+		return
+	}
+
+	err := ls.Logout()
+	if err != nil {
+		return
+	}
+
+	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, nil)
 }

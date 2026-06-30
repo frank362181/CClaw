@@ -46,7 +46,7 @@ func (in *Interceptors) DoFilter() gin.HandlerFunc {
 			}
 		}
 
-		// 2. 执行整整的逻辑
+		// 2. 执行正正的逻辑
 		c.Next()
 
 		// 3. 逆序执行 后置拦截
