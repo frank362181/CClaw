@@ -4,9 +4,9 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"my.favorite/agentos/agentoscommon"
-	"my.favorite/agentos/agentosservice"
-	"my.favorite/agentos/model"
+	"my.favorite/agentservice/agentoscommon"
+	"my.favorite/agentservice/agentosservice"
+	"my.favorite/agentservice/model"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/common/hash"
 	"my.favorite/platformutility/webbase/middleware/basic"

@@ -1,10 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
-	"my.favorite/agentos"
+	agentservice "my.favorite/agentservice"
 	_ "my.favorite/cclaw/docs"
 	"my.favorite/platformutility/common"
 )
@@ -20,23 +21,25 @@ import (
 // @in header
 // @name AUTHORIZATION
 func main() {
+	fmt.Println(GetVersion())
+
 	configFileName := filepath.Join(common.GetOSUtilityInstance().GetCurrentDir(), "cclaw.ini")
-	if !agentos.InitApp(configFileName) {
+	if !agentservice.InitApp(configFileName) {
 		os.Exit(-1)
 	}
 
-	agentos.SetupGlobalFilter()
+	agentservice.SetupGlobalFilter()
 
 	// 添加 health controller
-	agentos.SetupHealthController()
-	agentos.SetupLoggingController()
+	agentservice.SetupHealthController()
+	agentservice.SetupLoggingController()
 
 	// 1. setup server
-	agentos.SetupServer()
+	agentservice.SetupServer()
 
 	// 2. start the server
-	agentos.Startup()
+	agentservice.Startup()
 
 	// 3. wait the exit signal
-	agentos.Shutdown()
+	agentservice.Shutdown()
 }

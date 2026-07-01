@@ -1,7 +1,7 @@
 package agentosservice
 
 import (
-	"my.favorite/agentos/model"
+	"my.favorite/agentservice/model"
 	"my.favorite/platformutility/webbase/middleware/service"
 )
 

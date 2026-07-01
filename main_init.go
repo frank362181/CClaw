@@ -1,0 +1,59 @@
+package main
+
+import (
+	"fmt"
+	"runtime"
+	"runtime/debug"
+
+	"my.favorite/platformutility/common"
+)
+
+var (
+	Version   = "1.0.0"
+	Commit    = "unknown"
+	BuildTime = common.GetDatetimeUtilityInstance().GetCurrentDatetime().DateStr
+
+	GoVersion = runtime.Version() //运行时自动获取
+)
+
+func init() {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return
+	}
+
+	//主模块版本（最终二进制的程序）
+	if info.Main.Version != "" && info.Main.Version != "(devel)" {
+		Version = info.Main.Version
+	}
+
+	//如果库需要的是自身的版本,需要遍历Deps找到自己
+	const selfModulePath = "my.favorite/cclaw" //库的模块路径
+	for _, dep := range info.Deps {
+		if dep.Path == selfModulePath {
+			if dep.Version != "" {
+				Version = dep.Version
+			}
+			break
+		}
+	}
+
+	// 从vcs 信息中提取commit 和 时间
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			if len(s.Value) >= 7 {
+				Version = s.Value[:7]
+			}
+		case "vcs.time":
+			BuildTime = s.Value
+		}
+	}
+}
+
+func GetVersion() string {
+	verString := fmt.Sprintf("Version: %s\nCommit: %s\nBuildTime: %s \nGoVersion: %s\nOS/Arch: %s/%s",
+		Version, Commit, BuildTime, GoVersion, runtime.GOOS, runtime.GOARCH)
+
+	return verString
+}

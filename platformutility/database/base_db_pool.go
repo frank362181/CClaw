@@ -1,41 +1,30 @@
 package database
 
-import "my.favorite/platformutility/config"
-
-type DBConfig struct {
-	DBHost       string //数据所在服务器名IP或域名
-	DBPort       int
-	DatabaseName string
-	UserName     string
-	UserPass     string
-
-	SSLMode        string
-	MaxConnections int
-	MinConnections int
-
-	ConnectionTimeout int //最大链接超时时间
-
-	ConnectionIdle int //最大空闲时间, 15 min
-	ConnectionTTl  int //最大生存时间 30 min
-}
+import (
+	"my.favorite/platformutility/config"
+)
 
 type BaseDBPool struct {
-	dbTypeName string //数据据名称,MySQL,PostgreSQL等
+	DbTypeName string //数据据名称,MySQL,PostgreSQL等
 
-	dbConfig *DBConfig
+	DBConfig *DBConfig
+	Opened   bool
 }
 
 type IBaseDBPool interface {
 	GetDbTypeName() string
-	GetDbConfig() *DBConfig
-	InitDbPool(config *config.ConfigurationHelper) error
-	CloseDbPool()
+	GetDbConfig() DBConfig
+
+	InitPool(config *config.ConfigurationHelper) error
+	OpenPool() error
+	Ping() error
+	ClosePool()
 }
 
 func (pool *BaseDBPool) GetDbTypeName() string {
-	return pool.dbTypeName
+	return pool.DbTypeName
 }
 
-func (pool *BaseDBPool) GetDbConfig() *DBConfig {
-	return pool.dbConfig
+func (pool *BaseDBPool) GetDbConfig() DBConfig {
+	return *pool.DBConfig
 }

@@ -4,7 +4,6 @@ go 1.26
 
 require (
 	github.com/swaggo/swag v1.16.6
-	my.favorite/agentos v0.0.0-00010101000000-000000000000
 	my.favorite/platformutility v0.0.0
 )
 
@@ -66,6 +65,6 @@ require (
 )
 
 replace (
-	my.favorite/agentos => ./agentos
 	my.favorite/platformutility => ./platformutility
+	my.favorite/agentservice => ./agentservice
 )

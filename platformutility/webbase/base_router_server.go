@@ -100,20 +100,15 @@ func (router *BaseRouter) Startup(ssl bool) bool {
 		return false
 	}
 	// 3 start the server
+	if ssl {
+		if !common.FileExists(router.certFile) || !common.FileExists(router.keyFile) {
+			logging.LogInfo("[Startup] SSL certificate file %s does not exist")
+			return false
+		}
+	}
+	//启动服务
 	go func() {
 		if ssl {
-
-			if !common.FileExists(router.certFile) {
-				os.Exit(-basic.ConstSSLError)
-			}
-			if router.certFile == "" || router.keyFile == "" {
-				os.Exit(-basic.ConstSSLError)
-			}
-
-			if !common.FileExists(router.keyFile) {
-				os.Exit(-basic.ConstSSLError)
-			}
-
 			err := router.Server.ListenAndServeTLS(router.certFile, router.keyFile)
 			if err != nil {
 				os.Exit(-basic.ConstInternalServerError)
