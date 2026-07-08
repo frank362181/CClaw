@@ -21,7 +21,7 @@ type AuthenticationInterceptor struct {
 	UnWantedTokenUrls []string //不需要token的URL列表
 
 	// 业务处理的Service
-	loginService service.IService
+	userService service.IService
 }
 
 func (i *AuthenticationInterceptor) SetupUnwantedTokenUrls(urls []string) {
@@ -31,11 +31,11 @@ func (i *AuthenticationInterceptor) SetupUnwantedTokenUrls(urls []string) {
 }
 
 func (i *AuthenticationInterceptor) GetService() service.IService {
-	return i.loginService
+	return i.userService
 }
 
 func (i *AuthenticationInterceptor) SetService(svc service.IService) {
-	i.loginService = svc
+	i.userService = svc
 }
 
 func (i *AuthenticationInterceptor) PreHandle(c *gin.Context) bool {

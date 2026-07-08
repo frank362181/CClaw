@@ -1,22 +1,22 @@
-package database
+package core
 
 import (
-	"my.favorite/platformutility/config"
+	"database/sql"
 )
 
 type BaseDBPool struct {
 	DbTypeName string //数据据名称,MySQL,PostgreSQL等
-
-	DBConfig *DBConfig
-	Opened   bool
+	DBConfig   *DBConfig
 }
 
 type IBaseDBPool interface {
 	GetDbTypeName() string
 	GetDbConfig() DBConfig
 
-	InitPool(config *config.ConfigurationHelper) error
+	IsOpened() bool
+
 	OpenPool() error
+	GetDatabase() (*sql.DB, error)
 	Ping() error
 	ClosePool()
 }
@@ -28,3 +28,5 @@ func (pool *BaseDBPool) GetDbTypeName() string {
 func (pool *BaseDBPool) GetDbConfig() DBConfig {
 	return *pool.DBConfig
 }
+
+// ========================

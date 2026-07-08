@@ -4,9 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -126,10 +124,6 @@ func (router *BaseRouter) Startup(ssl bool) bool {
 }
 
 func (router *BaseRouter) Shutdown() error {
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -138,7 +132,6 @@ func (router *BaseRouter) Shutdown() error {
 	}
 
 	logging.LogInfo("server shutdown complete")
-	logging.CloseLogger() //确保日志被顺利关闭
 	return nil
 }
 

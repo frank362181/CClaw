@@ -5,7 +5,10 @@
 package agentos
 
 import (
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -14,6 +17,8 @@ import (
 	"my.favorite/agentservice/agentosinterceptor"
 	"my.favorite/agentservice/agentosservice"
 	"my.favorite/platformutility/config"
+	"my.favorite/platformutility/database"
+	"my.favorite/platformutility/database/core"
 	"my.favorite/platformutility/logging"
 	"my.favorite/platformutility/webbase"
 	"my.favorite/platformutility/webbase/middleware/basic"
@@ -24,6 +29,7 @@ import (
 
 var baseRouter = webbase.GetBaseRouter()
 var configHelper *config.ConfigurationHelper
+var appDb core.IBaseDatabase //全应用使用的数据库操作实例
 
 func InitApp(configFileName string) bool {
 	configFileName = strings.ToLower(configFileName)
@@ -32,15 +38,22 @@ func InitApp(configFileName string) bool {
 		return false
 	}
 
-	tempHelper, err := config.GetConfigurationHelper(configFileName)
+	var err error
+	configHelper, err = config.GetConfigurationHelper(configFileName)
 	if err != nil {
 		logging.LogError(err.Error())
 		return false
 	}
 
-	err = tempHelper.LoadConfiguration()
+	err = configHelper.LoadConfiguration()
 	if err != nil {
 		logging.LogError(err.Error())
+		return false
+	}
+
+	appDb = database.GetGormDatabase(configHelper)
+	err = appDb.Open()
+	if err != nil {
 		return false
 	}
 
@@ -48,7 +61,6 @@ func InitApp(configFileName string) bool {
 		return false
 	}
 
-	configHelper = tempHelper
 	return true
 }
 
@@ -92,14 +104,14 @@ func SetupHealthController() {
 }
 
 func SetupLoggingController() {
-	loginService := agentosservice.GetLoginService() //创建实现登录的业务逻辑对象
-	loginController := agentoscontroller.GetLoginController(loginService)
+	userService := agentosservice.GetUserService(appDb) //创建实现登录的业务逻辑对象
+	loginController := agentoscontroller.GetLoginController(userService)
 
 	urlFunMap := make(map[string]gin.HandlerFunc)
 	urlFunMap[webbase.RelativeLoginUrl] = loginController.Login
 	urlFunMap[webbase.RelativeLogoutUrl] = loginController.Logout
 
-	authInter := agentosinterceptor.GetAuthenticationInterceptor(loginService)
+	authInter := agentosinterceptor.GetAuthenticationInterceptor(userService)
 	tempStr, _ := configHelper.GetStringValueDefault("security", "unWantedToken", "")
 	urls := strings.Split(tempStr, ",")
 	authInter.SetupUnwantedTokenUrls(urls)
@@ -146,6 +158,10 @@ func Startup() bool {
 }
 
 func Shutdown() {
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
 	if baseRouter == nil {
 		return
 	}
@@ -154,6 +170,10 @@ func Shutdown() {
 	if err != nil {
 		return
 	}
+
+	appDb.Close() //关闭数据库链接
+
+	logging.CloseLogger() //确保日志被顺利关闭
 }
 
 // =============================== private functions & methods ======================================

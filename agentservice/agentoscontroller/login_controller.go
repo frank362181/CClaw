@@ -34,8 +34,8 @@ type LoginController struct {
 // @Failure      400  {object} basic.CommonResponseMsg
 // @Router       /login [post]
 func (lc *LoginController) Login(c *gin.Context) {
-	ls := lc.GetService().(*agentosservice.LoginService)
-	if ls == nil {
+	us := lc.GetService().(*agentosservice.UserService)
+	if us == nil {
 		//内部服务器错误
 		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
 		return
@@ -48,14 +48,14 @@ func (lc *LoginController) Login(c *gin.Context) {
 		return
 	}
 
-	err = ls.Login(&lq)
-	if err != nil {
+	user, err1 := us.Login(lq.Username, lq.Password)
+	if err1 != nil {
 		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, agentoscommon.ConstErrorLoginParameter, agentoscommon.ConstErrorLoginParameterMsg, err.Error())
 		return
 	}
 
-	token, _ := hash.SHA256(lq.Username + lq.Password + common.GetDatetimeUtilityInstance().GetCurrentDatetime().DatetimeStr) //根据username + password + 当前日期
-	resp := model.GenerationLoginResponse(lq.Username, token)
+	token, _ := hash.SHA256(user.LoginName + user.LoginPass + common.GetDatetimeUtilityInstance().GetCurrentDatetime().DatetimeStr) //根据username + password + 当前日期
+	resp := model.GenerationLoginResponse(user.LoginName, token)
 	basic.GetBaseResponser().Success(c, http.StatusOK, agentoscommon.ConstErrorNone, agentoscommon.ConstErrorNoneMsg, resp)
 }
 
@@ -73,14 +73,14 @@ func (lc *LoginController) Login(c *gin.Context) {
 // @Failure      400  {object} basic.CommonResponseMsg
 // @Router       /logout [get] [post]
 func (lc *LoginController) Logout(c *gin.Context) {
-	ls := lc.GetService().(*agentosservice.LoginService)
-	if ls == nil {
+	us := lc.GetService().(*agentosservice.UserService)
+	if us == nil {
 		//内部服务器错误
 		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
 		return
 	}
 
-	err := ls.Logout()
+	err := us.Logout()
 	if err != nil {
 		return
 	}

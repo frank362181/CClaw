@@ -12,7 +12,7 @@ var authInterceptor = common.GetSingleton(func() *AuthenticationInterceptor {
 			Order:           1,
 			InterceptorName: "authentication_interceptor",
 		},
-		loginService: nil, // initializes nil
+		userService: nil, // initializes nil
 	}
 }).Instance()
 

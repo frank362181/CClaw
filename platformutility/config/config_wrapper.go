@@ -113,7 +113,7 @@ func findHelper(filename string) (*ConfigurationHelper, error) {
 }
 
 func addHelper(filename string) (*ConfigurationHelper, error) {
-	ext := common.GetOSUtilityInstance().GetExtension(filename)
+	ext := common.GetExtension(filename)
 	if ext == "" {
 		return nil, exception.FileExtensionErrorEx("cannot determine config file type from " + filename)
 	}

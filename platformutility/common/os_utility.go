@@ -61,7 +61,11 @@ func GetProcessID() int {
 	return os.Getpid()
 }
 
-func (o *OSUtility) GetCurrentDir() string {
+func IsAbsolutePath(path string) bool {
+	return filepath.IsAbs(path)
+}
+
+func GetCurrentDir() string {
 	tmpDir, err := os.Getwd()
 	if err != nil {
 		panic(err)
@@ -77,7 +81,7 @@ func (o *OSUtility) GetCurrentDir() string {
 	return currentDir
 }
 
-func (o *OSUtility) GetExtension(filename string) string {
+func GetExtension(filename string) string {
 	if len(strings.TrimSpace(filename)) == 0 {
 		return ""
 	}
@@ -123,6 +127,15 @@ func FileExists(filename string) bool {
 	return false
 }
 
+func IsDir(path string) bool {
+	ret, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+
+	return ret.IsDir()
+}
+
 func CreateDir(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		err := os.MkdirAll(path, 0755) //递归创建
@@ -145,6 +158,33 @@ func CreateFile(filename string) (*os.File, error) {
 	}
 
 	return tempFile, nil
+}
+
+func ResolveFilePath(baseDir, name string) (string, error) {
+	if !IsDir(baseDir) {
+		return "", exception.FilePathErrorEx("base dir should be a directory: " + baseDir)
+	}
+
+	if IsDir(name) {
+		return "", exception.FilePathErrorEx("name could not be a directory: " + name)
+	}
+
+	targetFileName := name
+	if !IsAbsolutePath(name) {
+		targetFileName = filepath.Join(baseDir, targetFileName)
+	}
+
+	info, err := os.Stat(targetFileName)
+	if err != nil {
+		return "", exception.FilePathErrorEx(err.Error())
+	}
+
+	if info.IsDir() {
+		return "", exception.FilePathErrorEx("target must be a file: " + targetFileName)
+	}
+
+	// cleanup . & ..
+	return filepath.Clean(targetFileName), nil
 }
 
 func Close(file *os.File) {

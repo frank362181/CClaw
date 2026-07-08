@@ -85,7 +85,7 @@ func GenerateSSLCertFile(domainName string) bool {
 	certDer, _ := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
 
 	//写入私钥文件
-	sslPath := common.GetOSUtilityInstance().GetCurrentDir() + "\\cert"
+	sslPath := common.GetCurrentDir() + "\\cert"
 	_ = common.CreateDir(sslPath)
 	keyFileFileName := sslPath + "\\" + "key.pem"
 	keyFile, err := common.CreateFile(keyFileFileName)

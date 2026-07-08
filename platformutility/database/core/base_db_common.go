@@ -1,13 +1,23 @@
-package database
+package core
+
+// === 定义数据库类型
+const (
+	ConstDbTypePostgresSQL = iota + 1 //PostgreSQL
+	ConstDbTypeMysql
+	ConstDbTypeSqlite
+	ConstDbTypeOracle
+	ConstDbTypeUnknown
+)
 
 type DBConfig struct {
+	DBType       int
 	DBHost       string //数据所在服务器名IP或域名
 	DBPort       int
 	DatabaseName string
 	UserName     string
 	UserPass     string
 
-	SSLMode        string
+	SSLMode        bool
 	MaxConnections int
 	MinConnections int
 

@@ -23,7 +23,7 @@ import (
 func main() {
 	fmt.Println(GetVersion())
 
-	configFileName := filepath.Join(common.GetOSUtilityInstance().GetCurrentDir(), "cclaw.ini")
+	configFileName := filepath.Join(common.GetCurrentDir(), "cclaw.ini")
 	if !agentservice.InitApp(configFileName) {
 		os.Exit(-1)
 	}
@@ -42,4 +42,5 @@ func main() {
 
 	// 3. wait the exit signal
 	agentservice.Shutdown()
+
 }

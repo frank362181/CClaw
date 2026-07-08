@@ -37,7 +37,7 @@ var stdoutInstance = common.GetSingleton(func() *loggingwriter.AsyncLogger {
 
 // 定义文件日志输出
 var (
-	logDir = common.GetOSUtilityInstance().GetCurrentDir() + "/log/"
+	logDir = common.GetCurrentDir() + "/log/"
 	_      = common.CreateDir(logDir)
 
 	writer, _ = rotatelogs.New(
