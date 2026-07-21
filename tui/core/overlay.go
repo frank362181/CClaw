@@ -27,7 +27,7 @@ type OverlayOptions struct {
 
 	Visible func(termW, termH int) bool
 
-	NomCapturing bool
+	NonCapturing bool
 }
 
 type OverlayHandle interface {
@@ -130,7 +130,15 @@ func resolveLayout(opts *OverlayOptions, overlayHeight, termW, termH int) (width
 	// Col
 	if opts.Col != nil {
 		if s, ok := parseSize(opts.Col, termW); ok {
+			col = s
+		} else if pct, ok := opts.Col.(string); ok {
+			if strings.HasSuffix(pct, "%") {
+				f, _ := strconv.ParseFloat(strings.TrimSuffix(pct, "%"), 64)
+				col = m.Left + int(float64(availW-width)*f/100.0)
+			}
 		}
+	} else {
+		col = anchorCol(anchor, width, availW, m.Left)
 	}
 
 	row += opts.OffsetY

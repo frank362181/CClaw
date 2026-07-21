@@ -6,7 +6,8 @@ require (
 	github.com/swaggo/swag v1.16.6
 	my.favorite/agentservice v0.0.0-00010101000000-000000000000
 	my.favorite/platformutility v0.0.0-00010101000000-000000000000
-	my.favorite/tui v0.0.0-00010101000000-000000000000
+
+	my.favorite/tui-engine v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -87,5 +88,5 @@ require (
 replace (
 	my.favorite/agentservice => ./agentservice
 	my.favorite/platformutility => ./platformutility
-	my.favorite/tui => ./tui
+	my.favorite/tui-engine => ./tui
 )

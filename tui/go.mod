@@ -1,4 +1,4 @@
-module my.favorite/tui
+module my.favorite/tui-engine
 
 go 1.26
 

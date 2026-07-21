@@ -15,3 +15,10 @@ const (
 	AnchorLeftCenter   OverlayAnchor = "left-center"
 	AnchorRightCenter  OverlayAnchor = "right-center"
 )
+
+// 焦点回复状态常量
+const (
+	restoreInactive = "interactive"
+	restoreEligible = "eligible"
+	restoreBlocked  = "blocked"
+)
