@@ -15,8 +15,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -79,6 +82,27 @@ func GetCurrentDir() string {
 
 	currentDir := realPath
 	return currentDir
+}
+
+func GetRelativePath(path, cwd string) (string, bool) {
+	resolvedCwd := ResolvePath(cwd, "")
+	resolvedPath := ResolvePath(path, resolvedCwd)
+
+	rel, err := filepath.Rel(resolvedCwd, resolvedPath)
+	if err != nil {
+		return "", false
+	}
+
+	sep := string(filepath.Separator)
+	if rel == "." || rel == "" {
+		return ".", true
+	}
+
+	if rel == ".." || strings.HasPrefix(rel, ".."+sep) || IsAbsolutePath(rel) {
+		return "", false
+	}
+
+	return rel, true
 }
 
 func GetExtension(filename string) string {
@@ -160,7 +184,84 @@ func CreateFile(filename string) (*os.File, error) {
 	return tempFile, nil
 }
 
-func ResolveFilePath(baseDir, name string) (string, error) {
+// NormalizePath normalize a path string
+var unicodeSpacesRegex = regexp.MustCompile(`[\u00A0\u2000-\u200A\u202F\u205F\u3000]`)
+
+func NormalizePath(path string, homeDir string, trim bool, expandTilde bool, stripAtPrefix bool, normalizeUnicodeSpace bool) string {
+	if len(path) == 0 {
+		return ""
+	}
+
+	normalizedPath := path
+	if trim {
+		normalizedPath = strings.TrimSpace(normalizedPath)
+	}
+
+	if normalizeUnicodeSpace {
+		normalizedPath = unicodeSpacesRegex.ReplaceAllString(normalizedPath, " ")
+	}
+
+	if stripAtPrefix && strings.HasPrefix(normalizedPath, "@") {
+		normalizedPath = normalizedPath[1:]
+	}
+
+	if expandTilde {
+		home := homeDir
+		if home == "" {
+			var err error
+			home, err = os.UserHomeDir()
+			if err != nil {
+				home = ""
+			}
+		}
+
+		if home != "" {
+			if normalizedPath == "~" {
+				return home
+			}
+
+			if strings.HasPrefix(normalizedPath, "~/") || (IsWindows() && strings.HasPrefix(normalizedPath, "~\\")) {
+				return filepath.Join(home, normalizedPath[2:])
+			}
+		}
+	}
+
+	if strings.HasPrefix(normalizedPath, "file://") {
+		return FileURLToPath(normalizedPath)
+	}
+
+	return normalizedPath
+}
+
+func IsLocalPath(path string) bool {
+	trimmedPath := strings.TrimSpace(path)
+	if len(trimmedPath) == 0 {
+		return false
+	}
+
+	if strings.HasPrefix(trimmedPath, "npm:") {
+		return false
+	}
+	if strings.HasPrefix(trimmedPath, "git:") {
+		return false
+	}
+	if strings.HasPrefix(trimmedPath, "github:") {
+		return false
+	}
+	if strings.HasPrefix(trimmedPath, "http:") {
+		return false
+	}
+	if strings.HasPrefix(trimmedPath, "https:") {
+		return false
+	}
+	if strings.HasPrefix(trimmedPath, "ssh:") {
+		return false
+	}
+
+	return true
+}
+
+func ResolveFile(baseDir, name string) (string, error) {
 	if !IsDir(baseDir) {
 		return "", exception.FilePathErrorEx("base dir should be a directory: " + baseDir)
 	}
@@ -185,6 +286,69 @@ func ResolveFilePath(baseDir, name string) (string, error) {
 
 	// cleanup . & ..
 	return filepath.Clean(targetFileName), nil
+}
+
+func ResolvePath(input, baseDir string) string {
+	if baseDir == "" {
+		wd, _ := os.Getwd()
+		baseDir = wd
+	}
+
+	normalized := NormalizePath(input, "", false, false, false, false)
+	normalizedBaseDir := NormalizePath("", baseDir, false, true, false, false)
+
+	if IsAbsolutePath(normalized) {
+		return filepath.Clean(normalized)
+	}
+
+	joined := filepath.Join(normalizedBaseDir, normalized)
+	if !IsAbsolutePath(joined) {
+		joined, _ = filepath.Abs(joined)
+	}
+
+	return filepath.Clean(joined)
+}
+
+// FileURLToPath converts a file ://URL to an O-native path
+func FileURLToPath(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "file" {
+		trimmed := strings.TrimPrefix(rawURL, "file://")
+		return filepath.FromSlash(trimmed)
+	}
+
+	p := u.Path
+	if IsWindows() && len(p) > 3 && p[0] == '/' && p[2] == ':' {
+		p = p[1:]
+	}
+
+	return filepath.FromSlash(p)
+}
+
+func MarkPathIgnoreByCloudSync(path string) {
+	var attrs []string
+
+	switch runtime.GOOS {
+	case "darwin":
+		attrs = []string{"com.dropbox.ignored", "com.apple.fileprovider.ignore#P"}
+	case "linux":
+		attrs = []string{"user.com.dropbox.ignored"}
+	default:
+		return
+	}
+
+	for _, attr := range attrs {
+		var cmd *exec.Cmd
+		if runtime.GOOS == "darwin" {
+			cmd = exec.Command("xattr", "-w", attr, "1", path)
+		} else {
+			cmd = exec.Command("setfattr", "-n", attr, "-v", "1", path)
+		}
+
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+		_ = cmd.Run()
+	}
 }
 
 func Close(file *os.File) {

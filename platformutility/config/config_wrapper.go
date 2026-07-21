@@ -15,6 +15,7 @@ var parsers = map[string]IConfigurationParser{
 	"yaml":       &YamlConfigParser{},
 }
 
+// configurationHelper 与配置文件类型关联
 var (
 	mutex                sync.RWMutex
 	configurationHelpers = make(map[string]*ConfigurationHelper)
