@@ -1,10 +1,14 @@
+/*
+* abstract interface for the terminal
+ */
+
 package core
 
-type Terminal interface {
+type Terminator interface {
 	Start(onInput func(string), onResize func())
 	Stop()
 
-	Write(s strig)
+	Write(s string)
 	Columns() int
 	Rows() int
 	HideCursor()

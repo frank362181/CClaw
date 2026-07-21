@@ -5,20 +5,18 @@ import (
 	"strings"
 )
 
-const kittyPrefix = "\x1b_G"
-
 type kittyHeader struct {
 	ids  []int
 	rows int
 }
 
-func parseKittyHeader(line string) *kittyHeader {
-	idx := strings.Index(line, kittyPrefix)
+func parseImageHeader(line string) *kittyHeader {
+	idx := strings.Index(line, ImagePrefix)
 	if idx == -1 {
 		return nil
 	}
 
-	start := idx + len(kittyPrefix)
+	start := idx + len(ImagePrefix)
 	end := strings.Index(line[start:], ";")
 	if end == -1 {
 		return nil
@@ -49,16 +47,16 @@ func parseKittyHeader(line string) *kittyHeader {
 	return h
 }
 
-func extractKittyIDs(line string) []int {
-	if h := parseKittyHeader(line); h != nil {
+func extractImageIDs(line string) []int {
+	if h := parseImageHeader(line); h != nil {
 		return h.ids
 	}
 
 	return nil
 }
 
-func extractKittyRows(line string) int {
-	if h := parseKittyHeader(line); h != nil {
+func extractImageRows(line string) int {
+	if h := parseImageHeader(line); h != nil {
 		return h.rows
 	}
 

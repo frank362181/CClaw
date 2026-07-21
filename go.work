@@ -3,5 +3,6 @@ go 1.26
 use (
 	./platformutility
 	./agentservice
+	./tui
 	.
 )

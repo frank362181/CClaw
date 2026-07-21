@@ -360,6 +360,10 @@ func Close(file *os.File) {
 	}
 }
 
+func GetEnvString(key string) string {
+	return os.Getenv(key)
+}
+
 // =================================== member of object ======================
 
 func (o *OSUtility) GetHostName() string {

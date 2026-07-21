@@ -1,13 +1,9 @@
-module tui
+module my.favorite/tui
 
 go 1.26
 
-require (
-	github.com/mattn/go-runewidth v0.0.15
-	golang.org/x/term v0.17.0
-)
+require my.favorite/platformutility v0.0.0-00010101000000-000000000000
 
-require (
-	github.com/rivo/uniseg v0.4.4 //indirect
-	golang.org/x/sys v0.17.0 //indirect
-)
+require "github.com/mattn/go-runewidth" v0.0.15
+
+replace my.favorite/platformutility => ../platformutility
