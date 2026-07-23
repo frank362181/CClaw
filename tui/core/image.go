@@ -5,12 +5,14 @@ import (
 	"strings"
 )
 
-type kittyHeader struct {
-	ids  []int
-	rows int
+// ImageHeader 图像传输头信息
+type ImageHeader struct {
+	ids  []int //图像ID列表
+	rows int   //图像占用的行数
 }
 
-func parseImageHeader(line string) *kittyHeader {
+// 解析图像头
+func parseImageHeader(line string) *ImageHeader {
 	idx := strings.Index(line, ImagePrefix)
 	if idx == -1 {
 		return nil
@@ -23,7 +25,10 @@ func parseImageHeader(line string) *kittyHeader {
 	}
 	end += start
 	params := line[start:end]
-	h := &kittyHeader{rows: 1}
+	h := &ImageHeader{
+		ids:  make([]int, 0),
+		rows: 1,
+	}
 
 	for _, p := range strings.Split(params, ",") {
 		kv := strings.SplitN(p, "=", 2)
@@ -47,6 +52,7 @@ func parseImageHeader(line string) *kittyHeader {
 	return h
 }
 
+// 提取行中的图像ID
 func extractImageIDs(line string) []int {
 	if h := parseImageHeader(line); h != nil {
 		return h.ids
@@ -55,6 +61,7 @@ func extractImageIDs(line string) []int {
 	return nil
 }
 
+// 提取图像占用的行数
 func extractImageRows(line string) int {
 	if h := parseImageHeader(line); h != nil {
 		return h.rows

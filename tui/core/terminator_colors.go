@@ -13,18 +13,12 @@ type RGBColor struct {
 	R, G, B uint8
 }
 
-type TerminatorColorSchema string
-
-const (
-	SchemaDark  TerminatorColorSchema = "dark"
-	SchemaLight TerminatorColorSchema = "light"
-)
-
-func isOsc11Response(data string) bool {
+// 检查是否为OSC 11 背景色响应
+func isOsc11BackgroundResponse(data string) bool {
 	return strings.HasPrefix(data, "\x1b]11")
 }
 
-func parseOsc11Response(data string) (RGBColor, bool) {
+func parseOsc11BackgroundResponse(data string) (RGBColor, bool) {
 	// format ESC 11 ]; rgb: RR/GG/BB
 	parts := strings.Split(data, ";")
 	if len(parts) < 3 {
@@ -46,16 +40,24 @@ func parseOsc11Response(data string) (RGBColor, bool) {
 	return RGBColor{uint8(r), uint8(g), uint8(b)}, true
 }
 
+// 解析颜色报告方案
 func parseColorSchemaReport(data string) (TerminatorColorSchema, bool) {
-	if strings.HasPrefix(data, "\x1b[?997;") && strings.HasSuffix(data, "n") {
-		if strings.Contains(data, ";1") {
-			return SchemaDark, true
-		}
-
-		if strings.Contains(data, ";2") {
-			return SchemaLight, true
-		}
+	if !strings.HasPrefix(data, "\x1b[?997;") || !strings.HasSuffix(data, "n") {
+		return SchemaUnknown, false
 	}
 
-	return "", false
+	body := data[6 : len(data)-1]
+	parts := strings.Split(body, ";")
+	if len(parts) != 2 {
+		return SchemaUnknown, false
+	}
+
+	switch parts[1] {
+	case "1":
+		return SchemaDark, true
+	case "2":
+		return SchemaLight, true
+	}
+
+	return SchemaUnknown, false
 }

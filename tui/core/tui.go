@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -39,10 +40,10 @@ type pendingOsc11Query struct {
 }
 
 type TUI struct {
-	Container
+	*Container
 
 	terminator Terminator
-	mu         sync.Mutex
+	mu         sync.RWMutex
 
 	//渲染状态
 	prevLines    []string
@@ -90,6 +91,61 @@ type TUI struct {
 	cancel context.CancelFunc
 }
 
+// FullRedraws 返回全量重绘次数
+func (t *TUI) FullRedraws() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	return t.fullRedraws
+}
+
+// SetShowHardwareCursor 设置是否显示硬件光标
+func (t *TUI) SetShowHardwareCursor(enabled bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.showHWCursor == enabled {
+		return
+	}
+
+	t.showHWCursor = enabled
+	if !enabled {
+		t.terminator.HideCursor()
+	}
+
+	t.requestRender(false)
+}
+
+// SetClearOnShrink 设置内容缩小时是否清除空行
+func (t *TUI) SetClearOnShrink(enabled bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.clearShrink = enabled
+}
+
+func (t *TUI) SetOnDebug(f func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.onDebug = f
+}
+
+// AddInputListener 添加输入监听器
+func (t *TUI) AddInputListener(listener InputListener) func() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	id := t.nextListenerID
+	t.nextListenerID++
+	t.inputListeners[id] = listener
+
+	return func() {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		delete(t.inputListeners, id)
+	}
+}
+
 func (t *TUI) SetFocus(c Component) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -105,54 +161,44 @@ func (t *TUI) RequestRender(force bool) {
 }
 
 // Start actives the TUI
-func (t *TUI) Start() {
+func (t *TUI) Start() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.stopped = false
-	t.terminator.Start(t.handleInput, t.handleResize)
+	t.terminator.Start(t.ctx, t.handleInput, t.handleResize)
 	t.terminator.HideCursor()
 
 	if t.colorSchemaEnabled {
-		t.terminator.Write("\x1b[?2031h")
+		err := t.terminator.Write("\x1b[?2031h")
+		if err != nil {
+			return err
+		}
 	}
 	t.queryCellSize()
 	t.requestRender(false)
+
+	return nil
 }
 
-func (t *TUI) ShowOverlay(comp Component, opts *OverlayOptions) OverlayHandle {
+func (t *TUI) Stop() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	entry := &overlayEntry{
-		comp:       comp,
-		opts:       opts,
-		preFocus:   t.focused,
-		focusOrder: t.focusOrderCtr + 1,
-	}
-
-	t.focusOrderCtr++
-	t.overlayStack = append(t.overlayStack, entry)
-	if !opts.NonCapturing && t.isOverlayVisible(entry) {
-		t.setFocus(comp, true)
-	}
-
-	t.terminator.HideCursor()
-	t.requestRender(false)
-	return &overlayHandler{tui: t, entry: entry}
-}
-
-func (t *TUI) Stop() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	t.stopped = true
 	t.cancel()
 
 	if t.renderTimer != nil {
 		t.renderTimer.Stop()
+		t.renderTimer = nil
 	}
+
+	// 禁用颜色通知方案
 	if t.colorSchemaEnabled {
-		t.terminator.Write("\x1b[?2031l")
+		err := t.terminator.Write("\x1b[?2031l")
+		if err != nil {
+			return err
+		}
 	}
 
 	// 移动光标到末尾
@@ -160,14 +206,14 @@ func (t *TUI) Stop() {
 		targetRow := len(t.prevLines)
 		diff := targetRow - t.hwCursorRow
 		if diff > 0 {
-			t.terminator.Write(strings.Repeat("\x1b[B", diff))
+			_ = t.terminator.Write(strings.Repeat("\x1b[B", diff))
 		} else if diff < 0 {
-			t.terminator.Write(strings.Repeat("\x1b[A", -diff))
+			_ = t.terminator.Write(strings.Repeat("\x1b[A", -diff))
 		}
-		t.terminator.Write("\r\n")
+		_ = t.terminator.Write("\r\n")
 	}
 	t.terminator.ShowCursor()
-	t.terminator.Stop()
+	return t.terminator.Stop()
 }
 
 // ========================= private functions & methods =====================
@@ -184,10 +230,26 @@ func (t *TUI) handleInput(data string) {
 	defer t.mu.Unlock()
 
 	//OSC 11
-	if t.pendingOsc11Replies > 0 && isOsc11Response(data) {
-		if col, ok := parseOsc11Response(data); ok {
+	if t.pendingOsc11Replies > 0 && isOsc11BackgroundResponse(data) {
+		if color, ok := parseOsc11BackgroundResponse(data); ok {
 			t.pendingOsc11Replies--
+
 			// notify oldest pending query
+			if len(t.pendingOsc11Queries) > 0 {
+				query := t.pendingOsc11Queries[0]
+				t.pendingOsc11Queries = t.pendingOsc11Queries[1:]
+				if !query.settled {
+					query.settled = true
+					if query.timer != nil {
+						query.timer.Stop()
+					}
+
+					select {
+					case query.resolve <- &color:
+					default:
+					}
+				}
+			}
 		}
 		return
 	}
@@ -200,31 +262,49 @@ func (t *TUI) handleInput(data string) {
 		return
 	}
 
-	// cell size response
-	if ok, h, w := consumeCellSizeResponse(data); ok {
-		setCellDimensions(w, h)
-		t.Invalidate()
-		t.requestRender(false)
-		return
-	}
-
-	// input listeners
-	for _, l := range t.inputListeners {
-		res := l(data)
-		if res != nil {
-			if res.Consume {
+	// 运行输入监听器管道
+	currentData := data
+	for _, listener := range t.inputListeners {
+		result := listener(currentData)
+		if result != nil {
+			if result.Consume {
 				return
 			}
-			if res.Data != "" {
-				data = res.Data
+
+			if result.Data != "" {
+				currentData = result.Data
 			} else {
 				return
 			}
 		}
 	}
 
+	// cell size response
+	if ok, h, w := consumeCellSizeResponse(data); ok {
+		SetCellDimensions(w, h)
+		t.Invalidate()
+		t.requestRender(false)
+		return
+	}
+
+	// 调试快捷键
+	if matchesKey(data, "shift+ctrl+d") && t.onDebug != nil {
+		t.onDebug()
+		return
+	}
+
 	// focus overlay handling
-	if t.focused != nil && t.focused.HandleInput != nil {
+	if focusedOverlay := t.findOverlayByComponent(t.focused); focusedOverlay != nil && !t.isOverlayVisible(focusedOverlay) {
+		topVisible := t.getTopmostVisibleOverlay()
+		if topVisible != nil {
+			t.setFocus(topVisible.comp, true)
+		} else {
+			t.setFocus(topVisible.comp, false)
+		}
+	}
+
+	// 转发焦点组件
+	if t.focused != nil {
 		if isKeyRelease(data) && !t.focused.WantsKeyRelease() {
 			return
 		}
@@ -243,11 +323,29 @@ func (t *TUI) setFocus(c Component, clearRestore bool) {
 		}
 	}
 
+	// 处理覆盖层焦点恢复逻辑
+	prevFocusOverlay := t.findOverlayByComponent(prev)
+	if prevFocusOverlay != nil && t.isComponentInOverlayChain(prevFocusOverlay, c) {
+		// 前一个焦点不在覆盖层上，且新焦点不再该覆盖层的祖先链上
+		t.focusRestore = overlayFocusRestore{
+			status:    restoreEligible,
+			overlay:   prevFocusOverlay,
+			blockedBy: nil,
+		}
+	}
+
 	// apply overlay focus
 	t.focused = c
 	if c != nil {
 		if f, ok := c.(Focusable); ok {
 			f.SetFocused(true)
+		}
+	}
+
+	// 恢复覆盖层焦点状态
+	if entry := t.findOverlayByComponent(c); entry != nil && t.isOverlayVisible(entry) {
+		t.focusRestore = overlayFocusRestore{
+			status: restoreInactive,
 		}
 	}
 }
@@ -263,17 +361,23 @@ func (t *TUI) requestRender(force bool) {
 		t.prevViewTop = 0
 		if t.renderTimer != nil {
 			t.renderTimer.Stop()
+			t.renderTimer = nil
 		}
+		t.renderRequested = true
+
+		// 异步执行 渲染
 		go func() {
 			t.mu.Lock()
 			defer t.mu.Unlock()
-			if t.stopped {
+			if t.stopped || !t.renderRequested {
 				return
 			}
 
+			t.renderRequested = false
 			t.lastRender = time.Now()
 			t.doRender()
 		}()
+
 		return
 	}
 
@@ -285,16 +389,18 @@ func (t *TUI) requestRender(force bool) {
 	go t.scheduleRender()
 }
 
+// 执行渲染
 func (t *TUI) doRender() {
 	w, h := t.terminator.Columns(), t.terminator.Rows()
-	newLines := t.Container.Render(w)
+	newLines := t.Container.Render(w) //渲染所有的组件
 
 	// composite overlays
 	if len(t.overlayStack) > 0 {
 		newLines = t.compositeOverlays(newLines, w, h)
 	}
 
-	cursorPos := t.extractCursor(newLines, h)
+	// extract the cursor
+	cursorPos := t.extractCursorPosition(newLines, h)
 	newLines = applyLineResets(newLines)
 
 	// full render conditions
@@ -302,13 +408,14 @@ func (t *TUI) doRender() {
 		(t.clearShrink && len(newLines) < t.maxLinesRendered && len(t.overlayStack) == 0) {
 		t.fullRender(newLines, true)
 	} else {
-		t.diffRender(newLines, w, h, cursorPos)
+		t.diffRender(newLines, w, h)
 	}
 
 	t.prevLines = newLines
 	t.prevImageIDs = t.collectImageIDs(newLines)
 	t.prevW = w
 	t.prevH = h
+
 	t.positionCursor(cursorPos, len(newLines))
 }
 
@@ -338,6 +445,7 @@ func (t *TUI) scheduleRender() {
 		t.renderRequested = false
 		t.lastRender = time.Now()
 		t.doRender()
+
 		if t.renderRequested {
 			t.scheduleRender()
 		}
@@ -347,29 +455,46 @@ func (t *TUI) scheduleRender() {
 func (t *TUI) fullRender(newLines []string, clear bool) {
 	t.fullRedraws++
 	var b strings.Builder
-	b.WriteString("\x1b[?2026h")
+	b.WriteString("\x1b[?2026h") //开始同步更新
 	if clear {
 		b.WriteString(t.deleteImageIDs(t.prevImageIDs))
-		b.WriteString("\x1b[2J\x1b[H\x1b[3J")
+		b.WriteString("\x1b[2J\x1b[H\x1b[3J") //清除屏幕和回滚缓冲区
 	}
 
 	for i, l := range newLines {
 		if i > 0 {
 			b.WriteString("\r\n")
 		}
+
+		//处理多行图像
+		if isImageLine(l) {
+			reservedRows := getImageReservedRows(newLines, i, len(l)-1)
+			if reservedRows > 1 {
+				for row := 1; row < reservedRows; row++ {
+					b.WriteString("\r\n")
+				}
+
+				b.WriteString(fmt.Sprintf("\x1b[%dA", reservedRows-1))
+				b.WriteString(l)
+				b.WriteString(fmt.Sprintf("\x1b[%dB", reservedRows-1))
+				i += reservedRows - 1
+				continue
+			}
+		}
+
 		b.WriteString(l)
 	}
 
-	b.WriteString("\x1b[?2026l")
-	t.terminator.Write(b.String())
-	t.cursorRow = len(newLines) - 1
+	b.WriteString("\x1b[?2026l") //结束同步更新
+	_ = t.terminator.Write(b.String())
+	t.cursorRow = max(0, len(newLines)-1)
 	t.hwCursorRow = t.cursorRow
 	t.maxLinesRendered = len(newLines)
 	t.prevViewTop = max(0, len(newLines)-t.terminator.Rows())
 }
 
-func (t *TUI) diffRender(newLines []string, w, h int, cursorPos *[2]int) {
-	first, last := -1, -1
+func (t *TUI) diffRender(newLines []string, w, h int) {
+	firstChanged, lastChanged := -1, -1 //查找变化范围
 
 	for i := 0; i < max(len(newLines), len(t.prevLines)); i++ {
 		var old, nu string
@@ -380,60 +505,176 @@ func (t *TUI) diffRender(newLines []string, w, h int, cursorPos *[2]int) {
 			nu = newLines[i]
 		}
 		if old != nu {
-			if first == -1 {
-				first = i
+			if firstChanged == -1 {
+				firstChanged = i
 			}
-			last = i
+			lastChanged = i
 		}
 	}
 
-	if first == -1 {
-		t.positionCursor(cursorPos, len(newLines))
+	//处理追加的行
+	if len(newLines) > len(t.prevLines) {
+		if firstChanged == -1 {
+			firstChanged = len(t.prevLines)
+		}
+
+		lastChanged = len(newLines) - 1
+	}
+
+	// 无变化
+	if firstChanged == -1 {
 		return
 	}
 
-	// move cursor and update changed lines
+	// 扩展范围包含图像
+	firstChanged, lastChanged = t.expandForImages(firstChanged, lastChanged, newLines)
+
+	//检查是否需要全量渲染
+	if firstChanged < t.prevViewTop {
+		t.fullRender(newLines, true)
+		return
+	}
+
+	// 执行差分渲染
 	var b strings.Builder
 	b.WriteString("\x1b[?2026h")
-	b.WriteString(t.deleteChangedImages(first, last))
+	b.WriteString(t.deleteChangedImages(firstChanged, lastChanged))
 
-	// cursor movement
-	diff := first - t.hwCursorRow
+	// 移动光标的第一个变化行
+	moveTarget := firstChanged
+	if len(newLines) > len(t.prevLines) && firstChanged == len(t.prevLines) && firstChanged > 0 {
+		moveTarget = lastChanged - 1
+	}
+	diff := moveTarget - t.hwCursorRow
 	if diff > 0 {
 		b.WriteString(strings.Repeat("\x1b[B", diff))
 	} else if diff < 0 {
 		b.WriteString(strings.Repeat("\x1b[A", -diff))
 	}
 
-	for i := first; i <= last && i < len(newLines); i++ {
-		b.WriteString("\r\x1b[2K")
-		b.WriteString(newLines[i])
-		t.hwCursorRow = i
-		if i < last {
-			b.WriteString("\r\n")
-			t.hwCursorRow++
-		}
+	b.WriteString("\r")
+	if len(newLines) > len(t.prevLines) && firstChanged == len(t.prevLines) {
+		b.WriteString("\n")
 	}
+
+	// 渲染变化的行
+	renderEnd := min(lastChanged, len(newLines)-1)
+	for i := firstChanged; i <= renderEnd; i++ {
+		if i > firstChanged {
+			b.WriteString("\r\n")
+		}
+		b.WriteString("\x1b[2K") //清除当前行
+		if !isImageLine(newLines[i]) && visibleWidth(newLines[i]) > w {
+			t.handleRenderError(newLines, i, w)
+			return
+		}
+
+		b.WriteString(newLines[i])
+	}
+	t.hwCursorRow = renderEnd
+
+	//清除多余的行
+	if len(t.prevLines) > len(newLines) {
+		extraLines := len(t.prevLines) - len(newLines)
+		for i := 0; i < extraLines; i++ {
+			b.WriteString("\r\n\x1b[2K")
+		}
+		b.WriteString(fmt.Sprintf("\x1b[%dA", extraLines))
+	}
+
 	b.WriteString("\x1b[?2026l")
-	t.terminator.Write(b.String())
-	t.cursorRow = len(newLines) - 1
+	_ = t.terminator.Write(b.String())
+	t.cursorRow = max(0, len(newLines)-1)
 	t.maxLinesRendered = max(t.maxLinesRendered, len(newLines))
 	t.prevViewTop = max(0, len(newLines)-h)
 }
 
-// merges overlay content into the base lines
+// 合成覆盖层
 func (t *TUI) compositeOverlays(base []string, w, h int) []string {
-	// sort visible overlays by focusOrder, render, and overwrite base lines
-	// full implementation omitted for brevity;
-	return base
+	if len(t.overlayStack) == 0 {
+		return base
+	}
+
+	result := make([]string, len(base))
+	copy(result, base)
+
+	// 收集可见覆盖层并排序
+	type renderedOverlay struct {
+		lines []string
+		row   int
+		col   int
+		w     int
+	}
+
+	var visibleOverlays []*overlayEntry
+	for _, entry := range t.overlayStack {
+		if t.isOverlayVisible(entry) {
+			visibleOverlays = append(visibleOverlays, entry)
+		}
+	}
+
+	// 按focusOrder排序
+	for i := 0; i < len(visibleOverlays)-1; i++ {
+		for j := i + 1; j < len(visibleOverlays); j++ {
+			if visibleOverlays[i].focusOrder > visibleOverlays[j].focusOrder {
+				visibleOverlays[i], visibleOverlays[j] = visibleOverlays[j], visibleOverlays[i]
+			}
+		}
+	}
+
+	var rendered []renderedOverlay
+	minLinesNeeded := len(result)
+	for _, entry := range visibleOverlays {
+		opts := entry.opts
+		if opts == nil {
+			opts = &OverlayOptions{}
+		}
+
+		// 解析布局
+		w, _, _, maxH := resolveLayout(opts, 0, w, h)
+		overlayLines := entry.comp.Render(w)
+		if maxH > 0 && len(overlayLines) > maxH {
+			overlayLines = overlayLines[:maxH]
+		}
+
+		w, row, col, _ := resolveLayout(opts, len(overlayLines), w, h)
+		rendered = append(rendered, renderedOverlay{overlayLines, row, col, w})
+		minLinesNeeded = max(minLinesNeeded, row+len(overlayLines))
+	}
+
+	// 扩展结果数组
+	workingHeight := max(len(result), max(h, minLinesNeeded))
+	for len(result) < workingHeight {
+		result = append(result, "")
+	}
+
+	viewportStart := max(0, workingHeight-h)
+
+	// 合成每个覆盖层
+	for _, r := range rendered {
+		for i, line := range r.lines {
+			idx := viewportStart + r.row + i
+			if idx >= 0 && idx < len(result) {
+				truncatedLine := line
+				if visibleWidth(line) > r.w {
+					truncatedLine = sliceByColumn(line, 0, r.w, true)
+				}
+				result[idx] = compositeLineAt(result[idx], truncatedLine, r.col, r.w, w)
+			}
+		}
+	}
+
+	return result
 }
 
-func (t *TUI) extractCursor(lines []string, h int) *[2]int {
-	for i := len(lines) - 1; i >= 0 && i >= len(lines)-h; i-- {
-		idx := strings.Index(lines[i], cursorMarker)
+func (t *TUI) extractCursorPosition(lines []string, h int) *[2]int {
+	viewportTop := max(0, len(lines)-h)
+
+	for i := len(lines) - 1; i >= viewportTop; i-- {
+		idx := strings.Index(lines[i], CursorMarker)
 		if idx >= 0 {
 			col := visibleWidth(lines[i][:idx])
-			lines[i] = lines[i][:idx] + lines[i][idx+len(cursorMarker):]
+			lines[i] = lines[i][:idx] + lines[i][idx+len(CursorMarker):]
 			return &[2]int{i, col}
 		}
 	}
@@ -505,7 +746,67 @@ func (t *TUI) isTermux() bool {
 }
 
 func (t *TUI) queryCellSize() {
-	t.terminator.Write("\x1b[16t")
+	_ = t.terminator.Write("\x1b[16t")
+}
+
+func (t *TUI) findOverlayByComponent(c Component) *overlayEntry {
+	for _, entry := range t.overlayStack {
+		if entry.comp == c {
+			return entry
+		}
+	}
+
+	return nil
+}
+
+func (t *TUI) isOverlayInStack(entry *overlayEntry) bool {
+	for _, overlay := range t.overlayStack {
+		if overlay == entry {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (t *TUI) isComponentInOverlayChain(entry *overlayEntry, c Component) bool {
+	visited := make(map[Component]bool)
+	current := entry.preFocus
+
+	for current != nil && !visited[current] {
+		visited[current] = true
+		if current == c {
+			return true
+		}
+
+		if overlayEntry := t.findOverlayByComponent(current); overlayEntry != nil {
+			current = overlayEntry.preFocus
+		} else {
+			break
+		}
+	}
+
+	return false
+}
+
+func (t *TUI) getTopmostVisibleOverlay() *overlayEntry {
+	var topmost *overlayEntry
+
+	for _, entry := range t.overlayStack {
+		if entry.opts != nil && entry.opts.NonCapturing {
+			continue
+		}
+
+		if !t.isOverlayVisible(entry) {
+			continue
+		}
+
+		if topmost == nil || entry.focusOrder > topmost.focusOrder {
+			topmost = entry
+		}
+	}
+
+	return topmost
 }
 
 func (t *TUI) isOverlayVisible(e *overlayEntry) bool {
@@ -513,9 +814,48 @@ func (t *TUI) isOverlayVisible(e *overlayEntry) bool {
 		return false
 	}
 
-	if e.opts.Visible != nil {
+	if e.opts != nil && e.opts.Visible != nil {
 		return e.opts.Visible(t.terminator.Columns(), t.terminator.Rows())
 	}
 
 	return true
+}
+
+func (t *TUI) expandForImages(firstChanged, lastChanged int, newLines []string) (int, int) {
+	expandedFirst := firstChanged
+	expandedLast := lastChanged
+
+	// 扩展前一次渲染中的图像范围
+	for i := 0; i < len(t.prevLines); i++ {
+		ids := extractImageIDs(t.prevLines[i])
+		if len(ids) == 0 {
+			continue
+		}
+
+		blockEnd := i + getImageReservedRows(t.prevLines, i, len(t.prevLines)-1) - 1
+		if i >= firstChanged || (i <= lastChanged && blockEnd >= firstChanged) {
+			expandedFirst = min(expandedFirst, i)
+			expandedLast = max(expandedLast, blockEnd)
+		}
+	}
+
+	// 扩展新渲染中的图像范围
+	for i := 0; i < len(newLines); i++ {
+		ids := extractImageIDs(newLines[i])
+		if len(ids) == 0 {
+			continue
+		}
+
+		blockEnd := i + getImageReservedRows(newLines, i, len(newLines)-1) - 1
+		if i >= firstChanged || (i <= lastChanged && blockEnd >= firstChanged) {
+			expandedFirst = min(expandedFirst, i)
+			expandedLast = max(expandedLast, blockEnd)
+		}
+	}
+
+	return expandedFirst, expandedLast
+}
+
+func (t *TUI) handleRenderError(lines []string, index, width int) {
+
 }

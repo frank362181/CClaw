@@ -101,12 +101,10 @@ func normalizeTerminatorOutput(s string) string {
 	return s
 }
 
-const segmentReset = "\x1b[0m\x1b]8;;\x07"
-
 func applyLineResets(lines []string) []string {
 	for i, j := range lines {
 		if !isImageLine(j) {
-			lines[i] = normalizeTerminatorOutput(j) + segmentReset
+			lines[i] = normalizeTerminatorOutput(j) + SegmentReset
 		}
 	}
 
@@ -136,10 +134,10 @@ func compositeLineAt(baseLine, overlayLine string, startCol, overlayWidth, total
 	var result strings.Builder
 	result.WriteString(seg.before)
 	result.WriteString(strings.Repeat(" ", beforePad))
-	result.WriteString(segmentReset)
+	result.WriteString(SegmentReset)
 	result.WriteString(overlayText)
 	result.WriteString(strings.Repeat(" ", overlayPad))
-	result.WriteString(segmentReset)
+	result.WriteString(SegmentReset)
 	result.WriteString(seg.after)
 	result.WriteString(strings.Repeat(" ", afterPad))
 

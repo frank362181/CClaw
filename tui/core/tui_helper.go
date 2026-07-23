@@ -15,7 +15,7 @@ import (
 func CreateTUI(term Terminator) *TUI {
 	ctx, cancel := context.WithCancel(context.Background())
 	t := &TUI{
-		Container:  *NewContainer(),
+		Container:  NewContainer(),
 		terminator: term,
 
 		minInterval:  time.Millisecond * 16,

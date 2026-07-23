@@ -6,32 +6,43 @@ package core
 
 import (
 	"math"
-	"strconv"
-	"strings"
 )
 
+// OverlayMargin 覆盖层的边框
 type OverlayMargin struct{ Top, Right, Bottom, Left int }
 
-type SizeValue interface{}
+// SizeValue 尺寸值
+type SizeValue struct {
+	Value     int
+	IsPercent bool
+}
 
+// OverlayOptions 覆盖层的配置选项
 type OverlayOptions struct {
-	Width, MaxHeight SizeValue
-	MinWidth         int
+	Width     *SizeValue
+	MaxHeight *SizeValue
+	MinWidth  int
 
 	Anchor OverlayAnchor
 
-	OffsetX, OffsetY int
-	Row, Col         SizeValue
+	OffsetX int
+	OffsetY int
+	Row     *SizeValue
+	Col     *SizeValue
 
-	Margin interface{} // number or *OverlayMargin
+	Margin *OverlayMargin // number or *OverlayMargin
 
 	Visible func(termW, termH int) bool
 
 	NonCapturing bool
 }
 
+// OverlayHandle 覆盖层的控制句柄
 type OverlayHandle interface {
+	// Hide 永久移除覆盖层
 	Hide()
+
+	// SetHidden 临时隐藏
 	SetHidden(bool)
 	IsHidden() bool
 	Focus()
@@ -40,6 +51,7 @@ type OverlayHandle interface {
 	IsFocused() bool
 }
 
+// 覆盖层堆栈条目
 type overlayEntry struct {
 	comp     Component
 	opts     *OverlayOptions
@@ -49,96 +61,71 @@ type overlayEntry struct {
 	focusOrder int
 }
 
-func parseSize(s SizeValue, ref int) (int, bool) {
-	if s == nil {
-		return 0, false
+func (sv *SizeValue) ToAbsolute(ref int) int {
+	if sv == nil {
+		return 0
 	}
 
-	switch v := s.(type) {
-	case int:
-		return v, true
-	case string:
-		if strings.HasSuffix(v, "%") {
-			pct, err := strconv.ParseFloat(strings.TrimSuffix(v, "%"), 64)
-			if err == nil && pct >= 0 && pct <= 100 {
-				return int(math.Floor(float64(ref) * pct / 100.0)), true
-			}
-		}
+	if sv.IsPercent {
+		return int(math.Floor(float64(ref) * float64(sv.Value) / 100.0))
 	}
 
-	return 0, false
+	return sv.Value
 }
 
-func parseMargin(margin interface{}) OverlayMargin {
-	switch m := margin.(type) {
-	case int:
-		return OverlayMargin{m, m, m, m}
-	case OverlayMargin:
-		return m
-	case *OverlayMargin:
-		if m != nil {
-			return *m
-		}
-	}
-
-	return OverlayMargin{}
-}
-
+// 解析覆盖层布局
 func resolveLayout(opts *OverlayOptions, overlayHeight, termW, termH int) (width, row, col, maxH int) {
-	m := parseMargin(opts.Margin)
+	m := &OverlayMargin{}
+	if opts.Margin != nil {
+		*m = *opts.Margin
+	}
 	availW := max(1, termW-m.Left-m.Right)
 	availH := max(1, termH-m.Top-m.Bottom)
 
+	// parse width
 	width = min(80, availW)
-	if w, ok := parseSize(opts.Width, termW); ok {
-		width = w
+	if opts.Width != nil {
+		width = opts.Width.ToAbsolute(termW)
 	}
 
 	if opts.MinWidth > 0 {
 		width = max(width, opts.MinWidth)
 	}
-	width = clamp(width, 1, availW)
+	width = max(1, min(width, availW))
 
+	// parse height
 	maxH = 0
-	if h, ok := parseSize(opts.MaxHeight, termH); ok {
-		maxH = clamp(h, 1, availH)
+	if opts.MaxHeight != nil {
+		maxH = opts.MaxHeight.ToAbsolute(termH)
+		maxH = max(1, min(maxH, availH))
 	}
+
+	// 有效高度
 	effH := overlayHeight
 	if maxH > 0 && effH > maxH {
 		effH = maxH
 	}
 
-	anchor := opts.Anchor
-	if anchor == "" {
-		anchor = AnchorCenter
-	}
-
-	// row
+	// 解析行位置
 	if opts.Row != nil {
-		if s, ok := parseSize(opts.Row, termH); ok {
-			row = s
-		} else if pct, ok := opts.Row.(string); ok {
-			if strings.HasSuffix(pct, "%") {
-				f, _ := strconv.ParseFloat(strings.TrimSuffix(pct, "%"), 64)
-				row = m.Top + int(float64(availH-effH)*f/100.0)
-			}
-		}
+		row = opts.Row.ToAbsolute(termH)
 	} else {
-		col = anchorRow(anchor, width, availW, m.Left)
+		anchor := opts.Anchor
+		if anchor == "" {
+			anchor = AnchorCenter
+		}
+		row = resolveAnchorRow(anchor, effH, availH, m.Top)
 	}
 
 	// Col
 	if opts.Col != nil {
-		if s, ok := parseSize(opts.Col, termW); ok {
-			col = s
-		} else if pct, ok := opts.Col.(string); ok {
-			if strings.HasSuffix(pct, "%") {
-				f, _ := strconv.ParseFloat(strings.TrimSuffix(pct, "%"), 64)
-				col = m.Left + int(float64(availW-width)*f/100.0)
-			}
-		}
+		col = opts.Col.ToAbsolute(termW)
 	} else {
-		col = anchorCol(anchor, width, availW, m.Left)
+		anchor := opts.Anchor
+		if anchor == "" {
+			anchor = AnchorCenter
+		}
+		col = resolveAnchorCol(anchor, width, availW, m.Left)
 	}
 
 	row += opts.OffsetY
@@ -149,7 +136,7 @@ func resolveLayout(opts *OverlayOptions, overlayHeight, termW, termH int) (width
 	return
 }
 
-func anchorRow(anchor OverlayAnchor, h, availH, marginTop int) int {
+func resolveAnchorRow(anchor OverlayAnchor, h, availH, marginTop int) int {
 	switch anchor {
 	case AnchorTopLeft, AnchorTopCenter, AnchorTopRight:
 		return marginTop
@@ -160,7 +147,7 @@ func anchorRow(anchor OverlayAnchor, h, availH, marginTop int) int {
 	}
 }
 
-func anchorCol(anchor OverlayAnchor, w, availW, marginLeft int) int {
+func resolveAnchorCol(anchor OverlayAnchor, w, availW, marginLeft int) int {
 	switch anchor {
 	case AnchorTopLeft, AnchorLeftCenter, AnchorBottomLeft:
 		return marginLeft
