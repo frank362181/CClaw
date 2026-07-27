@@ -185,7 +185,7 @@ func CreateFile(filename string) (*os.File, error) {
 }
 
 // NormalizePath normalize a path string
-var unicodeSpacesRegex = regexp.MustCompile(`[\u00A0\u2000-\u200A\u202F\u205F\u3000]`)
+var unicodeSpacesRegex = regexp.MustCompile("[\u00A0\u2000-\u200A\u202F\u205F\u3000]")
 
 func NormalizePath(path string, homeDir string, trim bool, expandTilde bool, stripAtPrefix bool, normalizeUnicodeSpace bool) string {
 	if len(path) == 0 {

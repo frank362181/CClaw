@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -21,7 +20,7 @@ import (
 // @in header
 // @name AUTHORIZATION
 func main() {
-	fmt.Println(GetVersion())
+	//fmt.Println(GetVersion())
 
 	configFileName := filepath.Join(common.GetCurrentDir(), "cclaw.ini")
 	if !agentservice.InitApp(configFileName) {
@@ -42,5 +41,4 @@ func main() {
 
 	// 3. wait the exit signal
 	agentservice.Shutdown()
-
 }

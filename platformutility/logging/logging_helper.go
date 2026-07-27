@@ -11,7 +11,6 @@ package logging
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -19,20 +18,27 @@ import (
 
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging/loggingwriter"
+	"my.favorite/tui-engine/engine"
 
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 )
 
+var logMgr = engine.GetLogManager() //获取日志管理器
+
 // 定义标准输出的日志输出
 var stdoutInstance = common.GetSingleton(func() *loggingwriter.AsyncLogger {
-	if common.IsWindows() {
-		w := &loggingwriter.ConsoleWriter{File: os.Stdout}
-		return loggingwriter.OpenLogger(w, 1, 256*1024, "json")
-	}
+	//if common.IsWindows() {
+	//	w := &loggingwriter.ConsoleWriter{File: os.Stdout}
+	//	return loggingwriter.OpenLogger(w, 1, 256*1024, "json")
+	//}
 
-	var tempIo io.Writer = os.Stdout
-	//temp := &loggingwriter.ConsoleWriter{tempIo}
-	return loggingwriter.OpenLogger(tempIo, 1, 256*1024, "json")
+	var w = &loggingwriter.ConsoleWriter{File: os.Stdout}
+	asyncLogger := loggingwriter.OpenLogger(w, 1, 256*1024, "json")
+
+	logMgr := engine.GetLogManager()
+	asyncLogger.SetLogMgr(logMgr)
+
+	return asyncLogger
 }).Instance()
 
 // 定义文件日志输出
@@ -51,7 +57,27 @@ var (
 	}).Instance()
 )
 
+func InitializeLogger() {
+	if logMgr != nil {
+		logMgr.Start()
+
+		if logMgr.GetP() != nil {
+			go func() {
+				_, _ = logMgr.GetP().Run()
+			}()
+		}
+	}
+}
+
 func CloseLogger() {
+	// 关闭日志引擎
+	if logMgr != nil {
+		if logMgr.GetP() != nil {
+			logMgr.GetP().Quit()
+		}
+		logMgr.Stop()
+	}
+
 	if stdoutInstance != nil {
 		stdoutInstance.Close()
 	}
@@ -69,7 +95,10 @@ func LogDebug(v ...interface{}) {
 	msg := formatLog(v)
 
 	if stdoutInstance != nil {
-		stdoutInstance.Debug(msg)
+		//stdoutInstance.Debug(msg)
+		if stdoutInstance.GetLogMgr() != nil {
+			stdoutInstance.GetLogMgr().Log(levelNames[DEBUG], msg)
+		}
 	}
 
 	if fileInstance != nil {
@@ -85,7 +114,10 @@ func LogInfo(v ...interface{}) {
 	msg := formatLog(v)
 
 	if stdoutInstance != nil {
-		stdoutInstance.Info(msg)
+		//stdoutInstance.Info(msg)
+		if stdoutInstance.GetLogMgr() != nil {
+			stdoutInstance.GetLogMgr().Log(levelNames[INFO], msg)
+		}
 	}
 
 	if fileInstance != nil {
@@ -100,7 +132,10 @@ func LogWarn(v ...interface{}) {
 
 	msg := formatLog(v)
 	if stdoutInstance != nil {
-		stdoutInstance.Warn(msg)
+		//stdoutInstance.Warn(msg)
+		if stdoutInstance.GetLogMgr() != nil {
+			stdoutInstance.GetLogMgr().Log(levelNames[WARNING], msg)
+		}
 	}
 	if fileInstance != nil {
 		fileInstance.Warn(msg)
@@ -114,7 +149,10 @@ func LogError(v ...interface{}) {
 
 	msg := formatLog(v)
 	if stdoutInstance != nil {
-		stdoutInstance.Error(msg)
+		//stdoutInstance.Error(msg)
+		if stdoutInstance.GetLogMgr() != nil {
+			stdoutInstance.GetLogMgr().Log(levelNames[ERROR], msg)
+		}
 	}
 	if fileInstance != nil {
 		fileInstance.Error(msg)
@@ -127,7 +165,10 @@ func LogFatal(v ...interface{}) {
 	}
 	msg := formatLog(v)
 	if stdoutInstance != nil {
-		stdoutInstance.Fatal(msg)
+		//stdoutInstance.Fatal(msg)
+		if stdoutInstance.GetLogMgr() != nil {
+			stdoutInstance.GetLogMgr().Log(levelNames[FETAL], msg)
+		}
 	}
 	if fileInstance != nil {
 		fileInstance.Fatal(msg)

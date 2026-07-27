@@ -152,8 +152,11 @@ func Startup() bool {
 		return false
 	}
 
+	logging.InitializeLogger() // 启动日志模块
+
 	sslEnabled, _ := configHelper.GetBoolValueDefault("server", "ssl", false)
 	baseRouter.Startup(sslEnabled)
+
 	return true
 }
 
@@ -171,9 +174,8 @@ func Shutdown() {
 		return
 	}
 
-	appDb.Close() //关闭数据库链接
-
-	logging.CloseLogger() //确保日志被顺利关闭
+	appDb.Close()         //关闭数据库链接
+	logging.CloseLogger() //关闭日志模块
 }
 
 // =============================== private functions & methods ======================================
