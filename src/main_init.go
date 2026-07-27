@@ -16,6 +16,10 @@ var (
 	GoVersion = runtime.Version() //运行时自动获取
 )
 
+var (
+	VersionString = getVersion()
+)
+
 func init() {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
@@ -51,7 +55,7 @@ func init() {
 	}
 }
 
-func GetVersion() string {
+func getVersion() string {
 	verString := fmt.Sprintf("Version: %s\nCommit: %s\nBuildTime: %s \nGoVersion: %s\nOS/Arch: %s/%s",
 		Version, Commit, BuildTime, GoVersion, runtime.GOOS, runtime.GOARCH)
 

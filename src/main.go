@@ -8,6 +8,7 @@ import (
 	_ "my.favorite/cclaw/docs"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging"
+	"my.favorite/tui-engine/tui_engine"
 )
 
 // @title           企业级AI助手操作系统
@@ -22,9 +23,9 @@ import (
 // @name AUTHORIZATION
 func main() {
 	// 开启运行界面
-	//tui_engine.GetLogManager().Start()
+	tui_engine.GetLogManager().Start()
 
-	version_string := GetVersion()
+	version_string := VersionString
 	logging.LogInfo(version_string)
 
 	configFileName := filepath.Join(common.GetCurrentDir(), "cclaw.ini")
@@ -48,5 +49,5 @@ func main() {
 	agentservice.Shutdown()
 
 	// 结束TUI
-	//tui_engine.GetLogManager().Stop()
+	tui_engine.GetLogManager().Stop()
 }

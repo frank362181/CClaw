@@ -13,6 +13,8 @@ import (
 // ================================= public functions & methods ===============================
 
 var baseRouter = common.GetSingleton(func() *BaseRouter {
+	gin.SetMode(gin.ReleaseMode) //设置release模式
+
 	router := &BaseRouter{
 		GinEngine:            gin.New(),
 		Server:               nil,
@@ -21,8 +23,6 @@ var baseRouter = common.GetSingleton(func() *BaseRouter {
 		certFile:             "",
 		keyFile:              "",
 	}
-
-	gin.SetMode(gin.ReleaseMode)
 	return router
 }).Instance()
 

@@ -74,4 +74,11 @@ return nil, exception.DatabaseErrorEx("database connection need to be initialize
 	return result, err
 }
 
+- 确定系统的工作目录，skill目录，session目录，memory目录等
+  - skill的目录应该有系统的skill目录，个人的skill目录，项目的skill目录三种；
+    - 个人的skill目录应该是：workspace/{person_}/{agent}/skill
+    - 项目的skill：workspace/{project_name}/{agent}/skill
+  - session 目录依赖于skill目录，即/workspace/skill/{session_name}/***
+  - memory目录依赖于session:workspace/skill/{session_name}/{memory_date}
+
 
