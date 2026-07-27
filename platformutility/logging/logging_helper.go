@@ -18,12 +18,10 @@ import (
 
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging/loggingwriter"
-	"my.favorite/tui-engine/engine"
+	"my.favorite/tui-engine/tui_engine"
 
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 )
-
-var logMgr = engine.GetLogManager() //获取日志管理器
 
 // 定义标准输出的日志输出
 var stdoutInstance = common.GetSingleton(func() *loggingwriter.AsyncLogger {
@@ -35,7 +33,7 @@ var stdoutInstance = common.GetSingleton(func() *loggingwriter.AsyncLogger {
 	var w = &loggingwriter.ConsoleWriter{File: os.Stdout}
 	asyncLogger := loggingwriter.OpenLogger(w, 1, 256*1024, "json")
 
-	logMgr := engine.GetLogManager()
+	logMgr := tui_engine.GetLogManager()
 	asyncLogger.SetLogMgr(logMgr)
 
 	return asyncLogger
@@ -57,27 +55,7 @@ var (
 	}).Instance()
 )
 
-func InitializeLogger() {
-	if logMgr != nil {
-		logMgr.Start()
-
-		if logMgr.GetP() != nil {
-			go func() {
-				_, _ = logMgr.GetP().Run()
-			}()
-		}
-	}
-}
-
 func CloseLogger() {
-	// 关闭日志引擎
-	if logMgr != nil {
-		if logMgr.GetP() != nil {
-			logMgr.GetP().Quit()
-		}
-		logMgr.Stop()
-	}
-
 	if stdoutInstance != nil {
 		stdoutInstance.Close()
 	}

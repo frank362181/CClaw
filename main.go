@@ -7,6 +7,7 @@ import (
 	agentservice "my.favorite/agentservice"
 	_ "my.favorite/cclaw/docs"
 	"my.favorite/platformutility/common"
+	"my.favorite/platformutility/logging"
 )
 
 // @title           企业级AI助手操作系统
@@ -20,7 +21,11 @@ import (
 // @in header
 // @name AUTHORIZATION
 func main() {
-	//fmt.Println(GetVersion())
+	// 开启运行界面
+	//tui_engine.GetLogManager().Start()
+
+	version_string := GetVersion()
+	logging.LogInfo(version_string)
 
 	configFileName := filepath.Join(common.GetCurrentDir(), "cclaw.ini")
 	if !agentservice.InitApp(configFileName) {
@@ -41,4 +46,7 @@ func main() {
 
 	// 3. wait the exit signal
 	agentservice.Shutdown()
+
+	// 结束TUI
+	//tui_engine.GetLogManager().Stop()
 }

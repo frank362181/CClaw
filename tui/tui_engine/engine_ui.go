@@ -1,4 +1,4 @@
-package engine
+package tui_engine
 
 import (
 	"fmt"
@@ -118,6 +118,8 @@ func (mui *ModelUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
+			close(mui.logMgr.logCh)
+
 			return mui, tea.Quit
 		case tea.KeyCtrlL:
 			mui.logs = []string{}

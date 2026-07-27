@@ -1,4 +1,4 @@
-package engine
+package tui_engine
 
 import (
 	"fmt"

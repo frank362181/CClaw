@@ -1,4 +1,4 @@
-package engine
+package tui_engine
 
 import (
 	"github.com/charmbracelet/lipgloss"
@@ -28,36 +28,36 @@ var (
 
 	//标题栏样式
 	titleStyle = lipgloss.NewStyle().
-		Background(bgTitle).
-		Foreground(primary).
-		Bold(true).
-		Padding(0, 1).
-		Align(lipgloss.Center)
+			Background(bgTitle).
+			Foreground(primary).
+			Bold(true).
+			Padding(0, 1).
+			Align(lipgloss.Center)
 
 	// 状态栏样式
 	statusStyle = lipgloss.NewStyle().
-		Background(bgTitle).
-		Foreground(muted).
-		Padding(0, 1)
+			Background(bgTitle).
+			Foreground(muted).
+			Padding(0, 1)
 
 	// 输出区（viewport）带圆角边框
 	viewportBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(primary).
-		Background(bgViewport).
-		Foreground(textPrimary).
-		Padding(0, 1)
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(primary).
+				Background(bgViewport).
+				Foreground(textPrimary).
+				Padding(0, 1)
 
 	textAreaStyle = lipgloss.NewStyle().
-		Foreground(textPrimary).
-		Background(bgInput)
+			Foreground(textPrimary).
+			Background(bgInput)
 
 	// textInput box的包装样式
 	inputBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(primary).
-		Background(bgInput).
-		Padding(0, 1)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(primary).
+			Background(bgInput).
+			Padding(0, 1)
 
 	levelColor = map[string]lipgloss.Style{
 		"INFO":    lipgloss.NewStyle().Foreground(success).Bold(true),

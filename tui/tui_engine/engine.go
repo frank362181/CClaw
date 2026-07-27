@@ -1,4 +1,4 @@
-package engine
+package tui_engine
 
 import (
 	"time"
@@ -31,6 +31,11 @@ func (lm *LogManager) Start() {
 			}
 		}
 	}()
+
+	// 开始进入到bubble tea的event loop中
+	go func() {
+		_, _ = lm.program.Run()
+	}()
 }
 
 func (lm *LogManager) Log(level, content string) {
@@ -47,12 +52,12 @@ func (lm *LogManager) GetP() *tea.Program {
 }
 
 func (lm *LogManager) Stop() {
-	close(lm.quit)
+	//close(lm.quit)
 	<-lm.stopped
 
 	//协程退出
-	close(lm.logCh)
 	lm.pending = nil
+	lm.program.Quit() //退出bubble event loop
 }
 
 // =========================== private functions & methods ===================
