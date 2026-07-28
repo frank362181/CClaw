@@ -14,6 +14,7 @@ const (
 
 	errorIdDatabase
 	errorIdSqlError
+	errorIdMemoryDbError
 
 	errorIdUnstartServer = iota + 100
 
