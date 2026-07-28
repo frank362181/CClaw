@@ -38,7 +38,6 @@ func GetRedisClient(config *config.ConfigurationHelper) redisdb.IMemoryDB {
 
 		memoryConfig.ReconnectBaseDelay, _ = config.GetIntValueDefault("memoryDb", "reconnectBaseDelay", 500)
 	}
-	memoryConfig.MemoryType = redisdb.MemoryDbTypeRedis
 
 	memoryDbClient.MConfig = memoryConfig //设置配置信息
 	ctx, cancel := context.WithCancel(context.Background())

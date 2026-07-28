@@ -2,6 +2,7 @@ package m_redis
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -203,8 +204,8 @@ func (rdb *RedisClient) reconnect() error {
 		// 指数退避算法
 		exponent := int(math.Pow(2, float64(i))) // 转换为Int
 		wait := time.Duration(exponent*rdb.MConfig.ReconnectBaseDelay) * time.Millisecond
-		if wait > time.Duration(30*time.Second) {
-			wait = time.Duration(30 * time.Second)
+		if wait > 30*time.Second {
+			wait = 30 * time.Second
 		}
 
 		logging.LogInfo("[Redis] reconnecting in %v (attempt %d:%d)", wait, i+1, rdb.MConfig.MaxRetries)
@@ -233,7 +234,7 @@ func (rdb *RedisClient) reconnect() error {
 
 func (rdb *RedisClient) connecting(fn func(ctx context.Context, cn *redis.Conn) error) (*redis.Client, error) {
 	opts := &redis.Options{
-		Addr:         rdb.MConfig.Address,
+		Addr:         fmt.Sprintf("%s:%d", rdb.MConfig.Address, rdb.MConfig.Port),
 		Password:     rdb.MConfig.Password,
 		DB:           rdb.MConfig.DatabaseName,
 		PoolSize:     rdb.MConfig.PoolSize,
@@ -274,7 +275,16 @@ func (rdb *RedisClient) executeWithRetry(operation func(client *redis.Client) er
 		}
 
 		//重试操作
-		
+		rdb.mu.RLock()
+		rClient := rdb.mClient
+		isClosed := rdb.IsClosed()
+		rdb.mu.RUnlock()
+
+		if rClient == nil || isClosed {
+			return exception.MemoryDbErrEx("redis client not available after  reconnect")
+		}
+
+		return operation(rClient)
 	}
 
 	return err

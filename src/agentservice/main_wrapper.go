@@ -20,6 +20,8 @@ import (
 	"my.favorite/platformutility/database"
 	"my.favorite/platformutility/database/core"
 	"my.favorite/platformutility/logging"
+	"my.favorite/platformutility/memory_db"
+	"my.favorite/platformutility/memory_db/common"
 	"my.favorite/platformutility/webbase"
 	"my.favorite/platformutility/webbase/middleware/basic"
 	"my.favorite/platformutility/webbase/middleware/controller"
@@ -30,6 +32,7 @@ import (
 var baseRouter = webbase.GetBaseRouter()
 var configHelper *config.ConfigurationHelper
 var appDb core.IBaseDatabase //全应用使用的数据库操作实例
+var memoryDb common.IMemoryDB
 
 func InitApp(configFileName string) bool {
 	configFileName = strings.ToLower(configFileName)
@@ -50,6 +53,8 @@ func InitApp(configFileName string) bool {
 		logging.LogError(err.Error())
 		return false
 	}
+
+	memoryDb = memory_db.CreateMemoryDb(configHelper)
 
 	appDb = database.GetGormDatabase(configHelper)
 	err = appDb.Open()
@@ -172,7 +177,8 @@ func Shutdown() {
 		return
 	}
 
-	appDb.Close() //关闭数据库链接
+	appDb.Close()                //关闭数据库链接
+	_ = memoryDb.CloseMemoryDb() //关闭内存链接数据库
 }
 
 // =============================== private functions & methods ======================================
