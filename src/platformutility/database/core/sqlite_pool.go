@@ -29,7 +29,7 @@ func (pool *SqliteDBPool) OpenPool() error {
 	pool.ClosePool()
 
 	//读取配置文件
-	dbPath, err1 := common.ResolveFile(common.GetCurrentDir(), pool.DBConfig.DatabaseName) //包含路径
+	dbPath, err1 := common.ResolveFile(pool.DBConfig.DataDir, pool.DBConfig.DatabaseName) //包含路径
 	if err1 != nil {
 		return err1
 	}

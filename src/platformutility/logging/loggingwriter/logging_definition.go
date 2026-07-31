@@ -14,7 +14,7 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"my.favorite/tui-engine/tui_engine"
+	tui_engine "my.favorite/tui-engine/engine"
 )
 
 type AsyncLogger struct {

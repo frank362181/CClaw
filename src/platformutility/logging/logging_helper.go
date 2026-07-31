@@ -18,7 +18,7 @@ import (
 
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging/loggingwriter"
-	"my.favorite/tui-engine/tui_engine"
+	tui_engine "my.favorite/tui-engine/engine"
 
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 )

@@ -9,6 +9,7 @@ func GetDBPool(config *config.ConfigurationHelper) IBaseDBPool {
 	dbHost, _ := config.GetStringValueDefault("database", "server", "")
 	dbPort, _ := config.GetIntValueDefault("database", "port", 5432)
 	dbName, _ := config.GetStringValueDefault("database", "dbname", "")
+	datadir, _ := config.GetStringValueDefault("database", "datadir", "")
 	sslMode, _ := config.GetBoolValueDefault("database", "sslmode", false)
 	dbUser, _ := config.GetStringValueDefault("database", "username", "")
 	dbPassword, _ := config.GetStringValueDefault("database", "password", "")
@@ -17,7 +18,6 @@ func GetDBPool(config *config.ConfigurationHelper) IBaseDBPool {
 	connectTimeout, _ := config.GetIntValueDefault("database", "connection_timeout", 30)
 	connectionIdle, _ := config.GetIntValueDefault("database", "connection_idle", 900)
 	connectionTTl, _ := config.GetIntValueDefault("database", "connection_ttl", 1800)
-
 	maxRetries, _ := config.GetIntValueDefault("database", "max_retries", 5)
 	retryBaseDelay, _ := config.GetFloatValueDefault("database", "retry_base_delay", 1.0)
 	retryMaxDelay, _ := config.GetFloatValueDefault("database", "retry_max_delay", 60.0)
@@ -27,6 +27,7 @@ func GetDBPool(config *config.ConfigurationHelper) IBaseDBPool {
 		DBType:         dbType,
 		DBHost:         dbHost,
 		DBPort:         dbPort,
+		DataDir:        datadir,
 		DatabaseName:   dbName,
 		UserName:       dbUser,
 		UserPass:       dbPassword,

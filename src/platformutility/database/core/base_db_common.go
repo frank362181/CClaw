@@ -13,6 +13,7 @@ type DBConfig struct {
 	DBType       int
 	DBHost       string //数据所在服务器名IP或域名
 	DBPort       int
+	DataDir      string // just valid for sqlite
 	DatabaseName string
 	UserName     string
 	UserPass     string

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 )
 
 func (router *BaseRouter) SetupFilter(filters ...basic.IFilter) error {
-	if filters == nil || len(filters) == 0 {
+	if len(filters) == 0 {
 		return exception.ParameterEmptyErrorEx("filter is empty")
 	}
 
@@ -76,8 +77,11 @@ func (router *BaseRouter) SetupServer(configHelper *config.ConfigurationHelper) 
 	writeTimeout, _ := configHelper.GetIntValue("server", "writeTimeout")
 	idleTimeout, _ := configHelper.GetIntValue("server", "idleTimeout")
 	maxHeaderBytes, _ := configHelper.GetIntValue("server", "maxHeaderBytes")
+	certDir, _ := configHelper.GetStringValueDefault("server", "certdir", "")
 	certFile, _ := configHelper.GetStringValue("server", "certFile")
+	certFile = filepath.Join(certDir, certFile)
 	keyFile, _ := configHelper.GetStringValue("server", "keyFile")
+	keyFile = filepath.Join(certDir, keyFile)
 	router.certFile = certFile //设置SSL所需的配置文件
 	router.keyFile = keyFile
 

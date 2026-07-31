@@ -3,11 +3,11 @@ package main
 import (
 	"time"
 
-	"my.favorite/tui-engine/tui_engine"
+	tuiengine "my.favorite/tui-engine/engine"
 )
 
 func main() {
-	logMgr := tui_engine.GetLogManager()
+	logMgr := tuiengine.GetLogManager()
 	logMgr.Start()
 
 	// 模拟日志
