@@ -41,6 +41,6 @@ func (c *Connection) OnClose() {
 			c.onClose()
 		}
 
-		logging.LogInfo("Connection closed : %s", c.remoteAddr)
+		logging.LogInfof("Connection closed : %s", c.remoteAddr)
 	})
 }

@@ -5,6 +5,7 @@ import (
 
 	_ "my.favorite/cclaw/docs"
 	"my.favorite/cclawservice"
+	"my.favorite/platformutility/logging"
 )
 
 // @title           企业级AI助手操作系统
@@ -21,8 +22,8 @@ func main() {
 	// 开启运行界面
 	////tui_engine.GetLogManager().Start()
 	//
-	//version_string := VersionString
-	//logging.LogInfo(version_string)
+	version_string := VersionString
+	logging.LogInfof(version_string)
 
 	configFileName := GetConfigFileName()
 	if !cclawservice.InitApp(configFileName) {

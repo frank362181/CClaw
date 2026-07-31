@@ -69,7 +69,7 @@ func (pool *PostgresqlPool) OpenPool() error {
 
 	pool.db = stdlib.OpenDBFromPool(pool.pgxPool)
 
-	logging.LogInfo("PostgreSQL pool established: " + pool.DBConfig.DBHost + ":" + pool.DBConfig.DatabaseName)
+	logging.LogInfof("PostgreSQL pool established: " + pool.DBConfig.DBHost + ":" + pool.DBConfig.DatabaseName)
 	return nil
 }
 

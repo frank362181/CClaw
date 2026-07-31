@@ -104,7 +104,7 @@ func (router *BaseRouter) Startup(ssl bool) bool {
 	// 3 start the server
 	if ssl {
 		if !common.FileExists(router.certFile) || !common.FileExists(router.keyFile) {
-			logging.LogInfo("[Startup] SSL certificate file %s does not exist")
+			logging.LogInfof("[Startup] SSL certificate file %s does not exist")
 			return false
 		}
 	}
@@ -123,7 +123,7 @@ func (router *BaseRouter) Startup(ssl bool) bool {
 		}
 	}()
 
-	logging.LogDebug("server started at ", router.Server.Addr)
+	logging.LogDebugf("server started at ", router.Server.Addr)
 	return true
 }
 
@@ -132,10 +132,10 @@ func (router *BaseRouter) Shutdown() error {
 	defer cancel()
 
 	if err := router.Server.Shutdown(ctx); err != nil {
-		logging.LogError("Server force to Shutdown with error: ", err)
+		logging.LogErrorf("Server force to Shutdown with error: ", err)
 	}
 
-	logging.LogInfo("server shutdown complete")
+	logging.LogInfof("server shutdown complete")
 	return nil
 }
 
@@ -145,10 +145,10 @@ func (router *BaseRouter) setupController_(httpMethod int16, relativeUrl string,
 	switch httpMethod {
 	case HttpMethodGet:
 		router.GinEngine.GET(relativeUrl, handler)
-		break
+		//break
 	case HttpMethodPost:
 		router.GinEngine.POST(relativeUrl, handler)
-		break
+		//break
 	default:
 		break
 	}

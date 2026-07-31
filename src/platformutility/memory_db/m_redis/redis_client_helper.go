@@ -49,7 +49,7 @@ func GetRedisClient(config *config.ConfigurationHelper) redisdb.IMemoryDB {
 	// 链接数据库
 	if err := client.connectMemoryDb(); err != nil {
 		cancel()
-		logging.LogInfo("%s", err.Error())
+		logging.LogInfof("%s", err.Error())
 		return nil
 	}
 

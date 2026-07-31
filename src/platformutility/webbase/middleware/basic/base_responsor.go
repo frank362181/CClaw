@@ -82,8 +82,8 @@ func (resp *GlobalResponsor) createJsonObject(c *gin.Context, code int, msg stri
 
 func (resp *GlobalResponsor) printLog(msg interface{}) {
 	if jsonBytes, err := json.Marshal(msg); err == nil {
-		logging.LogInfo(string(jsonBytes))
+		logging.LogInfof(string(jsonBytes))
 	} else {
-		logging.LogInfo(msg)
+		logging.LogInfof("%v", msg)
 	}
 }

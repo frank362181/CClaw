@@ -19,7 +19,7 @@ func (cf *GlobalRecoveryFilter) DoFilter() gin.HandlerFunc {
 			if err := recover(); err != nil {
 				// 获取堆栈上的信息 并打印日志
 				stackString := string(debug.Stack())
-				logging.LogError(stackString)
+				logging.LogErrorf(stackString)
 
 				// 如果作为filter列表的一份子已经abort，则可不需要执行
 				if !c.IsAborted() {

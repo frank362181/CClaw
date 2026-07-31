@@ -51,7 +51,7 @@ func (pool *SqliteDBPool) OpenPool() error {
 	if err = pool.Ping(); err != nil {
 		return exception.DatabaseErrorEx(err.Error())
 	}
-	logging.LogInfo("Sqlite3 Database established: ", dbPath)
+	logging.LogInfof("Sqlite3 Database established: ", dbPath)
 
 	return nil
 }

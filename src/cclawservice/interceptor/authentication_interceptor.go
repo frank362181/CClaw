@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"my.favorite/cclawservice/common"
+	memoryCommon "my.favorite/platformutility/memory_db/common"
 	"my.favorite/platformutility/webbase"
 	"my.favorite/platformutility/webbase/middleware/basic"
 	"my.favorite/platformutility/webbase/middleware/service"
@@ -22,6 +23,9 @@ type AuthenticationInterceptor struct {
 
 	// 业务处理的Service
 	userService service.IService
+
+	//内存数据库
+	memoryDb memoryCommon.IMemoryDB
 }
 
 func (i *AuthenticationInterceptor) SetupUnwantedTokenUrls(urls []string) {
@@ -47,8 +51,8 @@ func (i *AuthenticationInterceptor) PreHandle(c *gin.Context) bool {
 
 	//此时需要先判断token的情况,为空、过期、不存在等
 	token := c.GetHeader(basic.ConstHeaderToken)
-	if len(token) == 1 {
-		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, common.ConstErrorInvalidToken, common.ConstErrorInvalidTokenMsg, nil)
+	if len(token) == 0 {
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, common.ConstErrorNonToken, common.ConstErrorNonTokenMsg, nil)
 		return false
 	}
 

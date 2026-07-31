@@ -1,5 +1,5 @@
 /*
-* 定义main的入口函数和逻辑
+* webservice的入口类
  */
 
 package cclawservice
@@ -37,20 +37,20 @@ var memoryDb common.IMemoryDB
 func InitApp(configFileName string) bool {
 	configFileName = strings.ToLower(configFileName)
 	if len(configFileName) == 0 {
-		logging.LogError("config file name can not be empty")
+		logging.LogErrorf("config file name can not be empty")
 		return false
 	}
 
 	var err error
 	configHelper, err = config.GetConfigurationHelper(configFileName)
 	if err != nil {
-		logging.LogError(err.Error())
+		logging.LogErrorf(err.Error())
 		return false
 	}
 
 	err = configHelper.LoadConfiguration()
 	if err != nil {
-		logging.LogError(err.Error())
+		logging.LogErrorf(err.Error())
 		return false
 	}
 
@@ -90,7 +90,7 @@ func SetupGlobalFilter() {
 func SetupFilter(filters ...basic.IFilter) {
 	err := baseRouter.SetupFilter(filters...)
 	if err != nil {
-		logging.LogError(err.Error())
+		logging.LogErrorf(err.Error())
 		return
 	}
 }
@@ -100,7 +100,7 @@ func SetupHealthController() {
 	urlFuncMap[webbase.RelativeHealthUrl] = controller.GetHealthController().OK
 	err := baseRouter.SetupControllerEx(webbase.HttpMethodGet, basic.APIGroupCommon, urlFuncMap, nil)
 	if err != nil {
-		logging.LogError(err.Error())
+		logging.LogErrorf(err.Error())
 		urlFuncMap = nil
 		return
 	}
@@ -116,7 +116,7 @@ func SetupLoggingController() {
 	urlFunMap[webbase.RelativeLoginUrl] = loginController.Login
 	urlFunMap[webbase.RelativeLogoutUrl] = loginController.Logout
 
-	authInter := selfinterceptor.GetAuthenticationInterceptor(userService)
+	authInter := selfinterceptor.GetAuthenticationInterceptor(memoryDb, userService)
 	tempStr, _ := configHelper.GetStringValueDefault("security", "unWantedToken", "")
 	urls := strings.Split(tempStr, ",")
 	authInter.SetupUnwantedTokenUrls(urls)
@@ -124,14 +124,14 @@ func SetupLoggingController() {
 	interceptors := interceptor.GetInterceptors()
 	err := interceptors.RegistryInterceptor(authInter)
 	if err != nil {
-		logging.LogError(err.Error())
+		logging.LogErrorf(err.Error())
 		urlFunMap = nil
 		return
 	}
 
 	err = baseRouter.SetupControllerEx(webbase.HttpMethodGet|webbase.HttpMethodPost, basic.APIGroupRequire, urlFunMap, interceptors)
 	if err != nil {
-		logging.LogError(err.Error())
+		logging.LogErrorf(err.Error())
 		urlFunMap = nil
 		return
 	}
@@ -189,21 +189,21 @@ func setDefaultFilter() bool {
 	}
 
 	if baseRouter == nil {
-		logging.LogError("cant not startup the web server")
+		logging.LogErrorf("cant not startup the web server")
 		return false
 	}
 
 	// setup the default filter for global
 	err := baseRouter.SetupFilter(filter.GetRecoveryFilter())
 	if err != nil {
-		logging.LogError(err.Error())
+		logging.LogErrorf(err.Error())
 		return false
 	}
 
 	// setup the swagger
 	err = baseRouter.SetupController(webbase.HttpMethodGet, "/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	if err != nil {
-		logging.LogError(err.Error())
+		logging.LogErrorf(err.Error())
 		return false
 	}
 

@@ -15,7 +15,7 @@ func (lf *LoggingFilter) DoFilter() gin.HandlerFunc {
 		r := basic.GetBaseRequester().GetOrCreateRequestInfo(c)
 
 		//打印日志
-		logging.LogInfo("remote IP:"+r.RemoteIp+" access the URL: "+r.RelativeURL+" at: ", r.ReqAtdTimestamp)
+		logging.LogInfof("remote IP:"+r.RemoteIp+" access the URL: "+r.RelativeURL+" at: ", r.ReqAtdTimestamp)
 
 		c.Next()
 	}

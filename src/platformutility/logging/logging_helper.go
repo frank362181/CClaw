@@ -65,12 +65,54 @@ func CloseLogger() {
 	}
 }
 
-func LogDebug(v ...interface{}) {
+// LogDebugf 格式化日志输出(Debug级别),名称以f结尾以便go vet识别为Printf风格函数
+func LogDebugf(format string, args ...interface{}) {
+	if len(format) == 0 {
+		return
+	}
+	logDebug(append([]interface{}{format}, args...)...)
+}
+
+// LogInfof 格式化日志输出(Info级别),名称以f结尾以便go vet识别为Printf风格函数
+func LogInfof(format string, args ...interface{}) {
+	if len(format) == 0 {
+		return
+	}
+	logInfo(append([]interface{}{format}, args...)...)
+}
+
+// LogWarnf 格式化日志输出(Warn级别),名称以f结尾以便go vet识别为Printf风格函数
+func LogWarnf(format string, args ...interface{}) {
+	if len(format) == 0 {
+		return
+	}
+	logWarn(append([]interface{}{format}, args...)...)
+}
+
+// LogErrorf 格式化日志输出(Error级别),名称以f结尾以便go vet识别为Printf风格函数
+func LogErrorf(format string, args ...interface{}) {
+	if len(format) == 0 {
+		return
+	}
+	logError(append([]interface{}{format}, args...)...)
+}
+
+// LogFatalf 格式化日志输出(Fatal级别),名称以f结尾以便go vet识别为Printf风格函数
+func LogFatalf(format string, args ...interface{}) {
+	if len(format) == 0 {
+		return
+	}
+	logFatal(append([]interface{}{format}, args...)...)
+}
+
+// ======================================== private functions & methods ====================================
+
+func logDebug(v ...interface{}) {
 	if len(v) == 0 {
 		return
 	}
 
-	msg := formatLog(v)
+	msg := formatLog(v...)
 
 	if stdoutInstance != nil {
 		//stdoutInstance.Debug(msg)
@@ -84,12 +126,12 @@ func LogDebug(v ...interface{}) {
 	}
 }
 
-func LogInfo(v ...interface{}) {
+func logInfo(v ...interface{}) {
 	if len(v) == 0 {
 		return
 	}
 
-	msg := formatLog(v)
+	msg := formatLog(v...)
 
 	if stdoutInstance != nil {
 		//stdoutInstance.Info(msg)
@@ -103,12 +145,12 @@ func LogInfo(v ...interface{}) {
 	}
 }
 
-func LogWarn(v ...interface{}) {
+func logWarn(v ...interface{}) {
 	if len(v) == 0 {
 		return
 	}
 
-	msg := formatLog(v)
+	msg := formatLog(v...)
 	if stdoutInstance != nil {
 		//stdoutInstance.Warn(msg)
 		if stdoutInstance.GetLogMgr() != nil {
@@ -120,12 +162,12 @@ func LogWarn(v ...interface{}) {
 	}
 }
 
-func LogError(v ...interface{}) {
+func logError(v ...interface{}) {
 	if len(v) == 0 {
 		return
 	}
 
-	msg := formatLog(v)
+	msg := formatLog(v...)
 	if stdoutInstance != nil {
 		//stdoutInstance.Error(msg)
 		if stdoutInstance.GetLogMgr() != nil {
@@ -137,11 +179,11 @@ func LogError(v ...interface{}) {
 	}
 }
 
-func LogFatal(v ...interface{}) {
+func logFatal(v ...interface{}) {
 	if len(v) == 0 {
 		return
 	}
-	msg := formatLog(v)
+	msg := formatLog(v...)
 	if stdoutInstance != nil {
 		//stdoutInstance.Fatal(msg)
 		if stdoutInstance.GetLogMgr() != nil {
@@ -153,7 +195,6 @@ func LogFatal(v ...interface{}) {
 	}
 }
 
-// ======================================== private functions & methods ====================================
 func formatLog(v ...interface{}) string {
 	var msg string
 	if format, ok := v[0].(string); ok && strings.Contains(format, "%") {
