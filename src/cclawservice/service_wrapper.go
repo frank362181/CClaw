@@ -109,7 +109,7 @@ func SetupHealthController() {
 }
 
 func SetupLoggingController() {
-	userService := service.GetUserService(appDb) //创建实现登录的业务逻辑对象
+	userService := service.GetUserService(memoryDb, appDb) //创建实现登录的业务逻辑对象
 	loginController := selfcontroller.GetLoginController(userService)
 
 	urlFunMap := make(map[string]gin.HandlerFunc)

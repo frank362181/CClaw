@@ -2,6 +2,7 @@ package dataaccessor
 
 import (
 	"my.favorite/cclawservice/model/dataobject"
+	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/database/core"
 )
 
@@ -12,6 +13,7 @@ type BaseAccessor struct {
 type IAccessor interface {
 	GetDatabase() core.IBaseDatabase
 	GetUserByNameAndPassword(username, userpass string) (*dataobject.T_Account, error)
+	GetUserByAccount(username string) (*dataobject.T_Account, error)
 }
 
 func (accessor *BaseAccessor) GetDatabase() core.IBaseDatabase {
@@ -22,27 +24,33 @@ type GormAccessor struct {
 	BaseAccessor
 }
 
+var gormAccessor = pCommon.GetSingleton(func() *GormAccessor {
+	return &GormAccessor{
+		BaseAccessor: BaseAccessor{
+			db: nil,
+		},
+	}
+}).Instance()
+
+func GetGormAccessor(db core.IBaseDatabase) IAccessor {
+	gormAccessor.db = db
+	return gormAccessor
+}
+
 type SQLdbAccessor struct {
 	BaseAccessor
 }
 
-func GetGormAccessor(db core.IBaseDatabase) IAccessor {
-	gormAccessor := &GormAccessor{
+var sqlDbAccessor = pCommon.GetSingleton(func() *SQLdbAccessor {
+	return &SQLdbAccessor{
 		BaseAccessor: BaseAccessor{
-			db: db,
+			db: nil,
 		},
 	}
-
-	return gormAccessor
-}
+}).Instance()
 
 func GetSQLdbAccessor(db core.IBaseDatabase) IAccessor {
-	//hsqldbAccessor := &SQLdbAccessor{
-	//	BaseAccessor: BaseAccessor{
-	//		db: db,
-	//	},
-	//}
-	//
-	//return hsqldbAccessor
+	// sqlDbAccessor.db = db
+	// return sqlDbAccessor
 	return nil
 }

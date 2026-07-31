@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"my.favorite/cclawservice/common"
+	"my.favorite/cclawservice/model/dataobject"
 	memoryCommon "my.favorite/platformutility/memory_db/common"
 	"my.favorite/platformutility/webbase"
 	"my.favorite/platformutility/webbase/middleware/basic"
@@ -38,10 +39,6 @@ func (i *AuthenticationInterceptor) GetService() service.IService {
 	return i.userService
 }
 
-func (i *AuthenticationInterceptor) SetService(svc service.IService) {
-	i.userService = svc
-}
-
 func (i *AuthenticationInterceptor) PreHandle(c *gin.Context) bool {
 	reqInfo := basic.GetBaseRequester().GetOrCreateRequestInfo(c)
 
@@ -53,6 +50,35 @@ func (i *AuthenticationInterceptor) PreHandle(c *gin.Context) bool {
 	token := c.GetHeader(basic.ConstHeaderToken)
 	if len(token) == 0 {
 		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, common.ConstErrorNonToken, common.ConstErrorNonTokenMsg, nil)
+		return false
+	}
+
+	var userAccount string
+	var err error
+	if i.memoryDb != nil {
+		// 此时要从内存数据库中获取指定的token
+		tokenkey := common.MemoryTokenUser + token
+		userAccount, err = i.memoryDb.Get(tokenkey)
+		if err != nil || len(userAccount) == 0 {
+			//无效的token
+			basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, common.ConstErrorInvalidToken, common.ConstErrorInvalidTokenMsg, nil)
+			return false
+		}
+	}
+
+	// 此时要从数据库中获取指定的token，此时是i必须要经过登录的API
+	userService, ok := i.userService.(interface {
+		GetUserByAccount(string) (*dataobject.T_Account, error)
+	})
+	if !ok {
+		//服务器内部出错
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
+		return false
+	}
+	userInfo, err1 := userService.GetUserByAccount(userAccount)
+	if err1 != nil || userInfo == nil {
+		//此时是无效的token信息
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, common.ConstErrorInvalidToken, common.ConstErrorInvalidTokenMsg, nil)
 		return false
 	}
 

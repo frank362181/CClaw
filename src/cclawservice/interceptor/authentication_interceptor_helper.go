@@ -21,6 +21,5 @@ var authInterceptor = common.GetSingleton(func() *AuthenticationInterceptor {
 func GetAuthenticationInterceptor(memoryDb memoryCommon.IMemoryDB, svc service.IService) *AuthenticationInterceptor {
 	authInterceptor.memoryDb = memoryDb
 	authInterceptor.userService = svc
-	//authInterceptor.SetService(svc) //设置业务处理的逻辑
 	return authInterceptor
 }

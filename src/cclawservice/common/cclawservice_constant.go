@@ -17,3 +17,7 @@ const (
 	ConstErrorNonTokenMsg       = "Token不存在,请登录"
 	ConstErrorInvalidTokenMsg   = "Token无效,请登录"
 )
+
+const (
+	MemoryTokenUser = "token_" //以token为key存放的用户信息
+)

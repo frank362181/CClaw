@@ -60,7 +60,7 @@ func (rdb *RedisClient) HealthCheck() {
 	}
 }
 
-func (rdb *RedisClient) PingMemoryDb(ctx context.Context) error {
+func (rdb *RedisClient) PingMemoryDb() error {
 	rdb.mu.RLock()
 	client := rdb.mClient
 	isClosed := rdb.isClosed
@@ -70,6 +70,8 @@ func (rdb *RedisClient) PingMemoryDb(ctx context.Context) error {
 		return exception.MemoryDbErrEx("redis client is closed")
 	}
 
+	ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.DialTimeout)*time.Second)
+	defer cancel()
 	return client.Ping(ctx).Err()
 }
 
@@ -77,7 +79,7 @@ func (rdb *RedisClient) IsClosed() bool {
 	return rdb.mClient == nil || rdb.isClosed
 }
 
-func (rdb *RedisClient) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
+func (rdb *RedisClient) Set(key string, value interface{}, expiration time.Duration) error {
 	rdb.mu.RLock()
 	client := rdb.mClient
 	isClosed := rdb.IsClosed()
@@ -88,11 +90,13 @@ func (rdb *RedisClient) Set(ctx context.Context, key string, value interface{}, 
 	}
 
 	return rdb.executeWithRetry(func(client *redis.Client) error {
+		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.WriteTimeout)*time.Second)
+		defer cancel()
 		return client.Set(ctx, key, value, expiration).Err()
 	})
 }
 
-func (rdb *RedisClient) Get(ctx context.Context, key string) (string, error) {
+func (rdb *RedisClient) Get(key string) (string, error) {
 	rdb.mu.RLock()
 	client := rdb.mClient
 	isClosed := rdb.IsClosed()
@@ -104,6 +108,8 @@ func (rdb *RedisClient) Get(ctx context.Context, key string) (string, error) {
 
 	var result string
 	err := rdb.executeWithRetry(func(client *redis.Client) error {
+		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.ReadTimeout)*time.Second)
+		defer cancel()
 		val, err := client.Get(ctx, key).Result()
 		if err != nil {
 			return err
@@ -116,7 +122,7 @@ func (rdb *RedisClient) Get(ctx context.Context, key string) (string, error) {
 	return result, err
 }
 
-func (rdb *RedisClient) Delete(ctx context.Context, keys ...string) (int64, error) {
+func (rdb *RedisClient) Delete(keys ...string) (int64, error) {
 	rdb.mu.RLock()
 	client := rdb.mClient
 	isClosed := rdb.IsClosed()
@@ -128,6 +134,8 @@ func (rdb *RedisClient) Delete(ctx context.Context, keys ...string) (int64, erro
 
 	var deleted int64
 	err := rdb.executeWithRetry(func(client *redis.Client) error {
+		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.WriteTimeout)*time.Second)
+		defer cancel()
 		val, err := client.Del(ctx, keys...).Result()
 		if err != nil {
 			return err
