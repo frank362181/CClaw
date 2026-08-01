@@ -15,9 +15,10 @@ func (c *ConfigurationHelper) LoadConfiguration() error {
 		return err
 	}
 
-	store, err := parser.Load(c.GetConfigurationFileName())
-	if err != nil {
-		return err
+	configFileName := c.GetConfigurationFileName()
+	store, err1 := parser.Load(configFileName)
+	if err1 != nil {
+		return err1
 	}
 
 	c.storage = store

@@ -15,9 +15,9 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/heartbeat": {
-            "get": {
-                "description": "返回健康检测结果，JSON",
+        "/chat": {
+            "post": {
+                "description": "实现用户与系统的聊天",
                 "consumes": [
                     "application/json"
                 ],
@@ -25,20 +25,59 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "健康检测"
+                    "用户聊天"
                 ],
-                "summary": "健康检测函数",
+                "summary": "聊天API",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "聊天内容",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.ChatRequest"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/basic.CommonResponseMsg"
+                            "$ref": "#/definitions/basic.CommonResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/basic.CommonResponseMsg"
+                            "$ref": "#/definitions/model.ChatResponseEx"
                         }
                     }
                 }
@@ -67,13 +106,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "对请求内容的签名秒数",
-                        "name": "SIGNATURE",
-                        "in": "header",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "盐",
                         "name": "NONCE",
                         "in": "query",
@@ -88,7 +120,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "对请求内容的签名秒数",
+                        "description": "对请求内容的签名",
                         "name": "SIGNATURE",
                         "in": "query",
                         "required": true
@@ -99,7 +131,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/model.LoginRequestModel"
+                            "$ref": "#/definitions/model.LoginRequest"
                         }
                     }
                 ],
@@ -107,13 +139,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/basic.CommonResponseMsg"
+                            "$ref": "#/definitions/model.LoginResponseEx"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/basic.CommonResponseMsg"
+                            "$ref": "#/definitions/basic.CommonResponse"
                         }
                     }
                 }
@@ -166,13 +198,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/basic.CommonResponseMsg"
+                            "$ref": "#/definitions/basic.CommonResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/basic.CommonResponseMsg"
+                            "$ref": "#/definitions/basic.CommonResponse"
                         }
                     }
                 }
@@ -180,7 +212,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "basic.CommonResponseMsg": {
+        "basic.CommonResponse": {
             "type": "object",
             "properties": {
                 "data": {
@@ -196,10 +228,7 @@ const docTemplate = `{
                     "description": "用户请求的方法",
                     "type": "string"
                 },
-                "req_relative_url": {
-                    "type": "string"
-                },
-                "req_url": {
+                "req_path": {
                     "type": "string"
                 },
                 "resp_code": {
@@ -215,7 +244,105 @@ const docTemplate = `{
                 }
             }
         },
-        "model.LoginRequestModel": {
+        "model.ChatRequest": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "description": "AgentID,如果为空,则采用系统默认的",
+                    "type": "string"
+                },
+                "chat_channel": {
+                    "description": "聊天的频道,1=WEB,2,FEISHU 等",
+                    "type": "integer"
+                },
+                "chat_type": {
+                    "description": "聊天类型，0/1:私聊/群聊",
+                    "type": "integer"
+                },
+                "request_msg": {
+                    "description": "聊天的内容",
+                    "type": "string"
+                },
+                "sender_id": {
+                    "description": "发送者,如果为空,则采用系统默认的",
+                    "type": "string"
+                },
+                "sender_name": {
+                    "description": "发送者名称,如果为空,则采用系统默认的",
+                    "type": "string"
+                }
+            }
+        },
+        "model.ChatResponse": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "description": "AgentID,如果为空,则采用系统默认的",
+                    "type": "string"
+                },
+                "chat_channel": {
+                    "description": "聊天的频道,1=WEB,2,FEISHU 等",
+                    "type": "integer"
+                },
+                "chat_id": {
+                    "description": "聊天的ID,用于标识一次聊天的唯一性",
+                    "type": "string"
+                },
+                "chat_type": {
+                    "description": "聊天类型，0/1:私聊/群聊",
+                    "type": "integer"
+                },
+                "sender_id": {
+                    "description": "发送者,如果为空,则采用系统默认的",
+                    "type": "string"
+                },
+                "server_ip": {
+                    "description": "服务端的IP地址,用于客户端直接访问服务端的资源",
+                    "type": "string"
+                },
+                "server_port": {
+                    "description": "服务端的端口号,用于客户端直接访问服务端的资源",
+                    "type": "integer"
+                },
+                "start_msg_id": {
+                    "description": "本次聊天的起始消息ID,用于标识本次聊天的起始位置",
+                    "type": "integer"
+                }
+            }
+        },
+        "model.ChatResponseEx": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/model.ChatResponse"
+                },
+                "req_at_timestamp": {
+                    "type": "integer"
+                },
+                "req_id": {
+                    "type": "string"
+                },
+                "req_method": {
+                    "description": "用户请求的方法",
+                    "type": "string"
+                },
+                "req_path": {
+                    "type": "string"
+                },
+                "resp_code": {
+                    "description": "响应码,业务层级",
+                    "type": "integer"
+                },
+                "resp_msg": {
+                    "description": "响应的消息",
+                    "type": "string"
+                },
+                "resp_timestamp": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.LoginRequest": {
             "type": "object",
             "properties": {
                 "password": {
@@ -223,6 +350,58 @@ const docTemplate = `{
                 },
                 "username": {
                     "type": "string"
+                }
+            }
+        },
+        "model.LoginResponse": {
+            "type": "object",
+            "properties": {
+                "expired_length": {
+                    "description": "token失效时长,unit = second",
+                    "type": "integer"
+                },
+                "gen_at": {
+                    "description": "token产生的时间",
+                    "type": "integer"
+                },
+                "token": {
+                    "description": "用户登录成功后得到的token",
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.LoginResponseEx": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/model.LoginResponse"
+                },
+                "req_at_timestamp": {
+                    "type": "integer"
+                },
+                "req_id": {
+                    "type": "string"
+                },
+                "req_method": {
+                    "description": "用户请求的方法",
+                    "type": "string"
+                },
+                "req_path": {
+                    "type": "string"
+                },
+                "resp_code": {
+                    "description": "响应码,业务层级",
+                    "type": "integer"
+                },
+                "resp_msg": {
+                    "description": "响应的消息",
+                    "type": "string"
+                },
+                "resp_timestamp": {
+                    "type": "integer"
                 }
             }
         }

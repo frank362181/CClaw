@@ -105,6 +105,15 @@ func GetRelativePath(path, cwd string) (string, bool) {
 	return rel, true
 }
 
+func FormatPath(path string) string {
+	if len(path) == 0 {
+		return ""
+	}
+
+	s := strings.ReplaceAll(path, "\\", "/")
+	return s
+}
+
 func GetExtension(filename string) string {
 	if len(strings.TrimSpace(filename)) == 0 {
 		return ""

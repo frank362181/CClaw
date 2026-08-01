@@ -16,6 +16,7 @@ import (
 	selfcontroller "my.favorite/cclawservice/controller"
 	selfinterceptor "my.favorite/cclawservice/interceptor"
 	"my.favorite/cclawservice/service"
+	common2 "my.favorite/platformutility/common"
 	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/database"
 	"my.favorite/platformutility/database/core"
@@ -41,6 +42,7 @@ func InitApp(configFileName string) bool {
 		return false
 	}
 
+	configFileName = common2.FormatPath(configFileName) //对为文件名进行格式化
 	var err error
 	configHelper, err = config.GetConfigurationHelper(configFileName)
 	if err != nil {
@@ -116,7 +118,7 @@ func SetupLoggingController() {
 	urlFunMap[webbase.RelativeLoginUrl] = loginController.Login
 	urlFunMap[webbase.RelativeLogoutUrl] = loginController.Logout
 
-	authInter := selfinterceptor.GetAuthenticationInterceptor(memoryDb, userService)
+	authInter := selfinterceptor.GetAuthenticationInterceptor(userService)
 	tempStr, _ := configHelper.GetStringValueDefault("security", "unWantedToken", "")
 	urls := strings.Split(tempStr, ",")
 	authInter.SetupUnwantedTokenUrls(urls)

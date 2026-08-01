@@ -50,7 +50,7 @@ func (resp *GlobalResponsor) createJsonObject(c *gin.Context, code int, msg stri
 	reqInfo, err := c.Get(ConstRequestTotal)
 	if err {
 		r := reqInfo.(*RequestInfo)
-		respMsg := &CommonResponseMsg{
+		respMsg := &CommonResponse{
 			ReqID:             r.RequestId,
 			ReqPath:           r.RequestPath,
 			ReqMethod:         r.RequestMethod,
@@ -65,7 +65,7 @@ func (resp *GlobalResponsor) createJsonObject(c *gin.Context, code int, msg stri
 		return respMsg
 	}
 
-	respMsg := &CommonResponseMsg{
+	respMsg := &CommonResponse{
 		ReqID:             "",
 		ReqPath:           "",
 		ReqMethod:         "",

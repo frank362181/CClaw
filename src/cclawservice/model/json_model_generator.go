@@ -6,7 +6,7 @@ import (
 	"my.favorite/platformutility/common"
 )
 
-func GenerationLoginRequest(username string, password string) interface{} {
+func GenerationLoginRequest(username string, password string) *LoginRequest {
 	username = strings.TrimSpace(username)
 	if len(username) == 0 {
 		return nil
@@ -15,7 +15,7 @@ func GenerationLoginRequest(username string, password string) interface{} {
 	password = strings.TrimSpace(password)
 	username = strings.ToLower(username) //不区分大小写
 
-	loginRequest := &LoginRequestModel{
+	loginRequest := &LoginRequest{
 		Username: username,
 		Password: password,
 	}
@@ -23,7 +23,7 @@ func GenerationLoginRequest(username string, password string) interface{} {
 	return loginRequest
 }
 
-func GenerationLoginResponse(username string, token string) interface{} {
+func GenerationLoginResponse(username string, token string) *LoginResponse {
 	username = strings.TrimSpace(username)
 	if len(username) == 0 {
 		return nil
@@ -31,7 +31,7 @@ func GenerationLoginResponse(username string, token string) interface{} {
 
 	username = strings.ToLower(username)
 
-	loginResponse := &LoginResponseModel{
+	loginResponse := &LoginResponse{
 		Username:      username,
 		Token:         token,
 		GenAt:         common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,

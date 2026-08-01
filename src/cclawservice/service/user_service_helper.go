@@ -20,7 +20,10 @@ var userService = common.GetSingleton(func() *UserService {
 }).Instance()
 
 func GetUserService(memoryDb memoryDbCommon.IMemoryDB, db core.IBaseDatabase) *UserService {
-	userService.memoryDb = memoryDb //设置内存访问
+	//设置内存访问
+	userService.memoryDb = memoryDb
+
+	//设置数据库访问的类
 	if strings.EqualFold(db.GetAccessorType(), "sqldb") {
 		userService.dbAccessor = dataaccessor.GetSQLdbAccessor(db)
 		return userService

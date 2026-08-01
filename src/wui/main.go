@@ -4,26 +4,27 @@ import (
 	"os"
 
 	_ "my.favorite/cclaw/docs"
+
 	"my.favorite/cclawservice"
 	"my.favorite/platformutility/logging"
 )
 
-// @title           企业级AI助手操作系统
-// @version         1.0.0
-// @description     API服务入口
+//	@title			企业级AI助手操作系统
+//	@version		1.0.0
+//	@description	API服务入口
 
-// @host      localhost:8443
-// @BasePath  /api
+//	@host		localhost:8443
+//	@BasePath	/api
 
-// @securityDefinitions.apikey ApiKeyAuth
-// @in header
-// @name AUTHORIZATION
+// @securityDefinitions.apikey	ApiKeyAuth
+// @in							header
+// @name						AUTHORIZATION
 func main() {
 	// 开启运行界面
 	////tui_engine.GetLogManager().Start()
 	//
-	version_string := VersionString
-	logging.LogInfof(version_string)
+	versionString := VersionString
+	logging.LogInfof(versionString)
 
 	configFileName := GetConfigFileName()
 	if !cclawservice.InitApp(configFileName) {

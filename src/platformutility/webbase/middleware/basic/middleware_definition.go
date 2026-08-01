@@ -29,7 +29,7 @@ type RequestInfo struct {
 	Signature string
 }
 
-type CommonResponseMsg struct {
+type CommonResponse struct {
 	ReqID             string `json:"req_id"`
 	ReqPath           string `json:"req_path"`
 	ReqMethod         string `json:"req_method"` //用户请求的方法

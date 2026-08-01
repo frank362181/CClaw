@@ -43,6 +43,19 @@ func ParameterEmptyErrorEx(errTxt string) *ParameterEmptyErrorDescription {
 	}
 }
 
+func ParameterEmptyErrorEx2(errTxt string, args ...interface{}) *ParameterEmptyErrorDescription {
+	errorString := fmt.Sprintf(errTxt, args...)
+	_, file, line, _ := runtime.Caller(1)
+	return &ParameterEmptyErrorDescription{
+		ErrorDescription: ErrorDescription{
+			ErrTxt:   errorString,
+			ErrId:    errorIdParamEmpty,
+			FileName: file,
+			LineNo:   line,
+		},
+	}
+}
+
 func (e *ParameterEmptyErrorDescription) Error() string {
 	return fmt.Sprintf("ERROR: [%s:%d]:%d: %s", e.FileName, e.LineNo, e.ErrId, e.ErrTxt)
 }

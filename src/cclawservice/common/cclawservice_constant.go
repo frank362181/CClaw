@@ -19,5 +19,24 @@ const (
 )
 
 const (
-	MemoryTokenUser = "token_" //以token为key存放的用户信息
+	UserTokenKeyPrefix = "token_" //以token为key存放的用户信息
+	UserInfoKeyPrefix  = "user_"  //以user为key存放的用户信息
+)
+
+const (
+	MemoryDefaultExpireTime = 1800 //内存数据库中数据的默认过期时间,单位为秒
+)
+
+// ================ chat type ================
+const (
+	ChatTypePrivate = 0 //私聊
+	ChatTypeGroup   = 1 //群聊
+)
+
+// ==================== channel type ====================
+const (
+	ChatChannelWeb      = 1 //WEB端
+	ChatChannelFeishu   = 2 //飞书端
+	ChatChannelWechat   = 3 //微信端
+	ChatChannelDingTalk = 4 //钉钉端
 )

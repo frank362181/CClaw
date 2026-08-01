@@ -1,3 +1,7 @@
+/*
+* 这里定义的是全局通用的错误ID
+ */
+
 package exception
 
 const (

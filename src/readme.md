@@ -4,6 +4,10 @@
     openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt -days 365 -nodes -subj "/CN=localhost"
 
 - 基于sql.DB, gorm.DB进行数据库操作，实现分离
+- 设置当前工作目录为 -- D:/MyIdea/CClaw/src
+- 重新生成swagger文档
+  - swag fmt ## 清空缓存 
+  - swag init -d .,./../cclawservice --parseInternal --parseDependency ## 生成swagger文档
 
 
 ### todo

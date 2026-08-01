@@ -16,15 +16,16 @@ const (
 	configFileName = "cclaw.ini"
 )
 
+// GetProjectDir 返回当前项目的目录
 func GetProjectDir() string {
-	curDir := common.GetCurrentDir()
-	projectDir := filepath.Join(curDir, projectName)
+	projectDir := filepath.Join(common.GetCurrentDir(), projectName)
 	return projectDir
 }
 
 /*
 * 获取配置文件所在的目录
 **/
+
 func GetConfigDir() string {
 	return filepath.Join(GetProjectDir(), "config")
 }
@@ -32,6 +33,7 @@ func GetConfigDir() string {
 /*
 * 获取配置文件的完整路径
 **/
+
 func GetConfigFileName() string {
 	return filepath.Join(GetConfigDir(), configFileName)
 }
