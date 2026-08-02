@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	projectName    = "wui"
+	projectName    = "agentService"
 	configFileName = "cclaw.ini"
 )
 

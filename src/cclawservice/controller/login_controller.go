@@ -47,8 +47,8 @@ func (lc *LoginController) Login(c *gin.Context) {
 	}
 
 	user, err1 := us.Login(lq.Username, lq.Password)
-	if err1 != nil {
-		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, cclawcommon.ConstErrorLoginParameter, cclawcommon.ConstErrorLoginParameterMsg, err1.Error())
+	if user == nil || err1 != nil {
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, cclawcommon.ConstErrorUserNotExist, cclawcommon.ConstErrorUserNotExistMsg, err1.Error())
 		return
 	}
 

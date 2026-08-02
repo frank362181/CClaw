@@ -141,6 +141,11 @@ func SetupLoggingController() {
 	urlFunMap = nil //释放内存
 }
 
+// SetupChatController sets up the chat controller for handling chat-related requests.
+func SetupChatController() {
+
+}
+
 func SetupServer() bool {
 	if baseRouter == nil {
 		return false

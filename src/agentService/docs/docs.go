@@ -17,7 +17,7 @@ const docTemplate = `{
     "paths": {
         "/chat": {
             "post": {
-                "description": "实现用户与系统的聊天",
+                "description": "与服务器聊天的API，该API会加载历史聊天记录",
                 "consumes": [
                     "application/json"
                 ],
@@ -78,6 +78,35 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/model.ChatResponseEx"
+                        }
+                    }
+                }
+            }
+        },
+        "/heartbeat": {
+            "get": {
+                "description": "返回健康检测结果，JSON",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "健康检测"
+                ],
+                "summary": "健康检测函数",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
                         }
                     }
                 }
@@ -270,6 +299,10 @@ const docTemplate = `{
                 "sender_name": {
                     "description": "发送者名称,如果为空,则采用系统默认的",
                     "type": "string"
+                },
+                "session_id": {
+                    "description": "表示会话的session，在一个会话中的就属于同一个session",
+                    "type": "string"
                 }
             }
         },
@@ -295,14 +328,6 @@ const docTemplate = `{
                 "sender_id": {
                     "description": "发送者,如果为空,则采用系统默认的",
                     "type": "string"
-                },
-                "server_ip": {
-                    "description": "服务端的IP地址,用于客户端直接访问服务端的资源",
-                    "type": "string"
-                },
-                "server_port": {
-                    "description": "服务端的端口号,用于客户端直接访问服务端的资源",
-                    "type": "integer"
                 },
                 "start_msg_id": {
                     "description": "本次聊天的起始消息ID,用于标识本次聊天的起始位置",

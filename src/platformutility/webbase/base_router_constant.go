@@ -1,30 +1,21 @@
 /*
-* 定义常用的常量
+* 定义WEB 服务 URL常用常量
  */
 
 package webbase
 
-const BasePath = "/api" //访问的基础路径
+// 定义通用的WEB URL常量
+const (
+	BasePath = "/api" //访问的基础路径
 
-const RelativeHealthUrl = "/heartbeat"
-const RelativeLoginUrl = "/login"
-const RelativeLogoutUrl = "/logout"
+	RelativeHealthUrl = "/heartbeat"
+	RelativeLoginUrl  = "/login"
+	RelativeLogoutUrl = "/logout"
 
-const HealthUrl = BasePath + RelativeHealthUrl
-const LoginUrl = BasePath + RelativeLoginUrl
-const LogoutUrl = BasePath + RelativeLogoutUrl
-
-//const (
-//	HttpMethodGet            = "GET"
-//	HttpMethodPost           = "POST"
-//	HttpMethodPut            = "PUT"
-//	HttpMethodPatch          = "PATCH"
-//	HttpMethodDelete         = "DELETE"
-//	HttpMethodOptions        = "OPTIONS"
-//	HttpMethodConnect        = "CONNECT"
-//	HttpMethodOptionsConnect = "OPTIONS_CONNECT"
-//	HttpMethodUnknown        = ""
-//)
+	HealthUrl = BasePath + RelativeHealthUrl
+	LoginUrl  = BasePath + RelativeLoginUrl
+	LogoutUrl = BasePath + RelativeLogoutUrl
+)
 
 const (
 	HttpMethodGet            = 1      // get
@@ -54,4 +45,23 @@ func GetHttpMethod(httpMethod int16) int16 {
 	}
 
 	return -1
+}
+
+var HttpMethodMap = map[int16]string{
+	HttpMethodGet:            "GET",
+	HttpMethodPost:           "POST",
+	HttpMethodPut:            "PUT",
+	HttpMethodPatch:          "PATCH",
+	HttpMethodDelete:         "DELETE",
+	HttpMethodOptions:        "OPTIONS",
+	HttpMethodConnect:        "CONNECT",
+	HttpMethodOptionsConnect: "OPTIONS_CONNECT",
+}
+
+func GetHttpMethodString(httpMethod int16) string {
+	if httpMethod >= HttpMethodGet {
+		return HttpMethodMap[httpMethod]
+	}
+
+	return ""
 }

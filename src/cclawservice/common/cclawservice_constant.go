@@ -1,12 +1,16 @@
 package common
 
-import "my.favorite/platformutility/webbase/middleware/basic"
+import (
+	"my.favorite/platformutility/webbase"
+	"my.favorite/platformutility/webbase/middleware/basic"
+)
 
 // 定义业务级的错误常量和错误信息
 
 const (
 	ConstErrorNone           = iota
 	ConstErrorLoginParameter = iota + 1 + basic.ConstErrorMax
+	ConstErrorUserNotExist
 	ConstErrorNonToken
 	ConstErrorInvalidToken
 )
@@ -14,6 +18,7 @@ const (
 const (
 	ConstErrorNoneMsg           = "success"
 	ConstErrorLoginParameterMsg = "登录参数错误"
+	ConstErrorUserNotExistMsg   = "用户不存在"
 	ConstErrorNonTokenMsg       = "Token不存在,请登录"
 	ConstErrorInvalidTokenMsg   = "Token无效,请登录"
 )
@@ -25,6 +30,23 @@ const (
 
 const (
 	MemoryDefaultExpireTime = 1800 //内存数据库中数据的默认过期时间,单位为秒
+)
+
+const (
+	RelativeNewChatUrl = "/newchat"
+	NewChatUrl         = webbase.BasePath + RelativeNewChatUrl
+
+	RelativeDeleteChat = "/deletechat"
+	DeleteChatUrl      = webbase.BasePath + RelativeDeleteChat
+
+	RelativeGetSessionList = "/getsessionlist"
+	GetSessionListUrl      = webbase.BasePath + RelativeGetSessionList
+
+	RelativeGetSession = "/getsession"
+	GetSessionUrl      = webbase.BasePath + RelativeGetSession
+
+	RelativeChatUrl = "/chat"
+	ChatUrl         = webbase.BasePath + RelativeChatUrl
 )
 
 // ================ chat type ================

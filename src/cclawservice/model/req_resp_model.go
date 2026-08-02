@@ -23,6 +23,17 @@ type LoginResponseEx struct {
 
 // ================= chat request and response model =================
 
+type NewChatRequest struct {
+	SenderId    string `json:"sender_id"`    //谁创建
+	ChatType    int    `json:"chat_type"`    //聊天类型
+	ChatChannel int    `json:"chat_channel"` //聊天渠道
+
+	AgentId string `json:"agent_id"` //与哪个Agent对话
+}
+
+type NewChatResponse struct {
+}
+
 type ChatRequest struct {
 	SenderId   string `json:"sender_id"`   //发送者,如果为空,则采用系统默认的
 	SenderName string `json:"sender_name"` //发送者名称,如果为空,则采用系统默认的
@@ -33,6 +44,8 @@ type ChatRequest struct {
 	RequestMsg string `json:"request_msg"` //聊天的内容
 
 	AgentId string `json:"agent_id"` //AgentID,如果为空,则采用系统默认的
+
+	SessionId string `json:"session_id"` //表示会话的session，在一个会话中的就属于同一个session
 }
 
 type ChatResponse struct {
@@ -45,9 +58,6 @@ type ChatResponse struct {
 	AgentID string `json:"agent_id"` //AgentID,如果为空,则采用系统默认的
 
 	StartMsgId int64 `json:"start_msg_id"` //本次聊天的起始消息ID,用于标识本次聊天的起始位置
-
-	ServerIp   string `json:"server_ip"`   //服务端的IP地址,用于客户端直接访问服务端的资源
-	ServerPort int    `json:"server_port"` //服务端的端口号,用于客户端直接访问服务端的资源
 }
 
 type ChatResponseEx struct {

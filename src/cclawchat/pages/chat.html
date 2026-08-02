@@ -1,0 +1,87 @@
+<!--
+    ============================================================
+    聊天页组件视图 (ChatPage)
+    ============================================================
+    本文件是 <chat-page> 组件的视图模板（纯 HTML 片段），
+    由 scripts/modules/component.js 动态加载并注入 Shadow DOM，
+    交互逻辑由 scripts/modules/chat.js 控制。
+    注意：初始不带 active 类，登录组件优先展示，
+    由 Auth.restore() 决定是否切换到聊天页。
+    ============================================================
+-->
+<div id="chatPage" class="chat-page">
+
+    <!-- 移动端侧边栏遮罩 -->
+    <div id="sidebarOverlay" class="chat-sidebar-overlay"></div>
+
+    <!-- 侧边栏 -->
+    <aside id="chatSidebar" class="chat-sidebar">
+        <div class="sidebar-header">
+            <a href="#" class="sidebar-brand">
+                <span class="brand-icon">AI</span>
+                <span>对话</span>
+            </a>
+            <button id="btnNewChat" class="btn-new-chat" title="新建对话">+</button>
+        </div>
+
+        <div id="conversationList" class="conversation-list">
+            <!-- 动态渲染对话列表 -->
+        </div>
+
+        <div class="sidebar-footer">
+            <div class="sidebar-user">
+                <span class="avatar" id="userAvatar">U</span>
+                <span id="userNameDisplay">用户</span>
+            </div>
+            <button id="btnLogout" class="btn-logout" title="退出登录">⏻</button>
+        </div>
+    </aside>
+
+    <!-- 主聊天区域 -->
+    <main class="chat-main">
+        <!-- 顶部栏 -->
+        <header class="chat-header">
+            <div class="chat-title">
+                <span id="chatTitle">新对话</span>
+                <span class="status-dot" title="在线"></span>
+            </div>
+            <div class="chat-actions">
+                <button id="btnToggleSidebar" title="切换侧边栏">☰</button>
+                <button id="btnClearChat" title="清空对话">✕</button>
+            </div>
+        </header>
+
+        <!-- 消息列表 -->
+        <div id="messageList" class="message-list">
+            <!-- 空状态 -->
+            <div class="empty-state" id="emptyState">
+                <div class="empty-icon">💬</div>
+                <h3>开始新的对话</h3>
+                <p>在下方输入消息，AI 助手将为您提供智能回复</p>
+            </div>
+            <!-- 动态消息渲染 -->
+        </div>
+
+        <!-- 输入区域 -->
+        <div class="chat-input-area">
+            <div class="input-wrapper">
+                <textarea id="chatInput" rows="3" placeholder="输入消息…" disabled></textarea>
+            </div>
+            <button id="btnSend" class="btn-send" disabled>
+                <span class="send-icon">➤</span>
+            </button>
+        </div>
+    </main>
+
+    <!-- 退出确认弹窗（二次确认） -->
+    <div id="logoutConfirm" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="logoutConfirmTitle">
+        <div class="modal-box">
+            <div class="modal-title" id="logoutConfirmTitle">确认退出登录？</div>
+            <div class="modal-text">退出后需要重新登录才能继续对话，是否继续？</div>
+            <div class="modal-actions">
+                <button type="button" id="btnCancelLogout" class="btn-modal-cancel">取消</button>
+                <button type="button" id="btnConfirmLogout" class="btn-modal-confirm">确认退出</button>
+            </div>
+        </div>
+    </div>
+</div>
