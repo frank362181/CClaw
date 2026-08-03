@@ -4,11 +4,12 @@
  * ============================================================
  */
 
-import { API } from './api.js';
-import { State } from './state.js';
-import { LoginPage } from './login.js';
-import { ChatPage } from './chat.js';
-import { StreamEngine } from './stream.js';
+import { API } from './api.js?v=1.0.8';
+import { State } from './state.js?v=1.0.4';
+import { LoginPage } from './login.js?v=1.0.4';
+import { ChatPage } from './chat.js?v=1.0.6';
+import { HomePage } from './home.js?v=1.0.7';
+import { StreamEngine } from './stream.js?v=1.0.6';
 
 export const Auth = {
     async login(username, password) {
@@ -17,7 +18,7 @@ export const Auth = {
             if (result.success) {
                 State.login(result.user.username, result.token);
                 ChatPage.updateUserInfo(result.user.username);
-                ChatPage.renderConversations(State.conversations, State.currentConvId);
+                HomePage.updateUserInfo(result.user.username);
                 const conv = State.getCurrentConversation();
                 if (conv) {
                     ChatPage.renderMessages(conv);
@@ -26,14 +27,12 @@ export const Auth = {
                     const newConv = State.createConversation('新对话');
                     ChatPage.renderMessages(newConv);
                     ChatPage.updateChatTitle(newConv.title);
-                    ChatPage.renderConversations(State.conversations, State.currentConvId);
                 }
                 ChatPage.setInputEnabled(true);
                 ChatPage.updateSendButton();
-                // 页面切换：隐藏登录组件，展示聊天组件
+                // 页面切换：隐藏登录组件，展示主页（聊天以抽屉形式提供）
                 LoginPage.hide();
-                ChatPage.show();
-                ChatPage.focusInput();
+                HomePage.show();
                 return true;
             }
             return false;
@@ -53,12 +52,14 @@ export const Auth = {
             }
         } catch (e) { /* ignore */ }
         State.logout();
-        // 页面切换：隐藏聊天组件、重置状态，并展示登录组件。
+        // 页面切换：隐藏主页与聊天组件、重置状态，并展示登录组件。
         // 使用 try/finally 确保即使异常也能回到登录页。
         try {
             ChatPage.hide();
             ChatPage.reset();
             ChatPage.setInputEnabled(false);
+            HomePage.hide();
+            HomePage.reset();
         } finally {
             LoginPage.show();
             LoginPage.hideError();
@@ -69,6 +70,7 @@ export const Auth = {
         State.load();
         if (State.isLoggedIn()) {
             ChatPage.updateUserInfo(State.user.username);
+            HomePage.updateUserInfo(State.user.username);
             if (State.conversations.length === 0) {
                 State.createConversation('新对话');
             }
@@ -76,7 +78,6 @@ export const Auth = {
                 State.currentConvId = State.conversations[0]?.id || null;
             }
             State.save();
-            ChatPage.renderConversations(State.conversations, State.currentConvId);
             const conv = State.getCurrentConversation();
             if (conv) {
                 ChatPage.renderMessages(conv);
@@ -85,11 +86,12 @@ export const Auth = {
             ChatPage.setInputEnabled(true);
             ChatPage.updateSendButton();
             LoginPage.hide();
-            ChatPage.show();
+            HomePage.show();
             return true;
         } else {
             ChatPage.hide();
             ChatPage.setInputEnabled(false);
+            HomePage.hide();
             LoginPage.show();
             return false;
         }

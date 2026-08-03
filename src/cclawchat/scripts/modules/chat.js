@@ -7,8 +7,8 @@
  *         通过 document 自定义事件对外广播。
  */
 
-import { State } from './state.js';
-import { getInitials, formatTime, formatDate, truncate } from '../utils/helper.js';
+import { State } from './state.js?v=1.0.4';
+import { getInitials, formatTime } from '../utils/helper.js?v=1.0.4';
 
 export const ChatPage = {
     comp: null,
@@ -17,30 +17,19 @@ export const ChatPage = {
     /**
      * 初始化组件
      * @param {object} comp 组件实例（mountComponent 返回）
-     * @param {{ onSend?: Function, onNewChat?: Function, onClearChat?: Function, onLogout?: Function, onConfirmLogout?: Function }} handlers
+     * @param {{ onSend?: Function, onNewChat?: Function, onClearChat?: Function }} handlers
      */
     init(comp, handlers = {}) {
         this.comp = comp;
         this.els = {
             chatPage: comp.query('#chatPage'),
-            chatSidebar: comp.query('#chatSidebar'),
-            sidebarOverlay: comp.query('#sidebarOverlay'),
-            conversationList: comp.query('#conversationList'),
             messageList: comp.query('#messageList'),
             emptyState: comp.query('#emptyState'),
             chatInput: comp.query('#chatInput'),
             btnSend: comp.query('#btnSend'),
             btnNewChat: comp.query('#btnNewChat'),
-            btnLogout: comp.query('#btnLogout'),
             btnClearChat: comp.query('#btnClearChat'),
-            btnToggleSidebar: comp.query('#btnToggleSidebar'),
             chatTitle: comp.query('#chatTitle'),
-            userNameDisplay: comp.query('#userNameDisplay'),
-            userAvatar: comp.query('#userAvatar'),
-            // 退出确认弹窗
-            logoutConfirm: comp.query('#logoutConfirm'),
-            btnCancelLogout: comp.query('#btnCancelLogout'),
-            btnConfirmLogout: comp.query('#btnConfirmLogout'),
         };
 
         // 输入区自适应高度 + 发送按钮状态
@@ -63,33 +52,13 @@ export const ChatPage = {
         this.els.btnSend.addEventListener('click', () => handlers.onSend?.());
         this.els.btnNewChat.addEventListener('click', () => handlers.onNewChat?.());
         this.els.btnClearChat.addEventListener('click', () => handlers.onClearChat?.());
-        // 点击退出：先弹出二次确认（是否真正退出由外部决定）
-        this.els.btnLogout.addEventListener('click', () => handlers.onLogout?.());
-        this.els.btnToggleSidebar.addEventListener('click', () => this.toggleSidebar());
-        this.els.sidebarOverlay.addEventListener('click', () => this.closeSidebar());
-
-        // 退出确认弹窗：取消则关闭，确认则回调外部执行退出
-        this.els.btnCancelLogout.addEventListener('click', () => this.closeLogoutConfirm());
-        this.els.btnConfirmLogout.addEventListener('click', () => handlers.onConfirmLogout?.());
-        this.els.logoutConfirm.addEventListener('click', (e) => {
-            if (e.target === this.els.logoutConfirm) this.closeLogoutConfirm();
-        });
     },
 
     show() {
-        this.closeLogoutConfirm();
         this.els.chatPage.style.display = 'flex';
         requestAnimationFrame(() => {
             this.els.chatPage.classList.add('active');
         });
-    },
-
-    openLogoutConfirm() {
-        this.els.logoutConfirm.classList.add('show');
-    },
-
-    closeLogoutConfirm() {
-        this.els.logoutConfirm.classList.remove('show');
     },
 
     hide() {
@@ -97,74 +66,7 @@ export const ChatPage = {
         this.els.chatPage.style.display = 'none';
     },
 
-    toggleSidebar(open) {
-        const isOpen = this.els.chatSidebar.classList.contains('open');
-        const target = open !== undefined ? open : !isOpen;
-        this.els.chatSidebar.classList.toggle('open', target);
-        this.els.sidebarOverlay.classList.toggle('active', target);
-        document.body.style.overflow = target ? 'hidden' : '';
-    },
 
-    closeSidebar() {
-        this.toggleSidebar(false);
-    },
-
-    renderConversations(conversations, currentId) {
-        const container = this.els.conversationList;
-        if (!conversations || conversations.length === 0) {
-            container.innerHTML = `
-                <div style="text-align:center;padding:var(--space-xl) 0;color:var(--color-text-muted);font-size:var(--font-size-sm);">
-                    <div style="font-size:32px;margin-bottom:var(--space-sm);">📭</div>
-                    暂无对话<br/>点击 「+」 开始新对话
-                </div>
-            `;
-            return;
-        }
-
-        let html = '';
-        conversations.forEach(conv => {
-            const isActive = conv.id === currentId;
-            const lastMsg = conv.messages.length > 0 ? conv.messages[conv.messages.length - 1] : null;
-            const preview = lastMsg ? truncate(lastMsg.content, 32) : '空对话';
-            const timeLabel = formatDate(conv.updatedAt);
-
-            html += `
-                <div class="conversation-item ${isActive ? 'active' : ''}" data-conv-id="${conv.id}">
-                    <span class="conv-icon">${isActive ? '●' : '○'}</span>
-                    <span class="conv-title">${truncate(conv.title, 26)}</span>
-                    <span class="conv-time">${timeLabel}</span>
-                    <button class="conv-delete" data-conv-id="${conv.id}" title="删除对话">✕</button>
-                </div>
-            `;
-        });
-        container.innerHTML = html;
-
-        container.querySelectorAll('.conversation-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                if (e.target.closest('.conv-delete')) return;
-                const convId = item.dataset.convId;
-                if (convId && convId !== State.currentConvId) {
-                    // 由外部 App 处理切换（低耦合：通过事件广播）
-                    const event = new CustomEvent('switch-conversation', { detail: { convId } });
-                    document.dispatchEvent(event);
-                }
-                if (window.innerWidth <= 768) {
-                    this.closeSidebar();
-                }
-            });
-        });
-
-        container.querySelectorAll('.conv-delete').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const convId = btn.dataset.convId;
-                if (convId && confirm('确定要删除这个对话吗？')) {
-                    const event = new CustomEvent('delete-conversation', { detail: { convId } });
-                    document.dispatchEvent(event);
-                }
-            });
-        });
-    },
 
     renderMessages(conv) {
         const container = this.els.messageList;
@@ -313,9 +215,7 @@ export const ChatPage = {
     },
 
     updateUserInfo(username) {
-        const display = username || '用户';
-        this.els.userNameDisplay.textContent = display;
-        this.els.userAvatar.textContent = getInitials(display);
+        // 对话历史侧边栏已移除：用户信息展示由主页(HomePage)负责，此处无需操作。
     },
 
     updateChatTitle(title) {
@@ -335,11 +235,8 @@ export const ChatPage = {
     },
 
     reset() {
-        this.closeLogoutConfirm();
         this.els.chatTitle.textContent = '新对话';
         this.els.messageList.querySelectorAll('.message').forEach(el => el.remove());
         this.els.emptyState.style.display = 'flex';
-        this.els.conversationList.innerHTML = '';
-        this.closeSidebar();
     },
 };

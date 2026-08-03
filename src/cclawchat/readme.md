@@ -15,7 +15,7 @@
 ## 工程结构
 
     /chat-app/
-    ├── index.html # 应用外壳：仅声明 <login-page> / <chat-page> 组件挂载点
+    ├── index.html # 应用外壳：声明 <login-page> / <home-page> 组件挂载点及聊天抽屉容器
     ├── README.md # 项目文档 (当前文件)
     ├── config/
     │ └── env.js # 环境配置 (API地址/Mock开关)
@@ -23,23 +23,32 @@
     │ ├── styles/
     │ │ └── main.css # 全局样式 (Kimi 风格，通过组件 Shadow DOM 引入)
     │ ├─ scripts/
-    │ │ ├── main.js # 应用编排层：挂载组件、注入回调、路由切换、全局事件
+    │ │ ├── main.js # 应用编排层：挂载组件、注入回调、路由切换、聊天抽屉控制、全局事件
     │ │ ├── modules/
     │ │ │ ├── component.js # 组件加载器 (fetch 视图 + Shadow DOM 隔离)
     │ │ │ ├── config.js # 应用配置 (导入 env.js)
     │ │ │ ├── state.js # 状态管理 (localStorage 持久化，纯逻辑)
     │ │ │ ├── api.js # API 接口层 (预留 RESTful 调用位置，纯逻辑)
     │ │ │ ├── login.js # 登录页组件控制器 (LoginPage)
+    │ │ │ ├── home.js # 主页组件控制器 (HomePage：目录树 + 内容区 + 聊天气泡)
     │ │ │ ├── chat.js # 聊天页组件控制器 (ChatPage)
-    │ │ │ ├── auth.js # 认证管理 (登录/登出，协调两个组件)
+    │ │ │ ├── auth.js # 认证管理 (登录/登出，协调各组件)
     │ │ │ ├── stream.js # 流式输出引擎 (依赖 ChatPage)
-    │ │ │ └── ui.js # [已废弃] 原 UI 层，已被 login.js / chat.js 替代
+    │ │ │ └── ui.js # [已废弃] 原 UI 层，已被 login.js / home.js / chat.js 替代
     │ │ └── utils/
     │ │   └── helper.js # 工具函数 (ID生成/时间格式化等)
     │ └── pages/
     │   ├── login.html # 登录页组件视图 (纯 HTML 片段)
-    │   └── chat.html # 聊天页组件视图 (纯 HTML 片段)
+    │   ├── home.html # 主页组件视图 (左侧目录树 + 内容区 + 聊天气泡)
+    │   └── chat.html # 聊天页组件视图 (以抽屉方式展示)
     └── .gitignore # (建议) Git 忽略文件
+
+## 页面流转与聊天抽屉
+
+- **登录成功** → 展示主页 `<home-page>`：左侧目录树（dashboard / 资产台账）+ 右侧核心内容区。
+- **聊天气泡** → 主页内容区右上角的气泡，点击后由 `main.js` 打开最右侧的聊天抽屉
+  （`#chatDrawer`），抽屉内嵌原 `<chat-page>` 组件，保留全部聊天能力。
+- **聊天抽屉** → 宽度 720px（移动端全宽），支持遮罩点击 / 关闭按钮 / `Esc` 收起。
 
 ## 组件化设计（高内聚 · 低耦合）
 

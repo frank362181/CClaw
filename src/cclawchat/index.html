@@ -3,10 +3,15 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CClaw Chat · 智能对话助手</title>
+    <title>CClaw Chat · 资产智能管理助手</title>
 
-    <!-- 外链全局样式 -->
-    <link rel="stylesheet" href="./styles/main.css" />
+    <!-- 禁止缓存：防止浏览器复用旧版本导致空白页（若出现空白页请 Ctrl+Shift+R 强刷） -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+
+    <!-- 外链全局样式（带版本号，防缓存白屏） -->
+    <link rel="stylesheet" href="./styles/main.css?v=1.0.7" />
 
     <style>
         /* -------- 应用外壳 ---------- */
@@ -18,7 +23,15 @@
 
         /* 自定义元素（页面组件）宿主布局 */
         login-page,
+        home-page,
         chat-page {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 聊天抽屉内嵌聊天组件：占满抽屉内容区 */
+        .drawer-body chat-page {
             display: block;
             width: 100%;
             height: 100%;
@@ -53,11 +66,10 @@
 <body>
 
 <div id="app">
-    <!--
-        应用外壳：仅声明两个页面组件挂载点。
-        组件的视图与行为分别来自 pages/*.html 与 scripts/modules/*.js，
-        由 scripts/modules/component.js 动态加载并注入 Shadow DOM。
-    -->
+    <script type="module">
+        import { ENV } from './config/env.js';
+        document.title = ENV.APP_TITLE;
+    </script>
 
     <!-- 登录组件（视图来自 pages/login.html） -->
     <login-page>
@@ -67,17 +79,41 @@
         </div>
     </login-page>
 
-    <!-- 聊天组件（视图来自 pages/chat.html） -->
-    <chat-page>
+    <!-- 主页组件（登录后显示：左侧目录树 + 内容区 + 聊天气泡，视图来自 pages/home.html） -->
+    <home-page>
         <div class="loading-placeholder">
             <div class="spinner"></div>
-            <span>加载聊天组件…</span>
+            <span>加载主页组件…</span>
         </div>
-    </chat-page>
+    </home-page>
+
+    <!-- 聊天抽屉（最右侧，内含聊天组件 chat.html） -->
+    <div id="chatDrawer" class="chat-drawer">
+        <div id="drawerOverlay" class="drawer-overlay"></div>
+        <div class="drawer-panel">
+            <div class="drawer-header">
+                <div class="drawer-title">
+                    <span class="drawer-icon">🤖</span>
+                    <span>AI 助手</span>
+                    <span class="drawer-status-dot" title="在线"></span>
+                </div>
+                <button id="btnCloseDrawer" class="btn-close-drawer" title="收起聊天窗口">✕</button>
+            </div>
+            <div class="drawer-body">
+                <!-- 聊天组件（视图来自 pages/chat.html） -->
+                <chat-page>
+                    <div class="loading-placeholder">
+                        <div class="spinner"></div>
+                        <span>加载聊天组件…</span>
+                    </div>
+                </chat-page>
+            </div>
+        </div>
+    </div>
 </div>
 
-<!-- 主应用脚本 (ES Module) -->
-<script type="module" src="./scripts/main.js"></script>
+<!-- 主应用脚本 (ES Module) —— 带版本号，强制浏览器在版本更新时重新拉取，避免缓存导致白屏 -->
+<script type="module" src="./scripts/main.js?v=1.0.7"></script>
 
 </body>
 </html>

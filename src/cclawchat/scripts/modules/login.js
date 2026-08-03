@@ -50,11 +50,15 @@ export const LoginPage = {
     },
 
     show() {
+        // 宿主也必须参与显示/隐藏；否则登录页虽然隐藏，仍会占满一屏高度，
+        // 将后续主页顶到首屏之外。
+        this.comp.el.style.display = 'block';
         this.els.page.style.display = 'flex';
     },
 
     hide() {
         this.els.page.style.display = 'none';
+        this.comp.el.style.display = 'none';
     },
 
     setLoading(loading) {

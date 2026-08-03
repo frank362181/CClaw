@@ -4,7 +4,7 @@
  * ============================================================
  */
 
-import { ENV } from '../../config/env.js';
+import { ENV } from '../../config/env.js?v=1.0.4';
 
 export const CONFIG = {
     // 应用基础信息

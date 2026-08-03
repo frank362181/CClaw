@@ -12,8 +12,8 @@
  *   login.query('#username');      // 在组件作用域内查找元素
  */
 
-// 组件全局样式入口（通过 Shadow DOM @import 引入，实现样式封装）
-const STYLE_ENTRY = './styles/main.css';
+// 组件全局样式入口（通过 Shadow DOM @import 引入，实现样式封装；带版本号防缓存白屏）
+const STYLE_ENTRY = './styles/main.css?v=1.0.7';
 
 const registry = new Map();
 

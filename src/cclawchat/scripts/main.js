@@ -4,33 +4,38 @@
  * ============================================================
  */
 
-import { State } from './modules/state.js';
-import { Auth } from './modules/auth.js';
-import { StreamEngine } from './modules/stream.js';
-import { LoginPage } from './modules/login.js';
-import { ChatPage } from './modules/chat.js';
-import { mountComponent } from './modules/component.js';
+import { State } from './modules/state.js?v=1.0.4';
+import { Auth } from './modules/auth.js?v=1.0.7';
+import { StreamEngine } from './modules/stream.js?v=1.0.6';
+import { LoginPage } from './modules/login.js?v=1.0.4';
+import { ChatPage } from './modules/chat.js?v=1.0.6';
+import { HomePage } from './modules/home.js?v=1.0.7';
+import { mountComponent } from './modules/component.js?v=1.0.7';
 
 const App = {
     async init() {
         try {
             // 1. 挂载页面组件（视图来自 pages/*.html，Shadow DOM 隔离）
-            const [loginComp, chatComp] = await Promise.all([
-                mountComponent({ tag: 'login-page', url: 'pages/login.html' }),
-                mountComponent({ tag: 'chat-page', url: 'pages/chat.html' }),
+            const [loginComp, chatComp, homeComp] = await Promise.all([
+                mountComponent({ tag: 'login-page', url: './pages/login.html?v=1.0.4' }),
+                mountComponent({ tag: 'chat-page', url: './pages/chat.html?v=1.0.6' }),
+                mountComponent({ tag: 'home-page', url: './pages/home.html?v=1.0.7' }),
             ]);
 
             // 2. 初始化组件（注入业务回调；组件内部不感知 App 细节）
             LoginPage.init(loginComp, {
                 onSubmit: (username, password) => Auth.login(username, password),
             });
-            
+
             ChatPage.init(chatComp, {
                 onSend: () => this.sendMessage(),
                 onNewChat: () => this.newConversation(),
                 onClearChat: () => this.clearConversation(),
-                // 点击退出：先弹出二次确认弹窗（不阻塞、不受 confirm() 拦截影响）
-                onLogout: () => ChatPage.openLogoutConfirm(),
+            });
+
+            HomePage.init(homeComp, {
+                // 点击右上角聊天气泡：以抽屉方式打开 chat.html
+                onToggleChat: () => this.toggleChatDrawer(),
                 // 二次确认后：执行退出，回到登录页
                 onConfirmLogout: () => Auth.logout(),
             });
@@ -38,7 +43,7 @@ const App = {
             // 3. 绑定全局事件（组件内部交互已由组件自身处理）
             this._bindEvents();
 
-            // 4. 恢复会话状态，决定初始展示登录页还是聊天页
+            // 4. 恢复会话状态，决定初始展示登录页还是主页
             const restored = Auth.restore();
             if (!restored) {
                 LoginPage.focusUsername();
@@ -55,23 +60,25 @@ const App = {
     },
 
     _bindEvents() {
-        // 窗口尺寸变化：桌面端收起侧边栏
+        // 窗口尺寸变化：桌面端收起主侧边栏与聊天抽屉
         let resizeTimer;
         window.addEventListener('resize', () => {
             clearTimeout(resizeTimer);
             resizeTimer = setTimeout(() => {
                 if (window.innerWidth > 768) {
-                    ChatPage.closeSidebar();
+                    HomePage.closeSidebar();
                 }
             }, 200);
         });
 
-        // 自定义事件：切换对话（由 ChatPage 会话列表广播）
-        document.addEventListener('switch-conversation', (e) => {
-            this.switchConversation(e.detail.convId);
+        // 聊天抽屉：点击遮罩 / 关闭按钮收起
+        document.getElementById('drawerOverlay').addEventListener('click', () => {
+            if (this.isChatDrawerOpen()) {
+                this.toggleChatDrawer(false);
+            }
         });
-        document.addEventListener('delete-conversation', (e) => {
-            this.deleteConversation(e.detail.convId);
+        document.getElementById('btnCloseDrawer').addEventListener('click', () => {
+            this.toggleChatDrawer(false);
         });
 
         // 全局快捷键
@@ -82,10 +89,51 @@ const App = {
                     this.newConversation();
                 }
             }
-            if (e.key === 'Escape' && window.innerWidth <= 768) {
-                ChatPage.closeSidebar();
+            if (e.key === 'Escape') {
+                if (this.isChatDrawerOpen()) {
+                    this.toggleChatDrawer(false);
+                } else if (window.innerWidth <= 768) {
+                    HomePage.closeSidebar();
+                }
             }
         });
+    },
+
+    /* ================= 聊天抽屉（chat.html 以抽屉方式展示） ================= */
+
+    isChatDrawerOpen() {
+        const drawer = document.getElementById('chatDrawer');
+        return drawer ? drawer.classList.contains('open') : false;
+    },
+
+    /**
+     * 打开 / 收起聊天抽屉
+     * @param {boolean|undefined} open 未传则切换
+     */
+    toggleChatDrawer(open) {
+        const drawer = document.getElementById('chatDrawer');
+        if (!drawer) return;
+
+        const isOpen = drawer.classList.contains('open');
+        const target = open !== undefined ? open : !isOpen;
+
+        if (target) {
+            // 打开：展示聊天组件并渲染会话状态
+            drawer.classList.add('open');
+            ChatPage.show();
+            const conv = State.getCurrentConversation();
+            if (conv) {
+                ChatPage.renderMessages(conv);
+                ChatPage.updateChatTitle(conv.title);
+            }
+            ChatPage.setInputEnabled(true);
+            ChatPage.updateSendButton();
+            ChatPage.focusInput();
+        } else {
+            // 收起：隐藏聊天组件
+            drawer.classList.remove('open');
+            ChatPage.hide();
+        }
     },
 
     clearConversation() {
@@ -96,7 +144,6 @@ const App = {
             const updated = State.getCurrentConversation();
             ChatPage.renderMessages(updated);
             ChatPage.updateChatTitle(updated?.title || '新对话');
-            ChatPage.renderConversations(State.conversations, State.currentConvId);
             ChatPage.focusInput();
         }
     },
@@ -108,7 +155,6 @@ const App = {
         let conv = State.getCurrentConversation();
         if (!conv) {
             const newConv = State.createConversation('新对话');
-            ChatPage.renderConversations(State.conversations, State.currentConvId);
             ChatPage.updateChatTitle(newConv.title);
             conv = State.getCurrentConversation();
             if (!conv) return;
@@ -124,7 +170,6 @@ const App = {
         State.addMessage(conv.id, 'user', content);
         ChatPage.renderMessages(conv);
         ChatPage.clearInput();
-        ChatPage.renderConversations(State.conversations, State.currentConvId);
 
         StreamEngine.start(
             conv.id,
@@ -136,7 +181,6 @@ const App = {
                 if (updatedConv) {
                     ChatPage.renderMessages(updatedConv);
                     ChatPage.updateChatTitle(updatedConv.title);
-                    ChatPage.renderConversations(State.conversations, State.currentConvId);
                 }
                 ChatPage.setInputEnabled(true);
                 ChatPage.updateSendButton();
@@ -157,58 +201,18 @@ const App = {
             StreamEngine.cancel();
         }
         const conv = State.createConversation('新对话');
-        ChatPage.renderConversations(State.conversations, State.currentConvId);
         ChatPage.renderMessages(conv);
         ChatPage.updateChatTitle(conv.title);
         ChatPage.setInputEnabled(true);
         ChatPage.updateSendButton();
         ChatPage.focusInput();
-        if (window.innerWidth <= 768) {
-            ChatPage.closeSidebar();
-        }
     },
 
-    switchConversation(convId) {
-        if (State.isStreaming) {
-            StreamEngine.cancel();
-        }
-        State.currentConvId = convId;
-        State.save();
-        const conv = State.getCurrentConversation();
-        if (conv) {
-            ChatPage.renderMessages(conv);
-            ChatPage.updateChatTitle(conv.title);
-            ChatPage.renderConversations(State.conversations, State.currentConvId);
-            ChatPage.setInputEnabled(true);
-            ChatPage.updateSendButton();
-            ChatPage.focusInput();
-        }
-    },
-
-    deleteConversation(convId) {
-        if (State.isStreaming) {
-            StreamEngine.cancel();
-        }
-        State.deleteConversation(convId);
-        ChatPage.renderConversations(State.conversations, State.currentConvId);
-        const conv = State.getCurrentConversation();
-        if (conv) {
-            ChatPage.renderMessages(conv);
-            ChatPage.updateChatTitle(conv.title);
-            ChatPage.setInputEnabled(true);
-        } else {
-            const newConv = State.createConversation('新对话');
-            ChatPage.renderMessages(newConv);
-            ChatPage.updateChatTitle(newConv.title);
-            ChatPage.renderConversations(State.conversations, State.currentConvId);
-            ChatPage.setInputEnabled(true);
-        }
-        ChatPage.updateSendButton();
-        ChatPage.focusInput();
-    },
 };
 
 // 启动应用
 document.addEventListener('DOMContentLoaded', () => {
-    App.init();
+    App.init().catch(error => {
+        console.error("应用初始化失败:", error);
+    });
 });

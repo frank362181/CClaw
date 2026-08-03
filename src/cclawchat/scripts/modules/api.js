@@ -4,8 +4,8 @@
  * ============================================================
  */
 
-import { CONFIG } from './config.js';
-import { genId, randomDelay } from '../utils/helper.js';
+import { CONFIG } from './config.js?v=1.0.4';
+import { genId, randomDelay } from '../utils/helper.js?v=1.0.4';
 
 export const API = {
     /**
@@ -78,23 +78,59 @@ export const API = {
     },
 
     /**
-     * 【预留】用户登录接口
+     * 用户登录接口
+     * 调用后端 POST {API_BASE}/login（HTTPS）。
+     * 按后端约定携带：
+     *   - 请求头 TIMESTAMP：当前时间（秒）
+     *   - 请求头 SIGNATURE：请求内容的签名（当前为占位值 1）
+     *   - querystring TIMESTAMP：与请求头 TIMESTAMP 一致
+     *   - querystring nonce：随机盐值
      */
     async login(username, password) {
-        // 模拟登录验证
-        return new Promise((resolve, reject) => {
-            setTimeout(() => {
-                if (username && username.trim().length > 0 && password && password.length >= 4) {
-                    resolve({
-                        success: true,
-                        user: { id: genId(), username: username.trim() },
-                        token: 'mock_token_' + genId(),
-                    });
-                } else {
-                    reject(new Error('用户名或密码错误'));
-                }
-            }, 600);
-        });
+        const url = new URL(CONFIG.API_BASE + '/login');
+
+        // 当前时间（1970-1-1 以来的秒数）
+        const timestamp = String(Math.floor(Date.now() / 1000));
+        // 随机盐值（nonce）
+        const nonce = genId() + '_' + Math.random().toString(36).slice(2, 12);
+
+        // querystring：TIMESTAMP（与 header 一致）+ nonce（随机值）
+        url.searchParams.set('TIMESTAMP', timestamp);
+        url.searchParams.set('nonce', nonce);
+
+        const body = JSON.stringify({ username: username.trim(), password });
+
+        let resp;
+        try {
+            resp = await fetch(url.toString(), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'TIMESTAMP': timestamp,
+                    'SIGNATURE': '1', // TODO: 后续按实际签名算法基于请求内容计算
+                },
+                body,
+            });
+        } catch (err) {
+            throw new Error('网络请求失败，无法连接服务器（' + err.message + '）');
+        }
+
+        let json;
+        try {
+            json = await resp.json();
+        } catch (err) {
+            throw new Error('服务器响应格式错误');
+        }
+
+        if (json.resp_code === 0 && json.data) {
+            const username2 = json.data.username || username.trim();
+            return {
+                success: true,
+                user: { id: username2, username: username2 },
+                token: json.data.token,
+            };
+        }
+        throw new Error(json.resp_msg || '用户名或密码错误');
     },
 
     /**
