@@ -4,10 +4,10 @@
  * ============================================================
  */
 
-import { API } from './api.js?v=1.0.8';
-import { State } from './state.js?v=1.0.4';
-import { ChatPage } from './chat.js?v=1.0.6';
-import { genId } from '../utils/helper.js?v=1.0.4';
+import { API } from './api.js';
+import { State } from './state.js';
+import { ChatPage } from './chat.js';
+import { genId } from '../utils/helper.js';
 
 export const StreamEngine = {
     _controller: null,

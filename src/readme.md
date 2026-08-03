@@ -2,9 +2,50 @@
 
 ## 1. done
 
-- 生成SSL所需的cert/key文件命令：
+- 生成SSL所需的cert/key文件命令：(open command line with Administrator)
+  - 生成CA私钥
+    openssl genrsa -out ca.key 2048 //生成CA私钥
+  - 生成CA根证书
+    openssl req -x509 -new -nodes -key ca.key -sha256 -days 3650 -out ca.crt -subj "/C=CN/ST=Beijing/L=Beijing/O=Dev/CN=Local CA"
+  - 生成服务器私钥
+    openssl genrsa -out server.key 2048
+  - 生成CSR（不包含SAN）
+    openssl req -new -key server.key -out server.csr  -subj "/C=CN/ST=Beijing/L=Beijing/O=Dev/CN=localhost"
+    - 使用CA签署，同时添加SAN
+      - 创建server.cnf文件，其文件内容：
+        [req]
+        default_bits = 2048
+        prompt = no
+        default_md = sha256
+        distinguished_name = dn
+        req_extensions = v3_req
 
-    openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt -days 365 -nodes -subj "/CN=localhost"
+        [dn]
+        C = CN
+        ST = Beijing
+        L = Beijing
+        O = Dev
+        CN = localhost
+      
+        [v3_req]
+        keyUsage = keyEncipherment, digitalSignature
+        extendedKeyUsage = serverAuth
+        subjectAltName = @alt_names
+      
+        [alt_names]
+        DNS.1 = localhost
+        DNS.2 = *.localhost
+        IP.1 = 127.0.0.1
+        IP.2 = ::1
+      - 执行1：
+        openssl req -new -key server.key -out server.csr -config server.cnf
+      - 执行2：
+        openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -days 365 -sha256 -extensions v3_req -extfile server.cnf
+  - 验证证书
+    openssl x509 -in server.crt -text -noout | findstr "Subject Alternative Name"
+  - 添加证书
+    certutil -addstore "Root" ca.crt
+    
 
 - 基于sql.DB, gorm.DB进行数据库操作，实现分离
 - 设置当前工作目录为 -- D:/MyIdea/CClaw/src

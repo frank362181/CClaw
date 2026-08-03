@@ -4,22 +4,22 @@
  * ============================================================
  */
 
-import { State } from './modules/state.js?v=1.0.4';
-import { Auth } from './modules/auth.js?v=1.0.7';
-import { StreamEngine } from './modules/stream.js?v=1.0.6';
-import { LoginPage } from './modules/login.js?v=1.0.4';
-import { ChatPage } from './modules/chat.js?v=1.0.6';
-import { HomePage } from './modules/home.js?v=1.0.7';
-import { mountComponent } from './modules/component.js?v=1.0.7';
+import { State } from './modules/state.js';
+import { Auth } from './modules/auth.js';
+import { StreamEngine } from './modules/stream.js';
+import { LoginPage } from './modules/login.js';
+import { ChatPage } from './modules/chat.js';
+import { HomePage } from './modules/home.js';
+import { mountComponent } from './modules/component.js';
 
 const App = {
     async init() {
         try {
             // 1. 挂载页面组件（视图来自 pages/*.html，Shadow DOM 隔离）
             const [loginComp, chatComp, homeComp] = await Promise.all([
-                mountComponent({ tag: 'login-page', url: './pages/login.html?v=1.0.4' }),
-                mountComponent({ tag: 'chat-page', url: './pages/chat.html?v=1.0.6' }),
-                mountComponent({ tag: 'home-page', url: './pages/home.html?v=1.0.7' }),
+                mountComponent({ tag: 'login-page', url: './pages/login.html' }),
+                mountComponent({ tag: 'chat-page', url: './pages/chat.html' }),
+                mountComponent({ tag: 'home-page', url: './pages/home.html' }),
             ]);
 
             // 2. 初始化组件（注入业务回调；组件内部不感知 App 细节）
@@ -31,6 +31,7 @@ const App = {
                 onSend: () => this.sendMessage(),
                 onNewChat: () => this.newConversation(),
                 onClearChat: () => this.clearConversation(),
+                onHideChat: () => this.toggleChatDrawer(false),
             });
 
             HomePage.init(homeComp, {
@@ -76,9 +77,6 @@ const App = {
             if (this.isChatDrawerOpen()) {
                 this.toggleChatDrawer(false);
             }
-        });
-        document.getElementById('btnCloseDrawer').addEventListener('click', () => {
-            this.toggleChatDrawer(false);
         });
 
         // 全局快捷键
@@ -136,6 +134,7 @@ const App = {
         }
     },
 
+    /** 清空当前对话 */
     clearConversation() {
         const conv = State.getCurrentConversation();
         if (!conv || conv.messages.length === 0) return;

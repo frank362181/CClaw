@@ -35,20 +35,20 @@ func (lc *LoginController) Login(c *gin.Context) {
 	us := lc.GetService().(*service.UserService)
 	if us == nil {
 		//内部服务器错误
-		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
 		return
 	}
 
 	var lq model.LoginRequest
 	err := c.ShouldBindBodyWithJSON(&lq) //这里将body读取之后,后面如果想要再次读取将会失败
 	if err != nil {
-		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, cclawcommon.ConstErrorLoginParameter, cclawcommon.ConstErrorLoginParameterMsg, err.Error())
+		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorLoginParameter, cclawcommon.ConstErrorLoginParameterMsg, err.Error())
 		return
 	}
 
 	user, err1 := us.Login(lq.Username, lq.Password)
 	if user == nil || err1 != nil {
-		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, cclawcommon.ConstErrorUserNotExist, cclawcommon.ConstErrorUserNotExistMsg, err1.Error())
+		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorUserNotExist, cclawcommon.ConstErrorUserNotExistMsg, nil)
 		return
 	}
 
@@ -75,7 +75,7 @@ func (lc *LoginController) Logout(c *gin.Context) {
 	us := lc.GetService().(*service.UserService)
 	if us == nil {
 		//内部服务器错误
-		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
 		return
 	}
 

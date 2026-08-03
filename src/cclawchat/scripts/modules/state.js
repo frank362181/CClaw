@@ -4,8 +4,8 @@
  * ============================================================
  */
 
-import { CONFIG } from './config.js?v=1.0.4';
-import { genId, safeJSON } from '../utils/helper.js?v=1.0.4';
+import { CONFIG } from './config.js';
+import { genId, safeJSON } from '../utils/helper.js';
 
 export const State = {
     user: null,

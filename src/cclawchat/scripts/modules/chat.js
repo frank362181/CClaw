@@ -7,8 +7,8 @@
  *         通过 document 自定义事件对外广播。
  */
 
-import { State } from './state.js?v=1.0.4';
-import { getInitials, formatTime } from '../utils/helper.js?v=1.0.4';
+import { State } from './state.js';
+import { getInitials, formatTime } from '../utils/helper.js';
 
 export const ChatPage = {
     comp: null,
@@ -17,7 +17,7 @@ export const ChatPage = {
     /**
      * 初始化组件
      * @param {object} comp 组件实例（mountComponent 返回）
-     * @param {{ onSend?: Function, onNewChat?: Function, onClearChat?: Function }} handlers
+     * @param {{ onSend?: Function, onNewChat?: Function, onClearChat?: Function, onHideChat?: Function }} handlers
      */
     init(comp, handlers = {}) {
         this.comp = comp;
@@ -27,6 +27,7 @@ export const ChatPage = {
             emptyState: comp.query('#emptyState'),
             chatInput: comp.query('#chatInput'),
             btnSend: comp.query('#btnSend'),
+            btnHideChat: comp.query('#btnHideChat'),
             btnNewChat: comp.query('#btnNewChat'),
             btnClearChat: comp.query('#btnClearChat'),
             chatTitle: comp.query('#chatTitle'),
@@ -50,6 +51,7 @@ export const ChatPage = {
 
         // 工具栏按钮
         this.els.btnSend.addEventListener('click', () => handlers.onSend?.());
+        this.els.btnHideChat.addEventListener('click', () => handlers.onHideChat?.());
         this.els.btnNewChat.addEventListener('click', () => handlers.onNewChat?.());
         this.els.btnClearChat.addEventListener('click', () => handlers.onClearChat?.());
     },

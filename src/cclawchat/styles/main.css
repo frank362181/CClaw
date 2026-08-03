@@ -577,6 +577,11 @@ body {
     color: var(--color-text-primary);
 }
 
+.chat-header .chat-actions .btn-header-icon {
+    font-size: 15px;
+    line-height: 1;
+}
+
 /* ---------- 消息列表 (Message List) ---------- */
 .message-list {
     flex: 1;
@@ -734,12 +739,12 @@ body {
 
 /* ---------- 输入区域 (Input Area) ---------- */
 .chat-input-area {
-    padding: var(--space-md) var(--space-sm);
+    padding: var(--space-sm) var(--space-xs);
     border-top: 1px solid var(--color-border);
     background: var(--color-bg-white);
     flex-shrink: 0;
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--space-xs);
     align-items: flex-end;
 }
 
@@ -786,14 +791,14 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 44px;
-    height: 44px;
-    margin: 4px;
+    width: 36px;
+    height: 36px;
+    margin: 2px;
     background: var(--color-primary);
     color: #fff;
     border: none;
     border-radius: var(--radius-full);
-    font-size: 18px;
+    font-size: 16px;
     cursor: pointer;
     transition: background var(--transition-fast), transform var(--transition-fast), opacity var(--transition-fast);
     flex-shrink: 0;
@@ -865,7 +870,7 @@ body {
     }
 
     .chat-input-area {
-        padding: var(--space-sm) var(--space-md);
+        padding: var(--space-xs) var(--space-xs);
     }
 
     .chat-header {
@@ -961,8 +966,8 @@ body {
         min-height: 40px;
     }
     .btn-send {
-        width: 40px;
-        height: 40px;
+        width: 36px;
+        height: 36px;
         font-size: 16px;
     }
 }
@@ -1515,10 +1520,10 @@ body {
 }
 
 .asset-title-block h2 {
-    font-size: var(--font-size-xl);
+    font-size: var(--font-size-lg);
     font-weight: 700;
     color: var(--color-text-primary);
-    margin-bottom: var(--space-xs);
+    margin-bottom: 2px;
 }
 
 .asset-title-block p {
@@ -1813,22 +1818,6 @@ body {
     background: #2ECC71;
     border-radius: var(--radius-full);
     animation: pulse-dot 2s ease-in-out infinite;
-}
-
-.btn-close-drawer {
-    background: none;
-    border: none;
-    color: var(--color-text-muted);
-    cursor: pointer;
-    font-size: 16px;
-    padding: 2px 6px;
-    border-radius: var(--radius-sm);
-    transition: background var(--transition-fast), color var(--transition-fast);
-}
-
-.btn-close-drawer:hover {
-    background: rgba(0, 0, 0, 0.04);
-    color: var(--color-text-primary);
 }
 
 .drawer-body {

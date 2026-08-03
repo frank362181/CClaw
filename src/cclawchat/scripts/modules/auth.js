@@ -4,12 +4,12 @@
  * ============================================================
  */
 
-import { API } from './api.js?v=1.0.8';
-import { State } from './state.js?v=1.0.4';
-import { LoginPage } from './login.js?v=1.0.4';
-import { ChatPage } from './chat.js?v=1.0.6';
-import { HomePage } from './home.js?v=1.0.7';
-import { StreamEngine } from './stream.js?v=1.0.6';
+import { API } from './api.js';
+import { State } from './state.js';
+import { LoginPage } from './login.js';
+import { ChatPage } from './chat.js';
+import { HomePage } from './home.js';
+import { StreamEngine } from './stream.js';
 
 export const Auth = {
     async login(username, password) {

@@ -30,13 +30,14 @@ type RequestInfo struct {
 }
 
 type CommonResponse struct {
-	ReqID             string `json:"req_id"`
-	ReqPath           string `json:"req_path"`
-	ReqMethod         string `json:"req_method"` //用户请求的方法
-	RespCode          int    `json:"resp_code"`  //响应码,业务层级
-	RespMsg           string `json:"resp_msg"`   //响应的消息
-	ReqAtTimestamp    int64  `json:"req_at_timestamp"`
-	ResponseTimestamp int64  `json:"resp_timestamp"`
+	ReqID         string `json:"req_id"`
+	ReqPath       string `json:"req_path"`
+	ReqMethod     string `json:"req_method"` //用户请求的方法
+	ReqTimestamp  int64  `json:"req_timestamp"`
+	RespTimestamp int64  `json:"resp_timestamp"`
+
+	RespCode int    `json:"resp_code"` //响应码,业务层级
+	RespMsg  string `json:"resp_msg"`  //响应的消息
 
 	Data interface{} `json:"data"` //具体的相应内容
 }

@@ -1,11 +1,15 @@
 /**
  * ============================================================
- * API 接口层 — 预留后端 RESTful 接口
+ * API 接口层 — 基于 http 包的后端 RESTful 接口封装
  * ============================================================
+ * 设计原则（高内聚 / 低耦合）：
+ *  - axios 实例与全局拦截器统一收敛在 http 包（./http.js），全局可复用；
+ *  - 本文件只定义业务接口（login 等），不重复实现任何 HTTP 细节；
+ *  - 外部模块（auth.js 等）只调用 API.xxx()，不感知 axios / http。
  */
 
-import { CONFIG } from './config.js?v=1.0.4';
-import { genId, randomDelay } from '../utils/helper.js?v=1.0.4';
+import { randomDelay } from '../utils/helper.js';
+import { http } from './http.js';
 
 export const API = {
     /**
@@ -79,58 +83,28 @@ export const API = {
 
     /**
      * 用户登录接口
-     * 调用后端 POST {API_BASE}/login（HTTPS）。
-     * 按后端约定携带：
-     *   - 请求头 TIMESTAMP：当前时间（秒）
-     *   - 请求头 SIGNATURE：请求内容的签名（当前为占位值 1）
-     *   - querystring TIMESTAMP：与请求头 TIMESTAMP 一致
-     *   - querystring nonce：随机盐值
+     * POST {API_BASE}/login；鉴权参数（TIMESTAMP / NONCE / SIGNATURE）
+     * 已由请求拦截器自动注入，无需在此重复构造。
      */
     async login(username, password) {
-        const url = new URL(CONFIG.API_BASE + '/login');
-
-        // 当前时间（1970-1-1 以来的秒数）
-        const timestamp = String(Math.floor(Date.now() / 1000));
-        // 随机盐值（nonce）
-        const nonce = genId() + '_' + Math.random().toString(36).slice(2, 12);
-
-        // querystring：TIMESTAMP（与 header 一致）+ nonce（随机值）
-        url.searchParams.set('TIMESTAMP', timestamp);
-        url.searchParams.set('nonce', nonce);
-
-        const body = JSON.stringify({ username: username.trim(), password });
-
-        let resp;
         try {
-            resp = await fetch(url.toString(), {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'TIMESTAMP': timestamp,
-                    'SIGNATURE': '1', // TODO: 后续按实际签名算法基于请求内容计算
-                },
-                body,
+            const json = await http.post('/login', {
+                username: username.trim(),
+                password,
             });
-        } catch (err) {
-            throw new Error('网络请求失败，无法连接服务器（' + err.message + '）');
-        }
 
-        let json;
-        try {
-            json = await resp.json();
+            if (json.resp_code === 0 && json.data) {
+                const username2 = json.data.username || username.trim();
+                return {
+                    success: true,
+                    user: { id: username2, username: username2 },
+                    token: json.data.token,
+                };
+            }
+            throw new Error(json.resp_msg || '用户名或密码错误');
         } catch (err) {
-            throw new Error('服务器响应格式错误');
+            throw new Error(err.message || '登录失败，请重试');
         }
-
-        if (json.resp_code === 0 && json.data) {
-            const username2 = json.data.username || username.trim();
-            return {
-                success: true,
-                user: { id: username2, username: username2 },
-                token: json.data.token,
-            };
-        }
-        throw new Error(json.resp_msg || '用户名或密码错误');
     },
 
     /**

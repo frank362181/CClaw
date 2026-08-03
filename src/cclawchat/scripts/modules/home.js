@@ -12,7 +12,7 @@
  *         打开聊天抽屉、退出登录等跨组件动作交由外部处理。
  */
 
-import { getInitials } from '../utils/helper.js?v=1.0.4';
+import { getInitials } from '../utils/helper.js';
 
 /* ---------- 菜单定义（目录树） ---------- */
 const MENUS = {

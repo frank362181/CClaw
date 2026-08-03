@@ -4,11 +4,11 @@
  * ============================================================
  */
 
-import { ENV } from '../../config/env.js?v=1.0.4';
+import { ENV } from '../../config/env.js';
 
 export const CONFIG = {
     // 应用基础信息
-    APP_NAME: 'CClaw Chat',
+    APP_NAME: ENV.APP_TITLE,
     VERSION: ENV.APP_VERSION,
 
     // API 配置
@@ -34,4 +34,14 @@ export const CONFIG = {
     IS_PROD: ENV.NODE_ENV === 'production',
     ENABLE_MOCK: ENV.ENABLE_MOCK,
     DEBUG: ENV.DEBUG,
+};
+
+export const USER_DEFINED_HEADER = {
+    HEADER_NAME_TIMESTAMP: 'TIMESTAMP', //http header
+};
+
+export const USER_DEFINED_QUERYSTRING = {
+    QUERYSTRING_NAME_NONCE: 'NONCE', // query string
+    QUERYSTRING_NAME_TIMESTAMP: 'TIMESTAMP', // query string
+    QUERYSTRING_NAME_SIGNATURE: 'SIGNATURE', // query string
 };

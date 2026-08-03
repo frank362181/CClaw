@@ -14,42 +14,40 @@ type CorsFilter struct {
 }
 
 func (cf *CorsFilter) DoFilter() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		cors.New(
-			cors.Config{
-				AllowOrigins: []string{
-					"*",
-				},
+	return cors.New(
+		cors.Config{
+			AllowOrigins: []string{"*"},
 
-				//允许的HTTP方法
-				AllowMethods: []string{
-					http.MethodGet,
-					http.MethodPost,
-					http.MethodPut,
-					http.MethodPatch,
-					http.MethodDelete,
-					http.MethodConnect,
-					http.MethodOptions,
-				},
+			//允许的HTTP方法
+			AllowMethods: []string{
+				http.MethodGet,
+				http.MethodPost,
+				http.MethodPut,
+				http.MethodPatch,
+				http.MethodDelete,
+				http.MethodConnect,
+				http.MethodOptions,
+			},
 
-				AllowHeaders: []string{
-					"Origin",
-					"Content-Type",
-					"Authorization",
-					"X-Requested-With",
-				},
+			AllowHeaders: []string{
+				"Origin",
+				"Content-Type",
+				"Authorization",
+				"X-Requested-With",
+				"TIMESTAMP",
+				"SIGNATURE",
+			},
 
-				//暴露给前端的响应头
-				ExposeHeaders: []string{
-					"Content-Length",
-					"X-Custom-Header",
-				},
+			//暴露给前端的响应头
+			ExposeHeaders: []string{
+				"Content-Length",
+				"X-Custom-Header",
+			},
 
-				//是否允许携带cookie
-				AllowCredentials: true,
+			//是否允许携带cookie
+			AllowCredentials: true,
 
-				//预检请求缓存时间(秒)
-				MaxAge: 12 * time.Hour,
-			})
-	}
+			//预检请求缓存时间(秒)
+			MaxAge: 12 * time.Hour,
+		})
 }

@@ -24,14 +24,23 @@ func (resp *GlobalResponsor) Success(c *gin.Context, httpStatus int, code int, m
 	c.PureJSON(httpStatus, jsonObj)
 }
 
-// WriteWithErrorAndAbort 用于表示业务执行失败,但并不影响系统正常运行
+// Failure 表示业务执行失败
+// /*此时httpStatus一般为HttpStatus.OK
+func (resp *GlobalResponsor) Failure(c *gin.Context, httpStatus int, code int, msg string, data interface{}) {
+	jsonObj := resp.createJsonObject(c, code, msg, data)
+	c.PureJSON(httpStatus, jsonObj)
+}
+
+// WriteWithErrorAndAbort
+// /* 此方法被调用后，后续的filter,interceptor等处理将会被终止,此时httpStatus一般为非HttpStatus.OK
 func (resp *GlobalResponsor) WriteWithErrorAndAbort(c *gin.Context, httpStatus int, code int, msg string, data interface{}) {
 	jsonObj := resp.createJsonObject(c, code, msg, data)
 	c.PureJSON(httpStatus, jsonObj)
 	c.Abort() //不能忽略
 }
 
-// AbortWithError 一般表示系统级错误,如http的系统错误等
+// AbortWithError
+// /* AbortWithError 一般表示系统级错误,如http的系统错误等,此时httpStatus一般为非HttpStatus.OK
 func (resp *GlobalResponsor) AbortWithError(c *gin.Context, httpStatus int, code int, msg string, data interface{}) {
 	jsonObj := resp.createJsonObject(c, code, msg, data)
 	c.AbortWithStatusJSON(httpStatus, jsonObj)
@@ -51,14 +60,16 @@ func (resp *GlobalResponsor) createJsonObject(c *gin.Context, code int, msg stri
 	if err {
 		r := reqInfo.(*RequestInfo)
 		respMsg := &CommonResponse{
-			ReqID:             r.RequestId,
-			ReqPath:           r.RequestPath,
-			ReqMethod:         r.RequestMethod,
-			RespCode:          code,
-			RespMsg:           msg,
-			ReqAtTimestamp:    r.ReqAtdTimestamp,
-			ResponseTimestamp: common.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp,
-			Data:              data,
+			ReqID:         r.RequestId,
+			ReqPath:       r.RequestPath,
+			ReqMethod:     r.RequestMethod,
+			ReqTimestamp:  r.ReqAtdTimestamp,
+			RespTimestamp: common.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp,
+
+			RespCode: code,
+			RespMsg:  msg,
+
+			Data: data,
 		}
 
 		resp.printLog(respMsg)
@@ -66,14 +77,16 @@ func (resp *GlobalResponsor) createJsonObject(c *gin.Context, code int, msg stri
 	}
 
 	respMsg := &CommonResponse{
-		ReqID:             "",
-		ReqPath:           "",
-		ReqMethod:         "",
-		RespCode:          code,
-		RespMsg:           msg,
-		ReqAtTimestamp:    -1,
-		ResponseTimestamp: common.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp,
-		Data:              data,
+		ReqID:         "",
+		ReqPath:       "",
+		ReqMethod:     "",
+		ReqTimestamp:  -1,
+		RespTimestamp: common.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp,
+
+		RespCode: code,
+		RespMsg:  msg,
+
+		Data: data,
 	}
 
 	resp.printLog(respMsg)
@@ -81,7 +94,7 @@ func (resp *GlobalResponsor) createJsonObject(c *gin.Context, code int, msg stri
 }
 
 func (resp *GlobalResponsor) printLog(msg interface{}) {
-	if jsonBytes, err := json.Marshal(msg); err == nil {
+	if jsonBytes, err := json.MarshalIndent(msg, "", " "); err == nil {
 		logging.LogInfof(string(jsonBytes))
 	} else {
 		logging.LogInfof("%v", msg)

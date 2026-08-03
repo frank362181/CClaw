@@ -11,7 +11,7 @@
     <meta http-equiv="Expires" content="0" />
 
     <!-- 外链全局样式（带版本号，防缓存白屏） -->
-    <link rel="stylesheet" href="./styles/main.css?v=1.0.7" />
+    <link rel="stylesheet" href="./styles/main.css" />
 
     <style>
         /* -------- 应用外壳 ---------- */
@@ -93,11 +93,10 @@
         <div class="drawer-panel">
             <div class="drawer-header">
                 <div class="drawer-title">
-                    <span class="drawer-icon">🤖</span>
+                    <span class="drawer-icon">💬</span>
                     <span>AI 助手</span>
                     <span class="drawer-status-dot" title="在线"></span>
                 </div>
-                <button id="btnCloseDrawer" class="btn-close-drawer" title="收起聊天窗口">✕</button>
             </div>
             <div class="drawer-body">
                 <!-- 聊天组件（视图来自 pages/chat.html） -->
@@ -112,8 +111,11 @@
     </div>
 </div>
 
+<!-- axios（本地 vendor 的全局 UMD 构建，挂载到 window.axios，供 scripts/modules/api.js 使用；离线可用） -->
+<script src="./scripts/modules/vendor/axios.min.js"></script>
+
 <!-- 主应用脚本 (ES Module) —— 带版本号，强制浏览器在版本更新时重新拉取，避免缓存导致白屏 -->
-<script type="module" src="./scripts/main.js?v=1.0.7"></script>
+<script type="module" src="./scripts/main.js"></script>
 
 </body>
 </html>
