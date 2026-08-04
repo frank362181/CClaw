@@ -10,10 +10,11 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	Username      string `json:"username"`
-	Token         string `json:"token"`          // 用户登录成功后得到的token
-	GenAt         int64  `json:"gen_at"`         //token产生的时间
-	ExpiredLength int64  `json:"expired_length"` //token失效时长,unit = second
+	UserName      string `json:"userName"`
+	DisplayName   string `json:"displayName"`
+	Token         string `json:"token"`         // 用户登录成功后得到的token
+	GenAt         int64  `json:"genAt"`         //token产生的时间
+	ExpiredLength int64  `json:"expiredLength"` //token失效时长,unit = second
 }
 
 type LoginResponseEx struct {

@@ -21,6 +21,12 @@ export const ENV = {
     // false: 调用真实后端接口
     ENABLE_MOCK: true,
 
+    // 真实聊天接口返回格式: 'sse' | 'text'
+    CHAT_STREAM_FORMAT: 'sse',
+
+    // 使用一个受保护的只读接口验证恢复的会话
+    SESSION_CHECK_PATH: '/getsessionlist',
+
     // 请求超时时间 (毫秒)
     REQUEST_TIMEOUT: 30000,
 

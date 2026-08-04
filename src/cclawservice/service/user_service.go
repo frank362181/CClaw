@@ -28,7 +28,7 @@ type UserService struct {
 	memoryDb   memoryDbCommon.IMemoryDB //内存数据库
 }
 
-func (service *UserService) Login(username, password string) (*dataobject.T_Account, error) {
+func (service *UserService) Login(username, password string) (*dataobject.TAccount, error) {
 	if len(username) == 0 || len(password) == 0 {
 		return nil, exception.ParameterEmptyErrorEx("user or password is empty")
 	}
@@ -42,7 +42,7 @@ func (service *UserService) Login(username, password string) (*dataobject.T_Acco
 	return service.saveSession(user)
 }
 
-func (service *UserService) GetUserByNameAndPassword(username, password string) (*dataobject.T_Account, error) {
+func (service *UserService) GetUserByNameAndPassword(username, password string) (*dataobject.TAccount, error) {
 	user, err := service.dbAccessor.GetUserByNameAndPassword(username, password)
 	if err != nil {
 		return nil, err
@@ -51,7 +51,7 @@ func (service *UserService) GetUserByNameAndPassword(username, password string) 
 	return user, err
 }
 
-func (service *UserService) GetUserByAccount(username string) (*dataobject.T_Account, error) {
+func (service *UserService) GetUserByAccount(username string) (*dataobject.TAccount, error) {
 	user, err := service.dbAccessor.GetUserByAccount(username)
 	if err != nil {
 		return nil, err
@@ -59,7 +59,7 @@ func (service *UserService) GetUserByAccount(username string) (*dataobject.T_Acc
 	return user, nil
 }
 
-func (service *UserService) GetUserByToken(token string) (*dataobject.T_Account, error) {
+func (service *UserService) GetUserByToken(token string) (*dataobject.TAccount, error) {
 	if len(token) == 0 {
 		return nil, myException.TokenInvalidErrEx("token empty")
 	}
@@ -70,7 +70,7 @@ func (service *UserService) GetUserByToken(token string) (*dataobject.T_Account,
 		return nil, err
 	}
 
-	var user dataobject.T_Account
+	var user dataobject.TAccount
 	err = user.FromJsonString(userJson)
 	if err != nil {
 		return nil, err
@@ -95,7 +95,7 @@ func (service *UserService) Logout(token string) {
 }
 
 // ======================== private functions & methods ========================
-func (service *UserService) saveSession(user *dataobject.T_Account) (*dataobject.T_Account, error) {
+func (service *UserService) saveSession(user *dataobject.TAccount) (*dataobject.TAccount, error) {
 	// 将用户信息写入到内存
 	if service.memoryDb != nil {
 		// 1. key = loginName,值为token
@@ -125,7 +125,7 @@ func (service *UserService) deleteSession(token string) {
 			return
 		}
 
-		var user dataobject.T_Account
+		var user dataobject.TAccount
 		err = user.FromJsonString(userJson)
 		if err != nil {
 			return

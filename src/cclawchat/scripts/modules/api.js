@@ -1,123 +1,128 @@
-/**
- * ============================================================
- * API 接口层 — 基于 http 包的后端 RESTful 接口封装
- * ============================================================
- * 设计原则（高内聚 / 低耦合）：
- *  - axios 实例与全局拦截器统一收敛在 http 包（./http.js），全局可复用；
- *  - 本文件只定义业务接口（login 等），不重复实现任何 HTTP 细节；
- *  - 外部模块（auth.js 等）只调用 API.xxx()，不感知 axios / http。
- */
-
 import { randomDelay } from '../utils/helper.js';
+import { CONFIG } from './config.js';
 import { http } from './http.js';
 
+const MOCK_REPLIES = {
+    greeting: '你好！很高兴见到你 👋 有什么我可以帮你的吗？',
+    help: '当然可以！我可以帮你解答问题、提供建议、或者和你闲聊。告诉我你想聊什么吧～',
+};
+
+function selectMockReply(content) {
+    const lower = content.toLowerCase();
+    if (content.includes('你好') || lower.includes('hi') || lower.includes('hello')) return MOCK_REPLIES.greeting;
+    if (content.includes('帮助') || lower.includes('help')) return MOCK_REPLIES.help;
+    return `我明白了。关于「${content}」，建议先明确目标和约束，再逐步验证可行方案。`;
+}
+
+async function runMockStream(content, signal, onChunk, onComplete) {
+    let current = '';
+    for (const char of selectMockReply(content)) {
+        if (signal.aborted) return;
+        await new Promise(resolve => setTimeout(resolve, randomDelay(CONFIG.STREAM_DELAY_MIN, CONFIG.STREAM_DELAY_MAX)));
+        if (signal.aborted) return;
+        current += char;
+        onChunk(current);
+    }
+    if (!signal.aborted) onComplete(current);
+}
+
+async function runRealStream(convId, content, token, signal, onChunk, onComplete) {
+    const response = await fetch(`${CONFIG.API_BASE}/chat`, {
+        method: 'POST',
+        signal,
+        credentials: 'omit',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': CONFIG.CHAT_STREAM_FORMAT === 'sse' ? 'text/event-stream' : 'text/plain',
+            ...(token ? { AUTHORIZATION: token } : {}),
+        },
+        body: JSON.stringify({ request_msg: content, session_id: convId, chat_type: 0, chat_channel: 1 }),
+    });
+    if (!response.ok) throw new Error(`聊天请求失败 (HTTP ${response.status})`);
+    if (!response.body) throw new Error('服务器未返回可读取的响应流');
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullContent = '';
+    let pending = '';
+    const consumeSseEvent = event => {
+        const data = event.split(/\r?\n/)
+            .filter(line => line.startsWith('data:'))
+            .map(line => line.slice(5).trimStart())
+            .join('\n');
+        if (!data || data === '[DONE]') return;
+        let chunk = data;
+        try {
+            const parsed = JSON.parse(data);
+            chunk = parsed.content ?? parsed.delta ?? parsed.data?.content ?? '';
+        } catch { /* plain SSE data */ }
+        fullContent += chunk;
+        onChunk(fullContent);
+    };
+    while (!signal.aborted) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        pending += decoder.decode(value, { stream: true });
+        if (CONFIG.CHAT_STREAM_FORMAT === 'sse') {
+            const events = pending.split(/\r?\n\r?\n/);
+            pending = events.pop() || '';
+            events.forEach(consumeSseEvent);
+        } else {
+            fullContent += pending;
+            pending = '';
+            onChunk(fullContent);
+        }
+    }
+    pending += decoder.decode();
+    if (CONFIG.CHAT_STREAM_FORMAT === 'sse' && pending.trim()) consumeSseEvent(pending);
+    if (CONFIG.CHAT_STREAM_FORMAT === 'text' && pending) {
+        fullContent += pending;
+        onChunk(fullContent);
+    }
+    if (!signal.aborted) onComplete(fullContent);
+}
+
 export const API = {
-    /**
-     * 发送消息并获取流式响应 (模拟实现)
-     * 实际项目替换为真实 fetch 调用
-     */
-    sendMessageStream(convId, content, onChunk, onComplete, onError) {
+    sendMessageStream(convId, content, token, onChunk, onComplete, onError) {
         const controller = new AbortController();
-        const signal = controller.signal;
-
-        // 模拟流式响应
-        (async () => {
-            try {
-                // 模拟 AI 回复
-                let replyText = '';
-                if (content.includes('你好') || content.includes('hi') || content.includes('hello')) {
-                    replyText = '你好！很高兴见到你 👋 有什么我可以帮你的吗？';
-                } else if (content.includes('帮助') || content.includes('help')) {
-                    replyText = '当然可以！我可以帮你解答问题、提供建议、或者和你闲聊。告诉我你想聊什么吧～';
-                } else if (content.includes('天气')) {
-                    replyText = '天气问题需要联网查询，不过我可以给你一些通用建议：出门记得看天气预报哦！🌤️';
-                } else if (content.includes('谢谢') || content.includes('感谢')) {
-                    replyText = '不客气！能帮到你是我的荣幸 ❤️ 还有别的问题随时找我。';
-                } else if (content.length > 20) {
-                    replyText = '你提出了一个很有深度的问题 🤔 让我认真思考一下…\n\n' +
-                        '从我的分析来看，这个问题涉及到多个方面。建议你从优先级最高的部分开始处理，' +
-                        '然后逐步推进。如果需要更具体的建议，可以告诉我更多细节。';
-                } else {
-                    const templates = [
-                        '我明白了。关于「' + content + '」，我的看法是…',
-                        '这是个好问题！让我从几个角度来回答：',
-                        '收到！我正在处理你的问题，请稍等…',
-                        '有趣的问题！我建议你这样考虑：',
-                    ];
-                    const pick = templates[Math.floor(Math.random() * templates.length)];
-                    replyText = pick + '\n\n' +
-                        '1. 首先，理解问题的本质\n' +
-                        '2. 然后，探索可能的方案\n' +
-                        '3. 最后，选择最适合的路径\n\n' +
-                        '你觉得这个思路怎么样？';
-                }
-
-                const chars = replyText.split('');
-                let currentText = '';
-                let isCancelled = false;
-                signal.addEventListener('abort', () => { isCancelled = true; });
-
-                for (let i = 0; i < chars.length; i++) {
-                    if (isCancelled) {
-                        onComplete(currentText);
-                        return;
-                    }
-                    await new Promise(r => setTimeout(r, randomDelay(12, 40)));
-                    const char = chars[i];
-                    if (/[\s，。、！？；：,.]/.test(char)) {
-                        await new Promise(r => setTimeout(r, 8));
-                    }
-                    currentText += char;
-                    onChunk(currentText);
-                }
-                onComplete(currentText);
-            } catch (err) {
-                if (err.name !== 'AbortError') {
-                    onError && onError(err);
-                }
-            }
-        })();
-
+        const task = CONFIG.ENABLE_MOCK
+            ? runMockStream(content, controller.signal, onChunk, onComplete)
+            : runRealStream(convId, content, token, controller.signal, onChunk, onComplete);
+        task.catch(error => {
+            if (error.name !== 'AbortError' && !controller.signal.aborted) onError?.(error);
+        });
         return controller;
     },
 
-    /**
-     * 用户登录接口
-     * POST {API_BASE}/login；鉴权参数（TIMESTAMP / NONCE / SIGNATURE）
-     * 已由请求拦截器自动注入，无需在此重复构造。
-     */
     async login(username, password) {
         try {
-            const json = await http.post('/login', {
-                username: username.trim(),
-                password,
-            });
-
-            if (json.resp_code === 0 && json.data) {
-                const username2 = json.data.username || username.trim();
-                return {
-                    success: true,
-                    user: { id: username2, username: username2 },
-                    token: json.data.token,
-                };
-            }
-            throw new Error(json.resp_msg || '用户名或密码错误');
-        } catch (err) {
-            throw new Error(err.message || '登录失败，请重试');
+            const json = await http.post('/login', { username: username.trim(), password });
+            if (json.resp_code !== 0 || !json.data) throw new Error(json.resp_msg || '用户名或密码错误');
+            const userName = json.data.userName || username.trim();
+            const generatedAt = Number(json.data.genAt) || Math.floor(Date.now() / 1000);
+            const lifetime = Number(json.data.expiredLength) || 0;
+            return {
+                success: true,
+                user: { id: userName, userName, displayName: json.data.displayName || userName },
+                token: json.data.token,
+                expiresAt: lifetime > 0 ? (generatedAt + lifetime) * 1000 : null,
+            };
+        } catch (error) {
+            throw new Error(error.message || '登录失败，请重试');
         }
     },
 
-    /**
-     * 【预留】登出接口
-     */
-    async logout(token) {
-        return Promise.resolve({ success: true });
+    async validateSession(token) {
+        if (!token) return false;
+        const json = await http.get(CONFIG.SESSION_CHECK_PATH, { headers: { AUTHORIZATION: token } });
+        if (json && typeof json.resp_code === 'number' && json.resp_code !== 0) {
+            throw new Error(json.resp_msg || '登录会话已失效');
+        }
+        return true;
     },
 
-    /**
-     * 【预留】获取对话历史
-     */
-    async getConversations(token) {
-        return Promise.resolve({ success: true, data: [] });
+    async logout(token) {
+        await http.post('/logout', null, { headers: { AUTHORIZATION: token } });
+        return { success: true };
     },
 };

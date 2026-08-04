@@ -12,8 +12,8 @@ type BaseAccessor struct {
 
 type IAccessor interface {
 	GetDatabase() core.IBaseDatabase
-	GetUserByNameAndPassword(username, userpass string) (*dataobject.T_Account, error)
-	GetUserByAccount(username string) (*dataobject.T_Account, error)
+	GetUserByNameAndPassword(username, userpass string) (*dataobject.TAccount, error)
+	GetUserByAccount(username string) (*dataobject.TAccount, error)
 }
 
 func (accessor *BaseAccessor) GetDatabase() core.IBaseDatabase {

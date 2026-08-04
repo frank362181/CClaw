@@ -51,7 +51,7 @@ func (i *AuthenticationInterceptor) PreHandle(c *gin.Context) bool {
 
 	// 此时要从数据库中获取指定的token，此时是i必须要经过登录的API
 	userService, ok := i.userService.(interface {
-		GetUserByToken(string) (*dataobject.T_Account, error)
+		GetUserByToken(string) (*dataobject.TAccount, error)
 	})
 	if !ok {
 		//服务器内部出错

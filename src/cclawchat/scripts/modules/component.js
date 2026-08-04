@@ -66,5 +66,6 @@ export async function mountComponent({ tag, url }) {
     })();
 
     registry.set(tag, promise);
+    promise.catch(() => registry.delete(tag));
     return promise;
 }

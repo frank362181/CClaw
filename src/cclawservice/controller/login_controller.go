@@ -52,7 +52,7 @@ func (lc *LoginController) Login(c *gin.Context) {
 		return
 	}
 
-	resp := model.GenerationLoginResponse(user.LoginName, user.Token)
+	resp := model.GenerationLoginResponse(user)
 	basic.GetBaseResponser().Success(c, http.StatusOK, cclawcommon.ConstErrorNone, cclawcommon.ConstErrorNoneMsg, resp)
 }
 

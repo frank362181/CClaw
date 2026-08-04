@@ -16,8 +16,8 @@ export const CONFIG = {
     TIMEOUT: ENV.REQUEST_TIMEOUT,
 
     // 存储键名
-    STORAGE_KEY: 'ai_chat_data',
-    USER_KEY: 'ai_chat_user',
+    STORAGE_KEY_PREFIX: 'cclaw_chat_data:',
+    USER_KEY: 'cclaw_chat_session',
 
     // 业务限制
     MAX_MESSAGES_PER_CONV: 200,
@@ -33,15 +33,7 @@ export const CONFIG = {
     IS_DEV: ENV.NODE_ENV === 'development',
     IS_PROD: ENV.NODE_ENV === 'production',
     ENABLE_MOCK: ENV.ENABLE_MOCK,
+    CHAT_STREAM_FORMAT: ENV.CHAT_STREAM_FORMAT || 'sse',
+    SESSION_CHECK_PATH: ENV.SESSION_CHECK_PATH || '/getsessionlist',
     DEBUG: ENV.DEBUG,
-};
-
-export const USER_DEFINED_HEADER = {
-    HEADER_NAME_TIMESTAMP: 'TIMESTAMP', //http header
-};
-
-export const USER_DEFINED_QUERYSTRING = {
-    QUERYSTRING_NAME_NONCE: 'NONCE', // query string
-    QUERYSTRING_NAME_TIMESTAMP: 'TIMESTAMP', // query string
-    QUERYSTRING_NAME_SIGNATURE: 'SIGNATURE', // query string
 };

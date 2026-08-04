@@ -8,7 +8,7 @@ import (
 	"my.favorite/platformutility/exception"
 )
 
-func (g *GormAccessor) GetUserByNameAndPassword(username, userpass string) (*dataobject.T_Account, error) {
+func (g *GormAccessor) GetUserByNameAndPassword(username, userpass string) (*dataobject.TAccount, error) {
 	username = strings.ToLower(username)
 	username = strings.TrimSpace(username)
 	if len(username) == 0 {
@@ -16,13 +16,13 @@ func (g *GormAccessor) GetUserByNameAndPassword(username, userpass string) (*dat
 	}
 
 	gormDb := g.db.(*core.GormDatabase)
-	var user dataobject.T_Account
+	var user dataobject.TAccount
 	err := gormDb.GetDB().First(&user, "login_name = ? and login_pass = ?", username, userpass).Error
 
 	return &user, err
 }
 
-func (g *GormAccessor) GetUserByAccount(username string) (*dataobject.T_Account, error) {
+func (g *GormAccessor) GetUserByAccount(username string) (*dataobject.TAccount, error) {
 	username = strings.ToLower(username)
 	username = strings.TrimSpace(username)
 	if len(username) == 0 {
@@ -30,7 +30,7 @@ func (g *GormAccessor) GetUserByAccount(username string) (*dataobject.T_Account,
 	}
 
 	gormDb := g.db.(*core.GormDatabase)
-	var user dataobject.T_Account
+	var user dataobject.TAccount
 	err := gormDb.GetDB().First(&user, "login_name = ?", username).Error
 
 	return &user, err

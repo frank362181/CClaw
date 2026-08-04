@@ -11,10 +11,12 @@ import { LoginPage } from './modules/login.js';
 import { ChatPage } from './modules/chat.js';
 import { HomePage } from './modules/home.js';
 import { mountComponent } from './modules/component.js';
+import { CONFIG } from './modules/config.js';
 
 const App = {
     async init() {
         try {
+            document.title = CONFIG.APP_NAME;
             // 1. 挂载页面组件（视图来自 pages/*.html，Shadow DOM 隔离）
             const [loginComp, chatComp, homeComp] = await Promise.all([
                 mountComponent({ tag: 'login-page', url: './pages/login.html' }),
@@ -38,14 +40,17 @@ const App = {
                 // 点击右上角聊天气泡：以抽屉方式打开 chat.html
                 onToggleChat: () => this.toggleChatDrawer(),
                 // 二次确认后：执行退出，回到登录页
-                onConfirmLogout: () => Auth.logout(),
+                onConfirmLogout: async () => {
+                    this.toggleChatDrawer(false);
+                    await Auth.logout();
+                },
             });
 
             // 3. 绑定全局事件（组件内部交互已由组件自身处理）
             this._bindEvents();
 
             // 4. 恢复会话状态，决定初始展示登录页还是主页
-            const restored = Auth.restore();
+            const restored = await Auth.restore();
             if (!restored) {
                 LoginPage.focusUsername();
             }
@@ -164,8 +169,6 @@ const App = {
 
     _doSendMessage(conv, content) {
         ChatPage.setInputEnabled(false);
-        State.isStreaming = true;
-
         State.addMessage(conv.id, 'user', content);
         ChatPage.renderMessages(conv);
         ChatPage.clearInput();
@@ -175,7 +178,6 @@ const App = {
             content,
             () => {
                 // onComplete
-                State.isStreaming = false;
                 const updatedConv = State.getCurrentConversation();
                 if (updatedConv) {
                     ChatPage.renderMessages(updatedConv);
@@ -186,7 +188,6 @@ const App = {
                 ChatPage.focusInput();
             },
             (err) => {
-                State.isStreaming = false;
                 ChatPage.setInputEnabled(true);
                 ChatPage.updateSendButton();
                 ChatPage.focusInput();

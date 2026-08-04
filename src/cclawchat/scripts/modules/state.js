@@ -1,117 +1,123 @@
-/**
- * ============================================================
- * 状态管理
- * ============================================================
- */
-
 import { CONFIG } from './config.js';
 import { genId, safeJSON } from '../utils/helper.js';
+
+function normalizeConversation(conv) {
+    if (!conv || typeof conv !== 'object' || !Array.isArray(conv.messages)) return null;
+    return {
+        id: String(conv.id || genId()),
+        title: String(conv.title || '新对话'),
+        messages: conv.messages
+            .filter(msg => msg && (msg.role === 'user' || msg.role === 'assistant'))
+            .slice(-CONFIG.MAX_MESSAGES_PER_CONV)
+            .map(msg => ({
+                id: String(msg.id || genId()),
+                role: msg.role,
+                content: String(msg.content ?? ''),
+                timestamp: Number(msg.timestamp) || Date.now(),
+            })),
+        createdAt: Number(conv.createdAt) || Date.now(),
+        updatedAt: Number(conv.updatedAt) || Date.now(),
+    };
+}
 
 export const State = {
     user: null,
     conversations: [],
     currentConvId: null,
     isStreaming: false,
-    _initialized: false,
 
-    load() {
-        try {
-            const raw = localStorage.getItem(CONFIG.STORAGE_KEY);
-            if (raw) {
-                const data = safeJSON(raw, null);
-                if (data && Array.isArray(data.conversations)) {
-                    this.conversations = data.conversations;
-                    this.currentConvId = data.currentConvId || null;
-                }
-            }
-            const userRaw = localStorage.getItem(CONFIG.USER_KEY);
-            if (userRaw) {
-                this.user = safeJSON(userRaw, null);
-            }
-        } catch (e) {
-            console.warn('State load error:', e);
+    _storageKey(username = this.user?.username) {
+        if (!username) return null;
+        return CONFIG.STORAGE_KEY_PREFIX + encodeURIComponent(username.toLowerCase());
+    },
+
+    loadSession() {
+        const raw = sessionStorage.getItem(CONFIG.USER_KEY);
+        const session = raw ? safeJSON(raw, null) : null;
+        if (!session || typeof session.username !== 'string' || typeof session.token !== 'string') {
+            this.user = null;
+            return null;
         }
-        this._initialized = true;
+        if (session.expiresAt && Date.now() >= session.expiresAt) {
+            sessionStorage.removeItem(CONFIG.USER_KEY);
+            this.user = null;
+            return null;
+        }
+        this.user = session;
+        this.loadConversations();
+        return session;
+    },
+
+    loadConversations() {
+        this.conversations = [];
+        this.currentConvId = null;
+        const key = this._storageKey();
+        if (!key) return;
+        try {
+            const data = safeJSON(localStorage.getItem(key), null);
+            if (!data || !Array.isArray(data.conversations)) return;
+            this.conversations = data.conversations.map(normalizeConversation).filter(Boolean);
+            this.currentConvId = this.conversations.some(c => c.id === data.currentConvId)
+                ? data.currentConvId
+                : this.conversations[0]?.id || null;
+        } catch (error) {
+            console.warn('Conversation state load failed:', error);
+        }
     },
 
     save() {
-        try {
-            localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify({
-                conversations: this.conversations,
-                currentConvId: this.currentConvId,
-            }));
-            if (this.user) {
-                localStorage.setItem(CONFIG.USER_KEY, JSON.stringify(this.user));
-            } else {
-                localStorage.removeItem(CONFIG.USER_KEY);
-            }
-        } catch (e) {
-            console.warn('State save error:', e);
+        const key = this._storageKey();
+        if (!key) return;
+        localStorage.setItem(key, JSON.stringify({
+            version: 2,
+            conversations: this.conversations,
+            currentConvId: this.currentConvId,
+        }));
+    },
+
+    saveSession() {
+        if (!this.user) {
+            sessionStorage.removeItem(CONFIG.USER_KEY);
+            return;
         }
+        sessionStorage.setItem(CONFIG.USER_KEY, JSON.stringify(this.user));
     },
 
     getCurrentConversation() {
-        if (!this.currentConvId) return null;
         return this.conversations.find(c => c.id === this.currentConvId) || null;
     },
 
-    getMessages(convId) {
-        const conv = this.conversations.find(c => c.id === convId);
-        return conv ? conv.messages : [];
-    },
-
     createConversation(title) {
-        const conv = {
-            id: genId(),
-            title: title || '新对话',
-            messages: [],
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-        };
+        const conv = { id: genId(), title: title || '新对话', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
         this.conversations.unshift(conv);
         this.currentConvId = conv.id;
         this.save();
         return conv;
     },
 
-    deleteConversation(convId) {
-        const idx = this.conversations.findIndex(c => c.id === convId);
-        if (idx === -1) return false;
-        this.conversations.splice(idx, 1);
-        if (this.currentConvId === convId) {
-            this.currentConvId = this.conversations.length > 0 ? this.conversations[0].id : null;
-        }
-        this.save();
-        return true;
-    },
-
-    addMessage(convId, role, content, id) {
+    addMessage(convId, role, content, id, { persist = true } = {}) {
         const conv = this.conversations.find(c => c.id === convId);
-        if (!conv) return null;
-        const msg = {
-            id: id || genId(),
-            role: role,
-            content: content,
-            timestamp: Date.now(),
-        };
+        if (!conv || (role !== 'user' && role !== 'assistant')) return null;
+        const msg = { id: id || genId(), role, content: String(content ?? ''), timestamp: Date.now() };
         conv.messages.push(msg);
+        if (conv.messages.length > CONFIG.MAX_MESSAGES_PER_CONV) {
+            conv.messages.splice(0, conv.messages.length - CONFIG.MAX_MESSAGES_PER_CONV);
+        }
         conv.updatedAt = Date.now();
         if (conv.messages.length === 1 && role === 'user') {
-            const title = content.slice(0, 30) + (content.length > 30 ? '…' : '');
-            conv.title = title || '新对话';
+            conv.title = msg.content.slice(0, 30) + (msg.content.length > 30 ? '…' : '') || '新对话';
         }
-        this.save();
+        if (persist) this.save();
         return msg;
     },
 
-    updateMessageContent(convId, msgId, newContent) {
+    updateMessageContent(convId, msgId, newContent, { persist = true } = {}) {
         const conv = this.conversations.find(c => c.id === convId);
-        if (!conv) return false;
-        const msg = conv.messages.find(m => m.id === msgId);
+        const msg = conv?.messages.find(item => item.id === msgId);
         if (!msg) return false;
-        msg.content = newContent;
+        msg.content = String(newContent ?? '');
         conv.updatedAt = Date.now();
-        this.save();
+        if (persist) this.save();
         return true;
     },
 
@@ -125,28 +131,24 @@ export const State = {
         return true;
     },
 
-    login(username, token) {
-        this.user = {
-            id: genId(),
-            username: username || CONFIG.DEFAULT_USERNAME,
-            token: token || 'mock_token_' + genId(),
-            loggedInAt: Date.now(),
-        };
-        if (this.conversations.length === 0) {
-            this.createConversation('新对话');
-        } else if (!this.currentConvId) {
-            this.currentConvId = this.conversations[0].id;
-        }
-        this.save();
+    login(username, token, { displayName, expiresAt } = {}) {
+        if (!username || !token) throw new Error('登录响应缺少用户名或令牌');
+        this.user = { username, displayName: displayName || username, token, expiresAt: Number(expiresAt) || null };
+        this.saveSession();
+        this.loadConversations();
+        if (this.conversations.length === 0) this.createConversation('新对话');
         return this.user;
     },
 
     logout() {
         this.user = null;
-        localStorage.removeItem(CONFIG.USER_KEY);
+        this.conversations = [];
+        this.currentConvId = null;
+        this.isStreaming = false;
+        sessionStorage.removeItem(CONFIG.USER_KEY);
     },
 
     isLoggedIn() {
-        return this.user !== null && this.user.username !== undefined;
+        return Boolean(this.user?.username && this.user?.token && (!this.user.expiresAt || Date.now() < this.user.expiresAt));
     },
 };

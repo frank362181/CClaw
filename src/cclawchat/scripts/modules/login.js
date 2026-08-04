@@ -39,8 +39,14 @@ export const LoginPage = {
             }
 
             this.setLoading(true);
-            const success = await (await handlers.onSubmit?.(username, password) ?? true);
-            this.setLoading(false);
+            let success = false;
+            try {
+                success = await (handlers.onSubmit?.(username, password) ?? true);
+            } catch (error) {
+                this.showError(error?.message || '登录失败，请重试');
+            } finally {
+                this.setLoading(false);
+            }
 
             if (!success) {
                 this.clearPassword();

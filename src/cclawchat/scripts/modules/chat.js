@@ -221,7 +221,10 @@ export const ChatPage = {
     },
 
     updateChatTitle(title) {
-        this.els.chatTitle.textContent = title || '新对话';
+        // 防护：视图缺失 #chatTitle 时不抛错（避免拖垮登录/会话流程）
+        if (this.els.chatTitle) {
+            this.els.chatTitle.textContent = title || '新对话';
+        }
     },
 
     getInputValue() {
@@ -237,7 +240,9 @@ export const ChatPage = {
     },
 
     reset() {
-        this.els.chatTitle.textContent = '新对话';
+        if (this.els.chatTitle) {
+            this.els.chatTitle.textContent = '新对话';
+        }
         this.els.messageList.querySelectorAll('.message').forEach(el => el.remove());
         this.els.emptyState.style.display = 'flex';
     },

@@ -1,94 +1,75 @@
-/**
- * ============================================================
- * 流式输出引擎
- * ============================================================
- */
-
 import { API } from './api.js';
 import { State } from './state.js';
 import { ChatPage } from './chat.js';
 import { genId } from '../utils/helper.js';
 
 export const StreamEngine = {
-    _controller: null,
-    _active: false,
+    _activeRequest: null,
 
     start(convId, userContent, onComplete, onError) {
-        if (this._active) {
-            this.cancel();
-        }
-
-        this._active = true;
+        this.cancel();
+        const requestId = genId();
         const msgId = genId();
-
-        // 预占位：将本条 AI 消息同步写入会话历史（与 DOM 占位共用 msgId），
-        // 保证流式完成/失败后消息能正确持久化并在重渲染时保留。
+        const request = { requestId, convId, msgId, controller: null, content: '' };
+        this._activeRequest = request;
+        State.isStreaming = true;
         State.addMessage(convId, 'assistant', '', msgId);
-
-        // 创建流式消息占位
         ChatPage.appendStreamingMessage(convId, msgId);
 
-        let fullContent = '';
-        let isCompleted = false;
-
-        const handleChunk = (chunk) => {
-            fullContent = chunk;
-            ChatPage.updateStreamingMessage(msgId, chunk, false);
-        };
-
-        const handleComplete = (finalContent) => {
-            if (isCompleted) return;
-            isCompleted = true;
-            this._active = false;
-            this._controller = null;
-            State.updateMessageContent(convId, msgId, finalContent || fullContent);
-            ChatPage.updateStreamingMessage(msgId, finalContent || fullContent, true);
-            // 重新渲染以保持一致性
-            const conv = State.getCurrentConversation();
-            if (conv) {
-                ChatPage.renderMessages(conv);
-            }
+        const isCurrent = () => this._activeRequest?.requestId === requestId;
+        const finish = () => {
+            if (!isCurrent()) return false;
+            this._activeRequest = null;
+            State.isStreaming = false;
             ChatPage.setInputEnabled(true);
             ChatPage.updateSendButton();
-            onComplete && onComplete(finalContent || fullContent);
+            return true;
         };
 
-        const handleError = (err) => {
-            this._active = false;
-            this._controller = null;
-            ChatPage.setInputEnabled(true);
-            ChatPage.updateSendButton();
-            const errorMsg = err?.message || '网络错误，请稍后重试';
-            ChatPage.updateStreamingMessage(msgId, '⚠️ ' + errorMsg, true);
-            State.updateMessageContent(convId, msgId, '⚠️ ' + errorMsg);
-            onError && onError(err);
-        };
-
-        const controller = API.sendMessageStream(
+        request.controller = API.sendMessageStream(
             convId,
             userContent,
-            handleChunk,
-            handleComplete,
-            handleError
+            State.user?.token,
+            content => {
+                if (!isCurrent()) return;
+                request.content = content;
+                State.updateMessageContent(convId, msgId, content, { persist: false });
+                ChatPage.updateStreamingMessage(msgId, content, false);
+            },
+            content => {
+                if (!isCurrent()) return;
+                request.content = content || request.content;
+                State.updateMessageContent(convId, msgId, request.content);
+                ChatPage.updateStreamingMessage(msgId, request.content, true);
+                if (!finish()) return;
+                onComplete?.(request.content);
+            },
+            error => {
+                if (!isCurrent()) return;
+                const message = `⚠️ ${error?.message || '网络错误，请稍后重试'}`;
+                State.updateMessageContent(convId, msgId, message);
+                ChatPage.updateStreamingMessage(msgId, message, true);
+                if (!finish()) return;
+                onError?.(error);
+            },
         );
-        this._controller = controller;
-
-        return { msgId, cancel: () => this.cancel() };
+        return { msgId, cancel: () => this.cancel(requestId) };
     },
 
-    cancel() {
-        if (this._controller) {
-            try {
-                this._controller.abort();
-            } catch (e) { /* ignore */ }
-            this._controller = null;
-        }
-        this._active = false;
+    cancel(requestId) {
+        const request = this._activeRequest;
+        if (!request || (requestId && request.requestId !== requestId)) return false;
+        this._activeRequest = null;
+        State.isStreaming = false;
+        request.controller?.abort();
+        State.updateMessageContent(request.convId, request.msgId, request.content);
+        ChatPage.updateStreamingMessage(request.msgId, request.content, true);
         ChatPage.setInputEnabled(true);
         ChatPage.updateSendButton();
+        return true;
     },
 
     isActive() {
-        return this._active;
+        return Boolean(this._activeRequest);
     },
 };

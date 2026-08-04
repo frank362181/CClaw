@@ -331,9 +331,9 @@ export const HomePage = {
     },
 
     /* ========== 用户信息 / 侧边栏 ========== */
-    updateUserInfo(username) {
+    updateUserInfo(username, displayName) {
         this.username = username || '';
-        const display = username || '用户';
+        const display = displayName || username || '用户';
         this.els.homeUserName.textContent = display;
         this.els.homeAvatar.textContent = getInitials(display);
         // 用户名变化后重渲染当前菜单内容（如 dashboard 欢迎语）

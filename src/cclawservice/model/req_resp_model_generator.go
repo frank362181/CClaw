@@ -3,6 +3,7 @@ package model
 import (
 	"strings"
 
+	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/platformutility/common"
 )
 
@@ -23,17 +24,15 @@ func GenerationLoginRequest(username string, password string) *LoginRequest {
 	return loginRequest
 }
 
-func GenerationLoginResponse(username string, token string) *LoginResponse {
-	username = strings.TrimSpace(username)
-	if len(username) == 0 {
+func GenerationLoginResponse(user *dataobject.TAccount) *LoginResponse {
+	if user == nil {
 		return nil
 	}
 
-	username = strings.ToLower(username)
-
 	loginResponse := &LoginResponse{
-		Username:      username,
-		Token:         token,
+		UserName:      user.LoginName,
+		DisplayName:   user.DisplayName,
+		Token:         user.Token,
 		GenAt:         common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,
 		ExpiredLength: 30 * 60, //default expired length, 1800 seconds
 	}

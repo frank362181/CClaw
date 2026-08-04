@@ -6,7 +6,8 @@
 
 /** 生成短 ID */
 export function genId() {
-    return Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+    return Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 11);
 }
 
 /** 格式化时间 (时:分) */
@@ -59,8 +60,4 @@ export function getInitials(name) {
 /** 随机延迟 (用于流式模拟) */
 export function randomDelay(min = 15, max = 45) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-export function getRandomNonce() {
-    return Math.floor(Math.random() * Number.MAX_SAFE_INTEGER) + 2;
 }
