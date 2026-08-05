@@ -1,4 +1,5 @@
-import { randomDelay } from '../utils/helper.js';
+import { randomDelay,getRandomNonce } from '../utils/helper.js';
+import { md5 } from '../utils/md5.js';
 import { CONFIG } from './config.js';
 import { http } from './http.js';
 
@@ -96,7 +97,17 @@ export const API = {
 
     async login(username, password) {
         try {
-            const json = await http.post('/login', { username: username.trim(), password });
+            // 请求体：签名基于实际发送的 JSON 字符串计算
+            const body = { username: username.trim(), password };
+            // TIMESTAMP = 当前秒数；NONCE = 随机数值
+            const TIMESTAMP = String(Math.floor(Date.now() / 1000));
+            const NONCE = getRandomNonce();
+            // SIGNATURE = MD5(请求body字符串 + TIMESTAMP + NONCE)
+            const SIGNATURE = md5(JSON.stringify(body) + TIMESTAMP + NONCE);
+
+            const json = await http.post('/login', body, {
+                params: { TIMESTAMP, NONCE, SIGNATURE },
+            });
             if (json.resp_code !== 0 || !json.data) throw new Error(json.resp_msg || '用户名或密码错误');
             const userName = json.data.userName || username.trim();
             const generatedAt = Number(json.data.genAt) || Math.floor(Date.now() / 1000);

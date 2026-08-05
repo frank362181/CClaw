@@ -13,8 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
-	selfcontroller "my.favorite/cclawservice/controller"
-	selfinterceptor "my.favorite/cclawservice/interceptor"
+	selfController "my.favorite/cclawservice/controller"
+	selfInterceptor "my.favorite/cclawservice/interceptor"
 	"my.favorite/cclawservice/service"
 	common2 "my.favorite/platformutility/common"
 	"my.favorite/platformutility/config"
@@ -112,13 +112,13 @@ func SetupHealthController() {
 
 func SetupLoggingController() {
 	userService := service.GetUserService(memoryDb, appDb) //创建实现登录的业务逻辑对象
-	loginController := selfcontroller.GetLoginController(userService)
+	loginController := selfController.GetLoginController(userService)
 
 	urlFunMap := make(map[string]gin.HandlerFunc)
 	urlFunMap[webbase.RelativeLoginUrl] = loginController.Login
 	urlFunMap[webbase.RelativeLogoutUrl] = loginController.Logout
 
-	authInter := selfinterceptor.GetAuthenticationInterceptor(userService)
+	authInter := selfInterceptor.GetAuthenticationInterceptor(userService)
 	tempStr, _ := configHelper.GetStringValueDefault("security", "unWantedToken", "")
 	urls := strings.Split(tempStr, ",")
 	authInter.SetupUnwantedTokenUrls(urls)

@@ -23,7 +23,6 @@ type LoginController struct {
 //	@Tags			用户登入登出
 //	@Accept			json
 //	@Produce		json
-//	@Param			TIMESTAMP	header		string				true	"数值,表示请求端请求的时间(秒数)"
 //	@Param			NONCE		query		string				true	"盐"
 //	@Param			TIMESTAMP	query		string				true	"数值,表示请求端请求的时间(秒数)"
 //	@Param			SIGNATURE	query		string				true	"对请求内容的签名"

@@ -36,20 +36,15 @@ func (sf *SecurityFilter) DoFilter() gin.HandlerFunc {
 		requestInfo := basic.GetBaseRequester().GetOrCreateRequestInfo(c)
 		// whether security checking or not
 		if sf.needSecurity(requestInfo.RequestPath) {
-			//headerTimestamp := c.GetHeader(basic.ConstHeaderTimestamp)
-			//if headerTimestamp == "" {
-			//	basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstHeaderTimestampUnexists, basic.ConstHeaderTimestampUnMatchMsg)
-			//	return
-			//}
-			// 1 replay attack
-			//if sf.replayAttack1(requestInfo) {
-			//	basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstGapGreaterStd, basic.ConstGapGreatStdMsg)
-			//	return
-			//}
-
-			// 2 replay attach
-			if sf.replayAttack2(requestInfo) {
+			// 1 replay attach
+			if sf.replayAttackNonce(requestInfo) {
 				basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstNonceInvalid, basic.ConstNonceInvalidMsg, nil)
+				return
+			}
+
+			//1 replay attack
+			if sf.replayAttackTimestamp(requestInfo.QueryTimestamp) {
+				basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstTimeGapOverflow, basic.ConstTimeGapOverflowMsg, nil)
 				return
 			}
 
@@ -83,7 +78,7 @@ func (sf *SecurityFilter) needSecurity(url string) bool {
 /*
 * 判断客户端请求的时间与服务端是否超过指定的阈值
  */
-func (sf *SecurityFilter) replayAttack1(originalTimestamp int64) bool {
+func (sf *SecurityFilter) replayAttackTimestamp(originalTimestamp int64) bool {
 	currentNow := common.GetDatetimeUtilityInstance().GetCurrentDatetime()
 	if currentNow.Timestamp-originalTimestamp > basic.ConstClientServerGap {
 		return true
@@ -92,7 +87,7 @@ func (sf *SecurityFilter) replayAttack1(originalTimestamp int64) bool {
 	return false
 }
 
-func (sf *SecurityFilter) replayAttack2(r *basic.RequestInfo) bool {
+func (sf *SecurityFilter) replayAttackNonce(r *basic.RequestInfo) bool {
 	//判断是否有nonce
 	tempNonce := strings.TrimSpace(r.Nonce)
 	if len(tempNonce) == 0 {

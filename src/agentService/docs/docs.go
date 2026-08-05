@@ -17,7 +17,7 @@ const docTemplate = `{
     "paths": {
         "/chat": {
             "post": {
-                "description": "与服务器聊天的API，该API会加载历史聊天记录",
+                "description": "新的聊天",
                 "consumes": [
                     "application/json"
                 ],
@@ -25,9 +25,9 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "用户聊天"
+                    "聊天管理"
                 ],
-                "summary": "聊天API",
+                "summary": "新的聊天",
                 "parameters": [
                     {
                         "type": "string",
@@ -71,13 +71,285 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/basic.CommonResponse"
+                            "$ref": "#/definitions/model.ChatResponseEx"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/model.ChatResponseEx"
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/createSession": {
+            "post": {
+                "description": "创建全新的聊天会话",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "聊天管理"
+                ],
+                "summary": "创建新的会话",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "聊天内容",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.SessionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.SessionResponseEx"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/deleteChat": {
+            "post": {
+                "description": "删除聊天",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "聊天管理"
+                ],
+                "summary": "删除聊天",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "聊天内容",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.ChatsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.ChatsResponseEx"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/deleteSession": {
+            "post": {
+                "description": "获取会话历史",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "聊天管理"
+                ],
+                "summary": "获取会话历史",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "聊天内容",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.SessionsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.SessionsResponseEx"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/getSessions": {
+            "post": {
+                "description": "获取会话历史列表",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "聊天管理"
+                ],
+                "summary": "获取会话历史列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "聊天内容",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.SessionsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.SessionsResponseEx"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
                         }
                     }
                 }
@@ -126,13 +398,6 @@ const docTemplate = `{
                 ],
                 "summary": "用户登入API",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "数值,表示请求端请求的时间(秒数)",
-                        "name": "TIMESTAMP",
-                        "in": "header",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "盐",
@@ -247,9 +512,6 @@ const docTemplate = `{
                 "data": {
                     "description": "具体的相应内容"
                 },
-                "req_at_timestamp": {
-                    "type": "integer"
-                },
                 "req_id": {
                     "type": "string"
                 },
@@ -259,6 +521,9 @@ const docTemplate = `{
                 },
                 "req_path": {
                     "type": "string"
+                },
+                "req_timestamp": {
+                    "type": "integer"
                 },
                 "resp_code": {
                     "description": "响应码,业务层级",
@@ -276,31 +541,19 @@ const docTemplate = `{
         "model.ChatRequest": {
             "type": "object",
             "properties": {
-                "agent_id": {
-                    "description": "AgentID,如果为空,则采用系统默认的",
-                    "type": "string"
-                },
-                "chat_channel": {
-                    "description": "聊天的频道,1=WEB,2,FEISHU 等",
+                "genAt": {
+                    "description": "消息的发送时间",
                     "type": "integer"
                 },
-                "chat_type": {
-                    "description": "聊天类型，0/1:私聊/群聊",
-                    "type": "integer"
-                },
-                "request_msg": {
+                "requestMsg": {
                     "description": "聊天的内容",
                     "type": "string"
                 },
-                "sender_id": {
+                "senderId": {
                     "description": "发送者,如果为空,则采用系统默认的",
                     "type": "string"
                 },
-                "sender_name": {
-                    "description": "发送者名称,如果为空,则采用系统默认的",
-                    "type": "string"
-                },
-                "session_id": {
+                "sessionId": {
                     "description": "表示会话的session，在一个会话中的就属于同一个session",
                     "type": "string"
                 }
@@ -309,29 +562,24 @@ const docTemplate = `{
         "model.ChatResponse": {
             "type": "object",
             "properties": {
-                "agent_id": {
-                    "description": "AgentID,如果为空,则采用系统默认的",
-                    "type": "string"
-                },
-                "chat_channel": {
+                "chatChannel": {
                     "description": "聊天的频道,1=WEB,2,FEISHU 等",
                     "type": "integer"
                 },
-                "chat_id": {
-                    "description": "聊天的ID,用于标识一次聊天的唯一性",
-                    "type": "string"
+                "chatId": {
+                    "description": "本次聊天的消息ID,用于标识本次聊天的位置",
+                    "type": "integer"
                 },
-                "chat_type": {
+                "chatType": {
                     "description": "聊天类型，0/1:私聊/群聊",
                     "type": "integer"
                 },
-                "sender_id": {
+                "senderId": {
                     "description": "发送者,如果为空,则采用系统默认的",
                     "type": "string"
                 },
-                "start_msg_id": {
-                    "description": "本次聊天的起始消息ID,用于标识本次聊天的起始位置",
-                    "type": "integer"
+                "sessionId": {
+                    "type": "string"
                 }
             }
         },
@@ -340,9 +588,6 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/model.ChatResponse"
-                },
-                "req_at_timestamp": {
-                    "type": "integer"
                 },
                 "req_id": {
                     "type": "string"
@@ -353,6 +598,55 @@ const docTemplate = `{
                 },
                 "req_path": {
                     "type": "string"
+                },
+                "req_timestamp": {
+                    "type": "integer"
+                },
+                "resp_code": {
+                    "description": "响应码,业务层级",
+                    "type": "integer"
+                },
+                "resp_msg": {
+                    "description": "响应的消息",
+                    "type": "string"
+                },
+                "resp_timestamp": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.ChatsRequest": {
+            "type": "object",
+            "properties": {
+                "chatIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "senderId": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.ChatsResponseEx": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/model.ChatsRequest"
+                },
+                "req_id": {
+                    "type": "string"
+                },
+                "req_method": {
+                    "description": "用户请求的方法",
+                    "type": "string"
+                },
+                "req_path": {
+                    "type": "string"
+                },
+                "req_timestamp": {
+                    "type": "integer"
                 },
                 "resp_code": {
                     "description": "响应码,业务层级",
@@ -381,11 +675,14 @@ const docTemplate = `{
         "model.LoginResponse": {
             "type": "object",
             "properties": {
-                "expired_length": {
+                "displayName": {
+                    "type": "string"
+                },
+                "expiredLength": {
                     "description": "token失效时长,unit = second",
                     "type": "integer"
                 },
-                "gen_at": {
+                "genAt": {
                     "description": "token产生的时间",
                     "type": "integer"
                 },
@@ -393,7 +690,7 @@ const docTemplate = `{
                     "description": "用户登录成功后得到的token",
                     "type": "string"
                 },
-                "username": {
+                "userName": {
                     "type": "string"
                 }
             }
@@ -404,8 +701,95 @@ const docTemplate = `{
                 "data": {
                     "$ref": "#/definitions/model.LoginResponse"
                 },
-                "req_at_timestamp": {
+                "req_id": {
+                    "type": "string"
+                },
+                "req_method": {
+                    "description": "用户请求的方法",
+                    "type": "string"
+                },
+                "req_path": {
+                    "type": "string"
+                },
+                "req_timestamp": {
                     "type": "integer"
+                },
+                "resp_code": {
+                    "description": "响应码,业务层级",
+                    "type": "integer"
+                },
+                "resp_msg": {
+                    "description": "响应的消息",
+                    "type": "string"
+                },
+                "resp_timestamp": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.SessionRequest": {
+            "type": "object",
+            "properties": {
+                "agentId": {
+                    "description": "session对应的调用目标Agent",
+                    "type": "string"
+                },
+                "chatChannel": {
+                    "description": "聊天渠道",
+                    "type": "integer"
+                },
+                "chatType": {
+                    "description": "聊天类型",
+                    "type": "integer"
+                },
+                "senderId": {
+                    "description": "发起新会话的userName",
+                    "type": "string"
+                },
+                "sessionId": {
+                    "description": "标识会话session",
+                    "type": "string"
+                },
+                "sessionName": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.SessionResponse": {
+            "type": "object",
+            "properties": {
+                "chatChannel": {
+                    "type": "integer"
+                },
+                "chatType": {
+                    "type": "integer"
+                },
+                "genAt": {
+                    "description": "session创建的时间",
+                    "type": "integer"
+                },
+                "senderId": {
+                    "description": "发起新会话的userName",
+                    "type": "string"
+                },
+                "sessionData": {
+                    "description": "用来存放session所有交互历史的文件名,格式为JSON",
+                    "type": "string"
+                },
+                "sessionId": {
+                    "type": "string"
+                },
+                "sessionName": {
+                    "description": "session name",
+                    "type": "string"
+                }
+            }
+        },
+        "model.SessionResponseEx": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/model.SessionResponse"
                 },
                 "req_id": {
                     "type": "string"
@@ -416,6 +800,64 @@ const docTemplate = `{
                 },
                 "req_path": {
                     "type": "string"
+                },
+                "req_timestamp": {
+                    "type": "integer"
+                },
+                "resp_code": {
+                    "description": "响应码,业务层级",
+                    "type": "integer"
+                },
+                "resp_msg": {
+                    "description": "响应的消息",
+                    "type": "string"
+                },
+                "resp_timestamp": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.SessionsRequest": {
+            "type": "object",
+            "properties": {
+                "endTime": {
+                    "type": "integer"
+                },
+                "senderId": {
+                    "description": "userName",
+                    "type": "string"
+                },
+                "startTime": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.SessionsResponse": {
+            "type": "object",
+            "properties": {
+                "senderId": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.SessionsResponseEx": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/model.SessionsResponse"
+                },
+                "req_id": {
+                    "type": "string"
+                },
+                "req_method": {
+                    "description": "用户请求的方法",
+                    "type": "string"
+                },
+                "req_path": {
+                    "type": "string"
+                },
+                "req_timestamp": {
+                    "type": "integer"
                 },
                 "resp_code": {
                     "description": "响应码,业务层级",

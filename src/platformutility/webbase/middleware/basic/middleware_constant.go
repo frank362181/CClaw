@@ -26,9 +26,7 @@ const ConstClientServerGap int64 = 5 * 60 //服务端与请求端最大的时间
 
 const ConstRequestTotal string = "RequestTotal"
 
-const ConstHeaderRequestID string = "X-REQUEST-ID"
 const ConstHeaderToken string = "AUTHORIZATION"
-const ConstHeaderTimestamp = "TIMESTAMP"
 
 const ConstQueryNonce string = "NONCE"
 const ConstSignature string = "SIGNATURE"
@@ -45,10 +43,9 @@ const (
 	ConstBlackUrl
 	ConstBlackIp
 	ConstNonceInvalid
-	ConstHeaderSignatureUnexists
-	ConstHeaderSignatureUnMatch
-	ConstHeaderTimestampUnexists
-	ConstHeaderTimestampUnMatch
+	ConstSignatureUnexists
+	ConstSignatureUnMatch
+	ConstTimeGapOverflow
 	ConstInternalServerError
 
 	ConstSSLError
@@ -59,14 +56,13 @@ const (
 const (
 	ConstSuccess = "success"
 
-	ConstSchemaUnsupportedMsg       = "schema unsupported"
-	ConstUrlInvalidMsg              = "invalid url"
-	ConstBlackUrlMsg                = "url hit black list"
-	ConstBlackIpMsg                 = "IP hit black list"
-	ConstNonceInvalidMsg            = "Nonce invalid"
-	ConstHeaderSignatureUnexistsMsg = "header signature unexists"
-	ConstHeaderSignatureUnMatchMsg  = "signature unmatched"
-	ConstHeaderTimestampUnexistsMsg = "header timestamp unexists"
-	ConstHeaderTimestampUnMatchMsg  = "timestamp unmatched"
-	ConstInternalServerErrorMsg     = "internal server error"
+	ConstSchemaUnsupportedMsg   = "schema unsupported"
+	ConstUrlInvalidMsg          = "invalid url"
+	ConstBlackUrlMsg            = "url hit black list"
+	ConstBlackIpMsg             = "IP hit black list"
+	ConstNonceInvalidMsg        = "Nonce invalid"
+	ConstSignatureUnexistsMsg   = "header signature unexists"
+	ConstSignatureUnMatchMsg    = "signature unmatched"
+	ConstTimeGapOverflowMsg     = "time gap overflow"
+	ConstInternalServerErrorMsg = "internal server error"
 )

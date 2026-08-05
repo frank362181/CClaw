@@ -57,6 +57,10 @@ export function getInitials(name) {
     return name.charAt(0).toUpperCase();
 }
 
+export function getRandomNonce() {
+    return String(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER) + 1);
+} 
+
 /** 随机延迟 (用于流式模拟) */
 export function randomDelay(min = 15, max = 45) {
     return Math.floor(Math.random() * (max - min + 1)) + min;

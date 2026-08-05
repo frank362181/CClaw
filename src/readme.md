@@ -50,7 +50,7 @@
 - 基于sql.DB, gorm.DB进行数据库操作，实现分离
 - 设置当前工作目录为 -- D:/MyIdea/CClaw/src
 - 重新生成swagger文档
-  - cd D:/MyIdea/CClaw/src/wui
+  - cd D:/MyIdea/CClaw/src/agentService
   - swag fmt ## 清空缓存
   - swag init -d .,./../platformutility,./../cclawservice --parseInternal --parseDependency --parseDependency ## 生成swagger文档
 
