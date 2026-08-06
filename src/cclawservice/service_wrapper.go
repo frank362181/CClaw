@@ -73,7 +73,17 @@ func InitApp(configFileName string) bool {
 
 func SetupGlobalFilter() {
 	// 1. set up the global filter which customized
+	originsStr, _ := configHelper.GetStringValueDefault("security", "allowedOrigins", "")
+	var origins []string
+	if len(originsStr) > 0 {
+		splits := strings.Split(originsStr, ",")
+		for _, o := range splits {
+			origins = append(origins, strings.TrimSpace(o))
+		}
+	}
 	corsFilter := filter.GetCorsFilter()
+	corsFilter.SetupAllowedOrigins2(origins)
+
 	loggingFilter := filter.GetLoggingFilter()
 	reqPreprocessFilter := filter.GetRequestPreprocessFilter()
 	addressFilter := filter.GetAddressFilter()
@@ -81,12 +91,20 @@ func SetupGlobalFilter() {
 	urls := strings.Split(tempStr, ",")
 	addressFilter.SetupAllowedUrls(urls) // set allowed URLs
 
-	securityFilter := filter.GetSecurityFilter(memoryDb)
+	trafficFilter := filter.GetTrafficFilter(memoryDb) // traffic controller
+
+	// set security filter
+	signKey, _ := configHelper.GetStringValueDefault("security", "signKey", "")
+	if len(strings.TrimSpace(signKey)) == 0 {
+		logging.LogErrorf("[Security] signKey is empty,refuse to start.")
+		return
+	}
+	securityFilter := filter.GetSecurityFilter(memoryDb, signKey)
 	tempStr, _ = configHelper.GetStringValueDefault("security", "deSecurityUrl", "")
 	urls = strings.Split(tempStr, ",")
 	securityFilter.SetupSecurityFilter(urls) //set security URLS
 
-	SetupFilter(corsFilter, loggingFilter, reqPreprocessFilter, addressFilter, securityFilter)
+	SetupFilter(corsFilter, loggingFilter, reqPreprocessFilter, addressFilter, trafficFilter, securityFilter)
 }
 
 func SetupFilter(filters ...basic.IFilter) {
@@ -207,11 +225,14 @@ func setDefaultFilter() bool {
 		return false
 	}
 
-	// setup the swagger
-	err = baseRouter.SetupController(webbase.HttpMethodGet, "/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-	if err != nil {
-		logging.LogErrorf(err.Error())
-		return false
+	// setup the swagger,根据配置来设置
+	swaggerEnabled, _ := configHelper.GetBoolValueDefault("server", "enableSwagger", false)
+	if swaggerEnabled {
+		err = baseRouter.SetupController(webbase.HttpMethodGet, "/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+		if err != nil {
+			logging.LogErrorf(err.Error())
+			return false
+		}
 	}
 
 	return true

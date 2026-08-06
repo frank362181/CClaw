@@ -10,6 +10,7 @@ import (
 
 type RequestInfo struct {
 	RequestId     string
+	RemoteAddr    string
 	RemoteIp      string
 	RequestURL    string
 	RequestMethod string

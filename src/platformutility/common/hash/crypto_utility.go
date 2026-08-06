@@ -8,12 +8,14 @@ package hash
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/hmac"
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -49,6 +51,23 @@ func SHA256Multi(texts ...string) (string, error) {
 	stringStrings := strings.Join(texts, "")
 	h := sha256.Sum256([]byte(stringStrings))
 	return base64.StdEncoding.EncodeToString(h[:]), nil
+}
+
+// GenerateRandomString 生成完全随机的字符串
+func GenerateRandomString() (string, error) {
+	b := make([]byte, 32) // 32Bytes = 256 bit
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// HmacSha256 HmacSha256 计算摘要
+func HmacSha256(key, data string) string {
+	h := hmac.New(sha256.New, []byte(key))
+	h.Write([]byte(data))
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // GenerateSSLCertFile ===== 这个函数是用来专门生成一个SSL所需的文件

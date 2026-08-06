@@ -13,7 +13,6 @@ import (
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
-	platformcommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/exception"
 
 	"my.favorite/platformutility/common/hash"
@@ -38,7 +37,13 @@ func (service *UserService) Login(username, password string) (*dataobject.TAccou
 		return nil, err
 	}
 
-	user.Token, _ = hash.SHA256(user.LoginName + user.LoginPass + platformcommon.GetDatetimeUtilityInstance().GetCurrentDatetime().DatetimeStr) //根据username + password + 当前日期
+	//使用服务端产生 256 bit的随机token
+	token, err1 := hash.GenerateRandomString()
+	if err1 != nil {
+		return nil, err1
+	}
+
+	user.Token = token
 	return service.saveSession(user)
 }
 
@@ -100,7 +105,7 @@ func (service *UserService) saveSession(user *dataobject.TAccount) (*dataobject.
 	if service.memoryDb != nil {
 		// 1. key = loginName,值为token
 		userTokenKey := selfCommon.UserTokenKeyPrefix + user.LoginName
-		err := service.memoryDb.Set(userTokenKey, user.Token, 0)
+		err := service.memoryDb.Set(userTokenKey, user.Token, time.Duration(selfCommon.MemoryTokenExpireTime)*time.Second)
 		if err != nil {
 			return nil, err
 		}

@@ -4,7 +4,21 @@
 
 package basic
 
-// ================= 请求判断所需的常量
+// ================= web service级通用常量===========================
+
+const (
+	TrafficFilterTimeGap = 2 * 60 //流量控制的时间间隔
+)
+
+const (
+	IPTrafficKeyPrefix = "ip_traffic_"
+	IPAPITrafficPrefix = "ip_api_traffic_"
+)
+
+const (
+	IPTrafficFilterLimits    = 1000 // 同一个 IP 指定时间范围内 1000次
+	IPAPITrafficFilterLimits = 50   // 同一个用户同一个API指定时间内 50次
+)
 
 const (
 	APIGroupCommon  = "common" //不需要interceptor过滤的control
@@ -14,9 +28,10 @@ const (
 const (
 	FilterOrderRecovery = iota + 1 //最外层的Filter
 	FilterOrderCors
-	FilterOrderLogging  // 日志filter
-	FilterOrderReqPre   //预处理
-	FilterOrderAddress  //地址处理
+	FilterOrderLogging // 日志filter
+	FilterOrderReqPre  //预处理
+	FilterOrderAddress //地址处理
+	FilterOrderTraffic
 	FilterOrderSecurity //安全处理
 )
 
@@ -47,8 +62,11 @@ const (
 	ConstSignatureUnMatch
 	ConstTimeGapOverflow
 	ConstInternalServerError
+	ConstTrafficOverflow
 
 	ConstSSLError
+
+	ConstRequestBodyTooLarge
 
 	ConstErrorMax //以上定义的是内部的常量,外部常量从这个开始
 )
@@ -65,4 +83,6 @@ const (
 	ConstSignatureUnMatchMsg    = "signature unmatched"
 	ConstTimeGapOverflowMsg     = "time gap overflow"
 	ConstInternalServerErrorMsg = "internal server error"
+	ConstTrafficOverflowMsg     = "traffic overflow"
+	ConstRequestBodyTooLargeMsg = "request body too large"
 )

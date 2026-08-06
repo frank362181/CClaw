@@ -31,4 +31,6 @@ type DBConfig struct {
 	RetryBaseDelay float32
 	RetryMaxDelay  float32
 	RetryJitter    float32
+
+	LogLevel string //数据库的日志级别,silent/error/warn/info,默认是warn级别
 }

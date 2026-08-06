@@ -30,8 +30,8 @@ const (
 )
 
 const (
-	MemoryTokenExpireTime  = 1800 //内存数据库中数据的默认过期时间,单位为秒
-	MemoryNonceExpiredTime = 120  //Nonce过期时间为 2 分钟
+	MemoryTokenExpireTime  = 30 * 60 //内存数据库中数据的默认过期时间,单位为秒
+	MemoryNonceExpiredTime = 2 * 60  //Nonce过期时间为 2 分钟
 )
 
 const (

@@ -1,5 +1,5 @@
 import { randomDelay,getRandomNonce } from '../utils/helper.js';
-import { md5 } from '../utils/md5.js';
+import {HmacSHA256Hex} from '../utils/hasher.js'
 import { CONFIG } from './config.js';
 import { http } from './http.js';
 
@@ -102,8 +102,8 @@ export const API = {
             // TIMESTAMP = 当前秒数；NONCE = 随机数值
             const TIMESTAMP = String(Math.floor(Date.now() / 1000));
             const NONCE = getRandomNonce();
-            // SIGNATURE = MD5(请求body字符串 + TIMESTAMP + NONCE)
-            const SIGNATURE = md5(JSON.stringify(body) + TIMESTAMP + NONCE);
+            // SIGNATURE = HmacSHA256Hex(请求body字符串 + TIMESTAMP + NONCE)
+            const SIGNATURE = await HmacSHA256Hex(CONFIG.SIGN_KEY, JSON.stringify(body) + TIMESTAMP + NONCE);
 
             const json = await http.post('/login', body, {
                 params: { TIMESTAMP, NONCE, SIGNATURE },

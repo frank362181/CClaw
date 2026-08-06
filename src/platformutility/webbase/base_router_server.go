@@ -74,6 +74,7 @@ func (router *BaseRouter) SetupServer(configHelper *config.ConfigurationHelper) 
 	// 1. get server config and set them for https
 	serverPort, _ := configHelper.GetStringValue("server", "port")
 	readTimeout, _ := configHelper.GetIntValue("server", "readTimeout")
+	readHeaderTimeout, _ := configHelper.GetIntValue("server", "readHeaderTimeout")
 	writeTimeout, _ := configHelper.GetIntValue("server", "writeTimeout")
 	idleTimeout, _ := configHelper.GetIntValue("server", "idleTimeout")
 	maxHeaderBytes, _ := configHelper.GetIntValue("server", "maxHeaderBytes")
@@ -85,13 +86,31 @@ func (router *BaseRouter) SetupServer(configHelper *config.ConfigurationHelper) 
 	router.certFile = certFile //设置SSL所需的配置文件
 	router.keyFile = keyFile
 
+	// 设置可信代理,将来将Nginx/HAProxy等地址填入配置文件即可
+	trustedProxies, _ := configHelper.GetStringValueDefault("server", "trustedproxies", "")
+	trustedProxies = strings.TrimSpace(trustedProxies)
+	if len(trustedProxies) == 0 {
+		_ = router.GinEngine.SetTrustedProxies(nil)
+	} else {
+		proxies := strings.Split(trustedProxies, ",")
+		cleaned := make([]string, 0, len(proxies))
+		for _, proxy := range proxies {
+			cleaned = append(cleaned, strings.TrimSpace(proxy))
+		}
+
+		if err := router.GinEngine.SetTrustedProxies(cleaned); err != nil {
+			logging.LogErrorf(err.Error())
+		}
+	}
+
 	router.Server = &http.Server{
-		Addr:           ":" + serverPort, // port for listening
-		Handler:        router.GinEngine,
-		ReadTimeout:    time.Duration(readTimeout) * time.Second,
-		WriteTimeout:   time.Duration(writeTimeout) * time.Second,
-		IdleTimeout:    time.Duration(idleTimeout) * time.Second,
-		MaxHeaderBytes: maxHeaderBytes,
+		Addr:              ":" + serverPort, // port for listening
+		Handler:           router.GinEngine,
+		ReadTimeout:       time.Duration(readTimeout) * time.Second,
+		ReadHeaderTimeout: time.Duration(readHeaderTimeout) * time.Second,
+		WriteTimeout:      time.Duration(writeTimeout) * time.Second,
+		IdleTimeout:       time.Duration(idleTimeout) * time.Second,
+		MaxHeaderBytes:    maxHeaderBytes,
 	}
 
 	return nil

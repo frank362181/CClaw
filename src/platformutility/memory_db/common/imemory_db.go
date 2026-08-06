@@ -12,6 +12,7 @@ type IMemoryDB interface {
 
 	Set(key string, value interface{}, expiration time.Duration) error
 	Get(key string) (string, error)
+	GetIntWithDefault(key string, defValue int) (int, error)
 	Delete(keys ...string) (int64, error)
 
 	CloseMemoryDb() error

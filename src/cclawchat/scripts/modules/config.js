@@ -15,6 +15,9 @@ export const CONFIG = {
     API_BASE: ENV.API_BASE_URL,
     TIMEOUT: ENV.REQUEST_TIMEOUT,
 
+    // 签名密钥（HMAC-SHA256，须与后端 signKey 一致；纯浏览器下非保密，仅防随意篡改）
+    SIGN_KEY: '123456',
+
     // 存储键名
     STORAGE_KEY_PREFIX: 'cclaw_chat_data:',
     USER_KEY: 'cclaw_chat_session',

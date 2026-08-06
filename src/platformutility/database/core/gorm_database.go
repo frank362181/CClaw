@@ -6,9 +6,9 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 	"gorm.io/gorm/schema"
 	"my.favorite/platformutility/config"
+	"my.favorite/platformutility/database/dblogging"
 	"my.favorite/platformutility/exception"
 )
 
@@ -99,7 +99,7 @@ func (g *GormDatabase) openGormDatabase() error {
 		NamingStrategy: schema.NamingStrategy{
 			SingularTable: true, //禁止标明复数化
 		},
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: dblogging.GetDbLogger(g.GetPool().GetDbConfig().LogLevel), //logger.Default.LogMode(logger.Info),
 	})
 	if err != nil {
 		return exception.DatabaseErrorEx(err.Error())

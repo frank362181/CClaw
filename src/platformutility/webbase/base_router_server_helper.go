@@ -23,6 +23,9 @@ var baseRouter = common.GetSingleton(func() *BaseRouter {
 		certFile:             "",
 		keyFile:              "",
 	}
+
+	_ = router.GinEngine.SetTrustedProxies(nil) //默认不信任任何代理
+
 	return router
 }).Instance()
 

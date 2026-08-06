@@ -3,6 +3,7 @@ package basic
 import (
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -31,23 +32,41 @@ func GetFullUrl(c *gin.Context) string {
 }
 
 // 命中这些url pattern直接放行
-var allowedUrlPatterns = [...]string{
-	"/heartbeat",
-	"/v2/api-docs.*",
-	"/doc.html",
-	"/index.html",
-	"/manifest.json",
-	"/robots.txt",
-	"/swagger-resources/.*",
-	"/configuration/security",
-	"/service-worker.js",
-	"/favicon.ico",
-	"/swagger-resources",
-	"/precache-manifest.eea302037a9c2783bdf341d6c2dd2ca2.js",
-	"/swagger-ui.html/.*",
-	"/swagger/index.html",
-	"/webjars/.*",
-	"/file/.*", // 文件访问过滤
+//var allowedUrlPatterns = [...]string{
+//	"/heartbeat",
+//	"/v2/api-docs.*",
+//	"/doc.html",
+//	"/index.html",
+//	"/manifest.json",
+//	"/robots.txt",
+//	"/swagger-resources/.*",
+//	"/configuration/security",
+//	"/service-worker.js",
+//	"/favicon.ico",
+//	"/swagger-resources",
+//	"/precache-manifest.eea302037a9c2783bdf341d6c2dd2ca2.js",
+//	"/swagger-ui.html/.*",
+//	"/swagger/index.html",
+//	"/webjars/.*",
+//	"/file/.*", // 文件访问过滤
+//}
+
+var allowedUrlPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`^/api/heartbeat$`),
+	regexp.MustCompile(`^/v2/api-docs(?:/.*)?$`),
+	regexp.MustCompile(`^/doc\.html$`),
+	regexp.MustCompile(`^/index\.html$`),
+	regexp.MustCompile(`^/manifest\.json$`),
+	regexp.MustCompile(`^/robots\.txt$`),
+	regexp.MustCompile(`^/swagger(?:/.*)?$`), // swagger UI 及静态资源
+	regexp.MustCompile(`^/swagger-resources(?:/.*)?$`),
+	regexp.MustCompile(`^/configuration/security$`),
+	regexp.MustCompile(`^/service-worker\.js$`),
+	regexp.MustCompile(`^/favicon\.ico$`),
+	regexp.MustCompile(`^/precache-manifest\..*\.js$`),
+	regexp.MustCompile(`^/swagger-ui\.html(?:/.*)?$`),
+	regexp.MustCompile(`^/webjars/.*$`),
+	regexp.MustCompile(`^/file/.*$`),
 }
 
 func IsGlobalAllowed(requestUrl string, relativeUrl string, method string) bool {
@@ -71,12 +90,12 @@ func IsGlobalAllowed(requestUrl string, relativeUrl string, method string) bool 
 		return true
 	}
 
-	//// 模式匹配,放行
-	//for _, pattern := range allowedUrlPatterns {
-	//	if strings.EqualFold(relativeUrl, pattern) {
-	//		return true
-	//	}
-	//}
+	// 模式匹配,放行
+	for _, pattern := range allowedUrlPatterns {
+		if pattern.MatchString(relativeUrl) {
+			return true
+		}
+	}
 
 	return false
 }

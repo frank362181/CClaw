@@ -35,7 +35,7 @@ func GenerationLoginResponse(user *dataobject.TAccount) *LoginResponse {
 		DisplayName:   user.DisplayName,
 		Token:         user.Token,
 		GenAt:         common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,
-		ExpiredLength: common2.MemoryTokenExpireTime * 60, //default expired length, 1800 seconds
+		ExpiredLength: common2.MemoryTokenExpireTime, //default expired length, 1800 seconds
 	}
 
 	return loginResponse

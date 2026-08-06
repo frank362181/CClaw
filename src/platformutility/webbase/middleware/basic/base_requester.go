@@ -27,6 +27,7 @@ func (req *GlobalRequester) getRequestInfo(c *gin.Context) *RequestInfo {
 	if !exists {
 		requestInfo := &RequestInfo{
 			RequestId:     common.GenerateUUID(),
+			RemoteAddr:    c.Request.RemoteAddr,
 			RemoteIp:      c.ClientIP(),
 			RequestURL:    GetFullUrl(c),
 			RequestMethod: c.Request.Method,

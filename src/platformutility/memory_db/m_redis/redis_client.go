@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
 	"sync"
 	"time"
 
@@ -122,6 +123,20 @@ func (rdb *RedisClient) Get(key string) (string, error) {
 	})
 
 	return result, err
+}
+
+func (rdb *RedisClient) GetIntWithDefault(key string, defValue int) (int, error) {
+	str, err := rdb.Get(key)
+	if err != nil {
+		return defValue, err
+	}
+
+	var result int
+	if result, err = strconv.Atoi(str); err == nil {
+		return result, nil
+	}
+
+	return defValue, err
 }
 
 func (rdb *RedisClient) Delete(keys ...string) (int64, error) {

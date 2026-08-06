@@ -6,12 +6,12 @@ package filter
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/gin-gonic/gin"
 	common3 "my.favorite/cclawservice/common"
@@ -27,6 +27,8 @@ type SecurityFilter struct {
 
 	deSecurity []string //不需要做安全检查的URL
 	memoryDb   common2.IMemoryDB
+
+	signKey string //signature 服务端密钥
 }
 
 func (sf *SecurityFilter) SetupSecurityFilter(urls []string) {
@@ -39,7 +41,7 @@ func (sf *SecurityFilter) DoFilter() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestInfo := basic.GetBaseRequester().GetOrCreateRequestInfo(c)
 		// whether security checking or not
-		if sf.needSecurity(requestInfo.RequestPath) {
+		if sf.needSecurity(requestInfo) {
 			// 1 replay attach
 			if sf.replayAttackNonce(requestInfo) {
 				basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstNonceInvalid, basic.ConstNonceInvalidMsg, nil)
@@ -53,7 +55,12 @@ func (sf *SecurityFilter) DoFilter() gin.HandlerFunc {
 			}
 
 			// 3. 对内容进行signature判断
-			if sf.antiTampering(requestInfo, c) {
+			ok, err := sf.antiTampering(requestInfo, c)
+			if ok {
+				if _, ok2 := errors.AsType[*http.MaxBytesError](err); ok2 {
+					basic.GetBaseResponser().AbortWithError(c, http.StatusRequestEntityTooLarge, basic.ConstRequestBodyTooLarge, basic.ConstRequestBodyTooLargeMsg, nil)
+					return
+				}
 				basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstSignatureUnMatch, basic.ConstSignatureUnMatchMsg, nil)
 				return
 			}
@@ -66,8 +73,13 @@ func (sf *SecurityFilter) DoFilter() gin.HandlerFunc {
 
 // ================================= private functions & methods ====================================
 
-func (sf *SecurityFilter) needSecurity(url string) bool {
-	url = strings.ToLower(url)
+func (sf *SecurityFilter) needSecurity(r *basic.RequestInfo) bool {
+	// 全局放行（OPTIONS,Swagger/文档类开发端点）不做NONCE/时间戳/签名校验
+	if basic.IsGlobalAllowed(r.RequestURL, r.RequestPath, r.RequestMethod) {
+		return false
+	}
+
+	url := strings.ToLower(r.RequestPath)
 	for _, v := range sf.deSecurity {
 		tempUrl := webbase.BasePath + "/" + v
 		if strings.EqualFold(url, tempUrl) {
@@ -84,7 +96,10 @@ func (sf *SecurityFilter) needSecurity(url string) bool {
  */
 func (sf *SecurityFilter) replayAttackTimestamp(originalTimestamp int64) bool {
 	currentNow := common.GetDatetimeUtilityInstance().GetCurrentDatetime()
-	if currentNow.Timestamp-originalTimestamp > basic.ConstClientServerGap {
+	diff := currentNow.Timestamp - originalTimestamp
+
+	// 双向窗口：过早或未来都拒绝
+	if diff > basic.ConstClientServerGap || diff < -basic.ConstClientServerGap {
 		return true
 	}
 
@@ -114,23 +129,25 @@ func (sf *SecurityFilter) replayAttackNonce(r *basic.RequestInfo) bool {
 	return false
 }
 
-func (sf *SecurityFilter) antiTampering(r *basic.RequestInfo, c *gin.Context) bool {
+func (sf *SecurityFilter) antiTampering(r *basic.RequestInfo, c *gin.Context) (bool, error) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2*1024*1024) //max body size is 2 M
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes)) // 恢复body供后续调用
 
 	if err != nil {
-		return true
+		// 请求体过大错误
+		return true, err
 	}
 
-	bodyString := *(*string)(unsafe.Pointer(&bodyBytes)) //要确保bodyBytes数据不会被修改
+	bodyString := string(bodyBytes) //要确保bodyBytes数据不会被修改
 	tempStr1 := strconv.FormatInt(r.QueryTimestamp, 10)
 	tempStr2 := r.Nonce
 
-	signature := hash.MD5(bodyString + tempStr1 + tempStr2)
+	signature := hash.HmacSha256(sf.signKey, bodyString+tempStr1+tempStr2)
 	if strings.EqualFold(signature, r.Signature) {
 		//此时要放行
-		return false
+		return false, nil
 	}
 
-	return true
+	return true, nil
 }

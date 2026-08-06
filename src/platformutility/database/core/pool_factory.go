@@ -23,6 +23,8 @@ func GetDBPool(config *config.ConfigurationHelper) IBaseDBPool {
 	retryMaxDelay, _ := config.GetFloatValueDefault("database", "retry_max_delay", 60.0)
 	retryJitter, _ := config.GetFloatValueDefault("database", "retry_jitter", 0.1)
 
+	logLevel, _ := config.GetStringValueDefault("database", "log_level", "warn")
+
 	dbConfig := &DBConfig{
 		DBType:         dbType,
 		DBHost:         dbHost,
@@ -43,6 +45,7 @@ func GetDBPool(config *config.ConfigurationHelper) IBaseDBPool {
 		RetryBaseDelay: retryBaseDelay,
 		RetryMaxDelay:  retryMaxDelay,
 		RetryJitter:    retryJitter,
+		LogLevel:       logLevel, //设置日志级别
 	}
 
 	switch dbType {

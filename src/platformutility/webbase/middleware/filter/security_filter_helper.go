@@ -25,7 +25,8 @@ var securityFilter = common.GetSingleton(func() *SecurityFilter {
 	return securityFilter
 }).Instance()
 
-func GetSecurityFilter(db common2.IMemoryDB) *SecurityFilter {
+func GetSecurityFilter(db common2.IMemoryDB, signatureKey string) *SecurityFilter {
+	securityFilter.signKey = signatureKey
 	securityFilter.memoryDb = db //设置内存数据库
 	return securityFilter
 }
