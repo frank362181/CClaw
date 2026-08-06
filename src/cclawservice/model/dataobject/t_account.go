@@ -5,11 +5,11 @@ import "encoding/json"
 // TAccount user for login
 type TAccount struct {
 	LoginName   string `json:"login_name"`
-	LoginPass   string `json:"login_pass"`
+	LoginPass   string `json:"-"`
 	DisplayName string `json:"display_name"`
 	Disabled    bool   `json:"disabled"`
 
-	Token string `json:"token"` //登录成功后返回的token信息
+	Token string `gorm:"-" json:"token,omitempty"` //登录成功后返回的token信息
 }
 
 func (account *TAccount) ToJsonString() string {

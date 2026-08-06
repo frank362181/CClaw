@@ -78,7 +78,7 @@ func (router *BaseRouter) SetupServer(configHelper *config.ConfigurationHelper) 
 	writeTimeout, _ := configHelper.GetIntValue("server", "writeTimeout")
 	idleTimeout, _ := configHelper.GetIntValue("server", "idleTimeout")
 	maxHeaderBytes, _ := configHelper.GetIntValue("server", "maxHeaderBytes")
-	certDir, _ := configHelper.GetStringValueDefault("server", "certdir", "")
+	certDir, _ := configHelper.GetStringValueDefault("server", "certDir", "")
 	certFile, _ := configHelper.GetStringValue("server", "certFile")
 	certFile = filepath.Join(certDir, certFile)
 	keyFile, _ := configHelper.GetStringValue("server", "keyFile")
@@ -87,7 +87,7 @@ func (router *BaseRouter) SetupServer(configHelper *config.ConfigurationHelper) 
 	router.keyFile = keyFile
 
 	// 设置可信代理,将来将Nginx/HAProxy等地址填入配置文件即可
-	trustedProxies, _ := configHelper.GetStringValueDefault("server", "trustedproxies", "")
+	trustedProxies, _ := configHelper.GetStringValueDefault("server", "trustedProxies", "")
 	trustedProxies = strings.TrimSpace(trustedProxies)
 	if len(trustedProxies) == 0 {
 		_ = router.GinEngine.SetTrustedProxies(nil)
@@ -102,6 +102,10 @@ func (router *BaseRouter) SetupServer(configHelper *config.ConfigurationHelper) 
 			logging.LogErrorf(err.Error())
 		}
 	}
+
+	///设置可信代理的转发头
+	trustedForwardedHeaders, _ := configHelper.GetBoolValueDefault("server", "trustedForwardedHeaders", false)
+	basic.GetBaseRequester().SetTrustedForwardedHeaders(trustedForwardedHeaders)
 
 	router.Server = &http.Server{
 		Addr:              ":" + serverPort, // port for listening
@@ -123,7 +127,7 @@ func (router *BaseRouter) Startup(ssl bool) bool {
 	// 3 start the server
 	if ssl {
 		if !common.FileExists(router.certFile) || !common.FileExists(router.keyFile) {
-			logging.LogInfof("[Startup] SSL certificate file %s does not exist")
+			logging.LogInfof("[Startup] SSL certificate file %s or %s does not exist", router.certFile, router.keyFile)
 			return false
 		}
 	}
@@ -142,7 +146,7 @@ func (router *BaseRouter) Startup(ssl bool) bool {
 		}
 	}()
 
-	logging.LogDebugf("server started at ", router.Server.Addr)
+	logging.LogDebugf("server started at:%s", router.Server.Addr)
 	return true
 }
 
@@ -151,7 +155,7 @@ func (router *BaseRouter) Shutdown() error {
 	defer cancel()
 
 	if err := router.Server.Shutdown(ctx); err != nil {
-		logging.LogErrorf("Server force to Shutdown with error: ", err)
+		logging.LogErrorf("Server force to Shutdown with error: %s", err.Error())
 	}
 
 	logging.LogInfof("server shutdown complete")
@@ -194,33 +198,12 @@ func (router *BaseRouter) setupControllerEx_(httpMethod int16, apiGroup string, 
 				g.POST(key, value)
 			}
 		}
-		//iType := *i
-		//switch httpMethod {
-		//case HttpMethodGet:
-		//	switch v := iType.(type) {
-		//	case *controller.HealthController:
-		//		hc := *v
-		//		g.GET(relativeUrl, hc.OK)
-		//	default:
-		//		break
-		//	}
-		//case HttpMethodPost:
-		//	switch v := iType.(type) {
-		//	case *controller.HealthController:
-		//		hc := *v
-		//		g.POST(relativeUrl, hc.OK)
-		//	default:
-		//		break
-		//	}
-		//default:
-		//	break
-		//}
 	}
 
 	return nil
 }
 
-//func setupLoginController_(method string, relativeUrl string, i *controller.IController, intercetors *interceptor.Interceptors) error {
+//func setupLoginController_(method string, relativeUrl string, i *controller.IController, interceptors *interceptor.Interceptors) error {
 //	typeName := (*i).GetType()
 //	if _, ok := baseRouter.RGroup[typeName]; !ok {
 //		r := baseRouter.GinEngine.Group(typeName)

@@ -7,14 +7,22 @@ import (
 	"my.favorite/platformutility/common"
 )
 
-type GlobalRequester struct{}
+type GlobalRequester struct {
+	trustForwarded bool //是否可信代理来的转发头
+}
 
 var globalRequester = common.GetSingleton(func() *GlobalRequester {
-	return &GlobalRequester{}
+	return &GlobalRequester{
+		trustForwarded: false, //默认为false
+	}
 }).Instance()
 
 func GetBaseRequester() *GlobalRequester {
 	return globalRequester
+}
+
+func (req *GlobalRequester) SetTrustedForwardedHeaders(trustedForwardedHeaders bool) {
+	req.trustForwarded = trustedForwardedHeaders
 }
 
 func (req *GlobalRequester) GetOrCreateRequestInfo(c *gin.Context) *RequestInfo {
@@ -29,7 +37,7 @@ func (req *GlobalRequester) getRequestInfo(c *gin.Context) *RequestInfo {
 			RequestId:     common.GenerateUUID(),
 			RemoteAddr:    c.Request.RemoteAddr,
 			RemoteIp:      c.ClientIP(),
-			RequestURL:    GetFullUrl(c),
+			RequestURL:    GetFullUrl(c, req.trustForwarded),
 			RequestMethod: c.Request.Method,
 			RelativeURL:   c.Request.URL.String(),
 			RequestPath:   c.Request.URL.Path,

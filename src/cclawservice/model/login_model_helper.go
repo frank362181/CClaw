@@ -3,9 +3,9 @@ package model
 import (
 	"strings"
 
-	common2 "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/platformutility/common"
+	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
 func GenerationLoginRequest(username string, password string) *LoginRequest {
@@ -35,7 +35,7 @@ func GenerationLoginResponse(user *dataobject.TAccount) *LoginResponse {
 		DisplayName:   user.DisplayName,
 		Token:         user.Token,
 		GenAt:         common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,
-		ExpiredLength: common2.MemoryTokenExpireTime, //default expired length, 1800 seconds
+		ExpiredLength: basic.MemoryTokenExpireTime, //default expired length, 1800 seconds
 	}
 
 	return loginResponse

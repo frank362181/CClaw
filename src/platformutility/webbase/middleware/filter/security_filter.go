@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	common3 "my.favorite/cclawservice/common"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/common/hash"
 	common2 "my.favorite/platformutility/memory_db/common"
@@ -98,7 +97,7 @@ func (sf *SecurityFilter) replayAttackTimestamp(originalTimestamp int64) bool {
 	currentNow := common.GetDatetimeUtilityInstance().GetCurrentDatetime()
 	diff := currentNow.Timestamp - originalTimestamp
 
-	// 双向窗口：过早或未来都拒绝
+	// 对服务端和客户端的时间差进行判断，是否超过 5 分钟（default）,双向窗口
 	if diff > basic.ConstClientServerGap || diff < -basic.ConstClientServerGap {
 		return true
 	}
@@ -115,7 +114,7 @@ func (sf *SecurityFilter) replayAttackNonce(r *basic.RequestInfo) bool {
 
 	if sf.memoryDb != nil {
 		// 2. 内存中是否在 5分钟内已经使用过
-		nonceKey := common3.NonceKeyPrefix + "_" + tempNonce //Nonce在redis中的key
+		nonceKey := basic.NonceKeyPrefix + "_" + tempNonce //Nonce在redis中的key
 		_, err := sf.memoryDb.Get(nonceKey)
 		if err == nil {
 			//过去 2 分钟内使用过
@@ -123,10 +122,12 @@ func (sf *SecurityFilter) replayAttackNonce(r *basic.RequestInfo) bool {
 		}
 
 		// 3. 写入到redis
-		_ = sf.memoryDb.Set(nonceKey, tempNonce, time.Duration(common3.MemoryNonceExpiredTime)*time.Second)
+		_ = sf.memoryDb.Set(nonceKey, tempNonce, time.Duration(basic.MemoryNonceExpiredTime)*time.Second)
+		return false
 	}
 
-	return false
+	// memory db不可用，视为无法验证Nonce->拒绝
+	return true
 }
 
 func (sf *SecurityFilter) antiTampering(r *basic.RequestInfo, c *gin.Context) (bool, error) {

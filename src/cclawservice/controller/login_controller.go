@@ -46,7 +46,12 @@ func (lc *LoginController) Login(c *gin.Context) {
 	}
 
 	user, err1 := us.Login(lq.Username, lq.Password)
-	if user == nil || err1 != nil {
+	if err1 != nil {
+		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, err1.Error())
+		return
+	}
+
+	if user == nil {
 		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorUserNotExist, cclawcommon.ConstErrorUserNotExistMsg, nil)
 		return
 	}

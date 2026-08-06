@@ -9,11 +9,11 @@ package service
 import (
 	"time"
 
-	selfCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/platformutility/exception"
+	"my.favorite/platformutility/webbase/middleware/basic"
 
 	"my.favorite/platformutility/common/hash"
 	memoryDbCommon "my.favorite/platformutility/memory_db/common"
@@ -33,6 +33,11 @@ func (service *UserService) Login(username, password string) (*dataobject.TAccou
 	}
 
 	user, err := service.GetUserByNameAndPassword(username, password)
+	if user == nil {
+		if err == nil {
+			return nil, nil //表示用户不存在
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -69,11 +74,17 @@ func (service *UserService) GetUserByToken(token string) (*dataobject.TAccount, 
 		return nil, myException.TokenInvalidErrEx("token empty")
 	}
 
-	userInfoKey := selfCommon.UserInfoKeyPrefix + token
+	if service.memoryDb == nil {
+		return nil, myException.TokenInvalidErrEx("Session store unavailable.")
+	}
+
+	userInfoKey := basic.UserInfoKeyPrefix + token
 	userJson, err := service.memoryDb.Get(userInfoKey)
 	if err != nil {
 		return nil, err
 	}
+
+	service.deleteSession(token) //将旧的token相关信息给删除了
 
 	var user dataobject.TAccount
 	err = user.FromJsonString(userJson)
@@ -104,15 +115,15 @@ func (service *UserService) saveSession(user *dataobject.TAccount) (*dataobject.
 	// 将用户信息写入到内存
 	if service.memoryDb != nil {
 		// 1. key = loginName,值为token
-		userTokenKey := selfCommon.UserTokenKeyPrefix + user.LoginName
-		err := service.memoryDb.Set(userTokenKey, user.Token, time.Duration(selfCommon.MemoryTokenExpireTime)*time.Second)
+		userTokenKey := basic.UserTokenKeyPrefix + user.LoginName
+		err := service.memoryDb.Set(userTokenKey, user.Token, time.Duration(basic.MemoryTokenExpireTime)*time.Second)
 		if err != nil {
 			return nil, err
 		}
 
 		// key=token,值为user对象
-		userInfoKey := selfCommon.UserInfoKeyPrefix + user.Token
-		err = service.memoryDb.Set(userInfoKey, user.ToJsonString(), time.Duration(selfCommon.MemoryTokenExpireTime)*time.Second)
+		userInfoKey := basic.UserInfoKeyPrefix + user.Token
+		err = service.memoryDb.Set(userInfoKey, user.ToJsonString(), time.Duration(basic.MemoryTokenExpireTime)*time.Second)
 		if err != nil {
 			return nil, err
 		}
@@ -124,7 +135,7 @@ func (service *UserService) saveSession(user *dataobject.TAccount) (*dataobject.
 func (service *UserService) deleteSession(token string) {
 	if service.memoryDb != nil {
 		// 1. 根据token获取用户信息
-		userInfoKey := selfCommon.UserInfoKeyPrefix + token
+		userInfoKey := basic.UserInfoKeyPrefix + token
 		userJson, err := service.memoryDb.Get(userInfoKey)
 		if err != nil {
 			return
@@ -140,7 +151,7 @@ func (service *UserService) deleteSession(token string) {
 		_, _ = service.memoryDb.Delete(userInfoKey)
 
 		// 3. 删除loginName对应的token信息
-		userTokenKey := selfCommon.UserTokenKeyPrefix + user.LoginName
+		userTokenKey := basic.UserTokenKeyPrefix + user.LoginName
 		_, _ = service.memoryDb.Delete(userTokenKey)
 	}
 }

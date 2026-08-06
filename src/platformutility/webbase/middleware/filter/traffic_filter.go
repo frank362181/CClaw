@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"my.favorite/platformutility/logging"
 	"my.favorite/platformutility/memory_db/common"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
@@ -42,6 +43,13 @@ func (filter *TrafficFilter) DoFilter() gin.HandlerFunc {
 
 		// 1. 判断是否需要流量控制
 		if !filter.unTrafficUrl(requestInfo.RemoteIp) {
+			if filter.memoryDb == nil {
+				// redis抖动时开放限流保可用
+				logging.LogWarnf("[Traffic] memory db unavailable,skip traffic limit.")
+				c.Next()
+				return
+			}
+
 			// 控制流量 1 IP维度
 			ipTrafficKey := basic.IPTrafficKeyPrefix + requestInfo.RemoteIp
 			result, _ := filter.memoryDb.GetIntWithDefault(ipTrafficKey, 0)
@@ -67,11 +75,12 @@ func (filter *TrafficFilter) DoFilter() gin.HandlerFunc {
 }
 
 func (filter *TrafficFilter) unTrafficUrl(url string) bool {
-	for _, url := range filter.UnTrafficUrls {
-		if strings.Contains(url, url) {
+	for _, u := range filter.UnTrafficUrls {
+		if strings.EqualFold(u, url) {
+			//不需要限流
 			return true
 		}
 	}
 
-	return false
+	return false //需要限流
 }

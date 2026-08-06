@@ -9,21 +9,24 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func GetFullUrl(c *gin.Context) string {
+func GetFullUrl(c *gin.Context, trustForwarded bool) string {
 	// 1. determine the schema
 	schema := "http"
 	if c.Request.TLS != nil {
 		schema = "https"
 	}
 
-	if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
-		schema = proto
-	}
-
-	// 2. determine the hostname
 	host := c.Request.Host
-	if fwdHost := c.GetHeader("X-Forwarded-Host"); fwdHost != "" {
-		host = fwdHost
+	if trustForwarded {
+		// 仅当请求确实来自可信反向代理时才采用转发头
+		if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
+			schema = proto
+		}
+
+		// 2. determine the hostname
+		if fwdHost := c.GetHeader("X-Forwarded-Host"); fwdHost != "" {
+			host = fwdHost
+		}
 	}
 
 	// 3. concat them

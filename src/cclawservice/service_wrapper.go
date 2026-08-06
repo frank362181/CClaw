@@ -57,6 +57,10 @@ func InitApp(configFileName string) bool {
 	}
 
 	memoryDb = memory_db.CreateMemoryDb(configHelper)
+	if memoryDb == nil {
+		logging.LogErrorf("[Init] memory db init failed")
+		return false
+	}
 
 	appDb = database.GetGormDatabase(configHelper)
 	err = appDb.Open()

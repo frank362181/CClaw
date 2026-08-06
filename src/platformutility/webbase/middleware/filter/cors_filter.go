@@ -15,17 +15,6 @@ type CorsFilter struct {
 	allowedOrigins []string //允许的来源白名单
 }
 
-func (cf *CorsFilter) SetupAllowedOrigins(origins ...string) {
-	if len(origins) == 0 {
-		return //保留默认
-	}
-
-	for _, origin := range origins {
-		cf.allowedOrigins = append(cf.allowedOrigins, origin)
-	}
-	cf.allowedOrigins = origins
-}
-
 func (cf *CorsFilter) SetupAllowedOrigins2(origins []string) {
 	if len(origins) == 0 {
 		return

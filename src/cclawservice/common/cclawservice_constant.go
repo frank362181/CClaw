@@ -8,8 +8,8 @@ import (
 // 定义业务级的错误常量和错误信息
 
 const (
-	ConstErrorNone           = iota
-	ConstErrorLoginParameter = iota + 1 + basic.ConstErrorMax
+	ConstErrorNone = iota + basic.ConstErrorMax + 1000
+	ConstErrorLoginParameter
 	ConstErrorUserNotExist
 	ConstErrorNonToken
 	ConstErrorInvalidToken
@@ -21,17 +21,6 @@ const (
 	ConstErrorUserNotExistMsg   = "用户不存在"
 	ConstErrorNonTokenMsg       = "Token不存在,请登录"
 	ConstErrorInvalidTokenMsg   = "Token无效,请登录"
-)
-
-const (
-	UserTokenKeyPrefix = "token_" //以token为key存放的用户信息
-	UserInfoKeyPrefix  = "user_"  //以user为key存放的用户信息
-	NonceKeyPrefix     = "nonce_" //Nonce Key
-)
-
-const (
-	MemoryTokenExpireTime  = 30 * 60 //内存数据库中数据的默认过期时间,单位为秒
-	MemoryNonceExpiredTime = 2 * 60  //Nonce过期时间为 2 分钟
 )
 
 const (

@@ -37,12 +37,21 @@ const (
 
 const ConstClientServerGap int64 = 5 * 60 //服务端与请求端最大的时间间隔
 
+const (
+	UserTokenKeyPrefix = "token_" //以token为key存放的用户信息
+	UserInfoKeyPrefix  = "user_"  //以user为key存放的用户信息
+	NonceKeyPrefix     = "nonce_" //Nonce Key
+)
+
+const (
+	MemoryTokenExpireTime  = 30 * 60 //内存数据库中数据的默认过期时间,单位为秒
+	MemoryNonceExpiredTime = 2 * 60  //Nonce过期时间为 2 分钟
+)
+
 // 定义http中header,request的属性的常量
 
 const ConstRequestTotal string = "RequestTotal"
-
 const ConstHeaderToken string = "AUTHORIZATION"
-
 const ConstQueryNonce string = "NONCE"
 const ConstSignature string = "SIGNATURE"
 const ConstQueryTimestamp string = "TIMESTAMP"
