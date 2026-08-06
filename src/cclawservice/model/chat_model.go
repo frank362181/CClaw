@@ -24,7 +24,9 @@ type SessionResponse struct {
 
 	GenAt int `json:"genAt"` // session创建的时间
 
-	SessionData string `json:"sessionData"` //用来存放session所有交互历史的文件名,格式为JSON
+	SessionData string `json:"sessionData"` //用来存放session所有交互历史的文件名,内容格式为JSON
+
+	Removed int `json:"removed"` //是否删除的标记
 }
 
 type SessionResponseEx struct {
@@ -41,8 +43,8 @@ type SessionsRequest struct {
 	EndTime   int64 `json:"endTime"`
 }
 type SessionsResponse struct {
-	SenderId string `json:"senderId"`
-	sessions []string
+	SenderId string            `json:"senderId"`
+	sessions []SessionResponse `json:"sessions"`
 }
 
 type SessionsResponseEx struct {
@@ -76,14 +78,14 @@ type ChatResponseEx struct {
 // ChatsRequest =================== 消息管理命令========================
 type ChatsRequest struct {
 	SenderId string   `json:"senderId"`
-	ChatIds  []string `json:"chatIds"`
+	Chats    []string `json:"chats"`
 }
 
 type ChatsResponse struct {
-	SenderId string   `json:"senderId"`
-	ChatIds  []string `json:"chatIds"`
+	SenderId string         `json:"senderId"`
+	Chats    []ChatResponse `json:"chats"`
 }
 type ChatsResponseEx struct {
 	basic.CommonResponse
-	Data ChatsRequest `json:"data"`
+	Data ChatsResponse `json:"data"`
 }

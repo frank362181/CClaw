@@ -79,9 +79,7 @@ func (rdb *RedisClient) IsClosed() bool {
 	return rdb.mClient == nil || rdb.isClosed
 }
 
-/*
-* 函数中expiration表示过期时间,单位为秒,如果expiration为0表示永不过期
- */
+// Set /*
 func (rdb *RedisClient) Set(key string, value interface{}, expiration time.Duration) error {
 	rdb.mu.RLock()
 	client := rdb.mClient

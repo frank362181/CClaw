@@ -26,27 +26,29 @@ const (
 const (
 	UserTokenKeyPrefix = "token_" //以token为key存放的用户信息
 	UserInfoKeyPrefix  = "user_"  //以user为key存放的用户信息
+	NonceKeyPrefix     = "nonce_" //Nonce Key
 )
 
 const (
-	MemoryDefaultExpireTime = 1800 //内存数据库中数据的默认过期时间,单位为秒
+	MemoryTokenExpireTime  = 1800 //内存数据库中数据的默认过期时间,单位为秒
+	MemoryNonceExpiredTime = 120  //Nonce过期时间为 2 分钟
 )
 
 const (
-	RelativeNewChatUrl = "/newchat"
-	NewChatUrl         = webbase.BasePath + RelativeNewChatUrl
+	RelativeCreateSession = "/createSession"
+	CreateSessionUrl      = webbase.BasePath + RelativeCreateSession
 
-	RelativeDeleteChat = "/deletechat"
-	DeleteChatUrl      = webbase.BasePath + RelativeDeleteChat
+	RelativeGetSessions = "/getSessions"
+	GetSessionsUrl      = webbase.BasePath + RelativeGetSessions
 
-	RelativeGetSessionList = "/getsessionlist"
-	GetSessionListUrl      = webbase.BasePath + RelativeGetSessionList
-
-	RelativeGetSession = "/getsession"
-	GetSessionUrl      = webbase.BasePath + RelativeGetSession
+	RelativeDeleteSession = "/deleteSession"
+	DeleteSessionUrl      = webbase.BasePath + RelativeDeleteSession
 
 	RelativeChatUrl = "/chat"
 	ChatUrl         = webbase.BasePath + RelativeChatUrl
+
+	RelativeDeleteChat = "/deleteChat"
+	DeleteChatUrl      = webbase.BasePath + RelativeDeleteChat
 )
 
 // ================ chat type ================

@@ -10,11 +10,14 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/gin-gonic/gin"
+	common3 "my.favorite/cclawservice/common"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/common/hash"
+	common2 "my.favorite/platformutility/memory_db/common"
 	"my.favorite/platformutility/webbase"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
@@ -23,6 +26,7 @@ type SecurityFilter struct {
 	basic.BaseFilter
 
 	deSecurity []string //不需要做安全检查的URL
+	memoryDb   common2.IMemoryDB
 }
 
 func (sf *SecurityFilter) SetupSecurityFilter(urls []string) {
@@ -49,10 +53,10 @@ func (sf *SecurityFilter) DoFilter() gin.HandlerFunc {
 			}
 
 			// 3. 对内容进行signature判断
-			//if sf.antiTampering(requestInfo, c) {
-			//	basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstSignatureUnMatched, basic.ConstSignatureUnMatchMsg)
-			//	return
-			//}
+			if sf.antiTampering(requestInfo, c) {
+				basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstSignatureUnMatch, basic.ConstSignatureUnMatchMsg, nil)
+				return
+			}
 		}
 
 		// 放行
@@ -88,13 +92,24 @@ func (sf *SecurityFilter) replayAttackTimestamp(originalTimestamp int64) bool {
 }
 
 func (sf *SecurityFilter) replayAttackNonce(r *basic.RequestInfo) bool {
-	//判断是否有nonce
+	// 1. 没有nonce为非法
 	tempNonce := strings.TrimSpace(r.Nonce)
 	if len(tempNonce) == 0 {
 		return true
 	}
 
-	//判断过去 5 分钟nonce是否曾经使用过，结合redis
+	if sf.memoryDb != nil {
+		// 2. 内存中是否在 5分钟内已经使用过
+		nonceKey := common3.NonceKeyPrefix + "_" + tempNonce //Nonce在redis中的key
+		_, err := sf.memoryDb.Get(nonceKey)
+		if err == nil {
+			//过去 2 分钟内使用过
+			return true
+		}
+
+		// 3. 写入到redis
+		_ = sf.memoryDb.Set(nonceKey, tempNonce, time.Duration(common3.MemoryNonceExpiredTime)*time.Second)
+	}
 
 	return false
 }

@@ -107,7 +107,7 @@ func (service *UserService) saveSession(user *dataobject.TAccount) (*dataobject.
 
 		// key=token,值为user对象
 		userInfoKey := selfCommon.UserInfoKeyPrefix + user.Token
-		err = service.memoryDb.Set(userInfoKey, user.ToJsonString(), time.Duration(selfCommon.MemoryDefaultExpireTime)*time.Second)
+		err = service.memoryDb.Set(userInfoKey, user.ToJsonString(), time.Duration(selfCommon.MemoryTokenExpireTime)*time.Second)
 		if err != nil {
 			return nil, err
 		}

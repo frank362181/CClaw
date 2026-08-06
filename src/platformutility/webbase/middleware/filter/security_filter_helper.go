@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"my.favorite/platformutility/common"
+	common2 "my.favorite/platformutility/memory_db/common"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
@@ -24,6 +25,7 @@ var securityFilter = common.GetSingleton(func() *SecurityFilter {
 	return securityFilter
 }).Instance()
 
-func GetSecurityFilter() *SecurityFilter {
+func GetSecurityFilter(db common2.IMemoryDB) *SecurityFilter {
+	securityFilter.memoryDb = db //设置内存数据库
 	return securityFilter
 }

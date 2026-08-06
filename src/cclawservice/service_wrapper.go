@@ -81,7 +81,7 @@ func SetupGlobalFilter() {
 	urls := strings.Split(tempStr, ",")
 	addressFilter.SetupAllowedUrls(urls) // set allowed URLs
 
-	securityFilter := filter.GetSecurityFilter()
+	securityFilter := filter.GetSecurityFilter(memoryDb)
 	tempStr, _ = configHelper.GetStringValueDefault("security", "deSecurityUrl", "")
 	urls = strings.Split(tempStr, ",")
 	securityFilter.SetupSecurityFilter(urls) //set security URLS

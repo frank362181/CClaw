@@ -17,9 +17,14 @@ func (g *GormAccessor) GetUserByNameAndPassword(username, userpass string) (*dat
 
 	gormDb := g.db.(*core.GormDatabase)
 	var user dataobject.TAccount
-	err := gormDb.GetDB().First(&user, "login_name = ? and login_pass = ?", username, userpass).Error
+	err := gormDb.GetDB().First(&user, "login_name = ?", username).Error
+	if err == nil {
+		if userpass == user.LoginPass {
+			return &user, nil
+		}
+	}
 
-	return &user, err
+	return nil, err
 }
 
 func (g *GormAccessor) GetUserByAccount(username string) (*dataobject.TAccount, error) {

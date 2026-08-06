@@ -7,6 +7,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"gorm.io/gorm/schema"
 	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/exception"
 )
@@ -95,6 +96,9 @@ func (g *GormDatabase) openGormDatabase() error {
 	}
 
 	gormDb, err := gorm.Open(d, &gorm.Config{
+		NamingStrategy: schema.NamingStrategy{
+			SingularTable: true, //禁止标明复数化
+		},
 		Logger: logger.Default.LogMode(logger.Info),
 	})
 	if err != nil {
