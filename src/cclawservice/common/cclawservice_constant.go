@@ -1,7 +1,6 @@
 package common
 
 import (
-	"my.favorite/platformutility/webbase"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
@@ -9,36 +8,48 @@ import (
 
 const (
 	ConstErrorLoginParameter = iota + basic.ConstErrorMax + 1000 + 1
+	ConstErrorUserNamePasswordUnmatch
 	ConstErrorUserNotExist
 	ConstErrorNonToken
 	ConstErrorInvalidToken
 )
 
 const (
-	ConstErrorLoginParameterMsg = "登录参数错误"
-	ConstErrorUserNotExistMsg   = "用户不存在"
-	ConstErrorNonTokenMsg       = "Token不存在,请登录"
-	ConstErrorInvalidTokenMsg   = "Token无效,请登录"
+	ConstErrorLoginParameterMsg          = "登录参数错误"
+	ConstErrorUserNamePasswordUnmatchMsg = "用户名或密码错误"
+	ConstErrorUserNotExistMsg            = "用户不存在"
+	ConstErrorNonTokenMsg                = "Token不存在,请登录"
+	ConstErrorInvalidTokenMsg            = "Token无效,请登录"
 )
 
 // ContextAuthenticatedUser is the gin.Context key for the server-verified user.
 const ContextAuthenticatedUser = "cclaw.authenticatedUser"
 
 const (
+	BasePath = "/api"
+
+	RelativeHealthUrl = "/heartbeat"
+	RelativeLoginUrl  = "/login"
+	RelativeLogoutUrl = "/logout"
+
+	HealthUrl = BasePath + RelativeHealthUrl
+	LoginUrl  = BasePath + RelativeLoginUrl
+	LogoutUrl = BasePath + RelativeLogoutUrl
+
 	RelativeCreateSession = "/createSession"
-	CreateSessionUrl      = webbase.BasePath + RelativeCreateSession
+	CreateSessionUrl      = BasePath + RelativeCreateSession
 
 	RelativeGetSessions = "/getSessions"
-	GetSessionsUrl      = webbase.BasePath + RelativeGetSessions
+	GetSessionsUrl      = BasePath + RelativeGetSessions
 
 	RelativeDeleteSession = "/deleteSession"
-	DeleteSessionUrl      = webbase.BasePath + RelativeDeleteSession
+	DeleteSessionUrl      = BasePath + RelativeDeleteSession
 
 	RelativeChatUrl = "/chat"
-	ChatUrl         = webbase.BasePath + RelativeChatUrl
+	ChatUrl         = BasePath + RelativeChatUrl
 
 	RelativeDeleteChat = "/deleteChat"
-	DeleteChatUrl      = webbase.BasePath + RelativeDeleteChat
+	DeleteChatUrl      = BasePath + RelativeDeleteChat
 )
 
 // ================ chat type ================

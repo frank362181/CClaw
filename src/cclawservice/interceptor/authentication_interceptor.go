@@ -13,7 +13,6 @@ import (
 	"my.favorite/cclawservice/common"
 	cclawException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
-	"my.favorite/platformutility/webbase"
 	"my.favorite/platformutility/webbase/middleware/basic"
 	"my.favorite/platformutility/webbase/middleware/service"
 )
@@ -105,8 +104,7 @@ func (i *AuthenticationInterceptor) AfterCompletion(c *gin.Context) {
  */
 func (i *AuthenticationInterceptor) unwantedTokenUrl(requestPath string) bool {
 	for _, url := range i.UnWantedTokenUrls {
-		tempStr := webbase.BasePath + "/" + url
-		tempStr = strings.ToLower(tempStr)
+		tempStr := strings.ToLower(url)
 		if strings.EqualFold(tempStr, requestPath) {
 			return true
 		}

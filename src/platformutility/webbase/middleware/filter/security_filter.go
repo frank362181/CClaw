@@ -18,7 +18,6 @@ import (
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/common/hash"
 	common2 "my.favorite/platformutility/memory_db/common"
-	"my.favorite/platformutility/webbase"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
@@ -118,7 +117,7 @@ func (sf *SecurityFilter) needSecurity(r *basic.RequestInfo) bool {
 
 	url := strings.ToLower(r.RequestPath)
 	for _, v := range sf.deSecurity {
-		tempUrl := webbase.BasePath + "/" + v
+		tempUrl := v
 		if strings.EqualFold(url, tempUrl) {
 			//不需要安全检查
 			return false

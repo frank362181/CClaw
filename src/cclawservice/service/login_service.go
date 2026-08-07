@@ -83,10 +83,7 @@ func (service *LoginService) Login(username, password string) (*dataobject.TAcco
 	if err != nil {
 		return nil, err
 	}
-	if user == nil || user.Disabled {
-		return nil, nil // Do not reveal whether an account exists or is disabled.
-	}
-
+	
 	token, err := hash.GenerateRandomString()
 	if err != nil {
 		return nil, err

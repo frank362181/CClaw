@@ -26,35 +26,32 @@ func main() {
 
 	configFileName := GetConfigFileName()
 	mainApp := cclawservice.NewMainApp(configFileName)
-	if !mainApp.Init() {
-		mainApp.Destroy()
+
+	defer mainApp.Destroy()
+
+	if err := mainApp.Init(); err != nil {
 		return
 	}
 
 	// 添加 health controller
-	if !mainApp.SetupHealthController() {
-		mainApp.Destroy()
+	if err := mainApp.SetupHealthController(); err != nil {
 		return
 	}
 
-	if !mainApp.SetupLoggingController() {
-		mainApp.Destroy()
+	if err := mainApp.SetupLoginController(); err != nil {
 		return
 	}
 
 	// 1. setup server
-	if !mainApp.SetupServer() {
-		mainApp.Destroy()
+	if err := mainApp.SetupServer(); err != nil {
 		return
 	}
 
 	// 2. start the server
-	mainApp.Startup()
+	_ = mainApp.Startup()
 
 	// 3. wait the exit signal
 	mainApp.Shutdown()
-
-	mainApp.Destroy()
 
 	//// 结束TUI
 	//tui_engine.GetLogManager().Stop()

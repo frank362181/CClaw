@@ -4,19 +4,6 @@
 
 package webbase
 
-// 定义通用的WEB URL常量
-const (
-	BasePath = "/api" //访问的基础路径
-
-	RelativeHealthUrl = "/heartbeat"
-	RelativeLoginUrl  = "/login"
-	RelativeLogoutUrl = "/logout"
-
-	HealthUrl = BasePath + RelativeHealthUrl
-	LoginUrl  = BasePath + RelativeLoginUrl
-	LogoutUrl = BasePath + RelativeLogoutUrl
-)
-
 const (
 	HttpMethodGet            = 1      // get
 	HttpMethodPost           = 1 << 1 //post

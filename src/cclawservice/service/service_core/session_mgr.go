@@ -11,6 +11,7 @@ import (
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
 	memoryDbCommon "my.favorite/platformutility/memory_db/common"
+	"my.favorite/platformutility/memory_db/m_redis"
 	"my.favorite/platformutility/webbase/middleware/basic"
 
 	"my.favorite/platformutility/common"
@@ -28,6 +29,10 @@ type ISessionManager interface {
 	Revoke(token string) error
 }
 
+type scriptRunner interface {
+	RunScript(script string, keys []string, args ...interface{}) (interface{}, error)
+}
+
 type MemorySessionMgr struct {
 	memoryDB memoryDbCommon.IMemoryDB
 	idleTTL  time.Duration
@@ -39,6 +44,7 @@ type MemorySessionMgr struct {
 	mu sync.Mutex
 }
 
+// 单例模式
 var memorySessionMgr = common.GetSingleton(func() *MemorySessionMgr {
 	return &MemorySessionMgr{
 		memoryDB: nil,
@@ -56,13 +62,21 @@ func GetMemorySessionMgr(memoryDB memoryDbCommon.IMemoryDB) (*MemorySessionMgr, 
 	return memorySessionMgr, nil
 }
 
+func NewMemorySessionMgr(memoryDB memoryDbCommon.IMemoryDB) (*MemorySessionMgr, error) {
+	if memoryDB == nil {
+		return nil, errors.New("session store: memory database is nil")
+	}
+	return &MemorySessionMgr{
+		memoryDB: memoryDB,
+		idleTTL:  time.Duration(basic.MemoryTokenExpireTime) * time.Second,
+		//absoluteLifetime: time.Duration(DefaultAbsoluteSessionLifetime) * time.Second,
+	}, nil
+}
+
 func (store *MemorySessionMgr) CreateOrReplace(token string, loginSession *dataobject.LoginSession) error {
 	if err := store.validateSessionInput(token, loginSession); err != nil {
 		return err
 	}
-
-	store.mu.Lock()
-	defer store.mu.Unlock()
 
 	session := *loginSession
 	now := common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp //time.Now().Unix()
@@ -76,6 +90,22 @@ func (store *MemorySessionMgr) CreateOrReplace(token string, loginSession *datao
 	}
 
 	userKey := store.sessionUserKey(session.LoginName)
+	if runner, ok := store.memoryDB.(scriptRunner); ok {
+		ttlSec := int64(store.sessionTTL(&session) / time.Second)
+		_, err = runner.RunScript(m_redis.LuaCreateOrReplace,
+			[]string{userKey, store.sessionTokenKey(token)},
+			token, value, ttlSec, basic.UserTokenKeyPrefix,
+		)
+		if err != nil {
+			return fmt.Errorf("session store: create session: %w", err)
+		}
+
+		return nil
+	}
+
+	// 非redis,可能不支持redis lua脚本
+	store.mu.Lock()
+	defer store.mu.Unlock()
 	oldToken, getErr := store.memoryDB.Get(userKey)
 	if getErr != nil && !common.IsKeyNotFound(getErr) {
 		return fmt.Errorf("session store: read current token: %w", getErr)
@@ -107,9 +137,21 @@ func (store *MemorySessionMgr) Get(token string) (*dataobject.LoginSession, erro
 		return nil, myException.TokenInvalidErrEx("token empty")
 	}
 
+	if runner, ok := store.memoryDB.(scriptRunner); ok {
+		now := common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
+		res, err := runner.RunScript(m_redis.LuaGet,
+			[]string{store.sessionTokenKey(token)},
+			token, now, basic.UserTokenKeyPrefix)
+		if err != nil {
+			return nil, err
+		}
+
+		return store.parseLuaSessionResult(res)
+	}
+
+	// 非redis，不支持redis lua
 	store.mu.Lock()
 	defer store.mu.Unlock()
-
 	return store.getLocked(token)
 }
 
@@ -118,6 +160,31 @@ func (store *MemorySessionMgr) Refresh(token string, loginSession *dataobject.Lo
 		return err
 	}
 
+	if runner, ok := store.memoryDB.(scriptRunner); ok {
+		now := common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
+		res, err := runner.RunScript(m_redis.LuaRefresh,
+			[]string{store.sessionTokenKey(token)},
+			token, now, int64(store.idleTTL/time.Second), basic.UserTokenKeyPrefix)
+		if err != nil {
+			return err
+		}
+
+		items, ok := res.([]interface{})
+		if !ok || len(items) < 1 {
+			return fmt.Errorf("session store: refresh session: invalid refresh token")
+		}
+
+		switch status, _ := items[0].(int64); status {
+		case 2:
+			return myException.TokenInvalidErrEx("refresh session: token has been replaced")
+		case 3:
+			return myException.TokenInvalidErrEx("session expired")
+		}
+
+		return nil
+	}
+
+	//非redis lua支持
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
@@ -134,7 +201,7 @@ func (store *MemorySessionMgr) Refresh(token string, loginSession *dataobject.Lo
 
 	value, err := session.ToJsonString()
 	if err != nil {
-		return fmt.Errorf("session store: encode refreshed session: %w", err)
+		return myException.TokenInvalidErrEx2("session store: encode refreshed session: %s", err.Error())
 	}
 
 	ttl := store.sessionTTL(&session)
@@ -143,12 +210,12 @@ func (store *MemorySessionMgr) Refresh(token string, loginSession *dataobject.Lo
 	}
 
 	if err := store.memoryDB.Set(store.sessionTokenKey(token), value, ttl); err != nil {
-		return fmt.Errorf("session store: refresh session: %w", err)
+		return myException.TokenInvalidErrEx2("session store: refresh session: %s", err.Error())
 	}
 
 	// getLocked proved this token is current while the process-local lock is held.
 	if err := store.memoryDB.Set(store.sessionUserKey(session.LoginName), token, ttl); err != nil {
-		return fmt.Errorf("session store: refresh current token: %w", err)
+		return myException.TokenInvalidErrEx2("session store: refresh current token: %s", err.Error())
 	}
 
 	return nil
@@ -160,6 +227,18 @@ func (store *MemorySessionMgr) Revoke(token string) error {
 		return nil // Logout is idempotent.
 	}
 
+	if runner, ok := store.memoryDB.(scriptRunner); ok {
+		_, err := runner.RunScript(m_redis.LuaRevoke,
+			[]string{store.sessionTokenKey(token)},
+			token, basic.UserTokenKeyPrefix)
+		if err != nil {
+			return myException.TokenInvalidErrEx2("session store: revoke session: %s", err.Error())
+		}
+
+		return nil
+	}
+
+	// 非redis lua支持
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
@@ -173,12 +252,12 @@ func (store *MemorySessionMgr) getLocked(token string) (*dataobject.LoginSession
 		if common.IsKeyNotFound(err) {
 			return nil, myException.TokenInvalidErrEx("session not found")
 		}
-		return nil, fmt.Errorf("session store: read session: %w", err)
+		return nil, myException.TokenInvalidErrEx2("session store: read session: %s", err.Error())
 	}
 
 	var loginSession dataobject.LoginSession
 	if err := loginSession.FromJsonString(value); err != nil {
-		return nil, fmt.Errorf("session store: decode session: %w", err)
+		return nil, myException.TokenInvalidErrEx2("session store: decode session: %s", err.Error())
 	}
 
 	currentToken, err := store.memoryDB.Get(store.sessionUserKey(loginSession.LoginName))
@@ -246,6 +325,31 @@ func (store *MemorySessionMgr) sessionTTL(loginSession *dataobject.LoginSession)
 	}
 
 	return store.idleTTL
+}
+
+func (store *MemorySessionMgr) parseLuaSessionResult(res interface{}) (*dataobject.LoginSession, error) {
+	items, ok := res.([]interface{})
+	if !ok || len(items) < 2 {
+		return nil, fmt.Errorf("session store: unexpected script result")
+	}
+	status, ok := items[0].(int64)
+	if !ok {
+		return nil, fmt.Errorf("session store: unexpected script status")
+	}
+	value, _ := items[1].(string)
+	switch status {
+	case 0:
+		return nil, myException.TokenInvalidErrEx("session not found")
+	case 2:
+		return nil, myException.TokenInvalidErrEx("token has been replaced")
+	case 3:
+		return nil, myException.TokenInvalidErrEx("session expired")
+	}
+	var loginSession dataobject.LoginSession
+	if err := loginSession.FromJsonString(value); err != nil {
+		return nil, fmt.Errorf("session store: decode session: %w", err)
+	}
+	return &loginSession, nil
 }
 
 func (store *MemorySessionMgr) validateSessionInput(token string, loginSession *dataobject.LoginSession) error {

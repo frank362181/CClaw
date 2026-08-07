@@ -218,6 +218,34 @@ func (rdb *RedisClient) Delete(keys ...string) (int64, error) {
 	return deleted, err
 }
 
+// RunScript 原子执行 Lua 脚本；go-redis 的 NewScript 会自动缓存 SHA，
+// 遇 NOSCRIPT 自动回退 EVAL，兼顾带宽与健壮性。
+func (rdb *RedisClient) RunScript(script string, keys []string, args ...interface{}) (interface{}, error) {
+	rdb.mu.RLock()
+	client := rdb.mClient
+	isClosed := rdb.IsClosed()
+	rdb.mu.RUnlock()
+
+	if isClosed || client == nil {
+		return nil, exception.MemoryDbErrEx("redis client is closed")
+	}
+
+	var result interface{}
+	err := rdb.executeWithRetry(func(client *redis.Client) error {
+		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.WriteTimeout)*time.Second)
+		defer cancel()
+
+		val, err := redis.NewScript(script).Run(ctx, client, keys, args...).Result()
+		if err != nil {
+			return err
+		}
+		result = val
+		return nil
+	})
+
+	return result, err
+}
+
 func (rdb *RedisClient) CloseMemoryDb() error {
 	var closeErr error
 	rdb.closeOnce.Do(func() {

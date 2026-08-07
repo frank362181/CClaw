@@ -55,7 +55,7 @@ func GetFullUrl(c *gin.Context, trustForwarded bool) string {
 //}
 
 var allowedUrlPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`^/api/heartbeat$`),
+	regexp.MustCompile(`^/heartbeat$`),
 	regexp.MustCompile(`^/v2/api-docs(?:/.*)?$`),
 	regexp.MustCompile(`^/doc\.html$`),
 	regexp.MustCompile(`^/index\.html$`),

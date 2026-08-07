@@ -3,6 +3,7 @@ package dataaccessor
 import (
 	"strings"
 
+	exception2 "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/platformutility/database/core"
 	"my.favorite/platformutility/exception"
@@ -18,13 +19,18 @@ func (g *GormAccessor) GetUserByNameAndPassword(username, userpass string) (*dat
 	gormDb := g.db.(*core.GormDatabase)
 	var user dataobject.TAccount
 	err := gormDb.GetDB().First(&user, "login_name = ?", username).Error
+	if err != nil {
+		//找不到用户
+		return nil, exception.UnMatchErrorEx2("username=%s can not find", username)
+	}
+
 	if err == nil {
 		if userpass == user.LoginPass {
 			return &user, nil
 		}
 	}
 
-	return nil, err
+	return nil, exception2.UserPasswordUnmatchEx("username and password do not match")
 }
 
 func (g *GormAccessor) GetUserByAccount(username string) (*dataobject.TAccount, error) {

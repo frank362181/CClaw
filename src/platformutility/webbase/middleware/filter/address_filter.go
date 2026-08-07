@@ -7,7 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"my.favorite/platformutility/common"
-	"my.favorite/platformutility/webbase"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
@@ -107,7 +106,7 @@ func (af *AddressFilter) isAllowedUrl(requestUrl string, relativeUrl string, met
 
 	// 允许的url
 	for _, allowedUrl := range af.AllowedUrls {
-		tempAllowedUrl := webbase.BasePath + "/" + allowedUrl
+		tempAllowedUrl := allowedUrl
 		if strings.EqualFold(relativeUrl, tempAllowedUrl) {
 			return true
 		}
@@ -118,7 +117,7 @@ func (af *AddressFilter) isAllowedUrl(requestUrl string, relativeUrl string, met
 
 func (af *AddressFilter) isBlackHit(relativeUrl string) bool {
 	for _, blackUrl := range af.URLBlackList {
-		tempBlackUrl := webbase.BasePath + "/" + blackUrl
+		tempBlackUrl := blackUrl
 		if strings.EqualFold(relativeUrl, tempBlackUrl) {
 			return true
 		}
