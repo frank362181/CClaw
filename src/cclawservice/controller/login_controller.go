@@ -29,9 +29,9 @@ type LoginController struct {
 //	@Param			body		body		model.LoginRequest	true	"登录用户名和密码"
 //	@Success		200			{object}	model.LoginResponseEx
 //	@Failure		400			{object}	basic.CommonResponse
-//	@Router			/login [post]
+//	@Router			/api/login [post]
 func (lc *LoginController) Login(c *gin.Context) {
-	us := lc.GetService().(*service.UserService)
+	us := lc.GetService().(*service.LoginService)
 	if us == nil {
 		//内部服务器错误
 		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
@@ -57,7 +57,7 @@ func (lc *LoginController) Login(c *gin.Context) {
 	}
 
 	resp := model.GenerationLoginResponse(user)
-	basic.GetBaseResponser().Success(c, http.StatusOK, cclawcommon.ConstErrorNone, cclawcommon.ConstErrorNoneMsg, resp)
+	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, resp)
 }
 
 // Logout (用户登出)
@@ -73,10 +73,11 @@ func (lc *LoginController) Login(c *gin.Context) {
 //	@Param			SIGNATURE		query		string	true	"对请求内容的签名秒数"
 //	@Success		200				{object}	basic.CommonResponse
 //	@Failure		400				{object}	basic.CommonResponse
-//	@Router			/logout [get] [post]
+//	@Router			/api/logout [get]
+//	@Router			/api/logout [post]
 func (lc *LoginController) Logout(c *gin.Context) {
 	token := c.GetHeader(basic.ConstHeaderToken)
-	us := lc.GetService().(*service.UserService)
+	us := lc.GetService().(*service.LoginService)
 	if us == nil {
 		//内部服务器错误
 		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)

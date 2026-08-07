@@ -28,6 +28,24 @@ func (router *BaseRouter) SetupFilter(filters ...basic.IFilter) error {
 	return nil
 }
 
+func (router *BaseRouter) SetupAPIGroupFilter(apiGroup string, filters ...basic.IFilter) error {
+	if len(apiGroup) == 0 || len(filters) == 0 {
+		return exception.ParameterEmptyErrorEx("filters is empty")
+	}
+
+	handlers := make([]gin.HandlerFunc, 0, len(filters))
+	for _, f := range filters {
+		if f == nil {
+			return exception.ParameterEmptyErrorEx("filter is empty")
+		}
+
+		handlers = append(handlers, f.DoFilter())
+	}
+
+	router.APIGroup = router.GinEngine.Group(apiGroup, handlers...)
+	return nil
+}
+
 func (router *BaseRouter) SetupController(httpMethod int16, relativeUrl string, handler gin.HandlerFunc) error {
 	method := GetHttpMethod(httpMethod)
 	if method == -1 {
@@ -178,25 +196,48 @@ func (router *BaseRouter) setupController_(httpMethod int16, relativeUrl string,
 }
 
 func (router *BaseRouter) setupControllerEx_(httpMethod int16, apiGroup string, urlFuncMap map[string]gin.HandlerFunc, inceptors basic.IFilter) error {
-	var tempFilter gin.HandlerFunc = nil
-	if inceptors != nil {
-		tempFilter = inceptors.DoFilter()
-	}
-	r := router.GinEngine.Group(BasePath, tempFilter)
-	if _, ok := router.RGroup[apiGroup]; !ok {
-		router.RGroup[apiGroup] = r
+	//var tempFilter gin.HandlerFunc = nil
+	//if inceptors != nil {
+	//	tempFilter = inceptors.DoFilter()
+	//}
+	//r := router.GinEngine.Group(BasePath, tempFilter)
+	//if _, ok := router.RGroup[apiGroup]; !ok {
+	//	router.RGroup[apiGroup] = r
+	//}
+	//
+	//g := router.RGroup[apiGroup]
+	//{
+	//	for key, value := range urlFuncMap {
+	//		if HttpMethodGet&httpMethod == HttpMethodGet {
+	//			g.GET(key, value)
+	//		}
+	//
+	//		if HttpMethodPost&httpMethod == HttpMethodPost {
+	//			g.POST(key, value)
+	//		}
+	//	}
+	//}
+	//
+	//return nil
+
+	g, ok := router.RGroup[apiGroup]
+	if !ok {
+		if inceptors == nil {
+			g = router.APIGroup.Group("")
+		} else {
+			g = router.APIGroup.Group("", inceptors.DoFilter())
+		}
+
+		router.RGroup[apiGroup] = g
 	}
 
-	g := router.RGroup[apiGroup]
-	{
-		for key, value := range urlFuncMap {
-			if HttpMethodGet&httpMethod == HttpMethodGet {
-				g.GET(key, value)
-			}
+	for relativeUrl, handler := range urlFuncMap {
+		if HttpMethodGet&httpMethod == HttpMethodGet {
+			g.GET(relativeUrl, handler)
+		}
 
-			if HttpMethodPost&httpMethod == HttpMethodPost {
-				g.POST(key, value)
-			}
+		if HttpMethodPost&httpMethod == HttpMethodPost {
+			g.POST(relativeUrl, handler)
 		}
 	}
 

@@ -11,6 +11,7 @@ import (
 
 type BaseRouter struct {
 	GinEngine *gin.Engine
+	APIGroup  *gin.RouterGroup
 	RGroup    map[string]*gin.RouterGroup
 	Server    *http.Server
 
@@ -22,6 +23,8 @@ type BaseRouter struct {
 
 type IBaseRouter interface {
 	SetupFilter(filters ...basic.IFilter) error
+
+	SetupAPIGroupFilter(apiGroup string, filters ...basic.IFilter) error
 
 	SetupController(httpMethod int16, relativeUrl string, handler gin.HandlerFunc) error
 	SetupControllerEx(httpMethod int16, apiGroup string, urlFuncMap map[string]gin.HandlerFunc, interceptors basic.IFilter) error

@@ -15,7 +15,7 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/chat": {
+        "/api/chat": {
             "post": {
                 "description": "新的聊天",
                 "consumes": [
@@ -83,7 +83,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/createSession": {
+        "/api/createSession": {
             "post": {
                 "description": "创建全新的聊天会话",
                 "consumes": [
@@ -151,7 +151,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/deleteChat": {
+        "/api/deleteChat": {
             "post": {
                 "description": "删除聊天",
                 "consumes": [
@@ -219,7 +219,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/deleteSession": {
+        "/api/deleteSession": {
             "post": {
                 "description": "获取会话历史",
                 "consumes": [
@@ -287,7 +287,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/getSessions": {
+        "/api/getSessions": {
             "post": {
                 "description": "获取会话历史列表",
                 "consumes": [
@@ -355,36 +355,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/heartbeat": {
-            "get": {
-                "description": "返回健康检测结果，JSON",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "健康检测"
-                ],
-                "summary": "健康检测函数",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/basic.CommonResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/basic.CommonResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/login": {
+        "/api/login": {
             "post": {
                 "description": "实现用户登录功能",
                 "consumes": [
@@ -445,7 +416,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/logout": {
+        "/api/logout": {
             "get": {
                 "description": "实现用户登出功能",
                 "consumes": [
@@ -488,6 +459,92 @@ const docTemplate = `{
                         "required": true
                     }
                 ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "实现用户登出功能",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户登入登出"
+                ],
+                "summary": "用户登出API",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/heartbeat": {
+            "get": {
+                "description": "返回健康检测结果，JSON",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "健康检测"
+                ],
+                "summary": "健康检测函数",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -618,10 +675,24 @@ const docTemplate = `{
         "model.ChatsRequest": {
             "type": "object",
             "properties": {
-                "chatIds": {
+                "chats": {
                     "type": "array",
                     "items": {
                         "type": "string"
+                    }
+                },
+                "senderId": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.ChatsResponse": {
+            "type": "object",
+            "properties": {
+                "chats": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.ChatResponse"
                     }
                 },
                 "senderId": {
@@ -633,7 +704,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/model.ChatsRequest"
+                    "$ref": "#/definitions/model.ChatsResponse"
                 },
                 "req_id": {
                     "type": "string"
@@ -768,12 +839,16 @@ const docTemplate = `{
                     "description": "session创建的时间",
                     "type": "integer"
                 },
+                "removed": {
+                    "description": "是否删除的标记",
+                    "type": "integer"
+                },
                 "senderId": {
                     "description": "发起新会话的userName",
                     "type": "string"
                 },
                 "sessionData": {
-                    "description": "用来存放session所有交互历史的文件名,格式为JSON",
+                    "description": "用来存放session所有交互历史的文件名,内容格式为JSON",
                     "type": "string"
                 },
                 "sessionId": {
@@ -886,7 +961,7 @@ const docTemplate = `{
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0.0",
 	Host:             "localhost:8443",
-	BasePath:         "/api",
+	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "企业级AI助手操作系统",
 	Description:      "API服务入口",

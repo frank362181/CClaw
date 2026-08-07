@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-
 	_ "my.favorite/cclaw/docs"
 
 	"my.favorite/cclawservice"
@@ -14,7 +12,7 @@ import (
 //	@description	API服务入口
 
 //	@host		localhost:8443
-//	@BasePath	/api
+//	@BasePath	/
 
 // @securityDefinitions.apikey	ApiKeyAuth
 // @in							header
@@ -27,24 +25,36 @@ func main() {
 	logging.LogInfof(versionString)
 
 	configFileName := GetConfigFileName()
-	if !cclawservice.InitApp(configFileName) {
-		os.Exit(-1)
+	mainApp := cclawservice.NewMainApp(configFileName)
+	if !mainApp.Init() {
+		mainApp.Destroy()
+		return
 	}
 
-	cclawservice.SetupGlobalFilter()
-
 	// 添加 health controller
-	cclawservice.SetupHealthController()
-	cclawservice.SetupLoggingController()
+	if !mainApp.SetupHealthController() {
+		mainApp.Destroy()
+		return
+	}
+
+	if !mainApp.SetupLoggingController() {
+		mainApp.Destroy()
+		return
+	}
 
 	// 1. setup server
-	cclawservice.SetupServer()
+	if !mainApp.SetupServer() {
+		mainApp.Destroy()
+		return
+	}
 
 	// 2. start the server
-	cclawservice.Startup()
+	mainApp.Startup()
 
 	// 3. wait the exit signal
-	cclawservice.Shutdown()
+	mainApp.Shutdown()
+
+	mainApp.Destroy()
 
 	//// 结束TUI
 	//tui_engine.GetLogManager().Stop()

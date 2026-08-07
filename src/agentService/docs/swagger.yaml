@@ -1,4 +1,4 @@
-basePath: /api
+basePath: /
 definitions:
   basic.CommonResponse:
     properties:
@@ -78,9 +78,18 @@ definitions:
     type: object
   model.ChatsRequest:
     properties:
-      chatIds:
+      chats:
         items:
           type: string
+        type: array
+      senderId:
+        type: string
+    type: object
+  model.ChatsResponse:
+    properties:
+      chats:
+        items:
+          $ref: '#/definitions/model.ChatResponse'
         type: array
       senderId:
         type: string
@@ -88,7 +97,7 @@ definitions:
   model.ChatsResponseEx:
     properties:
       data:
-        $ref: '#/definitions/model.ChatsRequest'
+        $ref: '#/definitions/model.ChatsResponse'
       req_id:
         type: string
       req_method:
@@ -181,11 +190,14 @@ definitions:
       genAt:
         description: session创建的时间
         type: integer
+      removed:
+        description: 是否删除的标记
+        type: integer
       senderId:
         description: 发起新会话的userName
         type: string
       sessionData:
-        description: 用来存放session所有交互历史的文件名,格式为JSON
+        description: 用来存放session所有交互历史的文件名,内容格式为JSON
         type: string
       sessionId:
         type: string
@@ -259,7 +271,7 @@ info:
   title: 企业级AI助手操作系统
   version: 1.0.0
 paths:
-  /chat:
+  /api/chat:
     post:
       consumes:
       - application/json
@@ -305,7 +317,7 @@ paths:
       summary: 新的聊天
       tags:
       - 聊天管理
-  /createSession:
+  /api/createSession:
     post:
       consumes:
       - application/json
@@ -351,7 +363,7 @@ paths:
       summary: 创建新的会话
       tags:
       - 聊天管理
-  /deleteChat:
+  /api/deleteChat:
     post:
       consumes:
       - application/json
@@ -397,7 +409,7 @@ paths:
       summary: 删除聊天
       tags:
       - 聊天管理
-  /deleteSession:
+  /api/deleteSession:
     post:
       consumes:
       - application/json
@@ -443,7 +455,7 @@ paths:
       summary: 获取会话历史
       tags:
       - 聊天管理
-  /getSessions:
+  /api/getSessions:
     post:
       consumes:
       - application/json
@@ -489,26 +501,7 @@ paths:
       summary: 获取会话历史列表
       tags:
       - 聊天管理
-  /heartbeat:
-    get:
-      consumes:
-      - application/json
-      description: 返回健康检测结果，JSON
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/basic.CommonResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/basic.CommonResponse'
-      summary: 健康检测函数
-      tags:
-      - 健康检测
-  /login:
+  /api/login:
     post:
       consumes:
       - application/json
@@ -549,7 +542,7 @@ paths:
       summary: 用户登入API
       tags:
       - 用户登入登出
-  /logout:
+  /api/logout:
     get:
       consumes:
       - application/json
@@ -589,6 +582,64 @@ paths:
       summary: 用户登出API
       tags:
       - 用户登入登出
+    post:
+      consumes:
+      - application/json
+      description: 实现用户登出功能
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 用户登出API
+      tags:
+      - 用户登入登出
+  /heartbeat:
+    get:
+      consumes:
+      - application/json
+      description: 返回健康检测结果，JSON
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 健康检测函数
+      tags:
+      - 健康检测
 securityDefinitions:
   ApiKeyAuth:
     in: header

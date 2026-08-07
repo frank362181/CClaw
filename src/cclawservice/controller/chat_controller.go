@@ -24,7 +24,7 @@ type ChatController struct {
 //	@Param			body		body		model.SessionRequest	true	"聊天内容"
 //	@Success		200			{object}	model.SessionResponseEx
 //	@Failure		400			{object}	basic.CommonResponse
-//	@Router			/createSession [post]
+//	@Router			/api/createSession [post]
 func (cc *ChatController) CreateSession(c *gin.Context) {
 
 }
@@ -43,7 +43,7 @@ func (cc *ChatController) CreateSession(c *gin.Context) {
 //	@Param			body		body		model.SessionsRequest	true	"聊天内容"
 //	@Success		200			{object}	model.SessionsResponseEx
 //	@Failure		400			{object}	basic.CommonResponse
-//	@Router			/getSessions [post]
+//	@Router			/api/getSessions [post]
 func (cc *ChatController) GetSessions(c *gin.Context) {}
 
 // DeleteSession
@@ -60,7 +60,7 @@ func (cc *ChatController) GetSessions(c *gin.Context) {}
 //	@Param			body		body		model.SessionsRequest	true	"聊天内容"
 //	@Success		200			{object}	model.SessionsResponseEx
 //	@Failure		400			{object}	basic.CommonResponse
-//	@Router			/deleteSession [post]
+//	@Router			/api/deleteSession [post]
 func (cc *ChatController) DeleteSession(c *gin.Context) {}
 
 // Chat
@@ -77,7 +77,7 @@ func (cc *ChatController) DeleteSession(c *gin.Context) {}
 //	@Param			body		body		model.ChatRequest	true	"聊天内容"
 //	@Success		200			{object}	model.ChatResponseEx
 //	@Failure		400			{object}	basic.CommonResponse
-//	@Router			/chat [post]
+//	@Router			/api/chat [post]
 func (cc *ChatController) Chat(c *gin.Context) {
 
 }
@@ -96,7 +96,7 @@ func (cc *ChatController) Chat(c *gin.Context) {
 //	@Param			body		body		model.ChatsRequest	true	"聊天内容"
 //	@Success		200			{object}	model.ChatsResponseEx
 //	@Failure		400			{object}	basic.CommonResponse
-//	@Router			/deleteChat [post]
+//	@Router			/api/deleteChat [post]
 func (cc *ChatController) DeleteChat(c *gin.Context) {
 
 }

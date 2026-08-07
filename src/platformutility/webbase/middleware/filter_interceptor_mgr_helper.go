@@ -7,8 +7,8 @@ import (
 
 var filterInterceptorMgr = common.GetSingleton(func() *FilterInterceptorMgr {
 	filterInterceptorMgr := &FilterInterceptorMgr{
-		filters:      make(map[string]basic.IFilter),
-		interceptors: make(map[string]basic.IFilter),
+		globalFilters: make(map[string]basic.IFilter),
+		interceptors:  make(map[string]basic.IFilter),
 	}
 	return filterInterceptorMgr
 }).Instance()

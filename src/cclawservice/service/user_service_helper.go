@@ -10,8 +10,8 @@ import (
 	"my.favorite/platformutility/webbase/middleware/service"
 )
 
-var userService = common.GetSingleton(func() *UserService {
-	return &UserService{
+var userService = common.GetSingleton(func() *LoginService {
+	return &LoginService{
 		BaseService: service.BaseService{
 			Name:        "userService",
 			Description: "service about the operation over user",
@@ -19,7 +19,7 @@ var userService = common.GetSingleton(func() *UserService {
 	}
 }).Instance()
 
-func GetUserService(memoryDb memoryDbCommon.IMemoryDB, db core.IBaseDatabase) *UserService {
+func GetUserService(memoryDb memoryDbCommon.IMemoryDB, db core.IBaseDatabase) *LoginService {
 	//设置内存访问
 	userService.memoryDb = memoryDb
 

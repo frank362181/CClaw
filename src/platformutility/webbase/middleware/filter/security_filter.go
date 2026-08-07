@@ -30,7 +30,7 @@ type SecurityFilter struct {
 	signKey string //signature 服务端密钥
 }
 
-func (sf *SecurityFilter) SetupSecurityFilter(urls []string) {
+func (sf *SecurityFilter) SetupDeSecurityFilter(urls []string) {
 	for _, url := range urls {
 		sf.deSecurity = append(sf.deSecurity, url)
 	}

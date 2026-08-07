@@ -42,6 +42,11 @@ func (service *UserService) Login(username, password string) (*dataobject.TAccou
 		return nil, err
 	}
 
+	if user.Disabled {
+		// 账号被禁用了，等同于用户名或密码错误
+		return nil, nil
+	}
+
 	//使用服务端产生 256 bit的随机token
 	token, err1 := hash.GenerateRandomString()
 	if err1 != nil {

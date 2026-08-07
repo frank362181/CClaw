@@ -42,7 +42,7 @@ func (filter *TrafficFilter) DoFilter() gin.HandlerFunc {
 		requestInfo := basic.GetBaseRequester().GetOrCreateRequestInfo(c)
 
 		// 1. 判断是否需要流量控制
-		if !filter.unTrafficUrl(requestInfo.RemoteIp) {
+		if !filter.unTrafficUrl(requestInfo.RequestPath) {
 			if filter.memoryDb == nil {
 				// redis抖动时开放限流保可用
 				logging.LogWarnf("[Traffic] memory db unavailable,skip traffic limit.")

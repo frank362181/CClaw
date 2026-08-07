@@ -7,7 +7,7 @@ import (
 )
 
 type FilterInterceptorMgr struct {
-	filters map[string]basic.IFilter //filter
+	globalFilters map[string]basic.IFilter //global filter
 
 	interceptors map[string]basic.IFilter //interceptor
 }
@@ -19,11 +19,11 @@ func (filterMgr *FilterInterceptorMgr) RegisterFilter(filter basic.IFilter, engi
 		return exception.ParameterEmptyErrorEx("parameter empty")
 	}
 
-	if _, ok := filterMgr.filters[filter.GetFilterName()]; ok {
+	if _, ok := filterMgr.globalFilters[filter.GetFilterName()]; ok {
 		return exception.MatchErrorEx("filter already registered")
 	}
 
-	filterMgr.filters[filter.GetFilterName()] = filter
+	filterMgr.globalFilters[filter.GetFilterName()] = filter
 	engine.Use(filter.DoFilter())
 
 	return nil

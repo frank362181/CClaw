@@ -16,6 +16,17 @@ var corsFilter = common.GetSingleton(func() *CorsFilter {
 	}
 }).Instance()
 
+// GetCorsFilter 单例模式
 func GetCorsFilter() *CorsFilter {
 	return corsFilter
+}
+
+// NewCorsFilter 每次创建一个
+func NewCorsFilter(filterOrder int) *CorsFilter {
+	return &CorsFilter{
+		BaseFilter: basic.BaseFilter{
+			Order:      filterOrder,
+			FilterName: fmt.Sprintf("corsFilter_%d", filterOrder),
+		},
+	}
 }
