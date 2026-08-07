@@ -2,18 +2,44 @@ package controller
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	cclawcommon "my.favorite/cclawservice/common"
-	"my.favorite/cclawservice/model"
+	model2 "my.favorite/cclawservice/controller/model"
 	"my.favorite/cclawservice/service"
+	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/webbase/middleware/basic"
-
+	"my.favorite/platformutility/webbase/middleware/controller"
 	baseController "my.favorite/platformutility/webbase/middleware/controller"
+	pService "my.favorite/platformutility/webbase/middleware/service"
 )
 
 type LoginController struct {
 	baseController.BaseController
+}
+
+var loginController = common.GetSingleton(func() *LoginController {
+	return &LoginController{
+		BaseController: controller.BaseController{
+			Type:    basic.APIGroupRequire,
+			Name:    "loggingController",
+			Service: nil,
+		},
+	}
+}).Instance()
+
+func NewLoginController(service pService.IService) *LoginController {
+	loginController := &LoginController{
+		BaseController: controller.BaseController{
+			Type:    basic.APIGroupRequire,
+			Name:    "loggingController",
+			Service: nil,
+		},
+	}
+
+	loginController.Service = service
+	return loginController
 }
 
 // Login (用户登入)
@@ -31,32 +57,32 @@ type LoginController struct {
 //	@Failure		400			{object}	basic.CommonResponse
 //	@Router			/api/login [post]
 func (lc *LoginController) Login(c *gin.Context) {
-	us := lc.GetService().(*service.LoginService)
-	if us == nil {
+	loginService, ok := lc.GetService().(*service.LoginService)
+	if !ok || loginService == nil {
 		//内部服务器错误
 		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
 		return
 	}
 
-	var lq model.LoginRequest
+	var lq model2.LoginRequest
 	err := c.ShouldBindBodyWithJSON(&lq) //这里将body读取之后,后面如果想要再次读取将会失败
 	if err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorLoginParameter, cclawcommon.ConstErrorLoginParameterMsg, err.Error())
+		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorLoginParameter, cclawcommon.ConstErrorLoginParameterMsg, nil)
 		return
 	}
 
-	user, err1 := us.Login(lq.Username, lq.Password)
+	user, err1 := loginService.Login(lq.Username, lq.Password)
 	if err1 != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, err1.Error())
+		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
 		return
 	}
 
 	if user == nil {
-		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorUserNotExist, cclawcommon.ConstErrorUserNotExistMsg, nil)
+		basic.GetBaseResponser().Failure(c, http.StatusUnauthorized, cclawcommon.ConstErrorUserNotExist, cclawcommon.ConstErrorUserNotExistMsg, nil)
 		return
 	}
 
-	resp := model.GenerationLoginResponse(user)
+	resp := model2.GenerationLoginResponse(user)
 	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, resp)
 }
 
@@ -76,14 +102,17 @@ func (lc *LoginController) Login(c *gin.Context) {
 //	@Router			/api/logout [get]
 //	@Router			/api/logout [post]
 func (lc *LoginController) Logout(c *gin.Context) {
-	token := c.GetHeader(basic.ConstHeaderToken)
-	us := lc.GetService().(*service.LoginService)
-	if us == nil {
+	token := strings.TrimSpace(c.GetHeader(basic.ConstHeaderToken))
+	loginService, ok := lc.GetService().(*service.LoginService)
+	if !ok || loginService == nil {
 		//内部服务器错误
 		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
 		return
 	}
 
-	us.Logout(token)
+	if err := loginService.Logout(token); err != nil {
+		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
+		return
+	}
 	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, nil)
 }

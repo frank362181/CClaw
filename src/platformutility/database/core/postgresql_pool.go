@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
+	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
 )
@@ -17,6 +18,22 @@ type PostgresqlPool struct {
 	pgxPool *pgxpool.Pool
 
 	db *sql.DB
+}
+
+var pgPool = common.GetSingleton(func() *PostgresqlPool {
+	return &PostgresqlPool{
+		BaseDBPool: BaseDBPool{
+			DbTypeName: "postgres",
+			DBConfig:   nil,
+		},
+
+		pgxPool: nil,
+	}
+}).Instance()
+
+func GetPGPool(dbConfig *DBConfig) IBaseDBPool {
+	pgPool.DBConfig = dbConfig
+	return pgPool
 }
 
 func (pool *PostgresqlPool) IsOpened() bool {

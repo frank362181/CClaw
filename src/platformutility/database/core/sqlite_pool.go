@@ -21,6 +21,20 @@ type SqliteDBPool struct {
 	db *sql.DB
 }
 
+var sqlitePool = common.GetSingleton(func() *SqliteDBPool {
+	return &SqliteDBPool{
+		BaseDBPool: BaseDBPool{
+			DbTypeName: "sqlite",
+			DBConfig:   nil,
+		},
+	}
+}).Instance()
+
+func GetSqliteDBPool(dbConfig *DBConfig) IBaseDBPool {
+	sqlitePool.DBConfig = dbConfig
+	return sqlitePool
+}
+
 func (pool *SqliteDBPool) IsOpened() bool {
 	return pool.db != nil
 }

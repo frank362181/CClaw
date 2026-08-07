@@ -6,12 +6,37 @@
 package filter
 
 import (
+	"fmt"
+
 	"github.com/gin-gonic/gin"
+	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
 type RequestPreprocessFilter struct {
 	basic.BaseFilter
+}
+
+var requestPreprocessFilter = common.GetSingleton(func() *RequestPreprocessFilter {
+	return &RequestPreprocessFilter{
+		BaseFilter: basic.BaseFilter{
+			Order:      basic.FilterOrderReqPre,
+			FilterName: fmt.Sprintf("reqPreprocessFilter_%d", basic.FilterOrderReqPre),
+		},
+	}
+}).Instance()
+
+func GetRequestPreprocessFilter() *RequestPreprocessFilter {
+	return requestPreprocessFilter
+}
+
+func NewRequestPreprocessFilter(order int) *RequestPreprocessFilter {
+	return &RequestPreprocessFilter{
+		BaseFilter: basic.BaseFilter{
+			Order:      order,
+			FilterName: fmt.Sprintf("reqPreprocessFilter_%d", order),
+		},
+	}
 }
 
 func (rf *RequestPreprocessFilter) DoFilter() gin.HandlerFunc {

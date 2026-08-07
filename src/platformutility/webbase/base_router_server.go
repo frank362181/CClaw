@@ -13,8 +13,30 @@ import (
 	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
+	"my.favorite/platformutility/webbase/middleware"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
+
+var baseRouter = common.GetSingleton(func() *BaseRouter {
+	gin.SetMode(gin.ReleaseMode) //设置release模式
+
+	router := &BaseRouter{
+		GinEngine:            gin.New(),
+		Server:               nil,
+		RGroup:               make(map[string]*gin.RouterGroup),
+		filterInterceptorMgr: middleware.GetFilterInterceptorMgr(),
+		certFile:             "",
+		keyFile:              "",
+	}
+
+	_ = router.GinEngine.SetTrustedProxies(nil) //默认不信任任何代理
+
+	return router
+}).Instance()
+
+func GetBaseRouter() *BaseRouter {
+	return baseRouter
+}
 
 func (router *BaseRouter) SetupFilter(filters ...basic.IFilter) error {
 	if len(filters) == 0 {
@@ -196,30 +218,6 @@ func (router *BaseRouter) setupController_(httpMethod int16, relativeUrl string,
 }
 
 func (router *BaseRouter) setupControllerEx_(httpMethod int16, apiGroup string, urlFuncMap map[string]gin.HandlerFunc, inceptors basic.IFilter) error {
-	//var tempFilter gin.HandlerFunc = nil
-	//if inceptors != nil {
-	//	tempFilter = inceptors.DoFilter()
-	//}
-	//r := router.GinEngine.Group(BasePath, tempFilter)
-	//if _, ok := router.RGroup[apiGroup]; !ok {
-	//	router.RGroup[apiGroup] = r
-	//}
-	//
-	//g := router.RGroup[apiGroup]
-	//{
-	//	for key, value := range urlFuncMap {
-	//		if HttpMethodGet&httpMethod == HttpMethodGet {
-	//			g.GET(key, value)
-	//		}
-	//
-	//		if HttpMethodPost&httpMethod == HttpMethodPost {
-	//			g.POST(key, value)
-	//		}
-	//	}
-	//}
-	//
-	//return nil
-
 	g, ok := router.RGroup[apiGroup]
 	if !ok {
 		if inceptors == nil {

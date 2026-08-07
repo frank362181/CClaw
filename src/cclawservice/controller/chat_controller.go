@@ -2,12 +2,28 @@ package controller
 
 import (
 	"github.com/gin-gonic/gin"
+	"my.favorite/platformutility/common"
+	"my.favorite/platformutility/webbase/middleware/basic"
 	_ "my.favorite/platformutility/webbase/middleware/basic"
 	baseController "my.favorite/platformutility/webbase/middleware/controller"
 )
 
 type ChatController struct {
 	baseController.BaseController
+}
+
+var chatController = common.GetSingleton(func() *ChatController {
+	return &ChatController{
+		BaseController: baseController.BaseController{
+			Type:    basic.APIGroupRequire,
+			Name:    "chatController",
+			Service: nil,
+		},
+	}
+}).Instance()
+
+func GetChatController() *ChatController {
+	return chatController
 }
 
 // CreateSession

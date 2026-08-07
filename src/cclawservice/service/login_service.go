@@ -1,162 +1,142 @@
-/*
-* User service implementation
-* 访问数据库、访问内存均在同一个层级上实现：即访问数据库和访问内存被视为是读写数据的操作，
-* UserService作为业务逻辑的实现，应该只关心数据的读写，而不关心数据是从数据库中获取还是从内存中获取
- */
-
 package service
 
 import (
-	"time"
+	"strings"
 
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
-	"my.favorite/platformutility/exception"
-	"my.favorite/platformutility/webbase/middleware/basic"
-
+	"my.favorite/cclawservice/service/service_core"
 	"my.favorite/platformutility/common/hash"
+	"my.favorite/platformutility/database/core"
+	"my.favorite/platformutility/exception"
 	memoryDbCommon "my.favorite/platformutility/memory_db/common"
-	"my.favorite/platformutility/webbase/middleware/service"
+	baseService "my.favorite/platformutility/webbase/middleware/service"
 )
 
+// LoginService contains authentication rules. Cache consistency is delegated to SessionStore.
 type LoginService struct {
-	service.BaseService
+	baseService.BaseService
 
-	dbAccessor dataaccessor.IAccessor   //数据库操作作为成员变量
-	memoryDb   memoryDbCommon.IMemoryDB //内存数据库
+	dbAccessor   dataaccessor.IAccessor
+	sessionStore service_core.ISessionManager
 }
 
-func (service *LoginService) Login(username, password string) (*dataobject.TAccount, error) {
-	if len(username) == 0 || len(password) == 0 {
-		return nil, exception.ParameterEmptyErrorEx("user or password is empty")
+// GetLoginService builds a fresh service graph instead of mutating a package singleton.
+func GetLoginService(memoryDB memoryDbCommon.IMemoryDB, db core.IBaseDatabase) (*LoginService, error) {
+	if memoryDB == nil || db == nil {
+		return nil, exception.ParameterEmptyErrorEx("login service: parameters are nil")
 	}
 
-	user, err := service.GetUserByNameAndPassword(username, password)
-	if user == nil {
-		if err == nil {
-			return nil, nil //表示用户不存在
-		}
+	var accessor dataaccessor.IAccessor
+	switch {
+	case strings.EqualFold(db.GetAccessorType(), "sqldb"):
+		accessor = dataaccessor.GetSQLdbAccessor(db)
+	case strings.EqualFold(db.GetAccessorType(), "gormdb"):
+		accessor = dataaccessor.GetGormAccessor(db)
+	default:
+		return nil, exception.UnsupportedExceptionErrorEx2("login service: database type[%s] is unsupported", db.GetAccessorType())
 	}
+
+	if accessor == nil {
+		return nil, exception.UnsupportedExceptionErrorEx2("login service: database type[%s] is unsupported", db.GetAccessorType())
+	}
+
+	sessionStore, err := service_core.GetMemorySessionMgr(memoryDB)
+	if err != nil {
+		return nil, myException.TokenInvalidErrEx2("login service: token storage invalid")
+	}
+
+	loginService, err := newLoginService(accessor, sessionStore)
 	if err != nil {
 		return nil, err
 	}
 
-	if user.Disabled {
-		// 账号被禁用了，等同于用户名或密码错误
-		return nil, nil
-	}
-
-	//使用服务端产生 256 bit的随机token
-	token, err1 := hash.GenerateRandomString()
-	if err1 != nil {
-		return nil, err1
-	}
-
-	user.Token = token
-	return service.saveSession(user)
+	return loginService, nil
 }
 
-func (service *LoginService) GetUserByNameAndPassword(username, password string) (*dataobject.TAccount, error) {
+func newLoginService(dbAccessor dataaccessor.IAccessor, sessionStore service_core.ISessionManager) (*LoginService, error) {
+	if dbAccessor == nil {
+		return nil, exception.ParameterEmptyErrorEx("login service: database accessor is nil")
+	}
+	if sessionStore == nil {
+		return nil, exception.ParameterEmptyErrorEx("login service: session store is nil")
+	}
+
+	return &LoginService{
+		BaseService: baseService.BaseService{
+			Name:        "loginService",
+			Description: "user authentication and session service",
+		},
+		dbAccessor:   dbAccessor,
+		sessionStore: sessionStore,
+	}, nil
+}
+
+func (service *LoginService) Login(username, password string) (*dataobject.TAccount, error) {
+	username = strings.ToLower(strings.TrimSpace(username))
+	if username == "" || password == "" {
+		return nil, exception.ParameterEmptyErrorEx("user or password is empty")
+	}
+
 	user, err := service.dbAccessor.GetUserByNameAndPassword(username, password)
 	if err != nil {
 		return nil, err
 	}
+	if user == nil || user.Disabled {
+		return nil, nil // Do not reveal whether an account exists or is disabled.
+	}
 
-	return user, err
-}
-
-func (service *LoginService) GetUserByAccount(username string) (*dataobject.TAccount, error) {
-	user, err := service.dbAccessor.GetUserByAccount(username)
+	token, err := hash.GenerateRandomString()
 	if err != nil {
 		return nil, err
 	}
+
+	principal := &dataobject.LoginSession{
+		LoginName:   user.LoginName,
+		DisplayName: user.DisplayName,
+	}
+	if err := service.sessionStore.CreateOrReplace(token, principal); err != nil {
+		return nil, err
+	}
+
+	user.LoginPass = ""
+	user.Token = token
 	return user, nil
 }
 
 func (service *LoginService) GetUserByToken(token string) (*dataobject.TAccount, error) {
-	if len(token) == 0 {
+	token = strings.TrimSpace(token)
+	if token == "" {
 		return nil, myException.TokenInvalidErrEx("token empty")
 	}
 
-	if service.memoryDb == nil {
-		return nil, myException.TokenInvalidErrEx("Session store unavailable.")
-	}
-
-	userInfoKey := basic.UserInfoKeyPrefix + token
-	userJson, err := service.memoryDb.Get(userInfoKey)
+	principal, err := service.sessionStore.Get(token)
 	if err != nil {
 		return nil, err
 	}
 
-	service.deleteSession(token) //将旧的token相关信息给删除了
-
-	var user dataobject.TAccount
-	err = user.FromJsonString(userJson)
+	user, err := service.dbAccessor.GetUserByAccount(principal.LoginName)
 	if err != nil {
 		return nil, err
 	}
-
-	userEx, err1 := service.GetUserByAccount(user.LoginName)
-	if err1 != nil {
-		return nil, err1
+	if user == nil || user.Disabled {
+		_ = service.sessionStore.Revoke(token)
+		return nil, myException.TokenInvalidErrEx("account unavailable")
 	}
 
-	// 此时调用了API，刷新缓存
-	userEx.Token = token
-	return service.saveSession(userEx)
-}
-
-func (service *LoginService) Logout(token string) {
-	if len(token) == 0 {
-		return
+	// Refresh revalidates current-token ownership, so a concurrent request cannot
+	// restore a token that Login or Logout has already replaced/revoked.
+	if err := service.sessionStore.Refresh(token, principal); err != nil {
+		return nil, err
 	}
 
-	service.deleteSession(token)
-}
-
-// ======================== private functions & methods ========================
-func (service *LoginService) saveSession(user *dataobject.TAccount) (*dataobject.TAccount, error) {
-	// 将用户信息写入到内存
-	if service.memoryDb != nil {
-		// 1. key = loginName,值为token
-		userTokenKey := basic.UserTokenKeyPrefix + user.LoginName
-		err := service.memoryDb.Set(userTokenKey, user.Token, time.Duration(basic.MemoryTokenExpireTime)*time.Second)
-		if err != nil {
-			return nil, err
-		}
-
-		// key=token,值为user对象
-		userInfoKey := basic.UserInfoKeyPrefix + user.Token
-		err = service.memoryDb.Set(userInfoKey, user.ToJsonString(), time.Duration(basic.MemoryTokenExpireTime)*time.Second)
-		if err != nil {
-			return nil, err
-		}
-	}
-
+	user.LoginPass = ""
+	user.Token = token
 	return user, nil
 }
 
-func (service *LoginService) deleteSession(token string) {
-	if service.memoryDb != nil {
-		// 1. 根据token获取用户信息
-		userInfoKey := basic.UserInfoKeyPrefix + token
-		userJson, err := service.memoryDb.Get(userInfoKey)
-		if err != nil {
-			return
-		}
-
-		var user dataobject.TAccount
-		err = user.FromJsonString(userJson)
-		if err != nil {
-			return
-		}
-
-		// 2. 删除token对应的用户信息
-		_, _ = service.memoryDb.Delete(userInfoKey)
-
-		// 3. 删除loginName对应的token信息
-		userTokenKey := basic.UserTokenKeyPrefix + user.LoginName
-		_, _ = service.memoryDb.Delete(userTokenKey)
-	}
+// Logout is idempotent: an already absent token is considered successfully revoked.
+func (service *LoginService) Logout(token string) error {
+	return service.sessionStore.Revoke(strings.TrimSpace(token))
 }

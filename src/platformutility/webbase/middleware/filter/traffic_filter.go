@@ -7,13 +7,15 @@
 package filter
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging"
-	"my.favorite/platformutility/memory_db/common"
+	memoryCommon "my.favorite/platformutility/memory_db/common"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
@@ -22,7 +24,33 @@ type TrafficFilter struct {
 
 	UnTrafficUrls []string //不需要流量控制的URL
 
-	memoryDb common.IMemoryDB //记录流量的内存数据库
+	memoryDb memoryCommon.IMemoryDB //记录流量的内存数据库
+}
+
+var trafficFilter = common.GetSingleton(func() *TrafficFilter {
+	return &TrafficFilter{
+		BaseFilter: basic.BaseFilter{
+			Order:      basic.FilterOrderTraffic,
+			FilterName: fmt.Sprintf("trafficFilter_%d", basic.FilterOrderTraffic),
+		},
+	}
+}).Instance()
+
+func GetTrafficFilter(db memoryCommon.IMemoryDB) *TrafficFilter {
+	trafficFilter.memoryDb = db
+	return trafficFilter
+}
+
+func NewTrafficFilter(order int, db memoryCommon.IMemoryDB) *TrafficFilter {
+	trafficFilter := &TrafficFilter{
+		BaseFilter: basic.BaseFilter{
+			Order:      order,
+			FilterName: fmt.Sprintf("trafficFilter_%d", order),
+		},
+	}
+
+	trafficFilter.memoryDb = db
+	return trafficFilter
 }
 
 func (filter *TrafficFilter) SetupUnTrafficUrl(unTrafficUrls []string) {
@@ -57,7 +85,7 @@ func (filter *TrafficFilter) DoFilter() gin.HandlerFunc {
 				basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstTrafficOverflow, basic.ConstTrafficOverflowMsg, nil)
 				return
 			}
-			filter.memoryDb.Set(ipTrafficKey, result+1, time.Duration(basic.TrafficFilterTimeGap)*time.Second)
+			_ = filter.memoryDb.Set(ipTrafficKey, result+1, time.Duration(basic.TrafficFilterTimeGap)*time.Second)
 
 			// 2. ip api维度
 			ipApiTrafficKey := basic.IPAPITrafficPrefix + requestInfo.RemoteIp + requestInfo.RequestPath
@@ -66,7 +94,7 @@ func (filter *TrafficFilter) DoFilter() gin.HandlerFunc {
 				basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstTrafficOverflow, basic.ConstTrafficOverflowMsg, nil)
 				return
 			}
-			filter.memoryDb.Set(ipApiTrafficKey, result+1, time.Duration(basic.TrafficFilterTimeGap)*time.Second)
+			_ = filter.memoryDb.Set(ipApiTrafficKey, result+1, time.Duration(basic.TrafficFilterTimeGap)*time.Second)
 		}
 
 		// 放行

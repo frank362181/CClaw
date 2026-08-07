@@ -120,20 +120,24 @@ func (m *MainApp) SetupHealthController() bool {
 }
 
 func (m *MainApp) SetupLoggingController() bool {
-	userService := service.GetUserService(m.memoryDB, m.database) //创建实现登录的业务逻辑对象
-	loginController := selfController.GetLoginController(userService)
+	userService, err := service.GetLoginService(m.memoryDB, m.database) //创建实现登录的业务逻辑对象
+	if err != nil {
+		logging.LogErrorf("failed to create login service,err:%s", err.Error())
+		return false
+	}
+	loginController := selfController.NewLoginController(userService)
 
 	urlFunMap := make(map[string]gin.HandlerFunc)
 	urlFunMap[webbase.RelativeLoginUrl] = loginController.Login
 	urlFunMap[webbase.RelativeLogoutUrl] = loginController.Logout
 
-	authInter := selfInterceptor.GetAuthenticationInterceptor(userService)
+	authInter := selfInterceptor.NewAuthenticationInterceptor(userService)
 	tempStr, _ := m.configHelper.GetStringValueDefault("security", "unWantedToken", "")
 	urls := strings.Split(tempStr, ",")
 	authInter.SetupUnwantedTokenUrls(urls)
 
-	interceptors := interceptor.GetInterceptors()
-	err := interceptors.RegistryInterceptor(authInter)
+	interceptors := interceptor.NewInterceptors()
+	err = interceptors.RegistryInterceptor(authInter)
 	if err != nil {
 		logging.LogErrorf("failed to setup logging controller,err:%s", err.Error())
 		urlFunMap = nil
@@ -184,7 +188,7 @@ func (m *MainApp) Destroy() {
 	}
 
 	if m.memoryDB != nil {
-		m.memoryDB.CloseMemoryDb()
+		_ = m.memoryDB.CloseMemoryDb()
 	}
 }
 
@@ -211,7 +215,6 @@ func (m *MainApp) setGlobalFilter() {
 }
 
 func (m *MainApp) setupApiFilters() bool {
-
 	signKey, _ := m.configHelper.GetStringValueDefault("security", "signKey", "")
 	if len(signKey) == 0 {
 		logging.LogErrorf("[SetupGlobalFilterAndController] signKey is required,confuse to startup")
@@ -219,16 +222,16 @@ func (m *MainApp) setupApiFilters() bool {
 	}
 
 	// 1 setup business filter
-	loggingFilter := filter.GetLoggingFilter()
-	reqPreprocessFilter := filter.GetRequestPreprocessFilter()
-	addressFilter := filter.GetAddressFilter()
+	loggingFilter := filter.NewLoggingFilter(basic.FilterOrderLogging)                //filter.GetLoggingFilter()
+	reqPreprocessFilter := filter.NewRequestPreprocessFilter(basic.FilterOrderReqPre) //filter.GetRequestPreprocessFilter()
+	addressFilter := filter.NewAddressFilter(basic.FilterOrderAddress)                //filter.GetAddressFilter()
 	tempStr, _ := m.configHelper.GetStringValueDefault("security", "allowedUrl", "")
 	urls := strings.Split(tempStr, ",")
 	addressFilter.SetupAllowedUrls(urls)
 
-	trafficFilter := filter.GetTrafficFilter(m.memoryDB)
+	trafficFilter := filter.NewTrafficFilter(basic.FilterOrderTraffic, m.memoryDB) //filter.GetTrafficFilter(m.memoryDB)
 
-	securityFilter := filter.GetSecurityFilter(m.memoryDB, signKey)
+	securityFilter := filter.NewSecurityFilter(basic.FilterOrderSecurity, m.memoryDB, signKey) //filter.GetSecurityFilter(m.memoryDB, signKey)
 	tempStr, _ = m.configHelper.GetStringValueDefault("security", "deSecurityUrl", "")
 	urls = strings.Split(tempStr, ",")
 	securityFilter.SetupDeSecurityFilter(urls)

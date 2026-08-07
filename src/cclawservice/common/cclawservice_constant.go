@@ -21,6 +21,9 @@ const (
 	ConstErrorInvalidTokenMsg   = "Token无效,请登录"
 )
 
+// ContextAuthenticatedUser is the gin.Context key for the server-verified user.
+const ContextAuthenticatedUser = "cclaw.authenticatedUser"
+
 const (
 	RelativeCreateSession = "/createSession"
 	CreateSessionUrl      = webbase.BasePath + RelativeCreateSession

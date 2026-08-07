@@ -1,10 +1,12 @@
 package filter
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/webbase"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
@@ -15,6 +17,37 @@ type AddressFilter struct {
 	AllowedUrls  []string //定义的允许的URL
 	URLBlackList []string //URL黑名单
 	IPBlackList  []string //IP 黑名单
+}
+
+var addressFilter = common.GetSingleton(func() *AddressFilter {
+	addressFilter := &AddressFilter{
+		BaseFilter: basic.BaseFilter{
+			Order:      basic.FilterOrderAddress,
+			FilterName: fmt.Sprintf("addressFilter_%d", basic.FilterOrderAddress),
+		},
+	}
+
+	//allowedUrls := []string{
+	//	webbase.HealthUrl,
+	//	webbase.LoginUrl,
+	//	webbase.LogoutUrl,
+	//}
+	//addressFilter.SetupAllowedUrls(allowedUrls)
+	return addressFilter
+}).Instance()
+
+func GetAddressFilter() *AddressFilter {
+	return addressFilter
+}
+
+func NewAddressFilter(order int) *AddressFilter {
+	addressFilter := &AddressFilter{
+		BaseFilter: basic.BaseFilter{
+			Order:      order,
+			FilterName: fmt.Sprintf("addressFilter_%d", order),
+		},
+	}
+	return addressFilter
 }
 
 func (af *AddressFilter) SetupAllowedUrls(allowedUrls []string) {

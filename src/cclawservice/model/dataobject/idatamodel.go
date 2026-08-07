@@ -5,6 +5,6 @@
 package dataobject
 
 type IDataModel interface {
-	ToJsonString() string
+	ToJsonString() (string, error)
 	FromJsonString(jsonStr string) error
 }

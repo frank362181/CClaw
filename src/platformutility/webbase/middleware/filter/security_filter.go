@@ -7,6 +7,7 @@ package filter
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -28,6 +29,43 @@ type SecurityFilter struct {
 	memoryDb   common2.IMemoryDB
 
 	signKey string //signature 服务端密钥
+}
+
+var securityFilter = common.GetSingleton(func() *SecurityFilter {
+	securityFilter := &SecurityFilter{
+		BaseFilter: basic.BaseFilter{
+			Order:      basic.FilterOrderSecurity,
+			FilterName: fmt.Sprintf("securityFilter_%d", basic.FilterOrderSecurity),
+		},
+	}
+
+	//deSecurityUrls := []string{
+	//	webbase.HealthUrl,
+	//	webbase.LogoutUrl,
+	//}
+	//
+	//securityFilter.SetupSecurityFilter(deSecurityUrls)
+	return securityFilter
+}).Instance()
+
+func GetSecurityFilter(db common2.IMemoryDB, signatureKey string) *SecurityFilter {
+	securityFilter.signKey = signatureKey
+	securityFilter.memoryDb = db //设置内存数据库
+	return securityFilter
+}
+
+func NewSecurityFilter(order int, db common2.IMemoryDB, signatureKey string) *SecurityFilter {
+	securityFilter := &SecurityFilter{
+		BaseFilter: basic.BaseFilter{
+			Order:      order,
+			FilterName: fmt.Sprintf("securityFilter_%d", order),
+		},
+	}
+
+	securityFilter.memoryDb = db
+	securityFilter.signKey = signatureKey
+
+	return securityFilter
 }
 
 func (sf *SecurityFilter) SetupDeSecurityFilter(urls []string) {

@@ -53,6 +53,11 @@ func (d *DatetimeUtility) GetCurrentDatetime() *DatetimeItem {
 	return datetimeItem
 }
 
+func (d *DatetimeUtility) Until(s, e int64) time.Duration {
+	diff := e - s
+	return time.Duration(diff) * time.Second
+}
+
 func (d *DatetimeItem) Equals(right *DatetimeItem) bool {
 	return d.Timestamp == right.Timestamp
 }
@@ -62,6 +67,16 @@ func (d *DatetimeItem) Equals(right *DatetimeItem) bool {
 // < 0 未来时间比当前时间早*/
 func (d *DatetimeItem) Distance(other *DatetimeItem, distance int64) int64 {
 	return d.MilliTimestamp - other.MilliTimestamp - distance
+}
+
+// Until 表示到目标时间t的秒数
+func (d *DatetimeItem) Until(t int64) time.Duration {
+	diff := t - d.Timestamp
+	return time.Duration(diff) * time.Second
+}
+
+func (d *DatetimeItem) Add(seconds int64) int64 {
+	return time.Now().Add(time.Duration(seconds) * time.Second).Unix()
 }
 
 func (d *DatetimeItem) IsBefore(other *DatetimeItem) bool {

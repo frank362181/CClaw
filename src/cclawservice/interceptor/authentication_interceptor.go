@@ -5,11 +5,13 @@
 package interceptor
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"my.favorite/cclawservice/common"
+	cclawException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/platformutility/webbase"
 	"my.favorite/platformutility/webbase/middleware/basic"
@@ -23,6 +25,17 @@ type AuthenticationInterceptor struct {
 
 	// 业务处理的Service
 	userService service.IService
+}
+
+func NewAuthenticationInterceptor(svc service.IService) *AuthenticationInterceptor {
+	authInterceptor := &AuthenticationInterceptor{
+		BaseInterceptor: basic.BaseInterceptor{
+			Order:           1,
+			InterceptorName: "authentication_interceptor",
+		},
+		userService: svc,
+	}
+	return authInterceptor
 }
 
 func (i *AuthenticationInterceptor) SetupUnwantedTokenUrls(urls []string) {
@@ -44,8 +57,9 @@ func (i *AuthenticationInterceptor) PreHandle(c *gin.Context) bool {
 
 	//此时需要先判断token的情况,为空、过期、不存在等
 	token := c.GetHeader(basic.ConstHeaderToken)
+	token = strings.TrimSpace(token)
 	if len(token) == 0 {
-		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, common.ConstErrorNonToken, common.ConstErrorNonTokenMsg, nil)
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusUnauthorized, common.ConstErrorNonToken, common.ConstErrorNonTokenMsg, nil)
 		return false
 	}
 
@@ -59,11 +73,21 @@ func (i *AuthenticationInterceptor) PreHandle(c *gin.Context) bool {
 		return false
 	}
 	userInfo, err1 := userService.GetUserByToken(token)
-	if err1 != nil || userInfo == nil {
-		//此时是无效的token信息
-		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusOK, common.ConstErrorInvalidToken, common.ConstErrorInvalidTokenMsg, nil)
+	if err1 != nil {
+		if _, ok2 := errors.AsType[*cclawException.ErrorInvalidToken](err1); !ok2 {
+			basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
+			return false
+		}
+
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusUnauthorized, common.ConstErrorInvalidToken, common.ConstErrorInvalidTokenMsg, nil)
 		return false
 	}
+	if userInfo == nil {
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusUnauthorized, common.ConstErrorInvalidToken, common.ConstErrorInvalidTokenMsg, nil)
+		return false
+	}
+
+	c.Set(common.ContextAuthenticatedUser, userInfo)
 
 	return true
 }

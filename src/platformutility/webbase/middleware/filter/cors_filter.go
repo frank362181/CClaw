@@ -1,11 +1,13 @@
 package filter
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
@@ -13,6 +15,30 @@ type CorsFilter struct {
 	basic.BaseFilter
 
 	allowedOrigins []string //允许的来源白名单
+}
+
+var corsFilter = common.GetSingleton(func() *CorsFilter {
+	return &CorsFilter{
+		BaseFilter: basic.BaseFilter{
+			Order:      basic.FilterOrderCors,
+			FilterName: fmt.Sprintf("corsFilter_%d", basic.FilterOrderCors),
+		},
+	}
+}).Instance()
+
+// GetCorsFilter 单例模式
+func GetCorsFilter() *CorsFilter {
+	return corsFilter
+}
+
+// NewCorsFilter 每次创建一个
+func NewCorsFilter(filterOrder int) *CorsFilter {
+	return &CorsFilter{
+		BaseFilter: basic.BaseFilter{
+			Order:      filterOrder,
+			FilterName: fmt.Sprintf("corsFilter_%d", filterOrder),
+		},
+	}
 }
 
 func (cf *CorsFilter) SetupAllowedOrigins2(origins []string) {

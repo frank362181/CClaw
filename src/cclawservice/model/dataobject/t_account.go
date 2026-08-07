@@ -12,12 +12,12 @@ type TAccount struct {
 	Token string `gorm:"-" json:"token,omitempty"` //登录成功后返回的token信息
 }
 
-func (account *TAccount) ToJsonString() string {
-	jsonString, err := json.MarshalIndent(account, "", "  ")
+func (account *TAccount) ToJsonString() (string, error) {
+	jsonString, err := json.Marshal(account)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return string(jsonString)
+	return string(jsonString), nil
 }
 
 func (account *TAccount) FromJsonString(jsonStr string) error {

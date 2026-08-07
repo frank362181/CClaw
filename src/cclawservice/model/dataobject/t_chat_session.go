@@ -20,13 +20,13 @@ type TSession struct {
 	Removed int `json:"removed"` //是否删除的标记,0/1:否/是
 }
 
-func (session *TSession) ToJsonString() string {
+func (session *TSession) ToJsonString() (string, error) {
 	b, err := json.MarshalIndent(session, "", " ")
 	if err != nil {
-		return ""
+		return "", err
 	}
 
-	return string(b)
+	return string(b), nil
 }
 
 func (session *TSession) FromJsonString(jsonString string) error {
@@ -46,13 +46,13 @@ type TChat struct {
 	RespTime  int64  `json:"respTime"`
 }
 
-func (chat *TChat) ToJsonString() string {
+func (chat *TChat) ToJsonString() (string, error) {
 	b, err := json.MarshalIndent(chat, "", " ")
 	if err != nil {
-		return ""
+		return "", err
 	}
 
-	return string(b)
+	return string(b), nil
 }
 
 func (chat *TChat) FromJsonString(jsonString string) error {

@@ -5,7 +5,10 @@
 package interceptor
 
 import (
+	"fmt"
+
 	"github.com/gin-gonic/gin"
+	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
@@ -15,6 +18,30 @@ type Interceptors struct {
 
 	interceptorsKey []string
 	chains          map[string]basic.IInterceptor
+}
+
+var interceptors = common.GetSingleton(func() *Interceptors {
+	return &Interceptors{
+		BaseFilter: basic.BaseFilter{
+			Order:      99,
+			FilterName: fmt.Sprintf("Interceptors_%d", 99),
+		},
+		chains: make(map[string]basic.IInterceptor),
+	}
+}).Instance()
+
+func GetInterceptors() *Interceptors {
+	return interceptors
+}
+
+func NewInterceptors() *Interceptors {
+	return &Interceptors{
+		BaseFilter: basic.BaseFilter{
+			Order:      99,
+			FilterName: fmt.Sprintf("Interceptors_%d", 99),
+		},
+		chains: make(map[string]basic.IInterceptor),
+	}
 }
 
 func (in *Interceptors) RegistryInterceptor(inter basic.IInterceptor) error {

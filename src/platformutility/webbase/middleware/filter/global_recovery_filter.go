@@ -1,16 +1,31 @@
 package filter
 
 import (
+	"fmt"
 	"net/http"
 	"runtime/debug"
 
 	"github.com/gin-gonic/gin"
+	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
 type GlobalRecoveryFilter struct {
 	basic.BaseFilter
+}
+
+var globalRecoveryFilter = common.GetSingleton(func() *GlobalRecoveryFilter {
+	return &GlobalRecoveryFilter{
+		BaseFilter: basic.BaseFilter{
+			Order:      basic.FilterOrderRecovery,
+			FilterName: fmt.Sprintf("recoveryFilter_%d", basic.FilterOrderRecovery),
+		},
+	}
+}).Instance()
+
+func GetRecoveryFilter() *GlobalRecoveryFilter {
+	return globalRecoveryFilter
 }
 
 func (cf *GlobalRecoveryFilter) DoFilter() gin.HandlerFunc {
