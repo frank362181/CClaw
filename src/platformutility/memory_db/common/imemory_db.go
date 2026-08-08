@@ -13,6 +13,13 @@ type IMemoryDB interface {
 	Set(key string, value interface{}, expiration time.Duration) error
 	Get(key string) (string, error)
 	GetIntWithDefault(key string, defValue int) (int, error)
+
+	// Increment 专门针对int类型的自增操作
+	Increment(key string, inc int64) (int64, error)
+
+	// IncrementWithExpiration 带有过期时间的增加/减少操作
+	IncrementWithExpiration(key string, inc int64, expiration time.Duration) (int64, error)
+
 	Delete(keys ...string) (int64, error)
 
 	// RunScript 原子地执行一段 Lua 脚本（Redis EVALSHA/EVAL，go-redis 自动缓存与回退）。

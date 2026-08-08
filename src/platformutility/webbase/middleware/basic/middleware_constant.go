@@ -50,34 +50,32 @@ const (
 
 // 定义http中header,request的属性的常量
 
-const ConstRequestTotal string = "RequestTotal"
-const ConstHeaderToken string = "AUTHORIZATION"
-const ConstQueryNonce string = "NONCE"
-const ConstSignature string = "SIGNATURE"
-const ConstQueryTimestamp string = "TIMESTAMP"
+const (
+	ConstRequestTotal   string = "RequestTotal"
+	ConstHeaderToken    string = "AUTHORIZATION"
+	ConstQueryNonce     string = "NONCE"
+	ConstSignature      string = "SIGNATURE"
+	ConstQueryTimestamp string = "TIMESTAMP"
+)
 
 // ========================= define the const error code & error message ===========================
 
 const (
 	ConstSuccessCode int = 0
 
-	ConstErrorCode int = iota + 1000 //基础代码
-	ConstSchemaUnsupported
+	ConstSchemaUnsupported = iota + 1000
 	ConstUrlInvalid
 	ConstBlackUrl
 	ConstBlackIp
 	ConstNonceInvalid
-	ConstSignatureUnexists
 	ConstSignatureUnMatch
 	ConstTimeGapOverflow
 	ConstInternalServerError
 	ConstTrafficOverflow
 
-	ConstSSLError
-
 	ConstRequestBodyTooLarge
 
-	ConstErrorMax //以上定义的是内部的常量,外部常量从这个开始
+	ConstErrorMax = iota + 2000 //以上定义的是内部的常量,外部常量从这个开始
 )
 
 const (
@@ -88,7 +86,6 @@ const (
 	ConstBlackUrlMsg            = "url hit black list"
 	ConstBlackIpMsg             = "IP hit black list"
 	ConstNonceInvalidMsg        = "Nonce invalid"
-	ConstSignatureUnexistsMsg   = "header signature unexists"
 	ConstSignatureUnMatchMsg    = "signature unmatched"
 	ConstTimeGapOverflowMsg     = "time gap overflow"
 	ConstInternalServerErrorMsg = "internal server error"

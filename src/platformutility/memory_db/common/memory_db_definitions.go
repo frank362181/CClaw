@@ -32,11 +32,13 @@ type MemoryDbClient struct {
 	MConfig MemoryDbConfig
 }
 
+// GetDefaultMemoryDbConfig build the default memory configuration
 func GetDefaultMemoryDbConfig() *MemoryDbConfig {
 	return &MemoryDbConfig{
-		Address:      "127.0.0.1",
-		Port:         6379,
-		DatabaseName: 0,
+		MemoryType:   MemoryDbTypeRedis,
+		Address:      DefaultMemoryDbAddress,
+		Port:         DefaultMemoryDbPort,
+		DatabaseName: DefaultMemoryDbName,
 		Username:     "",
 		Password:     "",
 

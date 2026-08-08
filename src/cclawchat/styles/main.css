@@ -1212,6 +1212,62 @@ body {
     flex-shrink: 0;
 }
 
+/* 用户菜单（点击登录名弹出） */
+.home-user-wrap {
+    position: relative;
+}
+
+.home-user {
+    cursor: pointer;
+    user-select: none;
+}
+
+.user-caret {
+    font-size: 10px;
+    color: var(--color-text-muted);
+    margin-left: 2px;
+}
+
+.user-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 170px;
+    background: var(--color-bg-white);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
+    padding: var(--space-xs);
+    display: none;
+    z-index: 950;
+}
+
+.user-menu.show {
+    display: block;
+    animation: modalIn 0.15s ease-out;
+}
+
+.user-menu-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    background: transparent;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-primary);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: background var(--transition-fast), color var(--transition-fast);
+    text-align: left;
+}
+
+.user-menu-item:hover {
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+}
+
 /* ---------- 核心内容区域 (Home Main) ---------- */
 .home-main {
     flex: 1;
@@ -1287,6 +1343,8 @@ body {
     align-items: center;
     flex-shrink: 0;
     gap: var(--space-md);
+    /* 将登录名与退出图标推到头部最右端（更后侧） */
+    margin-left: auto;
 }
 
 /* ---------- 聊天气泡（内容区右上角） ---------- */
@@ -1333,6 +1391,33 @@ body {
     border-radius: var(--radius-full);
     background: #2ECC71;
     animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* AI 助手浮动入口：右下角悬浮图标，渐变底色更醒目 */
+.chat-bubble.chat-bubble-float {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 900;
+    width: 54px;
+    height: 54px;
+    padding: 0;
+    justify-content: center;
+    border: none;
+    border-radius: var(--radius-full);
+    background: linear-gradient(135deg, #4A6CF7, #8B5CF6);
+    color: #fff;
+    box-shadow: 0 6px 18px rgba(74, 108, 247, 0.35);
+}
+
+.chat-bubble.chat-bubble-float:hover {
+    background: linear-gradient(135deg, #3A5CD7, #7C4CE0);
+    box-shadow: 0 8px 24px rgba(74, 108, 247, 0.45);
+}
+
+.chat-bubble.chat-bubble-float .bubble-icon {
+    font-size: 22px;
+    line-height: 1;
 }
 
 /* ---------- 内容视图 ---------- */
@@ -1509,8 +1594,8 @@ body {
     line-height: 1.5;
 }
 
-/* ---------- 资产台账 ---------- */
-.asset-toolbar {
+/* ---------- 内容页通用：工具栏与数据表格（dashboard / 我的项目 / 系统设置共用） ---------- */
+.content-toolbar {
     display: flex;
     align-items: flex-end;
     justify-content: space-between;
@@ -1519,30 +1604,30 @@ body {
     flex-wrap: wrap;
 }
 
-.asset-title-block h2 {
+.content-title-block h2 {
     font-size: var(--font-size-lg);
     font-weight: 700;
     color: var(--color-text-primary);
     margin-bottom: 2px;
 }
 
-.asset-title-block p {
+.content-title-block p {
     font-size: var(--font-size-sm);
     color: var(--color-text-muted);
 }
 
-.asset-actions {
+.toolbar-actions {
     display: flex;
     align-items: center;
     gap: var(--space-md);
 }
 
-.asset-count {
+.toolbar-count {
     font-size: var(--font-size-sm);
     color: var(--color-text-muted);
 }
 
-.btn-asset-add {
+.btn-primary-add {
     padding: 8px 18px;
     font-size: var(--font-size-sm);
     font-weight: 500;
@@ -1555,25 +1640,25 @@ body {
     transition: background var(--transition-fast), transform var(--transition-fast);
 }
 
-.btn-asset-add:hover {
+.btn-primary-add:hover {
     background: var(--color-primary-hover);
     transform: translateY(-1px);
 }
 
-.asset-table-wrap {
+.table-wrap {
     background: var(--color-bg-white);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     overflow: hidden;
 }
 
-.asset-table {
+.data-table {
     width: 100%;
     border-collapse: collapse;
     font-size: var(--font-size-sm);
 }
 
-.asset-table th {
+.data-table th {
     text-align: left;
     padding: var(--space-sm) var(--space-md);
     background: var(--color-bg-page);
@@ -1583,41 +1668,25 @@ body {
     white-space: nowrap;
 }
 
-.asset-table td {
+.data-table td {
     padding: var(--space-sm) var(--space-md);
     color: var(--color-text-primary);
     border-bottom: 1px solid var(--color-border);
 }
 
-.asset-table tbody tr:last-child td {
+.data-table tbody tr:last-child td {
     border-bottom: none;
 }
 
-.asset-table tbody tr {
+.data-table tbody tr {
     transition: background var(--transition-fast);
 }
 
-.asset-table tbody tr:hover {
+.data-table tbody tr:hover {
     background: var(--color-primary-light);
 }
 
-.asset-table .asset-id {
-    color: var(--color-primary);
-    font-family: Consolas, Monaco, monospace;
-    font-size: var(--font-size-xs);
-    white-space: nowrap;
-}
-
-.asset-table .asset-name {
-    font-weight: 500;
-}
-
-.asset-table .asset-updated {
-    color: var(--color-text-muted);
-    white-space: nowrap;
-}
-
-/* 资产状态徽标 */
+/* 通用状态徽标（具体配色由各页面的 .status-badge.<变体> 定义，如 NPA 的 doing/done/todo） */
 .status-badge {
     display: inline-block;
     padding: 2px 10px;
@@ -1625,26 +1694,6 @@ body {
     font-size: var(--font-size-xs);
     font-weight: 500;
     white-space: nowrap;
-}
-
-.status-badge.inuse {
-    color: #27AE60;
-    background: #EAF8EF;
-}
-
-.status-badge.repair {
-    color: #E67E22;
-    background: #FEF5EC;
-}
-
-.status-badge.idle {
-    color: #7F8C8D;
-    background: #F0F2F5;
-}
-
-.status-badge.scrapped {
-    color: #E74C3C;
-    background: #FDECEC;
 }
 
 /* ---------- 系统设置 (Settings) ---------- */
@@ -1742,6 +1791,215 @@ body {
     transform: translateX(20px);
 }
 
+/* Agents / Skills / MCP / Storages / Knowledge 图卡（参考 OpenClaw 设置结构） */
+.settings-section {
+    margin-bottom: var(--space-lg);
+}
+
+.settings-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-sm);
+}
+
+.settings-section-title {
+    font-size: var(--font-size-md);
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.settings-section-count {
+    display: inline-block;
+    margin-left: var(--space-sm);
+    font-size: var(--font-size-xs);
+    font-weight: 400;
+    color: var(--color-text-muted);
+    vertical-align: 2px;
+}
+
+.agent-grid,
+.skill-grid,
+.mini-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: var(--space-md);
+}
+
+.mini-grid {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+
+.agent-card,
+.skill-card,
+.mini-card {
+    position: relative;
+    background: var(--color-bg-white);
+    border: 2px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-lg) var(--space-md);
+    text-align: center;
+    cursor: pointer;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.mini-card {
+    padding: var(--space-md);
+}
+
+.agent-card .card-icon,
+.skill-card .card-icon,
+.mini-card .card-icon {
+    font-size: 30px;
+    line-height: 1;
+    margin-bottom: var(--space-sm);
+}
+
+.mini-card .card-icon {
+    font-size: 24px;
+}
+
+.agent-card .card-name,
+.skill-card .card-name,
+.mini-card .card-name {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: var(--space-xs);
+}
+
+.agent-card .card-desc,
+.skill-card .card-desc,
+.mini-card .card-desc {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    line-height: 1.5;
+}
+
+/* 卡片底部状态 */
+.card-status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    margin-top: var(--space-sm);
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+}
+
+.card-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: var(--radius-full);
+    background: #BDC3C7;
+}
+
+.card-status-dot.on {
+    background: #2ECC71;
+}
+
+.card-status-dot.off {
+    background: #E74C3C;
+}
+
+/* 模型信息与默认徽标 */
+.card-meta {
+    margin-top: var(--space-xs);
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    font-family: Consolas, Monaco, monospace;
+}
+
+.card-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--color-primary);
+    border-radius: var(--radius-full);
+    vertical-align: 2px;
+}
+
+/* 悬停：提示被选中（主色描边 + 选中角标） */
+.agent-card:hover,
+.skill-card:hover,
+.mini-card:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 8px 24px rgba(74, 108, 247, 0.16);
+    transform: translateY(-2px);
+}
+
+.agent-card .card-check,
+.skill-card .card-check,
+.mini-card .card-check {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 20px;
+    height: 20px;
+    border-radius: var(--radius-full);
+    background: var(--color-primary);
+    color: #fff;
+    font-size: 12px;
+    line-height: 1;
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
+
+.agent-card:hover .card-check,
+.skill-card:hover .card-check,
+.mini-card:hover .card-check {
+    display: flex;
+}
+
+/* Skills 工具栏：筛选 + 搜索 */
+.skills-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+.skills-filter {
+    display: inline-flex;
+    margin-left: var(--space-sm);
+    padding: 2px;
+    vertical-align: middle;
+    background: var(--color-bg-page);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full);
+}
+
+.skills-filter-btn {
+    border: none;
+    background: transparent;
+    padding: 4px 14px;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    border-radius: var(--radius-full);
+    transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.skills-filter-btn.active {
+    background: var(--color-bg-white);
+    color: var(--color-primary);
+    font-weight: 600;
+    box-shadow: 0 2px 6px var(--color-shadow);
+}
+
+.skills-search {
+    width: 180px;
+    margin-left: var(--space-sm);
+    padding: 6px 12px;
+    vertical-align: middle;
+}
+
 /* ============================================================
    聊天抽屉 (Chat Drawer) —— 最右侧，展示 chat.html
    ============================================================ */
@@ -1826,4 +2084,396 @@ body {
     overflow: hidden;
     position: relative;
     background: var(--color-bg-page);
+}
+
+/* ============================================================
+   我的项目 (NPA) —— 以项目维度管理不良资产
+   ============================================================ */
+/* 新建项目弹窗（加宽版 modal，复用 .modal-* 基础样式） */
+.modal-box-form {
+    width: 460px;
+    text-align: left;
+}
+
+.npa-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    margin: var(--space-md) 0;
+}
+
+.npa-form-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+}
+
+.npa-form-label {
+    width: 130px;
+    flex-shrink: 0;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-primary);
+}
+
+.npa-form-input {
+    flex: 1;
+    width: auto;
+}
+
+.npa-form-error {
+    display: none;
+    font-size: var(--font-size-xs);
+    color: #E74C3C;
+    margin-top: var(--space-xs);
+}
+
+/* 项目文件上传与提示 */
+.npa-file-input {
+    flex: 1;
+    width: auto;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    color: var(--color-text-primary);
+    background: var(--color-bg-white);
+}
+
+.npa-form-hint {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    margin-top: var(--space-xs);
+}
+
+/* 项目表格：名称 / 数字 / 金额 / 日期列 */
+.npa-table .npa-name {
+    font-weight: 500;
+}
+
+.npa-table .npa-num,
+.npa-table .npa-amount,
+.npa-table .npa-recovered {
+    font-family: Consolas, Monaco, monospace;
+    font-size: var(--font-size-xs);
+    white-space: nowrap;
+}
+
+.npa-table .npa-date {
+    color: var(--color-text-muted);
+    white-space: nowrap;
+}
+
+/* 分析进度直线：平直样式，按进度以绿色/红色显示 */
+.npa-progress {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-width: 120px;
+}
+
+.npa-progress-track {
+    flex: 1;
+    height: 10px;
+    background: var(--color-bg-page);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.npa-progress-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width var(--transition-normal);
+}
+
+/* 进度 >= 50%：绿色 */
+.npa-progress-fill.good {
+    background: #27AE60;
+}
+
+/* 进度 < 50%：红色 */
+.npa-progress-fill.bad {
+    background: #E74C3C;
+}
+
+.npa-progress-text {
+    width: 34px;
+    flex-shrink: 0;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    text-align: right;
+}
+
+/* 处置状态徽标（复用 .status-badge 基础样式，追加 NPA 专用变体） */
+.npa-table .status-badge.doing {
+    color: #4A6CF7;
+    background: #EEF1FE;
+}
+
+.npa-table .status-badge.done {
+    color: #27AE60;
+    background: #EAF8EF;
+}
+
+.npa-table .status-badge.todo {
+    color: #7F8C8D;
+    background: #F0F2F5;
+}
+
+/* 操作列 */
+.npa-ops {
+    white-space: nowrap;
+}
+
+.btn-npa-delete {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-white);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.btn-npa-delete:hover {
+    background: #FDECEC;
+    border-color: #E74C3C;
+}
+
+.npa-empty {
+    text-align: center;
+    color: var(--color-text-muted);
+    padding: var(--space-xl) 0;
+}
+
+/* 展开图标列 */
+.npa-expand-th {
+    width: 44px;
+}
+
+.npa-expand-cell {
+    text-align: center;
+}
+
+.btn-npa-expand {
+    width: 26px;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.btn-npa-expand:hover {
+    color: var(--color-primary);
+    background: var(--color-bg-page);
+}
+
+/* 项目户明细展开行 */
+.npa-detail-row[hidden] {
+    display: none;
+}
+
+.npa-table .npa-detail-cell {
+    background: var(--color-bg-page);
+    /* 顶部无间隔，明细表格紧贴上方项目行；左右稍作缩进，底部保留少量间距与下一行区分 */
+    padding: 0 var(--space-lg) var(--space-sm) var(--space-lg);
+}
+
+.npa-table tbody tr.npa-detail-row:hover {
+    background: transparent;
+}
+
+.npa-detail-wrap {
+    /* 浅蓝底，与项目行纯白风格区分 */
+    background: #F5F8FF;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-md);
+}
+
+.npa-detail-title {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: var(--space-sm);
+}
+
+.npa-sub-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.npa-sub-table th {
+    text-align: left;
+    font-size: var(--font-size-xs);
+    font-weight: 500;
+    color: var(--color-text-muted);
+    background: var(--color-bg-page);
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--color-border);
+    white-space: nowrap;
+}
+
+.npa-sub-table td {
+    font-size: var(--font-size-xs);
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--color-border);
+    white-space: nowrap;
+}
+
+/* 户明细斑马纹：奇数行白底、偶数行浅蓝，与项目行纯白风格区分 */
+.npa-sub-table tbody tr:nth-child(odd) {
+    background: var(--color-bg-white);
+}
+
+.npa-sub-table tbody tr:nth-child(even) {
+    background: var(--color-primary-light);
+}
+
+.npa-sub-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.npa-sub-table .npa-sub-name {
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+/* 回收评分列与悬停提示 */
+.npa-score-cell {
+    white-space: nowrap;
+}
+
+.npa-score {
+    position: relative;
+    display: inline-block;
+    min-width: 34px;
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    text-align: center;
+    cursor: help;
+}
+
+.npa-score.high {
+    background: #EAF8EF;
+    color: #27AE60;
+}
+
+.npa-score.mid {
+    background: #FFF6E5;
+    color: #E67E22;
+}
+
+.npa-score.low {
+    background: #FDECEC;
+    color: #E74C3C;
+}
+
+.npa-score:hover::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 5px 10px;
+    background: rgba(26, 26, 46, 0.92);
+    color: #fff;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: nowrap;
+    border-radius: var(--radius-sm);
+    z-index: 20;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+    pointer-events: none;
+}
+
+.npa-score:hover::before {
+    content: '';
+    position: absolute;
+    bottom: calc(100% + 3px);
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: rgba(26, 26, 46, 0.92);
+    z-index: 20;
+}
+
+/* 户格式文件按钮列 */
+.npa-file-cell {
+    white-space: nowrap;
+}
+
+.btn-npa-file {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    font-size: var(--font-size-xs);
+    color: var(--color-primary);
+    background: var(--color-bg-white);
+    border: 1px solid var(--color-primary-light);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.btn-npa-file:hover {
+    background: var(--color-primary-light);
+    border-color: var(--color-primary);
+}
+
+/* 户分析与格式文件弹窗 */
+.modal-box-file {
+    width: 560px;
+    text-align: left;
+}
+
+.npa-file-view {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    margin: var(--space-md) 0;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.npa-file-label {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: var(--space-xs);
+}
+
+.npa-file-analysis p {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+    line-height: 1.7;
+    margin: 0;
+}
+
+.npa-file-pre {
+    margin: 0;
+    padding: var(--space-md);
+    background: var(--color-bg-page);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    font-family: Consolas, Monaco, monospace;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-primary);
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-all;
 }

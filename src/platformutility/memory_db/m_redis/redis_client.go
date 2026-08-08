@@ -30,6 +30,7 @@ type RedisClient struct {
 	mClient *redis.Client
 }
 
+// 单例模式
 var memoryDbClient = common.GetSingleton(func() *RedisClient {
 	return &RedisClient{
 		mClient: nil,
@@ -41,23 +42,23 @@ func GetRedisClient(config *config.ConfigurationHelper) redisdb.IMemoryDB {
 	if config == nil {
 		memoryConfig = *redisdb.GetDefaultMemoryDbConfig()
 	} else {
-		memoryConfig.Address, _ = config.GetStringValueDefault("memoryDb", "address", "127.0.0.1")
-		memoryConfig.Port, _ = config.GetIntValueDefault("memoryDb", "port", 6379)
-		memoryConfig.DatabaseName, _ = config.GetIntValueDefault("memoryDb", "databaseName", 0)
+		memoryConfig.Address, _ = config.GetStringValueDefault("memoryDb", "address", redisdb.DefaultMemoryDbAddress)
+		memoryConfig.Port, _ = config.GetIntValueDefault("memoryDb", "port", redisdb.DefaultMemoryDbPort)
+		memoryConfig.DatabaseName, _ = config.GetIntValueDefault("memoryDb", "databaseName", redisdb.DefaultMemoryDbName)
 		memoryConfig.Username, _ = config.GetStringValueDefault("memoryDb", "username", "")
 		memoryConfig.Password, _ = config.GetStringValueDefault("memoryDb", "password", "")
 
-		memoryConfig.PoolSize, _ = config.GetIntValueDefault("memoryDb", "poolSize", 20)
-		memoryConfig.MinIdleConnections, _ = config.GetIntValueDefault("memoryDb", "minIdleConnections", 5)
-		memoryConfig.MaxRetries, _ = config.GetIntValueDefault("memoryDb", "maxRetries", 3)
+		memoryConfig.PoolSize, _ = config.GetIntValueDefault("memoryDb", "poolSize", redisdb.DefaultMaxPoolSize)
+		memoryConfig.MinIdleConnections, _ = config.GetIntValueDefault("memoryDb", "minIdleConnections", redisdb.DefaultMinIdleConnection)
+		memoryConfig.MaxRetries, _ = config.GetIntValueDefault("memoryDb", "maxRetries", redisdb.DefaultMaxRetries)
 
-		memoryConfig.DialTimeout, _ = config.GetIntValueDefault("memoryDb", "dialTimeout", 5)
-		memoryConfig.ReadTimeout, _ = config.GetIntValueDefault("memoryDb", "readTimeout", 3)
-		memoryConfig.WriteTimeout, _ = config.GetIntValueDefault("memoryDb", "writeTimeout", 3)
+		memoryConfig.DialTimeout, _ = config.GetIntValueDefault("memoryDb", "dialTimeout", redisdb.DefaultDialTimeout)
+		memoryConfig.ReadTimeout, _ = config.GetIntValueDefault("memoryDb", "readTimeout", redisdb.DefaultReadTimeout)
+		memoryConfig.WriteTimeout, _ = config.GetIntValueDefault("memoryDb", "writeTimeout", redisdb.DefaultWriteTimeout)
 
-		memoryConfig.HealthCheckInterval, _ = config.GetIntValueDefault("memoryDb", "healthCheckInterval", 10)
+		memoryConfig.HealthCheckInterval, _ = config.GetIntValueDefault("memoryDb", "healthCheckInterval", redisdb.HealthCheckInterval)
 
-		memoryConfig.ReconnectBaseDelay, _ = config.GetIntValueDefault("memoryDb", "reconnectBaseDelay", 500)
+		memoryConfig.ReconnectBaseDelay, _ = config.GetIntValueDefault("memoryDb", "reconnectBaseDelay", redisdb.ReconnectionBaseDelay)
 	}
 
 	memoryDbClient.MConfig = memoryConfig //设置配置信息
@@ -190,6 +191,59 @@ func (rdb *RedisClient) GetIntWithDefault(key string, defValue int) (int, error)
 	}
 
 	return defValue, err
+}
+
+func (rdb *RedisClient) Increment(key string, inc int64) (int64, error) {
+	rdb.mu.RLock()
+	client := rdb.mClient
+	isClosed := rdb.IsClosed()
+	rdb.mu.RUnlock()
+
+	if isClosed || client == nil {
+		return -1, exception.MemoryDbErrEx("redis client is closed")
+	}
+
+	var val int64
+	err := rdb.executeWithRetry(func(client *redis.Client) error {
+		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.WriteTimeout)*time.Second)
+		defer cancel()
+
+		result, err := client.IncrBy(ctx, key, inc).Result()
+		if err != nil {
+			return err
+		}
+
+		val = result
+		return nil
+	})
+
+	return val, err
+}
+
+func (rdb *RedisClient) IncrementWithExpiration(key string, inc int64, expiration time.Duration) (int64, error) {
+	rdb.mu.RLock()
+	client := rdb.mClient
+	isClosed := rdb.IsClosed()
+	rdb.mu.RUnlock()
+
+	if isClosed || client == nil {
+		return -1, exception.MemoryDbErrEx("redis client is closed")
+	}
+
+	var val int64 //返回的值
+	err := rdb.executeWithRetry(func(client *redis.Client) error {
+		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.WriteTimeout)*time.Second)
+		defer cancel()
+
+		v, err := redis.NewScript(LuaIncrementString).Run(ctx, client, []string{key}, inc, int64(expiration/time.Second)).Int64()
+		if err != nil {
+			return err
+		}
+		val = v
+		return nil
+	})
+
+	return val, err
 }
 
 func (rdb *RedisClient) Delete(keys ...string) (int64, error) {

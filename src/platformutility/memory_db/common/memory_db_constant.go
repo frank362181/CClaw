@@ -8,6 +8,11 @@ const (
 )
 
 const (
+	DefaultMemoryDbAddress = "127.0.0.1"
+	DefaultMemoryDbPort    = 6379
+
+	DefaultMemoryDbName = 0
+
 	DefaultMaxPoolSize       = 20
 	DefaultMinIdleConnection = 5
 	DefaultMaxRetries        = 3

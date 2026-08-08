@@ -35,23 +35,6 @@ func (err *ErrorDescription) Is(target error) bool {
 	return false
 }
 
-var UnstartServerError = &ErrorDescription{
-	ErrTxt:   "",
-	ErrId:    errorIdUnstartServer,
-	FileName: "",
-	LineNo:   -1,
-}
-
-func UnstartServerErrorEx(errTxt string) *ErrorDescription {
-	_, file, line, _ := runtime.Caller(1)
-	return &ErrorDescription{
-		ErrTxt:   errTxt,
-		ErrId:    errorIdUnstartServer,
-		FileName: file,
-		LineNo:   line,
-	}
-}
-
 var UnknownError = &ErrorDescription{
 	ErrTxt:   "",
 	ErrId:    errorIdUnknown,

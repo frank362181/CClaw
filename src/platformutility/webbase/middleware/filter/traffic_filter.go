@@ -2,6 +2,8 @@
 * 流量控制filter
 * 控制维度：1. 全局：IP维度：该IP过去 2 分钟内调用次数超过阈值
 *		  2. IP-API维度：某调用某API过去 2 分钟被调用次数超过阈值
+*		  3. LoginName维度，过去2分钟内 调用次数阈值
+*		  4. LoginName-API维度，过去2分钟内调用次数阈值
 **/
 
 package filter
@@ -80,21 +82,19 @@ func (filter *TrafficFilter) DoFilter() gin.HandlerFunc {
 
 			// 控制流量 1 IP维度
 			ipTrafficKey := basic.IPTrafficKeyPrefix + requestInfo.RemoteIp
-			result, _ := filter.memoryDb.GetIntWithDefault(ipTrafficKey, 0)
+			result, _ := filter.memoryDb.IncrementWithExpiration(ipTrafficKey, 1, time.Duration(basic.TrafficFilterTimeGap)*time.Second)
 			if result+1 > basic.IPTrafficFilterLimits {
 				basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstTrafficOverflow, basic.ConstTrafficOverflowMsg, nil)
 				return
 			}
-			_ = filter.memoryDb.Set(ipTrafficKey, result+1, time.Duration(basic.TrafficFilterTimeGap)*time.Second)
 
 			// 2. ip api维度
 			ipApiTrafficKey := basic.IPAPITrafficPrefix + requestInfo.RemoteIp + requestInfo.RequestPath
-			result, _ = filter.memoryDb.GetIntWithDefault(ipApiTrafficKey, 0)
+			result, _ = filter.memoryDb.IncrementWithExpiration(ipApiTrafficKey, 1, time.Duration(basic.TrafficFilterTimeGap)*time.Second)
 			if result+1 > basic.IPAPITrafficFilterLimits {
 				basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstTrafficOverflow, basic.ConstTrafficOverflowMsg, nil)
 				return
 			}
-			_ = filter.memoryDb.Set(ipApiTrafficKey, result+1, time.Duration(basic.TrafficFilterTimeGap)*time.Second)
 		}
 
 		// 放行

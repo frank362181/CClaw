@@ -9,8 +9,8 @@ const (
 	errorIdMatch
 	errorIdUnMatch
 	errorIdFileExtension
-
 	errorIdUnsupported
+	errorIdStringJsonTranslation
 
 	errorIdUnloadFile = iota + 60 //配置文件载入错误
 	errorIdFilePath
@@ -19,8 +19,6 @@ const (
 	errorIdDatabase
 	errorIdSqlError
 	errorIdMemoryDbError
-
-	errorIdUnstartServer = iota + 100
 
 	errorIdAddUsing             = iota + 300 //定义的服务器监听相关的错误
 	errorIdSocketConnectTimeout              //socket链接超时

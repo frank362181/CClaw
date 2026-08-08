@@ -2,14 +2,13 @@ package service_core
 
 import (
 	"crypto/subtle"
-	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
+	"my.favorite/platformutility/exception"
 	memoryDbCommon "my.favorite/platformutility/memory_db/common"
 	"my.favorite/platformutility/memory_db/m_redis"
 	"my.favorite/platformutility/webbase/middleware/basic"
@@ -20,9 +19,9 @@ import (
 // DefaultAbsoluteSessionLifetime 用来限制token的绝对过期时间，不能因为一直使用而使得token永久有效
 const DefaultAbsoluteSessionLifetime = 8 * 60 * 60 // 8个小时
 
-// ISessionManager owns the bidirectional session indexes and their consistency rules.
+// ISessionService owns the bidirectional session indexes and their consistency rules.
 // A username has exactly one current token; an older token must never become current again.
-type ISessionManager interface {
+type ISessionService interface {
 	CreateOrReplace(token string, principal *dataobject.LoginSession) error
 	Get(token string) (*dataobject.LoginSession, error)
 	Refresh(token string, principal *dataobject.LoginSession) error
@@ -33,7 +32,7 @@ type scriptRunner interface {
 	RunScript(script string, keys []string, args ...interface{}) (interface{}, error)
 }
 
-type MemorySessionMgr struct {
+type SessionService struct {
 	memoryDB memoryDbCommon.IMemoryDB
 	idleTTL  time.Duration
 	//absoluteLifetime time.Duration
@@ -45,35 +44,35 @@ type MemorySessionMgr struct {
 }
 
 // 单例模式
-var memorySessionMgr = common.GetSingleton(func() *MemorySessionMgr {
-	return &MemorySessionMgr{
+var sessionService = common.GetSingleton(func() *SessionService {
+	return &SessionService{
 		memoryDB: nil,
 		idleTTL:  time.Duration(basic.MemoryTokenExpireTime) * time.Second,
 		//absoluteLifetime: time.Duration(DefaultAbsoluteSessionLifetime) * time.Second,
 	}
 }).Instance()
 
-func GetMemorySessionMgr(memoryDB memoryDbCommon.IMemoryDB) (*MemorySessionMgr, error) {
+func GetSessionService(memoryDB memoryDbCommon.IMemoryDB) (*SessionService, error) {
 	if memoryDB == nil {
-		return nil, errors.New("session store: memory database is nil")
+		return nil, exception.ParameterEmptyErrorEx("session store: memory database is nil")
 	}
 
-	memorySessionMgr.memoryDB = memoryDB
-	return memorySessionMgr, nil
+	sessionService.memoryDB = memoryDB
+	return sessionService, nil
 }
 
-func NewMemorySessionMgr(memoryDB memoryDbCommon.IMemoryDB) (*MemorySessionMgr, error) {
+func NewSessionService(memoryDB memoryDbCommon.IMemoryDB) (*SessionService, error) {
 	if memoryDB == nil {
-		return nil, errors.New("session store: memory database is nil")
+		return nil, exception.ParameterEmptyErrorEx("session store: memory database is nil")
 	}
-	return &MemorySessionMgr{
+	return &SessionService{
 		memoryDB: memoryDB,
 		idleTTL:  time.Duration(basic.MemoryTokenExpireTime) * time.Second,
 		//absoluteLifetime: time.Duration(DefaultAbsoluteSessionLifetime) * time.Second,
 	}, nil
 }
 
-func (store *MemorySessionMgr) CreateOrReplace(token string, loginSession *dataobject.LoginSession) error {
+func (store *SessionService) CreateOrReplace(token string, loginSession *dataobject.LoginSession) error {
 	if err := store.validateSessionInput(token, loginSession); err != nil {
 		return err
 	}
@@ -86,18 +85,18 @@ func (store *MemorySessionMgr) CreateOrReplace(token string, loginSession *datao
 
 	value, err := session.ToJsonString()
 	if err != nil {
-		return fmt.Errorf("session store: encode session: %w", err)
+		return myException.TokenInvalidErrEx2("session store: encode session: %s", err.Error())
 	}
 
 	userKey := store.sessionUserKey(session.LoginName)
 	if runner, ok := store.memoryDB.(scriptRunner); ok {
 		ttlSec := int64(store.sessionTTL(&session) / time.Second)
-		_, err = runner.RunScript(m_redis.LuaCreateOrReplace,
+		_, err = runner.RunScript(LuaCreateOrReplace,
 			[]string{userKey, store.sessionTokenKey(token)},
 			token, value, ttlSec, basic.UserTokenKeyPrefix,
 		)
 		if err != nil {
-			return fmt.Errorf("session store: create session: %w", err)
+			return myException.TokenInvalidErrEx2("session store: create session: %s", err.Error())
 		}
 
 		return nil
@@ -107,18 +106,18 @@ func (store *MemorySessionMgr) CreateOrReplace(token string, loginSession *datao
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	oldToken, getErr := store.memoryDB.Get(userKey)
-	if getErr != nil && !common.IsKeyNotFound(getErr) {
-		return fmt.Errorf("session store: read current token: %w", getErr)
+	if getErr != nil && !m_redis.IsKeyNotFound(getErr) {
+		return myException.TokenInvalidErrEx2("session store: read current token: %s", getErr.Error())
 	}
 
 	newSessionKey := store.sessionTokenKey(token)
 	if err := store.memoryDB.Set(newSessionKey, value, store.sessionTTL(&session)); err != nil {
-		return fmt.Errorf("session store: create session: %w", err)
+		return myException.TokenInvalidErrEx2("session store: create session: %s", err.Error())
 	}
 
 	if err := store.memoryDB.Set(userKey, token, store.sessionTTL(&session)); err != nil {
 		_, _ = store.memoryDB.Delete(newSessionKey)
-		return fmt.Errorf("session store: switch current token: %w", err)
+		return myException.TokenInvalidErrEx2("session store: switch current token: %s", err.Error())
 	}
 
 	if oldToken != "" && !store.secureTokenEqual(oldToken, token) {
@@ -131,7 +130,7 @@ func (store *MemorySessionMgr) CreateOrReplace(token string, loginSession *datao
 	return nil
 }
 
-func (store *MemorySessionMgr) Get(token string) (*dataobject.LoginSession, error) {
+func (store *SessionService) Get(token string) (*dataobject.LoginSession, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return nil, myException.TokenInvalidErrEx("token empty")
@@ -139,7 +138,7 @@ func (store *MemorySessionMgr) Get(token string) (*dataobject.LoginSession, erro
 
 	if runner, ok := store.memoryDB.(scriptRunner); ok {
 		now := common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
-		res, err := runner.RunScript(m_redis.LuaGet,
+		res, err := runner.RunScript(LuaGetEx,
 			[]string{store.sessionTokenKey(token)},
 			token, now, basic.UserTokenKeyPrefix)
 		if err != nil {
@@ -155,14 +154,14 @@ func (store *MemorySessionMgr) Get(token string) (*dataobject.LoginSession, erro
 	return store.getLocked(token)
 }
 
-func (store *MemorySessionMgr) Refresh(token string, loginSession *dataobject.LoginSession) error {
+func (store *SessionService) Refresh(token string, loginSession *dataobject.LoginSession) error {
 	if err := store.validateSessionInput(token, loginSession); err != nil {
 		return err
 	}
 
 	if runner, ok := store.memoryDB.(scriptRunner); ok {
 		now := common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
-		res, err := runner.RunScript(m_redis.LuaRefresh,
+		res, err := runner.RunScript(LuaRefresh,
 			[]string{store.sessionTokenKey(token)},
 			token, now, int64(store.idleTTL/time.Second), basic.UserTokenKeyPrefix)
 		if err != nil {
@@ -171,7 +170,7 @@ func (store *MemorySessionMgr) Refresh(token string, loginSession *dataobject.Lo
 
 		items, ok := res.([]interface{})
 		if !ok || len(items) < 1 {
-			return fmt.Errorf("session store: refresh session: invalid refresh token")
+			return myException.TokenInvalidErrEx("session store: refresh session: invalid refresh token")
 		}
 
 		switch status, _ := items[0].(int64); status {
@@ -221,14 +220,14 @@ func (store *MemorySessionMgr) Refresh(token string, loginSession *dataobject.Lo
 	return nil
 }
 
-func (store *MemorySessionMgr) Revoke(token string) error {
+func (store *SessionService) Revoke(token string) error {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return nil // Logout is idempotent.
 	}
 
 	if runner, ok := store.memoryDB.(scriptRunner); ok {
-		_, err := runner.RunScript(m_redis.LuaRevoke,
+		_, err := runner.RunScript(LuaRevoke,
 			[]string{store.sessionTokenKey(token)},
 			token, basic.UserTokenKeyPrefix)
 		if err != nil {
@@ -246,10 +245,10 @@ func (store *MemorySessionMgr) Revoke(token string) error {
 }
 
 // ================================ private functions & methods ===================================
-func (store *MemorySessionMgr) getLocked(token string) (*dataobject.LoginSession, error) {
+func (store *SessionService) getLocked(token string) (*dataobject.LoginSession, error) {
 	value, err := store.memoryDB.Get(store.sessionTokenKey(token))
 	if err != nil {
-		if common.IsKeyNotFound(err) {
+		if m_redis.IsKeyNotFound(err) {
 			return nil, myException.TokenInvalidErrEx("session not found")
 		}
 		return nil, myException.TokenInvalidErrEx2("session store: read session: %s", err.Error())
@@ -262,11 +261,11 @@ func (store *MemorySessionMgr) getLocked(token string) (*dataobject.LoginSession
 
 	currentToken, err := store.memoryDB.Get(store.sessionUserKey(loginSession.LoginName))
 	if err != nil {
-		if common.IsKeyNotFound(err) {
+		if m_redis.IsKeyNotFound(err) {
 			_, _ = store.memoryDB.Delete(store.sessionTokenKey(token))
 			return nil, myException.TokenInvalidErrEx("token has been revoked")
 		}
-		return nil, fmt.Errorf("session store: read current token: %w", err)
+		return nil, myException.TokenInvalidErrEx2("session store: read current token: %s", err.Error())
 	}
 	if !store.secureTokenEqual(currentToken, token) {
 		// Remove only the stale token index. Never remove the user's newer token index.
@@ -283,41 +282,41 @@ func (store *MemorySessionMgr) getLocked(token string) (*dataobject.LoginSession
 	return &loginSession, nil
 }
 
-func (store *MemorySessionMgr) revokeLocked(token string) error {
+func (store *SessionService) revokeLocked(token string) error {
 	value, err := store.memoryDB.Get(store.sessionTokenKey(token))
 	if err != nil {
-		if common.IsKeyNotFound(err) {
+		if m_redis.IsKeyNotFound(err) {
 			return nil
 		}
-		return fmt.Errorf("session store: read session for revoke: %w", err)
+		return myException.TokenInvalidErrEx2("session store: read session for revoke: %s", err.Error())
 	}
 
 	var loginSession dataobject.LoginSession
 	if err := loginSession.FromJsonString(value); err != nil {
-		return fmt.Errorf("session store: decode session for revoke: %w", err)
+		return myException.TokenInvalidErrEx2("session store: decode session for revoke: %s", err.Error())
 	}
 
 	userKey := store.sessionUserKey(loginSession.LoginName)
 	currentToken, currentErr := store.memoryDB.Get(userKey)
-	if currentErr != nil && !common.IsKeyNotFound(currentErr) {
-		return fmt.Errorf("session store: read current token for revoke: %w", currentErr)
+	if currentErr != nil && !m_redis.IsKeyNotFound(currentErr) {
+		return myException.TokenInvalidErrEx2("session store: read current token for revoke: %s", currentErr.Error())
 	}
 
 	// An old token must not be allowed to delete the mapping of a newer login.
 	if store.secureTokenEqual(currentToken, token) {
 		if _, err := store.memoryDB.Delete(userKey); err != nil {
-			return fmt.Errorf("session store: remove current token: %w", err)
+			return myException.TokenInvalidErrEx2("session store: remove current token: %s", err.Error())
 		}
 	}
 
 	if _, err := store.memoryDB.Delete(store.sessionTokenKey(token)); err != nil {
-		return fmt.Errorf("session store: remove session: %w", err)
+		return myException.TokenInvalidErrEx2("session store: remove session: %s", err.Error())
 	}
 
 	return nil
 }
 
-func (store *MemorySessionMgr) sessionTTL(loginSession *dataobject.LoginSession) time.Duration {
+func (store *SessionService) sessionTTL(loginSession *dataobject.LoginSession) time.Duration {
 	//remaining := time.Until(time.Unix(loginSession.AbsoluteExpireAt, 0))
 	remaining := common.GetDatetimeUtilityInstance().GetCurrentDatetime().Until(loginSession.AbsoluteExpireAt)
 	if remaining < store.idleTTL {
@@ -327,14 +326,14 @@ func (store *MemorySessionMgr) sessionTTL(loginSession *dataobject.LoginSession)
 	return store.idleTTL
 }
 
-func (store *MemorySessionMgr) parseLuaSessionResult(res interface{}) (*dataobject.LoginSession, error) {
+func (store *SessionService) parseLuaSessionResult(res interface{}) (*dataobject.LoginSession, error) {
 	items, ok := res.([]interface{})
 	if !ok || len(items) < 2 {
-		return nil, fmt.Errorf("session store: unexpected script result")
+		return nil, myException.TokenInvalidErrEx("session store: unexpected script result")
 	}
 	status, ok := items[0].(int64)
 	if !ok {
-		return nil, fmt.Errorf("session store: unexpected script status")
+		return nil, myException.TokenInvalidErrEx("session store: unexpected script status")
 	}
 	value, _ := items[1].(string)
 	switch status {
@@ -347,30 +346,30 @@ func (store *MemorySessionMgr) parseLuaSessionResult(res interface{}) (*dataobje
 	}
 	var loginSession dataobject.LoginSession
 	if err := loginSession.FromJsonString(value); err != nil {
-		return nil, fmt.Errorf("session store: decode session: %w", err)
+		return nil, myException.TokenInvalidErrEx2("session store: decode session: %s", err.Error())
 	}
 	return &loginSession, nil
 }
 
-func (store *MemorySessionMgr) validateSessionInput(token string, loginSession *dataobject.LoginSession) error {
+func (store *SessionService) validateSessionInput(token string, loginSession *dataobject.LoginSession) error {
 	if strings.TrimSpace(token) == "" {
-		return myException.TokenInvalidErrEx("token empty")
+		return exception.ParameterEmptyErrorEx("token empty")
 	}
 	if loginSession == nil || strings.TrimSpace(loginSession.LoginName) == "" {
-		return errors.New("session store: loginSession is invalid")
+		return exception.ParameterEmptyErrorEx("session store: loginSession is invalid")
 	}
 	return nil
 }
 
-func (store *MemorySessionMgr) sessionTokenKey(token string) string {
+func (store *SessionService) sessionTokenKey(token string) string {
 	return basic.UserInfoKeyPrefix + token
 }
 
-func (store *MemorySessionMgr) sessionUserKey(loginName string) string {
+func (store *SessionService) sessionUserKey(loginName string) string {
 	return basic.UserTokenKeyPrefix + strings.ToLower(strings.TrimSpace(loginName))
 }
 
-func (store *MemorySessionMgr) secureTokenEqual(left, right string) bool {
+func (store *SessionService) secureTokenEqual(left, right string) bool {
 	if len(left) != len(right) {
 		return false
 	}

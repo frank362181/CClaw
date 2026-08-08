@@ -6,6 +6,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+func IsKeyNotFound(err error) bool {
+	return errors.Is(err, redis.Nil)
+}
+
 func isNetworkError(err error) bool {
 	if err == nil {
 		return false

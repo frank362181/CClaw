@@ -11,7 +11,6 @@ import (
 	exception2 "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/service"
 	"my.favorite/platformutility/common"
-	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/webbase/middleware/basic"
 	"my.favorite/platformutility/webbase/middleware/controller"
 	baseController "my.favorite/platformutility/webbase/middleware/controller"
@@ -76,16 +75,10 @@ func (lc *LoginController) Login(c *gin.Context) {
 
 	user, err1 := loginService.Login(lq.Username, lq.Password)
 	if err1 != nil {
-		if errors.Is(err1, exception.UnMatchError) {
-			basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorUserNotExist, cclawcommon.ConstErrorUserNotExistMsg, nil)
-			return
-		}
-
 		if errors.Is(err1, exception2.UserPasswordUnmatchErr) {
 			basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorUserNamePasswordUnmatch, cclawcommon.ConstErrorUserNamePasswordUnmatchMsg, nil)
 			return
 		}
-
 		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
 		return
 	}

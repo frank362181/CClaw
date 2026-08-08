@@ -10,6 +10,7 @@ const (
 	ConstErrorLoginParameter = iota + basic.ConstErrorMax + 1000 + 1
 	ConstErrorUserNamePasswordUnmatch
 	ConstErrorUserNotExist
+	ConstErrorUserDisabled
 	ConstErrorNonToken
 	ConstErrorInvalidToken
 )
@@ -18,6 +19,7 @@ const (
 	ConstErrorLoginParameterMsg          = "登录参数错误"
 	ConstErrorUserNamePasswordUnmatchMsg = "用户名或密码错误"
 	ConstErrorUserNotExistMsg            = "用户不存在"
+	ConstErrorUserDisabledMsg            = "用户被禁用,请联系管理员"
 	ConstErrorNonTokenMsg                = "Token不存在,请登录"
 	ConstErrorInvalidTokenMsg            = "Token无效,请登录"
 )

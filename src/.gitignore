@@ -11,6 +11,9 @@ data/*
 */data/*
 .data/*
 
+### Go build output ###
+bin/
+
 secret*.*
 *.pem
 

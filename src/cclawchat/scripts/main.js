@@ -120,6 +120,9 @@ const App = {
         const isOpen = drawer.classList.contains('open');
         const target = open !== undefined ? open : !isOpen;
 
+        // 抽屉打开时隐藏右下角 AI 浮动气泡，避免遮挡发送按钮
+        HomePage.setChatBubbleVisible(!target);
+
         if (target) {
             // 打开：展示聊天组件并渲染会话状态
             drawer.classList.add('open');
