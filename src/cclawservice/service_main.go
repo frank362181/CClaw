@@ -123,18 +123,18 @@ func (m *ServiceMain) SetupHealthController() error {
 }
 
 func (m *ServiceMain) SetupLoginController() error {
-	userService, err := service.GetLoginService(m.memoryDB, m.database) //创建实现登录的业务逻辑对象
+	loginService, err := service.GetLoginService(m.memoryDB, m.database) //创建实现登录的业务逻辑对象
 	if err != nil {
 		logging.LogErrorF("failed to create login service,err:%s", err.Error())
 		return exception.WebServerErrEx2("failed to create login service: " + err.Error())
 	}
-	loginController := selfController.NewLoginController(userService)
+	loginController := selfController.NewLoginController(loginService)
 
 	urlFunMap := make(map[string]gin.HandlerFunc)
 	urlFunMap[cCommon.RelativeLoginUrl] = loginController.Login
 	urlFunMap[cCommon.RelativeLogoutUrl] = loginController.Logout
 
-	authInter := selfInterceptor.NewAuthenticationInterceptor(userService)
+	authInter := selfInterceptor.NewAuthenticationInterceptor(loginService)
 	tempStr, _ := m.configHelper.GetStringValueDefault("security", "unWantedToken", "")
 	urls := strings.Split(tempStr, ",")
 	authInter.SetupUnwantedTokenUrls(urls)

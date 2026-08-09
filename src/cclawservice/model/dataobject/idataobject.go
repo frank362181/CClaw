@@ -4,7 +4,7 @@
 
 package dataobject
 
-type IDataModel interface {
+type IDataObject interface {
 	ToJsonString() (string, error)
 	FromJsonString(jsonStr string) error
 }

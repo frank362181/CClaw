@@ -11,14 +11,15 @@ import (
 	"errors"
 	"strings"
 
+	"my.favorite/cclawservice/controller/model"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataaccessor"
-	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/service/service_core"
 	"my.favorite/platformutility/common/hash"
 	"my.favorite/platformutility/database/core"
 	"my.favorite/platformutility/exception"
 	memoryDbCommon "my.favorite/platformutility/memory_db/common"
+	"my.favorite/platformutility/webbase/middleware/basic"
 	baseService "my.favorite/platformutility/webbase/middleware/service"
 )
 
@@ -86,7 +87,7 @@ func newLoginService(dbAccessor dataaccessor.IAccessor, ss service_core.ISession
 	}, nil
 }
 
-func (service *LoginService) Login(username, password string) (*dataobject.TAccount, error) {
+func (service *LoginService) Login(username, password string) (*model.LoginSession, error) {
 	username = strings.ToLower(strings.TrimSpace(username))
 	if username == "" || password == "" {
 		return nil, exception.ParameterEmptyErrorEx("user or password is empty")
@@ -120,31 +121,28 @@ func (service *LoginService) Login(username, password string) (*dataobject.TAcco
 		return nil, err
 	}
 
-	principal := &dataobject.LoginSession{
-		LoginName:   user.LoginName,
-		DisplayName: user.DisplayName,
-	}
-	if err := service.sessionService.CreateOrReplace(token, principal); err != nil {
+	loginSession := model.NewLoginSession(user.ComCode, user.LoginName, user.DisplayName)
+	if err := service.sessionService.CreateOrReplace(token, loginSession); err != nil {
 		return nil, err
 	}
 
-	user.LoginPass = ""
-	user.Token = token
-	return user, nil
+	loginSession.Token = token
+	loginSession.ExpiredLength = basic.MemoryTokenExpireTime
+	return loginSession, nil
 }
 
-func (service *LoginService) GetUserByToken(token string) (*dataobject.TAccount, error) {
+func (service *LoginService) GetUserByToken(token string) (*model.LoginSession, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return nil, myException.TokenInvalidErrEx("token empty")
 	}
 
-	principal, err := service.sessionService.Get(token)
+	loginSession, err := service.sessionService.Get(token)
 	if err != nil {
 		return nil, err
 	}
 
-	user, err := service.dbAccessor.GetUserByAccount(principal.LoginName)
+	user, err := service.dbAccessor.GetUserByAccount(loginSession.LoginName)
 	if err != nil {
 		return nil, err
 	}
@@ -155,13 +153,11 @@ func (service *LoginService) GetUserByToken(token string) (*dataobject.TAccount,
 
 	// Refresh revalidates current-token ownership, so a concurrent request cannot
 	// restore a token that Login or Logout has already replaced/revoked.
-	if err := service.sessionService.Refresh(token, principal); err != nil {
+	if err := service.sessionService.Refresh(token, loginSession); err != nil {
 		return nil, err
 	}
 
-	user.LoginPass = ""
-	user.Token = token
-	return user, nil
+	return loginSession, nil
 }
 
 // Logout is idempotent: an already absent token is considered successfully revoked.

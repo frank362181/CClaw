@@ -6,7 +6,6 @@ package filter
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -84,22 +83,22 @@ func (sf *SecurityFilter) DoFilter() gin.HandlerFunc {
 				return
 			}
 
-			//1 replay attack
-			if sf.replayAttackTimestamp(requestInfo.QueryTimestamp) {
-				basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstTimeGapOverflow, basic.ConstTimeGapOverflowMsg, nil)
-				return
-			}
-
-			// 3. 对内容进行signature判断
-			ok, err := sf.antiTampering(requestInfo, c)
-			if ok {
-				if _, ok2 := errors.AsType[*http.MaxBytesError](err); ok2 {
-					basic.GetBaseResponser().AbortWithError(c, http.StatusRequestEntityTooLarge, basic.ConstRequestBodyTooLarge, basic.ConstRequestBodyTooLargeMsg, nil)
-					return
-				}
-				basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstSignatureUnMatch, basic.ConstSignatureUnMatchMsg, nil)
-				return
-			}
+			////1 replay attack
+			//if sf.replayAttackTimestamp(requestInfo.QueryTimestamp) {
+			//	basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstTimeGapOverflow, basic.ConstTimeGapOverflowMsg, nil)
+			//	return
+			//}
+			//
+			//// 3. 对内容进行signature判断
+			//ok, err := sf.antiTampering(requestInfo, c)
+			//if ok {
+			//	if _, ok2 := errors.AsType[*http.MaxBytesError](err); ok2 {
+			//		basic.GetBaseResponser().AbortWithError(c, http.StatusRequestEntityTooLarge, basic.ConstRequestBodyTooLarge, basic.ConstRequestBodyTooLargeMsg, nil)
+			//		return
+			//	}
+			//	basic.GetBaseResponser().AbortWithError(c, http.StatusForbidden, basic.ConstSignatureUnMatch, basic.ConstSignatureUnMatchMsg, nil)
+			//	return
+			//}
 		}
 
 		// 放行

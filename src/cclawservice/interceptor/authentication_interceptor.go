@@ -5,14 +5,12 @@
 package interceptor
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"my.favorite/cclawservice/common"
-	cclawException "my.favorite/cclawservice/exception"
-	"my.favorite/cclawservice/model/dataobject"
+	"my.favorite/cclawservice/controller/model"
 	"my.favorite/platformutility/webbase/middleware/basic"
 	"my.favorite/platformutility/webbase/middleware/service"
 )
@@ -23,7 +21,7 @@ type AuthenticationInterceptor struct {
 	UnWantedTokenUrls []string //不需要token的URL列表
 
 	// 业务处理的Service
-	userService service.IService
+	loginService service.IService
 }
 
 func NewAuthenticationInterceptor(svc service.IService) *AuthenticationInterceptor {
@@ -32,7 +30,7 @@ func NewAuthenticationInterceptor(svc service.IService) *AuthenticationIntercept
 			Order:           1,
 			InterceptorName: "authentication_interceptor",
 		},
-		userService: svc,
+		loginService: svc,
 	}
 	return authInterceptor
 }
@@ -44,7 +42,7 @@ func (i *AuthenticationInterceptor) SetupUnwantedTokenUrls(urls []string) {
 }
 
 func (i *AuthenticationInterceptor) GetService() service.IService {
-	return i.userService
+	return i.loginService
 }
 
 func (i *AuthenticationInterceptor) PreHandle(c *gin.Context) bool {
@@ -63,30 +61,21 @@ func (i *AuthenticationInterceptor) PreHandle(c *gin.Context) bool {
 	}
 
 	// 此时要从数据库中获取指定的token，此时是i必须要经过登录的API
-	userService, ok := i.userService.(interface {
-		GetUserByToken(string) (*dataobject.TAccount, error)
+	userService, ok := i.loginService.(interface {
+		GetUserByToken(string) (*model.LoginSession, error)
 	})
 	if !ok {
 		//服务器内部出错
 		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
 		return false
 	}
-	userInfo, err1 := userService.GetUserByToken(token)
-	if err1 != nil {
-		if _, ok2 := errors.AsType[*cclawException.ErrorInvalidToken](err1); !ok2 {
-			basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
-			return false
-		}
-
-		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusUnauthorized, common.ConstErrorInvalidToken, common.ConstErrorInvalidTokenMsg, nil)
-		return false
-	}
-	if userInfo == nil {
+	loginSession, err1 := userService.GetUserByToken(token)
+	if loginSession == nil || err1 != nil {
 		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusUnauthorized, common.ConstErrorInvalidToken, common.ConstErrorInvalidTokenMsg, nil)
 		return false
 	}
 
-	c.Set(common.ContextAuthenticatedUser, userInfo)
+	c.Set(common.ContextAuthenticatedUser, loginSession)
 
 	return true
 }

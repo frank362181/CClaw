@@ -16,6 +16,52 @@ import (
 	"time"
 )
 
+type DatetimeUtility struct {
+	timezone *time.Location
+}
+
+var datetimeUtilityInstance = GetSingleton(func() *DatetimeUtility {
+	return &DatetimeUtility{timezone: time.Local}
+}).Instance()
+
+func GetDatetimeUtilityInstance() *DatetimeUtility {
+	return datetimeUtilityInstance
+}
+
+func (u *DatetimeUtility) GetCurrentDatetime() *DatetimeItem {
+	datetimeItem := u.getCurrentDatetime()
+	return datetimeItem
+}
+
+func (u *DatetimeUtility) Until(s, e int64) time.Duration {
+	diff := e - s
+	return time.Duration(diff) * time.Second
+}
+
+// GetCurrentDatetime 获取当前系统时间
+func (u *DatetimeUtility) getCurrentDatetime() *DatetimeItem {
+	now := time.Now().In(u.timezone)
+
+	return &DatetimeItem{
+		DatetimeStr: now.Format("2006-01-02 15:04:05"),
+		DateStr:     now.Format("2006-01-02"),
+		TimeStr:     now.Format("15:04:05"),
+		Year:        now.Year(),
+		Month:       int(now.Month()),
+		Day:         now.Day(),
+		Hour:        now.Hour(),
+		Minute:      now.Minute(),
+		Second:      now.Second(),
+		Weekday:     int(now.Weekday()),
+		YearDay:     now.YearDay(),
+
+		Timestamp:      now.Unix(),
+		MilliTimestamp: now.UnixMilli(),
+		MicroTimestamp: now.UnixMicro(),
+		NanoTimestamp:  now.UnixNano(),
+	}
+}
+
 type DatetimeItem struct {
 	DatetimeStr string
 	DateStr     string
@@ -35,27 +81,6 @@ type DatetimeItem struct {
 
 	Weekday int
 	YearDay int
-}
-type DatetimeUtility struct {
-	timezone *time.Location
-}
-
-var datetimeUtilityInstance = GetSingleton(func() *DatetimeUtility {
-	return &DatetimeUtility{timezone: time.Local}
-}).Instance()
-
-func GetDatetimeUtilityInstance() *DatetimeUtility {
-	return datetimeUtilityInstance
-}
-
-func (d *DatetimeUtility) GetCurrentDatetime() *DatetimeItem {
-	datetimeItem := d.getCurrentDatetime()
-	return datetimeItem
-}
-
-func (d *DatetimeUtility) Until(s, e int64) time.Duration {
-	diff := e - s
-	return time.Duration(diff) * time.Second
 }
 
 func (d *DatetimeItem) Equals(right *DatetimeItem) bool {
@@ -95,30 +120,4 @@ func (d *DatetimeItem) BeforeNow(distance int64) bool {
 func (d *DatetimeItem) AfterNow(distance int64) bool {
 	currentNow := datetimeUtilityInstance.getCurrentDatetime()
 	return currentNow.Distance(d, distance) < 0
-}
-
-// ============================= private functions & methods ==============================
-
-// GetCurrentDatetime 获取当前系统时间
-func (d *DatetimeUtility) getCurrentDatetime() *DatetimeItem {
-	now := time.Now().In(d.timezone)
-
-	return &DatetimeItem{
-		DatetimeStr: now.Format("2006-01-02 15:04:05"),
-		DateStr:     now.Format("2006-01-02"),
-		TimeStr:     now.Format("15:04:05"),
-		Year:        now.Year(),
-		Month:       int(now.Month()),
-		Day:         now.Day(),
-		Hour:        now.Hour(),
-		Minute:      now.Minute(),
-		Second:      now.Second(),
-		Weekday:     int(now.Weekday()),
-		YearDay:     now.YearDay(),
-
-		Timestamp:      now.Unix(),
-		MilliTimestamp: now.UnixMilli(),
-		MicroTimestamp: now.UnixMicro(),
-		NanoTimestamp:  now.UnixNano(),
-	}
 }

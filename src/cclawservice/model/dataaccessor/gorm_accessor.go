@@ -5,6 +5,7 @@ import (
 
 	exception2 "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
+	"my.favorite/platformutility/common/hash"
 	"my.favorite/platformutility/database/core"
 	"my.favorite/platformutility/exception"
 )
@@ -24,10 +25,9 @@ func (g *GormAccessor) GetUserByNameAndPassword(username, userpass string) (*dat
 		return nil, exception.UnMatchErrorEx2("username=%s can not find", username)
 	}
 
-	if err == nil {
-		if userpass == user.LoginPass {
-			return &user, nil
-		}
+	encryptedPass := hash.HmacSha256(user.LoginKey, userpass)
+	if encryptedPass == user.LoginPass {
+		return &user, nil
 	}
 
 	return nil, exception2.UserPasswordUnmatchEx("username and password do not match")

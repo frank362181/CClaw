@@ -73,7 +73,7 @@ func (lc *LoginController) Login(c *gin.Context) {
 		return
 	}
 
-	user, err1 := loginService.Login(lq.Username, lq.Password)
+	loginSession, err1 := loginService.Login(lq.Username, lq.Password)
 	if err1 != nil {
 		if errors.Is(err1, exception2.UserPasswordUnmatchErr) {
 			basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorUserNamePasswordUnmatch, cclawcommon.ConstErrorUserNamePasswordUnmatchMsg, nil)
@@ -83,8 +83,8 @@ func (lc *LoginController) Login(c *gin.Context) {
 		return
 	}
 
-	resp := model2.GenerationLoginResponse(user)
-	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, resp)
+	//resp := model2.GenerationLoginResponse(user)
+	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, loginSession)
 }
 
 // Logout (用户登出)

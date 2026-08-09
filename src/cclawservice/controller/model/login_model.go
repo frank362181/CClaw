@@ -1,11 +1,7 @@
 package model
 
 import (
-	"strings"
-
-	"my.favorite/cclawservice/model/dataobject"
-	"my.favorite/platformutility/common"
-	"my.favorite/platformutility/webbase/middleware/basic"
+	"encoding/json"
 )
 
 // ================ login request and response model ================
@@ -15,48 +11,37 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
-type LoginResponse struct {
-	UserName      string `json:"userName"`
-	DisplayName   string `json:"displayName"`
-	Token         string `json:"token"`         // 用户登录成功后得到的token
-	GenAt         int64  `json:"genAt"`         //token产生的时间
-	ExpiredLength int64  `json:"expiredLength"` //token失效时长,unit = second
+// LoginSession is the minimal, non-sensitive identity stored in the session cache.
+// Passwords, password hashes and the token itself must never be serialized into it.
+type LoginSession struct {
+	ComCode          string `json:"comCode"`
+	LoginName        string `json:"loginName"`
+	DisplayName      string `json:"displayName"`
+	IssuedAt         int64  `json:"issuedAt"` // timestamp for generating the token
+	LastActiveAt     int64  `json:"lastActiveAt"`
+	AbsoluteExpireAt int64  `json:"absoluteExpireAt"`
+
+	Token         string `json:"token"`
+	ExpiredLength int64  `json:"expiredLength"` //token expired length in seconds
 }
 
-type LoginResponseEx struct {
-	basic.CommonResponse
-	Data LoginResponse `json:"data"`
+func NewLoginSession(comCode string, loginName string, displayName string) *LoginSession {
+	return &LoginSession{
+		ComCode:     comCode,
+		LoginName:   loginName,
+		DisplayName: displayName,
+	}
 }
 
-func GenerationLoginRequest(username string, password string) *LoginRequest {
-	username = strings.TrimSpace(username)
-	if len(username) == 0 {
-		return nil
+func (loginSession *LoginSession) ToJsonString() (string, error) {
+	data, err := json.Marshal(loginSession)
+	if err != nil {
+		return "", err
 	}
 
-	password = strings.TrimSpace(password)
-	username = strings.ToLower(username) //不区分大小写
-
-	loginRequest := &LoginRequest{
-		Username: username,
-		Password: password,
-	}
-
-	return loginRequest
+	return string(data), nil
 }
 
-func GenerationLoginResponse(user *dataobject.TAccount) *LoginResponse {
-	if user == nil {
-		return nil
-	}
-
-	loginResponse := &LoginResponse{
-		UserName:      user.LoginName,
-		DisplayName:   user.DisplayName,
-		Token:         user.Token,
-		GenAt:         common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,
-		ExpiredLength: basic.MemoryTokenExpireTime, //default expired length, 1800 seconds
-	}
-
-	return loginResponse
+func (loginSession *LoginSession) FromJsonString(value string) error {
+	return json.Unmarshal([]byte(value), loginSession)
 }

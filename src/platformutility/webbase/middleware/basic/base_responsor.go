@@ -64,7 +64,7 @@ func (resp *GlobalResponsor) createJsonObject(c *gin.Context, code int, msg stri
 			ReqPath:       r.RequestPath,
 			ReqMethod:     r.RequestMethod,
 			ReqTimestamp:  r.ReqAtdTimestamp,
-			RespTimestamp: common.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp,
+			RespTimestamp: common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,
 
 			RespCode: code,
 			RespMsg:  msg,
@@ -81,7 +81,7 @@ func (resp *GlobalResponsor) createJsonObject(c *gin.Context, code int, msg stri
 		ReqPath:       "",
 		ReqMethod:     "",
 		ReqTimestamp:  -1,
-		RespTimestamp: common.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp,
+		RespTimestamp: common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,
 
 		RespCode: code,
 		RespMsg:  msg,
@@ -104,7 +104,7 @@ func (resp *GlobalResponsor) printLog(msg interface{}) {
 		return
 	}
 
-	if jsonBytes, err := json.MarshalIndent(msg, "", " "); err == nil {
+	if jsonBytes, err := json.Marshal(msg); err == nil {
 		logging.LogInfoF(string(jsonBytes))
 	}
 }
