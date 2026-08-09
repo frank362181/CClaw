@@ -1,4 +1,4 @@
-module my.favorite/cclaw
+module my.favorite/agentService
 
 go 1.26
 

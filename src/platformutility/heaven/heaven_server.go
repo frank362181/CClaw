@@ -83,7 +83,7 @@ func (s *Server) StartServer() error {
 	}
 
 	s.listener = listener
-	logging.LogInfof("Server started on %s, max connections: %d", s.address, s.maxConnections)
+	logging.LogInfoF("Server started on %s, max connections: %d", s.address, s.maxConnections)
 
 	go s.onListening() //进入到监听
 
@@ -91,7 +91,7 @@ func (s *Server) StartServer() error {
 }
 
 func (s *Server) Shutdown() {
-	logging.LogInfof("Shutting down heaven server...")
+	logging.LogInfoF("Shutting down heaven server...")
 
 	s.cancel() //通知所有的链接ctx.Done 得到true
 
@@ -109,10 +109,10 @@ func (s *Server) Shutdown() {
 
 	select {
 	case <-done:
-		logging.LogInfof("all connection finished gracefully")
+		logging.LogInfoF("all connection finished gracefully")
 		break
 	case <-time.After(ShutdownTimeout * time.Second):
-		logging.LogWarnf("timeout, forcing exit")
+		logging.LogWarnF("timeout, forcing exit")
 		break
 	default:
 		break
@@ -126,17 +126,17 @@ func (s *Server) onListening() {
 		if err != nil {
 			select {
 			case <-s.ctx.Done():
-				logging.LogInfof("server is shutdown")
+				logging.LogInfoF("server is shutdown")
 				return
 			default:
-				logging.LogErrorf("accept error: %v", err)
+				logging.LogErrorF("accept error: %v", err)
 				continue
 			}
 		}
 
 		// 判断连接数量是否超过最大数
 		if s.isReachedMaxConnections(conn) {
-			logging.LogErrorf("max connections reached")
+			logging.LogErrorF("max connections reached")
 			continue
 		}
 

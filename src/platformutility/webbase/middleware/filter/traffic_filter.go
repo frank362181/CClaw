@@ -75,7 +75,7 @@ func (filter *TrafficFilter) DoFilter() gin.HandlerFunc {
 		if !filter.unTrafficUrl(requestInfo.RequestPath) {
 			if filter.memoryDb == nil {
 				// redis抖动时开放限流保可用
-				logging.LogWarnf("[Traffic] memory db unavailable,skip traffic limit.")
+				logging.LogWarnF("[Traffic] memory db unavailable,skip traffic limit.")
 				c.Next()
 				return
 			}

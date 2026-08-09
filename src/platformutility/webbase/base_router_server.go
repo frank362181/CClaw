@@ -139,7 +139,7 @@ func (router *BaseRouter) SetupServer(configHelper *config.ConfigurationHelper) 
 		}
 
 		if err := router.GinEngine.SetTrustedProxies(cleaned); err != nil {
-			logging.LogErrorf(err.Error())
+			logging.LogErrorF(err.Error())
 		}
 	}
 
@@ -167,7 +167,7 @@ func (router *BaseRouter) Startup(ssl bool) bool {
 	// 3 start the server
 	if ssl {
 		if !common.FileExists(router.certFile) || !common.FileExists(router.keyFile) {
-			logging.LogInfof("[Startup] SSL certificate file %s or %s does not exist", router.certFile, router.keyFile)
+			logging.LogInfoF("[Startup] SSL certificate file %s or %s does not exist", router.certFile, router.keyFile)
 			return false
 		}
 	}
@@ -186,7 +186,7 @@ func (router *BaseRouter) Startup(ssl bool) bool {
 		}
 	}()
 
-	logging.LogDebugf("server started at:%s", router.Server.Addr)
+	logging.LogDebugF("server started at:%s", router.Server.Addr)
 	return true
 }
 
@@ -195,10 +195,10 @@ func (router *BaseRouter) Shutdown() error {
 	defer cancel()
 
 	if err := router.Server.Shutdown(ctx); err != nil {
-		logging.LogErrorf("Server force to Shutdown with error: %s", err.Error())
+		logging.LogErrorF("Server force to Shutdown with error: %s", err.Error())
 	}
 
-	logging.LogInfof("server shutdown complete")
+	logging.LogInfoF("server shutdown complete")
 	return nil
 }
 

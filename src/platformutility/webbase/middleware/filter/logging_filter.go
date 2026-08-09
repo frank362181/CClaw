@@ -41,7 +41,7 @@ func (lf *LoggingFilter) DoFilter() gin.HandlerFunc {
 		r := basic.GetBaseRequester().GetOrCreateRequestInfo(c)
 
 		//打印日志
-		logging.LogDebugf("remote IP:%s: access URL:%s at :%d", r.RemoteIp, r.RelativeURL, r.ReqAtdTimestamp)
+		logging.LogDebugF("remote IP:%s: access URL:%s at :%d", r.RemoteIp, r.RelativeURL, r.ReqAtdTimestamp)
 
 		c.Next()
 	}

@@ -99,12 +99,12 @@ func (resp *GlobalResponsor) createJsonObject(c *gin.Context, code int, msg stri
 func (resp *GlobalResponsor) printLog(msg interface{}) {
 	if r, ok := msg.(*CommonResponse); ok {
 		//只是打印响应数据的元数据，不打印具体内容
-		logging.LogInfof("response reqId=%s,path=%s,method=%s,timestamp=%d,code=%d,msg=%s",
+		logging.LogInfoF("response reqId=%s,path=%s,method=%s,timestamp=%d,code=%d,msg=%s",
 			r.ReqID, r.ReqPath, r.ReqMethod, r.ReqTimestamp, r.RespCode, r.RespMsg)
 		return
 	}
 
 	if jsonBytes, err := json.MarshalIndent(msg, "", " "); err == nil {
-		logging.LogInfof(string(jsonBytes))
+		logging.LogInfoF(string(jsonBytes))
 	}
 }

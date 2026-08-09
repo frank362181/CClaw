@@ -71,7 +71,7 @@ func GetRedisClient(config *config.ConfigurationHelper) redisdb.IMemoryDB {
 	// 链接数据库
 	if err := client.connectMemoryDb(); err != nil {
 		cancel()
-		logging.LogInfof("%s", err.Error())
+		logging.LogInfoF("%s", err.Error())
 		return nil
 	}
 
@@ -88,7 +88,7 @@ func (rdb *RedisClient) HealthCheck() {
 	for {
 		select {
 		case <-rdb.Ctx.Done():
-			logging.LogInfof("[Redis] health check done")
+			logging.LogInfoF("[Redis] health check done")
 			return
 		case <-ticker.C:
 			rdb.mu.Lock()
@@ -97,7 +97,7 @@ func (rdb *RedisClient) HealthCheck() {
 			rdb.mu.Unlock()
 
 			if isClosed || client == nil {
-				logging.LogInfof("[Redis] health check skipped: client is closed!")
+				logging.LogInfoF("[Redis] health check skipped: client is closed!")
 				continue
 			}
 
@@ -106,9 +106,9 @@ func (rdb *RedisClient) HealthCheck() {
 			cancel()
 
 			if err != nil {
-				logging.LogInfof("[Redis] health check ping failed:%s,starting reconnect...", err.Error())
+				logging.LogInfoF("[Redis] health check ping failed:%s,starting reconnect...", err.Error())
 				if reconErr := rdb.reconnect(); reconErr != nil {
-					logging.LogInfof("[redis] reconnect failed:%s:%s", rdb.MConfig.Address, reconErr.Error())
+					logging.LogInfoF("[redis] reconnect failed:%s:%s", rdb.MConfig.Address, reconErr.Error())
 				}
 			}
 		}
@@ -315,7 +315,7 @@ func (rdb *RedisClient) CloseMemoryDb() error {
 			rdb.mClient = nil
 		}
 
-		logging.LogInfof("[Redis] close success")
+		logging.LogInfoF("[Redis] close success")
 	})
 
 	return closeErr
@@ -341,7 +341,7 @@ func (rdb *RedisClient) connectMemoryDb() error {
 	rdb.isClosed = false
 	rdb.mu.Unlock()
 
-	logging.LogInfof("Redis connect success:%s", rdb.MConfig.Address)
+	logging.LogInfoF("Redis connect success:%s", rdb.MConfig.Address)
 	return nil
 }
 
@@ -368,7 +368,7 @@ func (rdb *RedisClient) reconnect() error {
 			wait = 30 * time.Second
 		}
 
-		logging.LogInfof("[Redis] reconnecting in %v (attempt %d:%d)", wait, i+1, rdb.MConfig.MaxRetries)
+		logging.LogInfoF("[Redis] reconnecting in %v (attempt %d:%d)", wait, i+1, rdb.MConfig.MaxRetries)
 
 		select {
 		case <-rdb.Ctx.Done():
@@ -426,10 +426,10 @@ func (rdb *RedisClient) executeWithRetry(operation func(client *redis.Client) er
 
 	// 判断是否需要重连(链接拒绝、EOF、连接池耗尽等)
 	if isNetworkError(err) {
-		logging.LogInfof("[Redis] network error detected:%s,%s,trying reconnect.", rdb.MConfig.Address, err.Error())
+		logging.LogInfoF("[Redis] network error detected:%s,%s,trying reconnect.", rdb.MConfig.Address, err.Error())
 
 		if reconErr := rdb.reconnect(); reconErr != nil {
-			logging.LogInfof("[redis] reconnect failed:%s:%s", rdb.MConfig.Address, reconErr.Error())
+			logging.LogInfoF("[redis] reconnect failed:%s:%s", rdb.MConfig.Address, reconErr.Error())
 			return reconErr
 		}
 
@@ -450,6 +450,6 @@ func (rdb *RedisClient) executeWithRetry(operation func(client *redis.Client) er
 }
 
 func (rdb *RedisClient) onConnected(ctx context.Context, cn *redis.Conn) error {
-	logging.LogInfof("[Redis] connection established:%s", rdb.MConfig.Address)
+	logging.LogInfoF("[Redis] connection established:%s", rdb.MConfig.Address)
 	return nil
 }

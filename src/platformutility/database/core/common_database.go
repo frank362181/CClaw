@@ -121,7 +121,7 @@ func (conn *CommonDatabase) execute(operation func() error) error {
 		err := conn.openDatabase()
 		if err != nil {
 			conn.rwLock.Unlock()
-			logging.LogErrorf(fmt.Sprintf("failed to reconnect the database : %s", err.Error()))
+			logging.LogErrorF(fmt.Sprintf("failed to reconnect the database : %s", err.Error()))
 			return err
 		}
 	}

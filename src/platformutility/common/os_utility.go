@@ -68,6 +68,7 @@ func IsAbsolutePath(path string) bool {
 	return filepath.IsAbs(path)
 }
 
+// GetCurrentDir 返回的是工作目录
 func GetCurrentDir() string {
 	tmpDir, err := os.Getwd()
 	if err != nil {
@@ -82,6 +83,22 @@ func GetCurrentDir() string {
 
 	currentDir := realPath
 	return currentDir
+}
+
+// GetExecutableDir 返回可执行文件所在目录（解析符号链接后的真实目录）。
+// 部署场景下配置文件放置在可执行文件附近，据此定位最可靠，且与启动时的工作目录无关。
+func GetExecutableDir() string {
+	exePath, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+
+	realPath, err := filepath.EvalSymlinks(exePath)
+	if err != nil {
+		realPath = exePath
+	}
+
+	return filepath.Dir(realPath)
 }
 
 func GetRelativePath(path, cwd string) (string, bool) {

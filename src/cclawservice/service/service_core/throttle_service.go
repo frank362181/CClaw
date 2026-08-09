@@ -1,3 +1,7 @@
+/*
+* 用来对用户在登录时做防爆破登录
+**/
+
 package service_core
 
 import (
@@ -49,7 +53,7 @@ func (service *ThrottleService) RecordFailure(userName string) {
 	uName := strings.ToLower(strings.TrimSpace(userName))
 	val, err := service.memoryDB.IncrementWithExpiration(loginFailKeyPrefix+uName, 1, LoginFailWindow)
 	if err != nil {
-		logging.LogWarnf("[ThrottleService] record failure failed for user %s: %s", userName, err.Error())
+		logging.LogWarnF("[ThrottleService] record failure failed for user %s: %s", userName, err.Error())
 		return
 	}
 

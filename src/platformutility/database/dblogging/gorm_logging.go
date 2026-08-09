@@ -7,6 +7,6 @@ import (
 )
 
 func (w DbLogWriter) Write(log []byte) (int, error) {
-	logging.LogInfof("%s", strings.TrimRight(string(log), "\n"))
+	logging.LogInfoF("%s", strings.TrimRight(string(log), "\n"))
 	return len(log), nil
 }

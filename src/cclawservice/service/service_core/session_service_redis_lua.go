@@ -1,7 +1,11 @@
-// 约定：脚本通过存储在 token key 的 JSON 再在脚本内拼出 user key。
-// 注意：脚本内计算 key 仅适用于单节点 Redis；若启用 Redis Cluster 需改为显式声明
-// 全部 KEYS，见“关键决策”一节。
-// 返回 status: 0=不存在 1=有效 2=已被替换 3=已过期
+/* 约定：脚本通过存储在 token key 的 JSON 再在脚本内拼出 user key。
+*  注意：脚本内计算 key 仅适用于单节点 Redis；若启用 Redis Cluster 需改为显式声明
+*  全部 KEYS，见“关键决策”一节。
+*  返回 status: 0=不存在 1=有效 2=已被替换 3=已过期
+*
+*  定义用来原子性执行支持的lua脚本，被用于在Redis中执行
+*
+**/
 
 package service_core
 
