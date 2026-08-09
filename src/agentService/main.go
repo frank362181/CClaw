@@ -4,9 +4,9 @@ import (
 	"path/filepath"
 
 	_ "my.favorite/agentService/docs"
+	"my.favorite/cclawservice"
 	"my.favorite/platformutility/common"
 
-	"my.favorite/cclawservice"
 	"my.favorite/platformutility/logging"
 )
 
@@ -14,56 +14,6 @@ const (
 	projectName    = "agentService"
 	configFileName = "agentService.ini"
 )
-
-//	@title			企业级AI助手操作系统
-//	@version		1.0.0
-//	@description	API服务入口
-
-//	@host		localhost:8443
-//	@BasePath	/
-
-// @securityDefinitions.apikey	ApiKeyAuth
-// @in							header
-// @name						AUTHORIZATION
-func main() {
-	// 开启运行界面
-	////tui_engine.GetLogManager().Start()
-	//
-	versionString := VersionString
-	logging.LogInfoF(versionString)
-
-	configFileName := getConfigFileName()
-	mainApp := cclawservice.NewMainApp(configFileName)
-
-	defer mainApp.Destroy()
-
-	if err := mainApp.Init(); err != nil {
-		return
-	}
-
-	// 添加 health controller
-	if err := mainApp.SetupHealthController(); err != nil {
-		return
-	}
-
-	if err := mainApp.SetupLoginController(); err != nil {
-		return
-	}
-
-	// 1. setup server
-	if err := mainApp.SetupServer(); err != nil {
-		return
-	}
-
-	// 2. start the server
-	_ = mainApp.Startup()
-
-	// 3. wait the exit signal
-	mainApp.Shutdown()
-
-	//// 结束TUI
-	//tui_engine.GetLogManager().Stop()
-}
 
 // GetProjectDir 返回当前项目的目录（基于工作目录，兼容开发期从源码根运行）
 func getProjectDir() string {
@@ -97,4 +47,52 @@ func getConfigFileName() string {
 	}
 
 	return candidates[0]
+}
+
+/*==================================================
+*                  应用入口函数
+**/
+
+//	@title			企业级AI助手操作系统
+//	@version		1.0.0
+//	@description	API服务入口
+
+//	@host		localhost:8443
+//	@BasePath	/
+
+// @securityDefinitions.apikey	ApiKeyAuth
+// @in							header
+// @name						AUTHORIZATION
+func main() {
+	versionString := VersionString
+	logging.LogInfoF(versionString)
+
+	configFileName := getConfigFileName()
+	mainApp := cclawservice.NewMainApp(configFileName)
+
+	defer mainApp.Destroy()
+
+	if err := mainApp.Init(); err != nil {
+		return
+	}
+
+	// 添加 health controller
+	if err := mainApp.SetupHealthController(); err != nil {
+		return
+	}
+
+	if err := mainApp.SetupLoginController(); err != nil {
+		return
+	}
+
+	// 1. setup server
+	if err := mainApp.SetupServer(); err != nil {
+		return
+	}
+
+	// 2. start the server
+	_ = mainApp.Startup()
+
+	// 3. wait the exit signal
+	mainApp.Shutdown()
 }

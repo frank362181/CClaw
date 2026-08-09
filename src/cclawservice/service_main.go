@@ -5,7 +5,6 @@
 package cclawservice
 
 import (
-	"errors"
 	"os"
 	"os/signal"
 	"strings"
@@ -34,7 +33,7 @@ import (
 	cCommon "my.favorite/cclawservice/common"
 )
 
-type MainApp struct {
+type ServiceMain struct {
 	configFileName string
 	configHelper   *config.ConfigurationHelper
 	baseRouter     *webbase.BaseRouter
@@ -44,8 +43,8 @@ type MainApp struct {
 }
 
 // NewMainApp 相当于构造函数
-func NewMainApp(confFileName string) *MainApp {
-	return &MainApp{
+func NewMainApp(confFileName string) *ServiceMain {
+	return &ServiceMain{
 		configFileName: strings.TrimSpace(confFileName),
 		configHelper:   nil,
 		baseRouter:     nil,
@@ -54,7 +53,7 @@ func NewMainApp(confFileName string) *MainApp {
 	}
 }
 
-func (m *MainApp) Init() error {
+func (m *ServiceMain) Init() error {
 	if len(m.configFileName) == 0 {
 		logging.LogErrorF("[Init] config file name is required,confuse to startup.")
 		return exception.ParameterEmptyErrorEx("config file name is required,confuse to startup.")
@@ -68,40 +67,40 @@ func (m *MainApp) Init() error {
 	m.configHelper, err = config.GetConfigurationHelper(m.configFileName)
 	if err != nil {
 		logging.LogErrorF("[Init] config file %s error: %s,confuse to startup", m.configFileName, err.Error())
-		return errors.New("config file " + m.configFileName + " error: " + err.Error())
+		return exception.ConfigErrorEx2("config file " + m.configFileName + " error: " + err.Error())
 	}
 
 	err = m.configHelper.LoadConfiguration()
 	if err != nil {
 		logging.LogErrorF("[Init] failed to load %s error: %s,confuse to startup", m.configFileName, err.Error())
-		return errors.New("failed to load " + m.configFileName + " error: " + err.Error())
+		return exception.ConfigErrorEx2("failed to load " + m.configFileName + " error: " + err.Error())
 	}
 
 	// 3. initialize the app
 	m.memoryDB = memory_db.CreateMemoryDb(m.configHelper)
 	if m.memoryDB == nil {
 		logging.LogErrorF("[Init] memory db init failed")
-		return errors.New("memory db init failed")
+		return exception.MemoryDbErrEx("memory db init failed")
 	}
 
 	m.database = database.GetGormDatabase(m.configHelper)
 	err = m.database.Open()
 	if err != nil {
 		logging.LogErrorF("[Init] failed to open database %s", err.Error())
-		return errors.New("failed to open database " + err.Error())
+		return exception.DatabaseErrorEx2("failed to open database " + err.Error())
 	}
 
 	m.baseRouter = webbase.GetBaseRouter() //baseRouter必须全局唯一，否则端口会被占用
 	if m.baseRouter == nil {
 		logging.LogErrorF("[Init] web router init failed")
-		return errors.New("web router init failed")
+		return exception.WebServerErrEx("web router init failed")
 	}
 
 	m.setGlobalFilter()
 
 	v := m.setupApiFilters()
 	if !v {
-		return errors.New("api filters init failed")
+		return exception.WebServerErrEx("api filters init failed")
 	}
 
 	m.setupSwaggerController()
@@ -109,7 +108,7 @@ func (m *MainApp) Init() error {
 	return nil
 }
 
-func (m *MainApp) SetupHealthController() error {
+func (m *ServiceMain) SetupHealthController() error {
 	err := m.baseRouter.SetupController(
 		webbase.HttpMethodGet,
 		cCommon.RelativeHealthUrl,
@@ -117,17 +116,17 @@ func (m *MainApp) SetupHealthController() error {
 	)
 	if err != nil {
 		logging.LogErrorF("[SetupHealthController] failed to setup health controller,err:%s", err.Error())
-		return errors.New("failed to setup health controller: " + err.Error())
+		return exception.WebServerErrEx2("failed to setup health controller: " + err.Error())
 	}
 
 	return nil
 }
 
-func (m *MainApp) SetupLoginController() error {
+func (m *ServiceMain) SetupLoginController() error {
 	userService, err := service.GetLoginService(m.memoryDB, m.database) //创建实现登录的业务逻辑对象
 	if err != nil {
 		logging.LogErrorF("failed to create login service,err:%s", err.Error())
-		return errors.New("failed to create login service: " + err.Error())
+		return exception.WebServerErrEx2("failed to create login service: " + err.Error())
 	}
 	loginController := selfController.NewLoginController(userService)
 
@@ -145,44 +144,44 @@ func (m *MainApp) SetupLoginController() error {
 	if err != nil {
 		logging.LogErrorF("failed to setup logging controller,err:%s", err.Error())
 		urlFunMap = nil
-		return errors.New("failed to setup logging controller: " + err.Error())
+		return exception.WebServerErrEx2("failed to setup logging controller: " + err.Error())
 	}
 
 	err = m.baseRouter.SetupControllerEx(webbase.HttpMethodGet|webbase.HttpMethodPost, basic.APIGroupRequire, urlFunMap, interceptors)
 	if err != nil {
 		logging.LogErrorF("failed to setup logging controller,err:%s", err.Error())
 		urlFunMap = nil
-		return errors.New("failed to setup logging controller: " + err.Error())
+		return exception.DatabaseErrorEx2("failed to setup logging controller: " + err.Error())
 	}
 
 	urlFunMap = nil //释放内存
 	return nil
 }
 
-func (m *MainApp) SetupServer() error {
+func (m *ServiceMain) SetupServer() error {
 	err := m.baseRouter.SetupServer(m.configHelper)
 	if err != nil {
 		logging.LogErrorF("[SetupServer] failed to setup server,err:%s", err.Error())
-		return errors.New("failed to setup server: " + err.Error())
+		return exception.WebServerErrEx2("failed to setup server: " + err.Error())
 	}
 
 	return nil
 }
 
-func (m *MainApp) Startup() error {
+func (m *ServiceMain) Startup() error {
 	sslEnabled, _ := m.configHelper.GetBoolValueDefault("server", "ssl", false)
 	m.baseRouter.Startup(sslEnabled)
 
 	return nil
 }
 
-func (m *MainApp) Shutdown() {
+func (m *ServiceMain) Shutdown() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 }
 
-func (m *MainApp) Destroy() {
+func (m *ServiceMain) Destroy() {
 	if m.baseRouter != nil {
 		_ = m.baseRouter.Shutdown()
 	}
@@ -198,7 +197,7 @@ func (m *MainApp) Destroy() {
 
 // ================================== private function & methods ==========================
 
-func (m *MainApp) setGlobalFilter() {
+func (m *ServiceMain) setGlobalFilter() {
 	originsStr, _ := m.configHelper.GetStringValueDefault("security", "allowedOrigins", "")
 	var origins []string
 	if len(originsStr) > 0 {
@@ -218,7 +217,7 @@ func (m *MainApp) setGlobalFilter() {
 	}
 }
 
-func (m *MainApp) setupApiFilters() bool {
+func (m *ServiceMain) setupApiFilters() bool {
 	signKey, _ := m.configHelper.GetStringValueDefault("security", "signKey", "")
 	if len(signKey) == 0 {
 		logging.LogErrorF("[SetupGlobalFilterAndController] signKey is required,confuse to startup")
@@ -249,7 +248,7 @@ func (m *MainApp) setupApiFilters() bool {
 	return true
 }
 
-func (m *MainApp) setupSwaggerController() {
+func (m *ServiceMain) setupSwaggerController() {
 	swaggerEnabled, _ := m.configHelper.GetBoolValueDefault("server", "enableSwagger", false)
 	if swaggerEnabled {
 		err := m.baseRouter.SetupController(webbase.HttpMethodGet, "/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))

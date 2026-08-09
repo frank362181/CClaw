@@ -13,7 +13,7 @@ type SqlExecuteError struct {
 var SqlExecuteErr = &SqlExecuteError{
 	ErrorDescription{
 		ErrTxt:   "",
-		ErrId:    errorIdSqlError,
+		ErrId:    ErrorIdSysSqlError,
 		FileName: "",
 		LineNo:   -1,
 	},
@@ -24,7 +24,7 @@ func SqlExecuteErrEx(errTxt string) *SqlExecuteError {
 	return &SqlExecuteError{
 		ErrorDescription{
 			ErrTxt:   errTxt,
-			ErrId:    errorIdSqlError,
+			ErrId:    ErrorIdSysSqlError,
 			FileName: file,
 			LineNo:   line,
 		},

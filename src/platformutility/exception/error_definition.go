@@ -37,7 +37,7 @@ func (err *ErrorDescription) Is(target error) bool {
 
 var UnknownError = &ErrorDescription{
 	ErrTxt:   "",
-	ErrId:    errorIdUnknown,
+	ErrId:    ErrorIdUnknown,
 	FileName: "",
 	LineNo:   -1,
 }
@@ -46,7 +46,7 @@ func UnknownErrorEx(errTxt string) *ErrorDescription {
 	_, file, line, _ := runtime.Caller(1)
 	return &ErrorDescription{
 		ErrTxt:   errTxt,
-		ErrId:    errorIdUnknown,
+		ErrId:    ErrorIdUnknown,
 		FileName: file,
 		LineNo:   line,
 	}

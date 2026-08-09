@@ -13,7 +13,7 @@ type MemoryDbError struct {
 var MemoryDbErr = &MemoryDbError{
 	ErrorDescription{
 		ErrTxt:   "",
-		ErrId:    errorIdMemoryDbError,
+		ErrId:    ErrorIdSysMemoryDbError,
 		FileName: "",
 		LineNo:   -1,
 	},
@@ -24,7 +24,7 @@ func MemoryDbErrEx(errTxt string) *MemoryDbError {
 	return &MemoryDbError{
 		ErrorDescription{
 			ErrTxt:   errTxt,
-			ErrId:    errorIdMemoryDbError,
+			ErrId:    ErrorIdSysMemoryDbError,
 			FileName: file,
 			LineNo:   line,
 		},
@@ -37,7 +37,7 @@ func MemoryDbErrEx2(errTxt string, a ...interface{}) *MemoryDbError {
 	return &MemoryDbError{
 		ErrorDescription{
 			ErrTxt:   errorString,
-			ErrId:    errorIdMemoryDbError,
+			ErrId:    ErrorIdSysMemoryDbError,
 			FileName: file,
 			LineNo:   line,
 		},

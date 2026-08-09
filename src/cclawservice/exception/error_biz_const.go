@@ -1,0 +1,12 @@
+package exception
+
+import "my.favorite/platformutility/exception"
+
+const (
+	ErrorIdBizBase = iota + exception.ErrorIdSystemBase
+)
+
+const (
+	ErrorIdBizUserNamePasswordUnmatched = iota + ErrorIdBizBase + 1
+	ErrorIdBizInvalidToken
+)

@@ -13,7 +13,7 @@ type FilePathErrorDescription struct {
 var FilePathError = &FilePathErrorDescription{
 	ErrorDescription{
 		ErrTxt:   "",
-		ErrId:    errorIdFilePath,
+		ErrId:    ErrorIdSysFilePath,
 		FileName: "",
 		LineNo:   -1,
 	},
@@ -24,7 +24,7 @@ func FilePathErrorEx(errTxt string) *FilePathErrorDescription {
 	return &FilePathErrorDescription{
 		ErrorDescription{
 			ErrTxt:   errTxt,
-			ErrId:    errorIdFilePath,
+			ErrId:    ErrorIdSysFilePath,
 			FileName: file,
 			LineNo:   line,
 		},
@@ -45,7 +45,7 @@ func (e *FilePathErrorDescription) Is(target error) bool {
 var FileExtensionError = &FilePathErrorDescription{
 	ErrorDescription{
 		ErrTxt:   "",
-		ErrId:    errorIdFileExtension,
+		ErrId:    ErrorIdSysFileExtension,
 		FileName: "",
 		LineNo:   -1,
 	},
@@ -56,7 +56,7 @@ func FileExtensionErrorEx(errTxt string) *FilePathErrorDescription {
 	return &FilePathErrorDescription{
 		ErrorDescription{
 			ErrTxt:   errTxt,
-			ErrId:    errorIdFileExtension,
+			ErrId:    ErrorIdSysFileExtension,
 			FileName: file,
 			LineNo:   line,
 		},
@@ -66,7 +66,7 @@ func FileExtensionErrorEx(errTxt string) *FilePathErrorDescription {
 var UnloadFileError = &FilePathErrorDescription{
 	ErrorDescription{
 		ErrTxt:   "",
-		ErrId:    errorIdUnloadFile,
+		ErrId:    ErrorIdSysUnloadFile,
 		FileName: "",
 		LineNo:   -1,
 	},
@@ -77,7 +77,7 @@ func UnloadFileErrorEx(errTxt string) *FilePathErrorDescription {
 	return &FilePathErrorDescription{
 		ErrorDescription{
 			ErrTxt:   errTxt,
-			ErrId:    errorIdUnloadFile,
+			ErrId:    ErrorIdSysUnloadFile,
 			FileName: file,
 			LineNo:   line,
 		},

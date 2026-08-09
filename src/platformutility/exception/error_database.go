@@ -13,7 +13,7 @@ type DatabaseError struct {
 var DatabaseErr = &DatabaseError{
 	ErrorDescription{
 		ErrTxt:   "",
-		ErrId:    errorIdDatabase,
+		ErrId:    ErrorIdSysDatabase,
 		FileName: "",
 		LineNo:   -1,
 	},
@@ -24,7 +24,20 @@ func DatabaseErrorEx(errTxt string) *DatabaseError {
 	return &DatabaseError{
 		ErrorDescription{
 			ErrTxt:   errTxt,
-			ErrId:    errorIdDatabase,
+			ErrId:    ErrorIdSysDatabase,
+			FileName: file,
+			LineNo:   line,
+		},
+	}
+}
+
+func DatabaseErrorEx2(errTxt string, a ...interface{}) *DatabaseError {
+	argsString := fmt.Sprintf(errTxt, a...)
+	_, file, line, _ := runtime.Caller(1)
+	return &DatabaseError{
+		ErrorDescription{
+			ErrTxt:   argsString,
+			ErrId:    ErrorIdSysDatabase,
 			FileName: file,
 			LineNo:   line,
 		},

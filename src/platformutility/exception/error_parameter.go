@@ -25,7 +25,7 @@ type ParameterEmptyErrorDescription struct {
 var ParameterEmptyError = &ParameterEmptyErrorDescription{
 	ErrorDescription: ErrorDescription{
 		ErrTxt:   "",
-		ErrId:    errorIdParamEmpty,
+		ErrId:    ErrorIdSysParamEmpty,
 		FileName: "",
 		LineNo:   -1,
 	},
@@ -36,7 +36,7 @@ func ParameterEmptyErrorEx(errTxt string) *ParameterEmptyErrorDescription {
 	return &ParameterEmptyErrorDescription{
 		ErrorDescription: ErrorDescription{
 			ErrTxt:   errTxt,
-			ErrId:    errorIdParamEmpty,
+			ErrId:    ErrorIdSysParamEmpty,
 			FileName: file,
 			LineNo:   line,
 		},
@@ -49,7 +49,7 @@ func ParameterEmptyErrorEx2(errTxt string, args ...interface{}) *ParameterEmptyE
 	return &ParameterEmptyErrorDescription{
 		ErrorDescription: ErrorDescription{
 			ErrTxt:   errorString,
-			ErrId:    errorIdParamEmpty,
+			ErrId:    ErrorIdSysParamEmpty,
 			FileName: file,
 			LineNo:   line,
 		},

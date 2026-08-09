@@ -11,17 +11,14 @@ package logging
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
+	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging/loggingwriter"
-	tuiengine "my.favorite/tui-engine/engine"
-
-	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 )
 
 // 定义标准输出的日志输出
@@ -31,13 +28,14 @@ var stdoutInstance = common.GetSingleton(func() *loggingwriter.AsyncLogger {
 	//	return loggingwriter.OpenLogger(w, 1, 256*1024, "json")
 	//}
 
-	var w = &loggingwriter.ConsoleWriter{File: os.Stdout}
-	asyncLogger := loggingwriter.OpenLogger(w, 1, 256*1024, "json")
-
-	logMgr := tuiengine.GetLogManager()
-	asyncLogger.SetLogMgr(logMgr)
-
-	return asyncLogger
+	//var w = &loggingwriter.ConsoleWriter{File: os.Stdout}
+	//asyncLogger := loggingwriter.OpenLogger(w, 1, 256*1024, "json")
+	//
+	//logMgr := tuiengine.GetLogManager()
+	//asyncLogger.SetLogMgr(logMgr)
+	//
+	//return asyncLogger
+	return nil
 }).Instance()
 
 // 定义文件日志输出

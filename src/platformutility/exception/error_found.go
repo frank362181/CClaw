@@ -27,7 +27,7 @@ type MatchErrorDescription struct {
 var MatchError = &MatchErrorDescription{
 	ErrorDescription: ErrorDescription{
 		ErrTxt:   "",
-		ErrId:    errorIdMatch,
+		ErrId:    ErrorIdSysMatch,
 		FileName: "",
 		LineNo:   -1,
 	},
@@ -38,7 +38,7 @@ func MatchErrorEx(errTxt string) *MatchErrorDescription {
 	return &MatchErrorDescription{
 		ErrorDescription: ErrorDescription{
 			ErrTxt:   errTxt,
-			ErrId:    errorIdMatch,
+			ErrId:    ErrorIdSysMatch,
 			FileName: file,
 			LineNo:   line,
 		},
@@ -66,7 +66,7 @@ type UnMatchErrorDescription struct {
 var UnMatchError = &UnMatchErrorDescription{
 	ErrorDescription: ErrorDescription{
 		ErrTxt:   "",
-		ErrId:    errorIdUnMatch,
+		ErrId:    ErrorIdSysUnMatch,
 		FileName: "",
 		LineNo:   -1,
 	},
@@ -77,7 +77,7 @@ func UnMatchErrorEx(errTxt string) *UnMatchErrorDescription {
 	return &UnMatchErrorDescription{
 		ErrorDescription: ErrorDescription{
 			ErrTxt:   errTxt,
-			ErrId:    errorIdUnMatch,
+			ErrId:    ErrorIdSysUnMatch,
 			FileName: file,
 			LineNo:   line,
 		},
@@ -90,7 +90,7 @@ func UnMatchErrorEx2(errTxt string, a ...interface{}) *UnMatchErrorDescription {
 	return &UnMatchErrorDescription{
 		ErrorDescription: ErrorDescription{
 			ErrTxt:   argsString,
-			ErrId:    errorIdUnMatch,
+			ErrId:    ErrorIdSysUnMatch,
 			FileName: file,
 			LineNo:   line,
 		},
