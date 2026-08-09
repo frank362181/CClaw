@@ -14,6 +14,11 @@ type IMemoryDB interface {
 	Get(key string) (string, error)
 	GetIntWithDefault(key string, defValue int) (int, error)
 
+	// SetNX 原子写入：仅当 key 不存在时设置（等价 Redis `SET key val NX EX`）。
+	// 返回 true 表示本次写入成功（key 此前不存在）；false 表示 key 已存在。
+	// 用于 NONCE 防重放等「检查并写入」场景：把 GET+SET 两次往返合并为一次，且天然原子。
+	SetNX(key string, value interface{}, expiration time.Duration) (bool, error)
+
 	// Increment 专门针对int类型的自增操作
 	Increment(key string, inc int64) (int64, error)
 

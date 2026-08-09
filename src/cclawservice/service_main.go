@@ -67,13 +67,13 @@ func (m *ServiceMain) Init() error {
 	m.configHelper, err = config.GetConfigurationHelper(m.configFileName)
 	if err != nil {
 		logging.LogErrorF("[Init] config file %s error: %s,confuse to startup", m.configFileName, err.Error())
-		return exception.ConfigErrorEx2("config file " + m.configFileName + " error: " + err.Error())
+		return exception.ConfigErrorEx2("[Init] config file %s error: %s,confuse to startup", m.configFileName, err.Error())
 	}
 
 	err = m.configHelper.LoadConfiguration()
 	if err != nil {
 		logging.LogErrorF("[Init] failed to load %s error: %s,confuse to startup", m.configFileName, err.Error())
-		return exception.ConfigErrorEx2("failed to load " + m.configFileName + " error: " + err.Error())
+		return exception.ConfigErrorEx2("[Init] failed to load %s error: %s,confuse to startup", m.configFileName, err.Error())
 	}
 
 	// 3. initialize the app
@@ -87,7 +87,7 @@ func (m *ServiceMain) Init() error {
 	err = m.database.Open()
 	if err != nil {
 		logging.LogErrorF("[Init] failed to open database %s", err.Error())
-		return exception.DatabaseErrorEx2("failed to open database " + err.Error())
+		return exception.DatabaseErrorEx2("failed to open database,error:%s", err.Error())
 	}
 
 	m.baseRouter = webbase.GetBaseRouter() //baseRouter必须全局唯一，否则端口会被占用
@@ -116,7 +116,7 @@ func (m *ServiceMain) SetupHealthController() error {
 	)
 	if err != nil {
 		logging.LogErrorF("[SetupHealthController] failed to setup health controller,err:%s", err.Error())
-		return exception.WebServerErrEx2("failed to setup health controller: " + err.Error())
+		return exception.WebServerErrEx2("failed to setup health controller,error:%s", err.Error())
 	}
 
 	return nil
@@ -126,7 +126,7 @@ func (m *ServiceMain) SetupLoginController() error {
 	loginService, err := service.GetLoginService(m.memoryDB, m.database) //创建实现登录的业务逻辑对象
 	if err != nil {
 		logging.LogErrorF("failed to create login service,err:%s", err.Error())
-		return exception.WebServerErrEx2("failed to create login service: " + err.Error())
+		return exception.WebServerErrEx2("failed to create login service,error:%s", err.Error())
 	}
 	loginController := selfController.NewLoginController(loginService)
 
@@ -144,14 +144,14 @@ func (m *ServiceMain) SetupLoginController() error {
 	if err != nil {
 		logging.LogErrorF("failed to setup logging controller,err:%s", err.Error())
 		urlFunMap = nil
-		return exception.WebServerErrEx2("failed to setup logging controller: " + err.Error())
+		return exception.WebServerErrEx2("failed to setup logging controller,error:%s", err.Error())
 	}
 
 	err = m.baseRouter.SetupControllerEx(webbase.HttpMethodGet|webbase.HttpMethodPost, basic.APIGroupRequire, urlFunMap, interceptors)
 	if err != nil {
 		logging.LogErrorF("failed to setup logging controller,err:%s", err.Error())
 		urlFunMap = nil
-		return exception.DatabaseErrorEx2("failed to setup logging controller: " + err.Error())
+		return exception.DatabaseErrorEx2("failed to setup logging controller,error:%s", err.Error())
 	}
 
 	urlFunMap = nil //释放内存
@@ -162,7 +162,7 @@ func (m *ServiceMain) SetupServer() error {
 	err := m.baseRouter.SetupServer(m.configHelper)
 	if err != nil {
 		logging.LogErrorF("[SetupServer] failed to setup server,err:%s", err.Error())
-		return exception.WebServerErrEx2("failed to setup server: " + err.Error())
+		return exception.WebServerErrEx2("failed to setup server,error:%s", err.Error())
 	}
 
 	return nil

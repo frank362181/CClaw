@@ -153,6 +153,34 @@ func (rdb *RedisClient) Set(key string, value interface{}, expiration time.Durat
 	})
 }
 
+// SetNX 原子写入：仅当 key 不存在时设置成功（Redis `SET NX EX`），等价「检查并写入」。
+// 返回 true=写入成功（key 此前不存在）；false=key 已存在。
+func (rdb *RedisClient) SetNX(key string, value interface{}, expiration time.Duration) (bool, error) {
+	rdb.mu.RLock()
+	client := rdb.mClient
+	isClosed := rdb.IsClosed()
+	rdb.mu.RUnlock()
+
+	if isClosed || client == nil {
+		return false, exception.MemoryDbErrEx("redis client is closed")
+	}
+
+	var ok bool
+	err := rdb.executeWithRetry(func(client *redis.Client) error {
+		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.WriteTimeout)*time.Second)
+		defer cancel()
+
+		b, err := client.SetNX(ctx, key, value, expiration).Result()
+		if err != nil {
+			return err
+		}
+		ok = b
+		return nil
+	})
+
+	return ok, err
+}
+
 func (rdb *RedisClient) Get(key string) (string, error) {
 	rdb.mu.RLock()
 	client := rdb.mClient

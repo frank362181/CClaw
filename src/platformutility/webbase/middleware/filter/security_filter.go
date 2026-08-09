@@ -149,17 +149,16 @@ func (sf *SecurityFilter) replayAttackNonce(r *basic.RequestInfo) bool {
 	}
 
 	if sf.memoryDb != nil {
-		// 2. 内存中是否在 5分钟内已经使用过
+		// 2. 原子「检查并写入」（SET key val NX EX）：一次往返完成防重放，且无竞态。
+		//    ok=true  → nonce 首次使用，写入成功 → 放行
+		//    ok=false → nonce 在过期窗口内已使用过 → 拦截
 		nonceKey := basic.NonceKeyPrefix + "_" + tempNonce //Nonce在redis中的key
-		_, err := sf.memoryDb.Get(nonceKey)
-		if err == nil {
-			//过去 2 分钟内使用过
-			return true
+		ok, err := sf.memoryDb.SetNX(nonceKey, tempNonce, time.Duration(basic.MemoryNonceExpiredTime)*time.Second)
+		if err != nil {
+			// Redis 异常时放行（fail-open，与原有 GET 报错时行为一致）
+			return false
 		}
-
-		// 3. 写入到redis
-		_ = sf.memoryDb.Set(nonceKey, tempNonce, time.Duration(basic.MemoryNonceExpiredTime)*time.Second)
-		return false
+		return !ok
 	}
 
 	// memory db不可用，视为无法验证Nonce->拒绝
