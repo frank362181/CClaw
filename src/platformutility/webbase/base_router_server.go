@@ -3,7 +3,6 @@ package webbase
 import (
 	"context"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -167,7 +166,7 @@ func (router *BaseRouter) Startup(ssl bool) bool {
 	// 3 start the server
 	if ssl {
 		if !common.FileExists(router.certFile) || !common.FileExists(router.keyFile) {
-			logging.LogInfoF("[Startup] SSL certificate file %s or %s does not exist", router.certFile, router.keyFile)
+			logging.LogErrorF("[Startup] SSL certificate file %s or %s does not exist", router.certFile, router.keyFile)
 			return false
 		}
 	}
@@ -176,17 +175,19 @@ func (router *BaseRouter) Startup(ssl bool) bool {
 		if ssl {
 			err := router.Server.ListenAndServeTLS(router.certFile, router.keyFile)
 			if err != nil {
-				os.Exit(-basic.ConstInternalServerError)
+				logging.LogErrorF("[Startup] can not start the server at :%s with SSL.", router.Server.Addr)
+				return
 			}
 		} else {
 			err := router.Server.ListenAndServe()
 			if err != nil {
-				os.Exit(-basic.ConstInternalServerError)
+				logging.LogErrorF("[Startup] can not start the server at :%s.", router.Server.Addr)
+				return
 			}
 		}
 	}()
 
-	logging.LogDebugF("server started at:%s", router.Server.Addr)
+	logging.LogDebugF("server started at:%s,time = %s", router.Server.Addr, common.GetDatetimeUtilityInstance().GetCurrentDatetime().DatetimeStr)
 	return true
 }
 

@@ -31,26 +31,28 @@ func init() {
 		Version = info.Main.Version
 	}
 
+	// 从vcs 信息中提取commit 和 时间
+	if Version == "" || Version == "(devel)" {
+		for _, s := range info.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				if len(s.Value) >= 7 {
+					Version = s.Value[:7]
+				}
+			case "vcs.time":
+				BuildTime = s.Value
+			}
+		}
+	}
+
 	//如果库需要的是自身的版本,需要遍历Deps找到自己
-	const selfModulePath = "my.favorite/cclaw" //库的模块路径
+	const selfModulePath = "my.favorite/agentService" //库的模块路径
 	for _, dep := range info.Deps {
 		if dep.Path == selfModulePath {
 			if dep.Version != "" {
 				Version = dep.Version
 			}
 			break
-		}
-	}
-
-	// 从vcs 信息中提取commit 和 时间
-	for _, s := range info.Settings {
-		switch s.Key {
-		case "vcs.revision":
-			if len(s.Value) >= 7 {
-				Version = s.Value[:7]
-			}
-		case "vcs.time":
-			BuildTime = s.Value
 		}
 	}
 }

@@ -108,9 +108,11 @@ export const API = {
             const json = await http.post('/login', body, {
                 params: { TIMESTAMP, NONCE, SIGNATURE },
             });
-            if (json.resp_code !== 0 || !json.data) throw new Error(json.resp_msg || '用户名或密码错误');
-            const userName = json.data.userName || username.trim();
-            const generatedAt = Number(json.data.genAt) || Math.floor(Date.now() / 1000);
+            // 后端 CommonResponse 字段为 respCode/respMsg（camelCase），勿写成 resp_code
+            if (json.respCode !== 0 || !json.data) throw new Error(json.respMsg || '用户名或密码错误');
+            // 后端 LoginSession 用户名字段为 loginName（非 userName）、签发时间为 issuedAt（非 genAt）
+            const userName = json.data.loginName || username.trim();
+            const generatedAt = Number(json.data.issuedAt) || Math.floor(Date.now() / 1000);
             const lifetime = Number(json.data.expiredLength) || 0;
             return {
                 success: true,
@@ -126,8 +128,8 @@ export const API = {
     async validateSession(token) {
         if (!token) return false;
         const json = await http.get(CONFIG.SESSION_CHECK_PATH, { headers: { AUTHORIZATION: token } });
-        if (json && typeof json.resp_code === 'number' && json.resp_code !== 0) {
-            throw new Error(json.resp_msg || '登录会话已失效');
+        if (json && typeof json.respCode === 'number' && json.respCode !== 0) {
+            throw new Error(json.respMsg || '登录会话已失效');
         }
         return true;
     },

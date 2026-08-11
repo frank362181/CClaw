@@ -33,7 +33,7 @@ func GetCommonDatabase(config *config.ConfigurationHelper) IBaseDatabase {
 		rwLock:    sync.RWMutex{},
 
 		BaseDatabase: BaseDatabase{
-			accessorType: "sqldb", //通过SQLDB来访问数据库
+			accessorType: DatabaseCommonAccessing, //通过SQLDB来访问数据库
 		},
 	}
 	db.SetPool(pool)

@@ -2,6 +2,11 @@ package core
 
 // === 定义数据库类型
 const (
+	DatabaseGormAccessing   = "gormdb"
+	DatabaseCommonAccessing = "sqldb"
+)
+
+const (
 	ConstDbTypePostgresSQL = iota + 1 //PostgreSQL
 	ConstDbTypeMysql
 	ConstDbTypeSqlite

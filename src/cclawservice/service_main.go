@@ -7,6 +7,7 @@ package cclawservice
 import (
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -40,6 +41,8 @@ type ServiceMain struct {
 
 	database core.IBaseDatabase
 	memoryDB common.IMemoryDB
+
+	// agents repository
 }
 
 // NewMainApp 相当于构造函数
@@ -90,6 +93,10 @@ func (m *ServiceMain) Init() error {
 		return exception.DatabaseErrorEx2("failed to open database,error:%s", err.Error())
 	}
 
+	// 4. load the agent configurations
+	_ = m.loadAgentConfigurations() //加载失败不影响启动系统
+
+	// 5. initializes the webserver
 	m.baseRouter = webbase.GetBaseRouter() //baseRouter必须全局唯一，否则端口会被占用
 	if m.baseRouter == nil {
 		logging.LogErrorF("[Init] web router init failed")
@@ -151,7 +158,7 @@ func (m *ServiceMain) SetupLoginController() error {
 	if err != nil {
 		logging.LogErrorF("failed to setup logging controller,err:%s", err.Error())
 		urlFunMap = nil
-		return exception.DatabaseErrorEx2("failed to setup logging controller,error:%s", err.Error())
+		return exception.WebServerErrEx2("failed to setup logging controller,error:%s", err.Error())
 	}
 
 	urlFunMap = nil //释放内存
@@ -196,6 +203,14 @@ func (m *ServiceMain) Destroy() {
 }
 
 // ================================== private function & methods ==========================
+
+func (m *ServiceMain) loadAgentConfigurations() error {
+	// 首先判断所需的目录是否存在
+	workSpaceDir := filepath.Join(common2.GetExecutableDir(), cCommon.AgentServiceWorkspaceDirName)
+	_ = common2.CreateDir(workSpaceDir)
+
+	return nil
+}
 
 func (m *ServiceMain) setGlobalFilter() {
 	originsStr, _ := m.configHelper.GetStringValueDefault("security", "allowedOrigins", "")

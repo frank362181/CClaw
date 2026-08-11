@@ -24,7 +24,7 @@ func GetGormDatabase(config *config.ConfigurationHelper) IBaseDatabase {
 
 	gormDb := &GormDatabase{
 		BaseDatabase: BaseDatabase{
-			accessorType: "gormdb", //通过GORMDB来访问数据
+			accessorType: DatabaseGormAccessing, //通过GORMDB来访问数据
 		},
 		rwLock: sync.RWMutex{},
 	}

@@ -40,17 +40,9 @@ func GetLoginService(memoryDB memoryDbCommon.IMemoryDB, db core.IBaseDatabase) (
 	}
 
 	var accessor dataaccessor.IAccessor
-	switch {
-	case strings.EqualFold(db.GetAccessorType(), "sqldb"):
-		accessor = dataaccessor.GetSQLdbAccessor(db)
-	case strings.EqualFold(db.GetAccessorType(), "gormdb"):
-		accessor = dataaccessor.GetGormAccessor(db)
-	default:
-		return nil, exception.UnsupportedExceptionErrorEx2("login service: database type[%s] is unsupported", db.GetAccessorType())
-	}
-
-	if accessor == nil {
-		return nil, exception.UnsupportedExceptionErrorEx2("login service: database type[%s] is unsupported", db.GetAccessorType())
+	accessor, err := dataaccessor.GetAccessor(db)
+	if err != nil {
+		return nil, err
 	}
 
 	ss, err := service_core.GetSessionService(memoryDB)
@@ -108,7 +100,7 @@ func (service *LoginService) Login(username, password string) (*model.LoginSessi
 		return nil, err
 	}
 
-	if user == nil || user.Disabled {
+	if user == nil || user.Deleted || user.Disabled {
 		service.throttleService.RecordFailure(username)
 		return nil, myException.UserPasswordUnmatchErr
 	}

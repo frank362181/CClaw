@@ -69,7 +69,6 @@ func main() {
 
 	configFileName := getConfigFileName()
 	mainApp := cclawservice.NewMainApp(configFileName)
-
 	defer mainApp.Destroy()
 
 	if err := mainApp.Init(); err != nil {

@@ -4,6 +4,10 @@ import (
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
+const (
+	AgentServiceWorkspaceDirName = "workspace" //agent workspace目录名称
+)
+
 // 定义业务级的错误常量和错误信息
 
 const (
