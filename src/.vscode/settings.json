@@ -1,0 +1,6 @@
+{
+    // 注意：不要设置 liveServer.settings.root。
+    "liveServer.settings.port": 5500,
+    "liveServer.settings.host": "localhost",
+    "liveServer.settings.donotShowInfoMsg": true
+}
