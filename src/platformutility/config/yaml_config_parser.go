@@ -9,7 +9,7 @@ import (
 
 type YamlConfigParser struct{}
 
-func (y *YamlConfigParser) Load(filename string) (*ConfigurationStore, error) {
+func (y *YamlConfigParser) Load(filename string) (IConfigurationStorage, error) {
 	if strings.TrimSpace(filename) == "" {
 		return nil, exception.ParameterEmptyErrorEx("filename must not be empty")
 	}
@@ -25,6 +25,6 @@ func (y *YamlConfigParser) Load(filename string) (*ConfigurationStore, error) {
 	return nil, nil
 }
 
-func (y *YamlConfigParser) Save(filename string, store *ConfigurationStore) error {
+func (y *YamlConfigParser) Save(filename string, storage IConfigurationStorage) error {
 	panic("implement me")
 }

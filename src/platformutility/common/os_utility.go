@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -23,8 +24,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-
-	"my.favorite/platformutility/exception"
 )
 
 type hostInfo struct {
@@ -199,12 +198,12 @@ func CreateDir(path string) error {
 
 func CreateFile(filename string) (*os.File, error) {
 	if FileExists(filename) {
-		return nil, exception.FilePathErrorEx("file already exists")
+		return nil, errors.New("file already exists")
 	}
 
 	tempFile, err := os.Create(filename)
 	if err != nil {
-		return nil, exception.FilePathErrorEx(err.Error())
+		return nil, err
 	}
 
 	return tempFile, nil
@@ -289,11 +288,11 @@ func IsLocalPath(path string) bool {
 
 func ResolveFile(baseDir, name string) (string, error) {
 	if !IsDir(baseDir) {
-		return "", exception.FilePathErrorEx("base dir should be a directory: " + baseDir)
+		return "", errors.New("should be a dir")
 	}
 
 	if IsDir(name) {
-		return "", exception.FilePathErrorEx("name could not be a directory: " + name)
+		return "", errors.New("could not be a dir")
 	}
 
 	targetFileName := name
@@ -303,11 +302,11 @@ func ResolveFile(baseDir, name string) (string, error) {
 
 	info, err := os.Stat(targetFileName)
 	if err != nil {
-		return "", exception.FilePathErrorEx(err.Error())
+		return "", err
 	}
 
 	if info.IsDir() {
-		return "", exception.FilePathErrorEx("target must be a file: " + targetFileName)
+		return "", errors.New("target must be a file")
 	}
 
 	// cleanup . & ..
@@ -375,6 +374,28 @@ func MarkPathIgnoreByCloudSync(path string) {
 		cmd.Stderr = io.Discard
 		_ = cmd.Run()
 	}
+}
+
+func ReadAll(fileName string) ([]byte, error) {
+	if !FileExists(fileName) {
+		return nil, errors.New("file not found")
+	}
+	if IsDir(fileName) {
+		return nil, errors.New("file is a dir")
+	}
+
+	file, err := os.Open(fileName)
+	if err != nil {
+		return nil, errors.New("can not loaded")
+	}
+	defer Close(file)
+
+	jsonData, err := ioutil.ReadAll(file)
+	if err != nil {
+		return nil, errors.New("can not read")
+	}
+
+	return jsonData, nil
 }
 
 func Close(file *os.File) {

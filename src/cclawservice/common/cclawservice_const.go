@@ -5,7 +5,8 @@ import (
 )
 
 const (
-	AgentServiceWorkspaceDirName = "workspace" //agent workspace目录名称
+	AgentServiceWorkspaceDirName = "workspace"         //agent workspace目录名称
+	DefaultAgentConfigFile       = "agentdefault.json" //agent 的默认配置所在的文件
 )
 
 // 定义业务级的错误常量和错误信息

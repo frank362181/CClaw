@@ -31,6 +31,19 @@ func FilePathErrorEx(errTxt string) *FilePathErrorDescription {
 	}
 }
 
+func FilePathErrorEx2(errTxt string, a ...interface{}) *FilePathErrorDescription {
+	argsString := fmt.Sprintf(errTxt, a...)
+	_, file, line, _ := runtime.Caller(1)
+	return &FilePathErrorDescription{
+		ErrorDescription{
+			ErrTxt:   argsString,
+			ErrId:    ErrorIdSysFilePath,
+			FileName: file,
+			LineNo:   line,
+		},
+	}
+}
+
 func (e *FilePathErrorDescription) Error() string {
 	return fmt.Sprintf("ERROR: [%s:%d]:%d: %s", e.FileName, e.LineNo, e.ErrId, e.ErrTxt)
 }
@@ -77,6 +90,19 @@ func UnloadFileErrorEx(errTxt string) *FilePathErrorDescription {
 	return &FilePathErrorDescription{
 		ErrorDescription{
 			ErrTxt:   errTxt,
+			ErrId:    ErrorIdSysUnloadFile,
+			FileName: file,
+			LineNo:   line,
+		},
+	}
+}
+
+func UnloadFileErrorEx2(errTxt string, a ...interface{}) *FilePathErrorDescription {
+	argsString := fmt.Sprintf(errTxt, a...)
+	_, file, line, _ := runtime.Caller(1)
+	return &FilePathErrorDescription{
+		ErrorDescription{
+			ErrTxt:   argsString,
 			ErrId:    ErrorIdSysUnloadFile,
 			FileName: file,
 			LineNo:   line,

@@ -4,6 +4,14 @@ import (
 	"strconv"
 )
 
+type ConfigurationHelper struct {
+	configFileName string //配置文件名称
+	extension      string //配置文件类型
+	loaded         bool   //是否已经加载
+
+	storage IConfigurationStorage
+}
+
 func (c *ConfigurationHelper) LoadConfiguration() error {
 	//此时已经设置了配置文件
 	if c.loaded {
@@ -16,12 +24,12 @@ func (c *ConfigurationHelper) LoadConfiguration() error {
 	}
 
 	configFileName := c.GetConfigurationFileName()
-	store, err1 := parser.Load(configFileName)
+	storage, err1 := parser.Load(configFileName)
 	if err1 != nil {
 		return err1
 	}
 
-	c.storage = store
+	c.storage = storage
 	return nil
 }
 
@@ -123,6 +131,11 @@ func (c *ConfigurationHelper) GetDoubleValueDefault(section string, key string, 
 		return defaultValue, err
 	}
 	return f64, nil
+}
+
+func (c *ConfigurationHelper) Destroy() {
+	c.storage.Destroy()
+	c.storage = nil
 }
 
 // ================================= private functions & methods ====================================

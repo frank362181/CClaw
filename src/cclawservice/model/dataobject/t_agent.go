@@ -10,8 +10,8 @@ import (
 	"gorm.io/plugin/optimisticlock"
 )
 
-// TLLMProviders 表示大模型供应商数据对象
-type TLLMProviders struct {
+// TLLMProvider 表示大模型供应商数据对象
+type TLLMProvider struct {
 	OwnerId      string `json:"OwnerId"`
 	ProviderId   string `json:"providerId"`   //供应商ID
 	ProviderName string `json:"providerName"` //供应商名称
@@ -43,7 +43,7 @@ type TLLMProviders struct {
 	DVersion optimisticlock.Version `json:"dVersion"` //乐观锁
 }
 
-func (llmProvider *TLLMProviders) ToJsonString() (string, error) {
+func (llmProvider *TLLMProvider) ToJsonString() (string, error) {
 	jsonSting, err := json.Marshal(llmProvider)
 	if err != nil {
 		return "", err
@@ -52,7 +52,7 @@ func (llmProvider *TLLMProviders) ToJsonString() (string, error) {
 	return string(jsonSting), nil
 }
 
-func (llmProvider *TLLMProviders) FromJsonString(jsonStr string) error {
+func (llmProvider *TLLMProvider) FromJsonString(jsonStr string) error {
 	err := json.Unmarshal([]byte(jsonStr), llmProvider)
 	if err != nil {
 		return err

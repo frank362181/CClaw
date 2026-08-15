@@ -10,9 +10,10 @@ import (
 
 var parsers = map[string]IConfigurationParser{
 	//载入不同配置文件的配置类
-	"ini":        &IniConfigParser{},
-	"properties": &PropertiesConfigParser{},
-	"yaml":       &YamlConfigParser{},
+	FileIni:        &IniConfigParser{},
+	FileProperties: &PropertiesConfigParser{},
+	FileYaml:       &YamlConfigParser{},
+	FileJson:       &JsonConfigParser{},
 }
 
 // configurationHelper 与配置文件类型关联
@@ -55,6 +56,10 @@ func GetConfigurationHelper(filename string) (*ConfigurationHelper, error) {
 
 func LookupConfigurationHelper(filename string) (*ConfigurationHelper, error) {
 	filename = strings.TrimSpace(filename)
+	if len(filename) == 0 {
+		return nil, exception.ParameterEmptyErrorEx("filename must not be empty")
+	}
+
 	mutex.RLock()
 	defer mutex.RUnlock()
 
@@ -123,7 +128,7 @@ func addHelper(filename string) (*ConfigurationHelper, error) {
 		configFileName: filename,
 		extension:      ext,
 		loaded:         false,
-		storage:        &ConfigurationStore{data: make(map[string]map[string]string)},
+		storage:        nil,
 	}
 	configurationHelpers[filename] = helper
 	return helper, nil

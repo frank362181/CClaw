@@ -25,7 +25,7 @@ const (
 	ErrorIdSysFileExtension                      // 103 文件扩展名错误
 	ErrorIdSysUnsupported                        // 104 不支持的操作
 	ErrorIdSysStringJsonTranslation              // 105 字符串 JSON 转换错误
-	ErrorIdSysUnloadFile                         // 106 配置文件载入错误
+	ErrorIdSysUnloadFile                         // 106 文件载入错误
 	ErrorIdSysFilePath                           // 107 文件路径错误
 	ErrorIdSysConfigRW                           // 108 配置文件读写错误
 )

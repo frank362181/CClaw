@@ -16,6 +16,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 	selfController "my.favorite/cclawservice/controller"
 	selfInterceptor "my.favorite/cclawservice/interceptor"
+	"my.favorite/cclawservice/model/repo"
 	"my.favorite/cclawservice/service"
 	common2 "my.favorite/platformutility/common"
 	"my.favorite/platformutility/config"
@@ -35,14 +36,20 @@ import (
 )
 
 type ServiceMain struct {
+	//系统配置
 	configFileName string
 	configHelper   *config.ConfigurationHelper
-	baseRouter     *webbase.BaseRouter
 
+	//web服务
+	baseRouter *webbase.BaseRouter
+
+	//数据读写相关，RDB,Redis等
 	database core.IBaseDatabase
 	memoryDB common.IMemoryDB
 
-	// agents repository
+	// agents related
+	defaultAgentConfigHelper *config.ConfigurationHelper
+	agentRepo                repo.IAgentRepository
 }
 
 // NewMainApp 相当于构造函数
@@ -53,6 +60,8 @@ func NewMainApp(confFileName string) *ServiceMain {
 		baseRouter:     nil,
 		database:       nil,
 		memoryDB:       nil,
+
+		defaultAgentConfigHelper: nil,
 	}
 }
 
@@ -193,6 +202,10 @@ func (m *ServiceMain) Destroy() {
 		_ = m.baseRouter.Shutdown()
 	}
 
+	if m.agentRepo != nil {
+		m.agentRepo.Destroy()
+	}
+
 	if m.database != nil {
 		m.database.Close()
 	}
@@ -200,14 +213,35 @@ func (m *ServiceMain) Destroy() {
 	if m.memoryDB != nil {
 		_ = m.memoryDB.CloseMemoryDb()
 	}
+
+	if m.defaultAgentConfigHelper != nil {
+		m.defaultAgentConfigHelper.Destroy()
+	}
+
+	if m.configHelper != nil {
+		m.configHelper.Destroy()
+	}
 }
 
 // ================================== private function & methods ==========================
 
 func (m *ServiceMain) loadAgentConfigurations() error {
-	// 首先判断所需的目录是否存在
+	// 1.首先判断所需的目录是否存在
 	workSpaceDir := filepath.Join(common2.GetExecutableDir(), cCommon.AgentServiceWorkspaceDirName)
 	_ = common2.CreateDir(workSpaceDir)
+
+	// 2. 加载所有agent的配置信息
+	configDir := filepath.Join(common2.GetExecutableDir(), "config")
+	defaultAgentConfigFile := filepath.Join(configDir, cCommon.DefaultAgentConfigFile)
+	m.defaultAgentConfigHelper, _ = config.GetConfigurationHelper(defaultAgentConfigFile)
+
+	_ = m.defaultAgentConfigHelper.LoadConfiguration()
+
+	// 3. load the agent & LLM providers configuration from the database
+	if m.agentRepo == nil {
+		m.agentRepo = repo.GetAgentRepository(m.database)
+	}
+	m.agentRepo.LoadAllAgents()
 
 	return nil
 }
