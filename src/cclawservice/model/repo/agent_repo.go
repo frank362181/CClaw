@@ -43,7 +43,9 @@ func GetAgentRepository(db core.IBaseDatabase) IAgentRepository {
 }
 
 func (repo *AgentRepository) LoadAllAgents() {
-
+	repo.loadLLMProviders()
+	repo.loadAgents()
+	repo.loadSkills()
 }
 
 func (repo *AgentRepository) Destroy() {
@@ -57,5 +59,37 @@ func (repo *AgentRepository) Destroy() {
 
 	if repo.skills != nil {
 		repo.skills.Clear()
+	}
+}
+
+// ============================== private functions & methods =========================
+
+func (repo *AgentRepository) loadLLMProviders() {
+	var providers []dataobject.TLLMProvider
+	err := repo.dataAccessor.GetAllLLMProviders(&providers)
+	if err == nil {
+		for _, p := range providers {
+			repo.llmProviders.Append(p)
+		}
+	}
+}
+
+func (repo *AgentRepository) loadAgents() {
+	var agents []dataobject.TAgent
+	err := repo.dataAccessor.GetAllAgents(&agents)
+	if err != nil {
+		for _, a := range agents {
+			repo.agents.Append(a)
+		}
+	}
+}
+
+func (repo *AgentRepository) loadSkills() {
+	var skills []dataobject.TSkill
+	err := repo.dataAccessor.GetAllSkills(&skills)
+	if err == nil {
+		for _, s := range skills {
+			repo.skills.Append(s)
+		}
 	}
 }

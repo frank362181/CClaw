@@ -404,7 +404,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/model.LoginResponseEx"
+                            "$ref": "#/definitions/basic.CommonResponse"
                         }
                     },
                     "400": {
@@ -569,28 +569,28 @@ const docTemplate = `{
                 "data": {
                     "description": "具体的相应内容"
                 },
-                "req_id": {
+                "reqId": {
                     "type": "string"
                 },
-                "req_method": {
+                "reqMethod": {
                     "description": "用户请求的方法",
                     "type": "string"
                 },
-                "req_path": {
+                "reqPath": {
                     "type": "string"
                 },
-                "req_timestamp": {
+                "reqTimestamp": {
                     "type": "integer"
                 },
-                "resp_code": {
+                "respCode": {
                     "description": "响应码,业务层级",
                     "type": "integer"
                 },
-                "resp_msg": {
+                "respMsg": {
                     "description": "响应的消息",
                     "type": "string"
                 },
-                "resp_timestamp": {
+                "respTimestamp": {
                     "type": "integer"
                 }
             }
@@ -646,28 +646,28 @@ const docTemplate = `{
                 "data": {
                     "$ref": "#/definitions/model.ChatResponse"
                 },
-                "req_id": {
+                "reqId": {
                     "type": "string"
                 },
-                "req_method": {
+                "reqMethod": {
                     "description": "用户请求的方法",
                     "type": "string"
                 },
-                "req_path": {
+                "reqPath": {
                     "type": "string"
                 },
-                "req_timestamp": {
+                "reqTimestamp": {
                     "type": "integer"
                 },
-                "resp_code": {
+                "respCode": {
                     "description": "响应码,业务层级",
                     "type": "integer"
                 },
-                "resp_msg": {
+                "respMsg": {
                     "description": "响应的消息",
                     "type": "string"
                 },
-                "resp_timestamp": {
+                "respTimestamp": {
                     "type": "integer"
                 }
             }
@@ -706,28 +706,28 @@ const docTemplate = `{
                 "data": {
                     "$ref": "#/definitions/model.ChatsResponse"
                 },
-                "req_id": {
+                "reqId": {
                     "type": "string"
                 },
-                "req_method": {
+                "reqMethod": {
                     "description": "用户请求的方法",
                     "type": "string"
                 },
-                "req_path": {
+                "reqPath": {
                     "type": "string"
                 },
-                "req_timestamp": {
+                "reqTimestamp": {
                     "type": "integer"
                 },
-                "resp_code": {
+                "respCode": {
                     "description": "响应码,业务层级",
                     "type": "integer"
                 },
-                "resp_msg": {
+                "respMsg": {
                     "description": "响应的消息",
                     "type": "string"
                 },
-                "resp_timestamp": {
+                "respTimestamp": {
                     "type": "integer"
                 }
             }
@@ -740,61 +740,6 @@ const docTemplate = `{
                 },
                 "username": {
                     "type": "string"
-                }
-            }
-        },
-        "model.LoginResponse": {
-            "type": "object",
-            "properties": {
-                "displayName": {
-                    "type": "string"
-                },
-                "expiredLength": {
-                    "description": "token失效时长,unit = second",
-                    "type": "integer"
-                },
-                "genAt": {
-                    "description": "token产生的时间",
-                    "type": "integer"
-                },
-                "token": {
-                    "description": "用户登录成功后得到的token",
-                    "type": "string"
-                },
-                "userName": {
-                    "type": "string"
-                }
-            }
-        },
-        "model.LoginResponseEx": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/model.LoginResponse"
-                },
-                "req_id": {
-                    "type": "string"
-                },
-                "req_method": {
-                    "description": "用户请求的方法",
-                    "type": "string"
-                },
-                "req_path": {
-                    "type": "string"
-                },
-                "req_timestamp": {
-                    "type": "integer"
-                },
-                "resp_code": {
-                    "description": "响应码,业务层级",
-                    "type": "integer"
-                },
-                "resp_msg": {
-                    "description": "响应的消息",
-                    "type": "string"
-                },
-                "resp_timestamp": {
-                    "type": "integer"
                 }
             }
         },
@@ -866,28 +811,28 @@ const docTemplate = `{
                 "data": {
                     "$ref": "#/definitions/model.SessionResponse"
                 },
-                "req_id": {
+                "reqId": {
                     "type": "string"
                 },
-                "req_method": {
+                "reqMethod": {
                     "description": "用户请求的方法",
                     "type": "string"
                 },
-                "req_path": {
+                "reqPath": {
                     "type": "string"
                 },
-                "req_timestamp": {
+                "reqTimestamp": {
                     "type": "integer"
                 },
-                "resp_code": {
+                "respCode": {
                     "description": "响应码,业务层级",
                     "type": "integer"
                 },
-                "resp_msg": {
+                "respMsg": {
                     "description": "响应的消息",
                     "type": "string"
                 },
-                "resp_timestamp": {
+                "respTimestamp": {
                     "type": "integer"
                 }
             }
@@ -921,28 +866,28 @@ const docTemplate = `{
                 "data": {
                     "$ref": "#/definitions/model.SessionsResponse"
                 },
-                "req_id": {
+                "reqId": {
                     "type": "string"
                 },
-                "req_method": {
+                "reqMethod": {
                     "description": "用户请求的方法",
                     "type": "string"
                 },
-                "req_path": {
+                "reqPath": {
                     "type": "string"
                 },
-                "req_timestamp": {
+                "reqTimestamp": {
                     "type": "integer"
                 },
-                "resp_code": {
+                "respCode": {
                     "description": "响应码,业务层级",
                     "type": "integer"
                 },
-                "resp_msg": {
+                "respMsg": {
                     "description": "响应的消息",
                     "type": "string"
                 },
-                "resp_timestamp": {
+                "respTimestamp": {
                     "type": "integer"
                 }
             }

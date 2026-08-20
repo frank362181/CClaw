@@ -10,6 +10,7 @@ import (
 	"my.favorite/platformutility/common/hash"
 	"my.favorite/platformutility/database/core"
 	"my.favorite/platformutility/exception"
+	"my.favorite/platformutility/logging"
 )
 
 type GormAccessor struct {
@@ -72,4 +73,36 @@ func (g *GormAccessor) GetUserByAccount(username string) (*dataobject.TAccount, 
 	err := g.gormDb.First(&user, "login_name = ?", username).Error
 
 	return &user, err
+}
+
+func (g *GormAccessor) GetAllLLMProviders(providers *[]dataobject.TLLMProvider) error {
+	result := g.gormDb.Find(&providers)
+
+	//检查错误
+	if result.Error != nil {
+		logging.LogInfoF("load LLM providers error:%s", result.Error.Error())
+		return exception2.DatabaseQueryErrEx2("load LLM providers error:%s", result.Error.Error())
+	}
+
+	return nil
+}
+
+func (g *GormAccessor) GetAllAgents(agents *[]dataobject.TAgent) error {
+	result := g.gormDb.Find(&agents)
+	if result.Error != nil {
+		logging.LogInfoF("load agents error:%s", result.Error.Error())
+		return exception2.DatabaseQueryErrEx2("load agents error:%s", result.Error.Error())
+	}
+
+	return nil
+}
+
+func (g *GormAccessor) GetAllSkills(skills *[]dataobject.TSkill) error {
+	result := g.gormDb.Find(&skills)
+	if result.Error != nil {
+		logging.LogInfoF("load skills error:%s", result.Error.Error())
+		return exception2.DatabaseQueryErrEx2("load skills error:%s", result.Error.Error())
+	}
+
+	return nil
 }

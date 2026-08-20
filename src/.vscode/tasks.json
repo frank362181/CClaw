@@ -4,12 +4,19 @@
         {
             "label": "cclawchat: start web server (5500)",
             "type": "shell",
-            "command": "powershell",
+            "command": "sh",
             "args": [
-                "-NoProfile",
-                "-ExecutionPolicy", "Bypass",
-                "-File", "${workspaceFolder}/.vscode/scripts/serve.ps1"
+                "${workspaceFolder}/.vscode/scripts/serve.sh",
+                "5500"
             ],
+            "windows": {
+                "command": "powershell",
+                "args": [
+                    "-NoProfile",
+                    "-ExecutionPolicy", "Bypass",
+                    "-File", "${workspaceFolder}/.vscode/scripts/serve.ps1"
+                ]
+            },
             "presentation": {
                 "reveal": "silent",
                 "panel": "dedicated",

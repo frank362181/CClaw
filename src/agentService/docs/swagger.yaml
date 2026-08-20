@@ -4,22 +4,22 @@ definitions:
     properties:
       data:
         description: 具体的相应内容
-      req_id:
+      reqId:
         type: string
-      req_method:
+      reqMethod:
         description: 用户请求的方法
         type: string
-      req_path:
+      reqPath:
         type: string
-      req_timestamp:
+      reqTimestamp:
         type: integer
-      resp_code:
+      respCode:
         description: 响应码,业务层级
         type: integer
-      resp_msg:
+      respMsg:
         description: 响应的消息
         type: string
-      resp_timestamp:
+      respTimestamp:
         type: integer
     type: object
   model.ChatRequest:
@@ -58,22 +58,22 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/model.ChatResponse'
-      req_id:
+      reqId:
         type: string
-      req_method:
+      reqMethod:
         description: 用户请求的方法
         type: string
-      req_path:
+      reqPath:
         type: string
-      req_timestamp:
+      reqTimestamp:
         type: integer
-      resp_code:
+      respCode:
         description: 响应码,业务层级
         type: integer
-      resp_msg:
+      respMsg:
         description: 响应的消息
         type: string
-      resp_timestamp:
+      respTimestamp:
         type: integer
     type: object
   model.ChatsRequest:
@@ -98,22 +98,22 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/model.ChatsResponse'
-      req_id:
+      reqId:
         type: string
-      req_method:
+      reqMethod:
         description: 用户请求的方法
         type: string
-      req_path:
+      reqPath:
         type: string
-      req_timestamp:
+      reqTimestamp:
         type: integer
-      resp_code:
+      respCode:
         description: 响应码,业务层级
         type: integer
-      resp_msg:
+      respMsg:
         description: 响应的消息
         type: string
-      resp_timestamp:
+      respTimestamp:
         type: integer
     type: object
   model.LoginRequest:
@@ -122,44 +122,6 @@ definitions:
         type: string
       username:
         type: string
-    type: object
-  model.LoginResponse:
-    properties:
-      displayName:
-        type: string
-      expiredLength:
-        description: token失效时长,unit = second
-        type: integer
-      genAt:
-        description: token产生的时间
-        type: integer
-      token:
-        description: 用户登录成功后得到的token
-        type: string
-      userName:
-        type: string
-    type: object
-  model.LoginResponseEx:
-    properties:
-      data:
-        $ref: '#/definitions/model.LoginResponse'
-      req_id:
-        type: string
-      req_method:
-        description: 用户请求的方法
-        type: string
-      req_path:
-        type: string
-      req_timestamp:
-        type: integer
-      resp_code:
-        description: 响应码,业务层级
-        type: integer
-      resp_msg:
-        description: 响应的消息
-        type: string
-      resp_timestamp:
-        type: integer
     type: object
   model.SessionRequest:
     properties:
@@ -209,22 +171,22 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/model.SessionResponse'
-      req_id:
+      reqId:
         type: string
-      req_method:
+      reqMethod:
         description: 用户请求的方法
         type: string
-      req_path:
+      reqPath:
         type: string
-      req_timestamp:
+      reqTimestamp:
         type: integer
-      resp_code:
+      respCode:
         description: 响应码,业务层级
         type: integer
-      resp_msg:
+      respMsg:
         description: 响应的消息
         type: string
-      resp_timestamp:
+      respTimestamp:
         type: integer
     type: object
   model.SessionsRequest:
@@ -246,22 +208,22 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/model.SessionsResponse'
-      req_id:
+      reqId:
         type: string
-      req_method:
+      reqMethod:
         description: 用户请求的方法
         type: string
-      req_path:
+      reqPath:
         type: string
-      req_timestamp:
+      reqTimestamp:
         type: integer
-      resp_code:
+      respCode:
         description: 响应码,业务层级
         type: integer
-      resp_msg:
+      respMsg:
         description: 响应的消息
         type: string
-      resp_timestamp:
+      respTimestamp:
         type: integer
     type: object
 host: localhost:8443
@@ -534,7 +496,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/model.LoginResponseEx'
+            $ref: '#/definitions/basic.CommonResponse'
         "400":
           description: Bad Request
           schema:

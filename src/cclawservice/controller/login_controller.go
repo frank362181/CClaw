@@ -55,7 +55,7 @@ func NewLoginController(service pService.IService) *LoginController {
 //	@Param			TIMESTAMP	query		string				true	"数值,表示请求端请求的时间(秒数)"
 //	@Param			SIGNATURE	query		string				true	"对请求内容的签名"
 //	@Param			body		body		model.LoginRequest	true	"登录用户名和密码"
-//	@Success		200			{object}	model.LoginResponseEx
+//	@Success		200			{object}	basic.CommonResponse
 //	@Failure		400			{object}	basic.CommonResponse
 //	@Router			/api/login [post]
 func (lc *LoginController) Login(c *gin.Context) {

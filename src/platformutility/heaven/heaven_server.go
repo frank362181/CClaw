@@ -62,18 +62,13 @@ func NewConnection(server *Server, conn net.Conn, readTimeout int16, writeTimeou
 func (s *Server) StartServer() error {
 	listenConfig := net.ListenConfig{
 		Control: func(network, address string, c syscall.RawConn) error {
-			var err error
-			err = c.Control(func(fd uintptr) {
-				err = syscall.SetsockoptInt(syscall.Handle(int(fd)), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
-				if err != nil {
-					return
-				}
-
-				// SO_REUSEPORT = 15,linux
-				err = syscall.SetsockoptInt(syscall.Handle(int(fd)), syscall.SOL_SOCKET, 0xf, 1)
-			})
-
-			return err
+			var opErr error
+			if err := c.Control(func(fd uintptr) {
+				opErr = setSocketOptions(fd)
+			}); err != nil {
+				return err
+			}
+			return opErr
 		},
 	}
 

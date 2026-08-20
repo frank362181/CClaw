@@ -9,4 +9,5 @@ const (
 const (
 	ErrorIdBizUserNamePasswordUnmatched = iota + ErrorIdBizBase + 1
 	ErrorIdBizInvalidToken
+	ErrorIdBizDatabase
 )
