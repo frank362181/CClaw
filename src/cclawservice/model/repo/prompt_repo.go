@@ -1,5 +1,5 @@
 /**
-* Agent 启动文档与 Skill 元数据的文件仓库
+* Agent 启动文档与 Skill 元数据的文件仓库，对应每个agent
 *
 * 职责:
 *   1. 从 agent 的工作区根目录读取 AGENTS.md(agent.md)/SOUL.md(soul.md)/TOOLS.md(tools.md)
@@ -24,23 +24,6 @@ import (
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
 )
-
-// startupDocFiles 启动文档清单,按固定顺序加载(参考 OpenClaw WORKSPACE_BOOTSTRAP_FILENAMES)。
-// required=true 的必需文件缺失时,仍会生成带 Missing 标记的文档,由 prompt 组装层注入 [MISSING] 提示;
-// required=false 的可选文件缺失时直接省略。
-var startupDocFiles = []struct {
-	kind     dataobject.AgentDocumentKind
-	name     string
-	required bool
-}{
-	{dataobject.AgentDocAgent, cCommon.AgentDocFileName, true},
-	{dataobject.AgentDocSoul, cCommon.SoulDocFileName, false},
-	{dataobject.AgentDocIdentity, cCommon.IdentityDocFileName, false},
-	{dataobject.AgentDocUser, cCommon.UserDocFileName, false},
-	{dataobject.AgentDocTools, cCommon.ToolsDocFileName, false},
-	{dataobject.AgentDocBootstrap, cCommon.BootstrapDocFileName, false},
-	{dataobject.AgentDocMemory, cCommon.MemoryDocFileName, false},
-}
 
 // PromptRepository 负责从文件系统加载并缓存 prompt 相关的文档
 type PromptRepository struct {
@@ -95,8 +78,8 @@ func (repo *PromptRepository) LoadWorkspace(workspaceRoot string) error {
 	defer repo.mu.Unlock()
 
 	var fileNames []string
-	for _, item := range startupDocFiles {
-		fileNames = append(fileNames, item.name)
+	for _, item := range cCommon.StartupDocFiles {
+		fileNames = append(fileNames, item.Name)
 	}
 
 	if repo.workspaceRoot == workspaceRoot &&
@@ -108,10 +91,10 @@ func (repo *PromptRepository) LoadWorkspace(workspaceRoot string) error {
 	repo.skills.Clear()
 	repo.workspaceRoot = workspaceRoot
 
-	for _, item := range startupDocFiles {
-		doc, ok, err := repo.readAgentDocumentLocked(item.kind, item.name, item.required)
+	for _, item := range cCommon.StartupDocFiles {
+		doc, ok, err := repo.readAgentDocumentLocked(item.Kind, item.Name, item.Required)
 		if err != nil {
-			logging.LogWarnF("prompt repo: load %s error:%s", item.name, err.Error())
+			logging.LogWarnF("prompt repo: load %s error:%s", item.Name, err.Error())
 			continue
 		}
 		if ok {

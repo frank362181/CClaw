@@ -1,6 +1,7 @@
 package common
 
 import (
+	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
@@ -10,10 +11,11 @@ const (
 )
 
 // ==================== agent 启动文档与 skill 文档 ====================
-const (
-	AgentWorkspaceDefaultDirName = "default" //agent 的默认工作区子目录名称
 
-	// 启动文档文件名全集(顺序即注入顺序,参考 OpenClaw WORKSPACE_BOOTSTRAP_FILENAMES)
+// MissingFileMarker 缺失文件标记(OpenClaw context-file: [MISSING] Expected at: <path>)
+const MissingFileMarker = "[MISSING]"
+
+const (
 	AgentDocFileName     = "AGENTS.md"    //agent.md:运行规则(必需)
 	SoulDocFileName      = "SOUL.md"      //soul.md:人格/语气/边界(可选)
 	IdentityDocFileName  = "IDENTITY.md"  //身份:名称/形象/emoji(可选)
@@ -21,8 +23,24 @@ const (
 	ToolsDocFileName     = "TOOLS.md"     //tools.md:工具使用指引(可选)
 	BootstrapDocFileName = "BOOTSTRAP.md" //首次运行的引导仪式(仅新工作区)
 	MemoryDocFileName    = "MEMORY.md"    //长期记忆文件(存在才注入)
-	SkillDocFileName     = "SKILL.md"     //skill.md:技能定义
 )
+
+// StartupDocFiles 启动文档清单,按固定顺序加载。
+// required=true 的必需文件缺失时,仍会生成带 Missing 标记的文档,由 prompt 组装层注入 [MISSING] 提示;
+// required=false 的可选文件缺失时直接省略。
+var StartupDocFiles = []struct {
+	Kind     dataobject.AgentDocumentKind
+	Name     string
+	Required bool
+}{
+	{dataobject.AgentDocAgent, AgentDocFileName, true},
+	{dataobject.AgentDocSoul, SoulDocFileName, false},
+	{dataobject.AgentDocIdentity, IdentityDocFileName, false},
+	{dataobject.AgentDocUser, UserDocFileName, false},
+	{dataobject.AgentDocTools, ToolsDocFileName, false},
+	{dataobject.AgentDocBootstrap, BootstrapDocFileName, false},
+	{dataobject.AgentDocMemory, MemoryDocFileName, false},
+}
 
 // 启动文档注入预算(安全/性能,参考 OpenClaw bootstrap-budget)
 const (
@@ -34,14 +52,16 @@ const (
 	MaxPromptSectionLen    = 32 * 1024  //system prompt 单个 section 的最大 rune 数
 )
 
-// skill 元数据目录预算(参考 OpenClaw skill-prompt-limits)
+// skill 元数据目录预算
+
+const (
+	SkillDocFileName = "SKILL.md" //skill.md:技能定义
+)
+
 const (
 	MaxSkillsInPrompt    = 150   //注入 prompt 的 skill 数量上限
 	MaxSkillsPromptChars = 18000 //skill 元数据目录的字符上限
 )
-
-// 缺失文件标记(OpenClaw context-file: [MISSING] Expected at: <path>)
-const MissingFileMarker = "[MISSING]"
 
 // 定义业务级的错误常量和错误信息
 

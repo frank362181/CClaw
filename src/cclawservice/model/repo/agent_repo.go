@@ -1,5 +1,6 @@
 /**
-* 所有Agent的配置信息仓库
+* 从数据库中获取所有的llm providers,agent,skill等信息
+* 这里并不会加载agent的启动文件以及SKILL.md等文件内容
 **/
 
 package repo
@@ -24,6 +25,18 @@ type AgentRepository struct {
 type IAgentRepository interface {
 	LoadAllAgents()
 
+	GetAllLLMProviders() []dataobject.TLLMProvider
+	AddLLMProvider(provider dataobject.TLLMProvider)
+	RemoveLLMProvider(providerId string)
+
+	GetAllAgents() []dataobject.TAgent
+	AddAgent(agent dataobject.TAgent)
+	RemoveAgent(agentId string)
+
+	GetAllSkills() []dataobject.TSkill
+	AddSkill(skill dataobject.TSkill)
+	RemoveSkill(skillId string)
+
 	Destroy()
 }
 
@@ -47,6 +60,56 @@ func (repo *AgentRepository) LoadAllAgents() {
 	repo.loadAgents()
 	repo.loadSkills()
 }
+
+func (repo *AgentRepository) GetAllLLMProviders() []dataobject.TLLMProvider {
+	out := make([]dataobject.TLLMProvider, 0, repo.llmProviders.Len())
+	repo.llmProviders.Range(func(_ int, item dataobject.TLLMProvider) bool {
+		out = append(out, item)
+		return true
+	})
+
+	return out
+}
+
+func (repo *AgentRepository) AddLLMProvider(provider dataobject.TLLMProvider) {
+
+}
+
+func (repo *AgentRepository) RemoveLLMProvider(providerId string) {
+
+}
+
+func (repo *AgentRepository) GetAllAgents() []dataobject.TAgent {
+	out := make([]dataobject.TAgent, 0, repo.agents.Len())
+	repo.agents.Range(func(_ int, item dataobject.TAgent) bool {
+		out = append(out, item)
+		return true
+	})
+
+	return out
+}
+
+func (repo *AgentRepository) AddAgent(agent dataobject.TAgent) {
+
+}
+
+func (repo *AgentRepository) RemoveAgent(agentId string) {}
+
+func (repo *AgentRepository) GetAllSkills() []dataobject.TSkill {
+	out := make([]dataobject.TSkill, 0, repo.agents.Len())
+	repo.skills.Range(func(_ int, item dataobject.TSkill) bool {
+		out = append(out, item)
+		return true
+	})
+
+	return out
+}
+
+func (repo *AgentRepository) AddSkill(skill dataobject.TSkill) {
+
+}
+
+func (repo *AgentRepository) RemoveSkill(skillId string) {}
 
 func (repo *AgentRepository) Destroy() {
 	if repo.llmProviders != nil {

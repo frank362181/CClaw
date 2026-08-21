@@ -475,7 +475,8 @@ func ReadFile(fileName string, maxSize int64) ([]byte, int64, error) {
 
 	fileSize := info.Size()
 	if fileSize > maxSize {
-		return nil, 0, errors.New(fmt.Sprintf("prompt repo: document too large(size=%d,max=%d):%s", fileSize, maxSize, fileName))
+		errString := fmt.Sprintf("prompt repo: document too large(size=%d,max=%d):%s", fileSize, maxSize, fileName)
+		return nil, 0, errors.New(errString)
 	}
 
 	data, err := os.ReadFile(fileName)
