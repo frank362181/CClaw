@@ -68,7 +68,7 @@ func (i *IniConfigParser) Save(filename string, storage IConfigurationStorage) e
 	}
 
 	store := storage.(*DefaultConfigStore)
-	if store.data == nil || len(store.data) == 0 {
+	if len(store.data) == 0 {
 		return nil
 	}
 

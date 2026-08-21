@@ -67,6 +67,7 @@ type TAgent struct {
 	AgentName    string `json:"AgentName"`
 	PrimaryModel string `json:"PrimaryModel"` //主要使用的AI模型,如deepseek,qwen-3.8-flash等
 	Fallbacks    string `json:"Fallbacks"`
+	AgentDir     string `json:"AgentDir"`  //agent启动文件所在的路径
 	Workspace    string `json:"Workspace"` //表示该agent的工作空间
 
 	ImageName  string `json:"ImageName"` //agent的公众形象名称
@@ -104,10 +105,11 @@ func (agent *TAgent) FromJsonString(jsonStr string) error {
 }
 
 type TSkill struct {
-	OwnerId   string `json:"OwnerId"`
-	SkillId   string `json:"skillId"`
-	SkillName string `json:"skillName"`
-	SkillFile string `json:"skillFile"` // 指向skill对应的SKILL.md文件
+	OwnerId    string `json:"OwnerId"`
+	SkillId    string `json:"skillId"`
+	SkillName  string `json:"skillName"`
+	SkillDir   string `json:"skillDir"`   // 指向skill对应的相对路径,定位SKILL.md
+	SkillScope int    `json:"skillScope"` // 指向skill的作用域
 
 	Disabled bool                   `json:"Disabled"`
 	Deleted  bool                   `json:"Deleted"`

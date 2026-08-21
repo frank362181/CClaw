@@ -68,3 +68,17 @@ func ToJson(value string) interface{} {
 	}
 	return value
 }
+
+// TruncateRunes 按 rune 安全截断,避免截断多字节字符;fast-path 直接按字节比较。
+func TruncateRunes(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+
+	return string(runes[:max])
+}

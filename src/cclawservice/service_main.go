@@ -50,6 +50,7 @@ type ServiceMain struct {
 	// agents related
 	defaultAgentConfigHelper *config.ConfigurationHelper
 	agentRepo                repo.IAgentRepository
+	promptRepo               repo.IPromptRepository
 }
 
 // NewMainApp 相当于构造函数
@@ -206,6 +207,10 @@ func (m *ServiceMain) Destroy() {
 		m.agentRepo.Destroy()
 	}
 
+	if m.promptRepo != nil {
+		m.promptRepo.Destroy()
+	}
+
 	if m.database != nil {
 		m.database.Close()
 	}
@@ -230,11 +235,10 @@ func (m *ServiceMain) loadAgentConfigurations() error {
 	workSpaceDir := filepath.Join(common2.GetExecutableDir(), cCommon.AgentServiceWorkspaceDirName)
 	_ = common2.CreateDir(workSpaceDir)
 
-	// 2. 加载所有agent的配置信息
+	// 2. 加载agent的默认配置信息
 	configDir := filepath.Join(common2.GetExecutableDir(), "config")
 	defaultAgentConfigFile := filepath.Join(configDir, cCommon.DefaultAgentConfigFile)
 	m.defaultAgentConfigHelper, _ = config.GetConfigurationHelper(defaultAgentConfigFile)
-
 	_ = m.defaultAgentConfigHelper.LoadConfiguration()
 
 	// 3. load the agent & LLM providers configuration from the database
@@ -242,6 +246,15 @@ func (m *ServiceMain) loadAgentConfigurations() error {
 		m.agentRepo = repo.GetAgentRepository(m.database)
 	}
 	m.agentRepo.LoadAllAgents()
+
+	// 4. warm up the prompt repository with the default workspace (best-effort)
+	if m.promptRepo == nil {
+		m.promptRepo = repo.GetPromptRepository()
+	}
+	defaultWorkspace := filepath.Join(workSpaceDir, cCommon.AgentWorkspaceDefaultDirName)
+	if err := m.promptRepo.LoadWorkspace(defaultWorkspace); err != nil {
+		logging.LogWarnF("warm up default workspace error:%s", err.Error())
+	}
 
 	return nil
 }

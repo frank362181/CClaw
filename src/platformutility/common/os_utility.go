@@ -12,6 +12,7 @@ package common
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
@@ -334,6 +335,21 @@ func ResolvePath(input, baseDir string) string {
 	return filepath.Clean(joined)
 }
 
+// ResolveRealPath 解析路径的真实路径;文件不存在时沿父目录链向上找最近存在的祖先,
+// 解析其真实路径后拼接剩余部分,保证符号链接前缀(如 macOS /var -> /private/var)也被正确解析。
+func ResolveRealPath(path string) string {
+	if r, err := filepath.EvalSymlinks(path); err == nil {
+		return r
+	}
+
+	parent := filepath.Dir(path)
+	if parent == path {
+		return path
+	}
+
+	return filepath.Join(ResolveRealPath(parent), filepath.Base(path))
+}
+
 // FileURLToPath converts a file ://URL to an O-native path
 func FileURLToPath(rawURL string) string {
 	u, err := url.Parse(rawURL)
@@ -376,7 +392,56 @@ func MarkPathIgnoreByCloudSync(path string) {
 	}
 }
 
-func ReadAll(fileName string) ([]byte, error) {
+// SafeJoin 解析目标路径并校验其真实路径必须位于 workspaceRoot 之内,
+// 用于防目录穿越与符号链接逃逸。
+func SafeJoin(base, target string) (string, error) {
+	rootAbs, err := filepath.Abs(base)
+	if err != nil {
+		return "", err
+	}
+	rootAbs = filepath.Clean(rootAbs)
+
+	targetAbs, err := filepath.Abs(target)
+	if err != nil {
+		return "", err
+	}
+	targetAbs = filepath.Clean(targetAbs)
+
+	// 防符号链接逃逸:解析真实路径后仍须位于 workspace 内。
+	// 注意:目标文件可能不存在(如缺失的必需文档),此时 EvalSymlinks 会失败,
+	// 需按"最近存在的祖先"解析真实路径,否则 macOS(/var->/private/var)等
+	// 带符号链接的根目录会对缺失文件误报越界。
+	realRoot := ResolveRealPath(rootAbs)
+	realTarget := ResolveRealPath(targetAbs)
+
+	sep := string(filepath.Separator)
+	if realTarget != realRoot && !strings.HasPrefix(realTarget, realRoot+sep) {
+		return "", errors.New("prompt repo: document escapes workspace root: " + target)
+	}
+
+	return targetAbs, nil
+}
+
+// ComputeFileFingerprint 计算启动文档的指纹（文件名+大小+修改时间），用于是否从磁盘重新读取文件的判断
+func ComputeFileFingerprint(path string, fileNames []string) string {
+	var sb strings.Builder
+
+	for _, fileName := range fileNames {
+		file := filepath.Join(path, fileName)
+		info, err := os.Stat(file)
+		if err != nil {
+			sb.WriteString(fileName)
+			sb.WriteString(":missing;")
+			continue
+		}
+
+		_, _ = fmt.Fprintf(&sb, "%s:%d:%d", fileName, info.Size(), info.ModTime().UnixNano())
+	}
+
+	return sb.String()
+}
+
+func ReadFileAll(fileName string) ([]byte, error) {
 	if !FileExists(fileName) {
 		return nil, errors.New("file not found")
 	}
@@ -396,6 +461,29 @@ func ReadAll(fileName string) ([]byte, error) {
 	}
 
 	return jsonData, nil
+}
+
+// ReadFile 带上大小上限读取文件，防止超大文件导致内存耗尽
+func ReadFile(fileName string, maxSize int64) ([]byte, int64, error) {
+	info, err := os.Stat(fileName)
+	if err != nil {
+		return nil, 0, err
+	}
+	if info.IsDir() {
+		return nil, 0, errors.New("prompt repo: not a file: " + fileName)
+	}
+
+	fileSize := info.Size()
+	if fileSize > maxSize {
+		return nil, 0, errors.New(fmt.Sprintf("prompt repo: document too large(size=%d,max=%d):%s", fileSize, maxSize, fileName))
+	}
+
+	data, err := os.ReadFile(fileName)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return data, fileSize, nil
 }
 
 func Close(file *os.File) {

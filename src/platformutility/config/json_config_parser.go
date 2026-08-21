@@ -5,7 +5,7 @@ import "my.favorite/platformutility/common"
 type JsonConfigParser struct{}
 
 func (j *JsonConfigParser) Load(fileName string) (IConfigurationStorage, error) {
-	jsonData, err := common.ReadAll(fileName)
+	jsonData, err := common.ReadFileAll(fileName)
 	if err != nil {
 		return nil, err
 	}

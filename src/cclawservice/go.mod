@@ -9,6 +9,8 @@ require (
 
 	gorm.io/gorm v1.31.2
 
+	gopkg.in/yaml.v2 v2.4.0
+
 	my.favorite/platformutility v0.0.0-00010101000000-000000000000
 )
 
@@ -96,7 +98,6 @@ require (
 	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/tools v0.47.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gorm.io/driver/postgres v1.6.0 // indirect
 	gorm.io/driver/sqlite v1.6.0 // indirect
 	gorm.io/plugin/optimisticlock v1.1.3
