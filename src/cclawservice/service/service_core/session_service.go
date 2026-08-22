@@ -49,15 +49,20 @@ type SessionService struct {
 	mu sync.Mutex
 }
 
-func NewSessionService(memoryDB memoryDbCommon.IMemoryDB) (*SessionService, error) {
+var sessionService = common.GetSingleton(func() *SessionService {
+	return &SessionService{
+		memoryDB: nil,
+		idleTTL:  time.Duration(basic.MemoryTokenExpireTime) * time.Second,
+		//absoluteLifetime: time.Duration(DefaultAbsoluteSessionLifetime) * time.Second,
+	}
+}).Instance()
+
+func GetSessionService(memoryDB memoryDbCommon.IMemoryDB) (*SessionService, error) {
 	if memoryDB == nil {
 		return nil, exception.ParameterEmptyErrorEx("session store: memory database is nil")
 	}
-	return &SessionService{
-		memoryDB: memoryDB,
-		idleTTL:  time.Duration(basic.MemoryTokenExpireTime) * time.Second,
-		//absoluteLifetime: time.Duration(DefaultAbsoluteSessionLifetime) * time.Second,
-	}, nil
+	sessionService.memoryDB = memoryDB
+	return sessionService, nil
 }
 
 func (store *SessionService) CreateOrReplace(token string, loginSession *model.LoginSession) error {

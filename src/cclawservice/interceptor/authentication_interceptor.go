@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/controller/model"
+	common2 "my.favorite/platformutility/common"
 	"my.favorite/platformutility/webbase/middleware/basic"
 	"my.favorite/platformutility/webbase/middleware/service"
 )
@@ -24,15 +25,19 @@ type AuthenticationInterceptor struct {
 	loginService service.IService
 }
 
-func NewAuthenticationInterceptor(svc service.IService) *AuthenticationInterceptor {
-	authInterceptor := &AuthenticationInterceptor{
+var authenticationInterceptor = common2.GetSingleton(func() *AuthenticationInterceptor {
+	return &AuthenticationInterceptor{
 		BaseInterceptor: basic.BaseInterceptor{
 			Order:           1,
 			InterceptorName: "authentication_interceptor",
 		},
-		loginService: svc,
+		loginService: nil,
 	}
-	return authInterceptor
+}).Instance()
+
+func GetAuthenticationInterceptor(svc service.IService) *AuthenticationInterceptor {
+	authenticationInterceptor.loginService = svc
+	return authenticationInterceptor
 }
 
 func (i *AuthenticationInterceptor) SetupUnwantedTokenUrls(urls []string) {

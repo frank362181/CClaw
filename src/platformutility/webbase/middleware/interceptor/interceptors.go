@@ -34,16 +34,6 @@ func GetInterceptors() *Interceptors {
 	return interceptors
 }
 
-func NewInterceptors() *Interceptors {
-	return &Interceptors{
-		BaseFilter: basic.BaseFilter{
-			Order:      99,
-			FilterName: fmt.Sprintf("Interceptors_%d", 99),
-		},
-		chains: make(map[string]basic.IInterceptor),
-	}
-}
-
 func (in *Interceptors) RegistryInterceptor(inter basic.IInterceptor) error {
 	if inter == nil {
 		return exception.ParameterEmptyErrorEx("parameter interface is nil")

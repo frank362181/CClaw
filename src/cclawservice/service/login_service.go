@@ -15,6 +15,7 @@ import (
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/service/service_core"
+	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/common/hash"
 	"my.favorite/platformutility/database/core"
 	"my.favorite/platformutility/exception"
@@ -33,6 +34,18 @@ type LoginService struct {
 	throttleService *service_core.ThrottleService
 }
 
+var loginService = common.GetSingleton(func() *LoginService {
+	return &LoginService{
+		BaseService: baseService.BaseService{
+			Name:        "loginService",
+			Description: "user authentication and session service",
+		},
+		dbAccessor:      nil,
+		sessionService:  nil,
+		throttleService: nil,
+	}
+}).Instance()
+
 // GetLoginService builds a fresh service graph instead of mutating a package singleton.
 func GetLoginService(memoryDB memoryDbCommon.IMemoryDB, db core.IBaseDatabase) (*LoginService, error) {
 	if memoryDB == nil || db == nil {
@@ -45,38 +58,18 @@ func GetLoginService(memoryDB memoryDbCommon.IMemoryDB, db core.IBaseDatabase) (
 		return nil, err
 	}
 
-	ss, err := service_core.NewSessionService(memoryDB)
+	ss, err := service_core.GetSessionService(memoryDB)
 	if err != nil {
 		return nil, myException.TokenInvalidErrEx2("login service: token storage invalid")
 	}
 
 	ts := service_core.NewThrottleService(memoryDB)
 
-	loginService, err := newLoginService(accessor, ss, ts)
-	if err != nil {
-		return nil, err
-	}
+	loginService.dbAccessor = accessor
+	loginService.sessionService = ss
+	loginService.throttleService = ts
 
 	return loginService, nil
-}
-
-func newLoginService(dbAccessor dataaccessor.IAccessor, ss service_core.ISessionService, ts *service_core.ThrottleService) (*LoginService, error) {
-	if dbAccessor == nil {
-		return nil, exception.ParameterEmptyErrorEx("login service: database accessor is nil")
-	}
-	if ss == nil {
-		return nil, exception.ParameterEmptyErrorEx("login service: session store is nil")
-	}
-
-	return &LoginService{
-		BaseService: baseService.BaseService{
-			Name:        "loginService",
-			Description: "user authentication and session service",
-		},
-		dbAccessor:      dbAccessor,
-		sessionService:  ss,
-		throttleService: ts,
-	}, nil
 }
 
 func (service *LoginService) Login(username, password string) (*model.LoginSession, error) {

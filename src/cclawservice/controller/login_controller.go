@@ -10,6 +10,7 @@ import (
 	model2 "my.favorite/cclawservice/controller/model"
 	exception2 "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/service"
+	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/webbase/middleware/basic"
 	"my.favorite/platformutility/webbase/middleware/controller"
 	baseController "my.favorite/platformutility/webbase/middleware/controller"
@@ -20,15 +21,17 @@ type LoginController struct {
 	baseController.BaseController
 }
 
-func NewLoginController(service pService.IService) *LoginController {
-	loginController := &LoginController{
+var loginController = common.GetSingleton(func() *LoginController {
+	return &LoginController{
 		BaseController: controller.BaseController{
 			Type:    basic.APIGroupRequire,
 			Name:    "loggingController",
 			Service: nil,
 		},
 	}
+}).Instance()
 
+func GetLoginController(service pService.IService) *LoginController {
 	loginController.Service = service
 	return loginController
 }

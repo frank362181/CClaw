@@ -145,18 +145,18 @@ func (m *ServiceMain) SetupLoginController() error {
 		logging.LogErrorF("failed to create login service,err:%s", err.Error())
 		return exception.WebServerErrEx2("failed to create login service,error:%s", err.Error())
 	}
-	loginController := selfController.NewLoginController(loginService)
+	loginController := selfController.GetLoginController(loginService)
 
 	urlFunMap := make(map[string]gin.HandlerFunc)
 	urlFunMap[cCommon.RelativeLoginUrl] = loginController.Login
 	urlFunMap[cCommon.RelativeLogoutUrl] = loginController.Logout
 
-	authInter := selfInterceptor.NewAuthenticationInterceptor(loginService)
+	authInter := selfInterceptor.GetAuthenticationInterceptor(loginService)
 	tempStr, _ := m.configHelper.GetStringValueDefault("security", "unWantedToken", "")
 	urls := strings.Split(tempStr, ",")
 	authInter.SetupUnwantedTokenUrls(urls)
 
-	interceptors := interceptor.NewInterceptors()
+	interceptors := interceptor.GetInterceptors()
 	err = interceptors.RegistryInterceptor(authInter)
 	if err != nil {
 		logging.LogErrorF("failed to setup logging controller,err:%s", err.Error())
