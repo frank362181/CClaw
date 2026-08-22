@@ -18,7 +18,7 @@ import (
 	selfInterceptor "my.favorite/cclawservice/interceptor"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/cclawservice/service"
-	common2 "my.favorite/platformutility/common"
+	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/database"
 	"my.favorite/platformutility/database/core"
@@ -73,7 +73,7 @@ func (m *ServiceMain) Init() error {
 	}
 
 	// 1. format the configuration filename
-	m.configFileName = common2.FormatPath(m.configFileName)
+	m.configFileName = pCommon.FormatPath(m.configFileName)
 
 	// 2. load configuration
 	var err error
@@ -232,11 +232,11 @@ func (m *ServiceMain) Destroy() {
 
 func (m *ServiceMain) loadAgentConfigurations() error {
 	// 1.首先判断所需的目录是否存在
-	workSpaceDir := filepath.Join(common2.GetExecutableDir(), cCommon.AgentServiceWorkspaceDirName)
-	_ = common2.CreateDir(workSpaceDir)
+	workSpaceDir := filepath.Join(pCommon.GetExecutableDir(), cCommon.AgentServiceWorkspaceDirName)
+	_ = pCommon.CreateDir(workSpaceDir)
 
 	// 2. 加载agent的默认配置信息
-	configDir := filepath.Join(common2.GetExecutableDir(), "config")
+	configDir := filepath.Join(pCommon.GetExecutableDir(), "config")
 	defaultAgentConfigFile := filepath.Join(configDir, cCommon.DefaultAgentConfigFile)
 	m.defaultAgentConfigHelper, _ = config.GetConfigurationHelper(defaultAgentConfigFile)
 	_ = m.defaultAgentConfigHelper.LoadConfiguration()
