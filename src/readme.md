@@ -138,7 +138,8 @@ AGENTS.md,SOUL.md等启动文件的真正读取的点是PromptRepository.LoadWor
   MaxBootstrapFileChars = 20000 / MaxUserDocChars = 4000
   MaxBootstrapTotalChars = 60000 + enforceTotalBudget
   [MISSING] Expected at: <path>
-  ## Bootstrap Context Notice 
+  
+  Bootstrap Context Notice 
   isKindAllowedInScope（subagent仅AGENTS、corn无MEMORY)
   skill只注入metadata
 
@@ -147,15 +148,54 @@ AGENTS.md,SOUL.md等启动文件的真正读取的点是PromptRepository.LoadWor
   front matter只是负责切分，并不负责把关
 
 ### 1 判断正文是什么 <- front matter只影响这一步
+
   首行是"---" 且有闭合的"---"行，有front matter， "---"包裹的之间的YAML元数据剥离，只取后面的正文 进入到prompt的正文
-  首行不是"---"则就是普通的md,无front matter，整个md就是正文，进入到prompt正文的候选区
-  首行是"---"无闭合的"---"，视为普通的md,整个md就是正文,进度到prompt正文的候选区，不判断为front matter
-### 2 正文能否进入/进入多少到system prompt <- 由预算/空白/缺失/范围决定，与front matter无关
+  首行不是"---"则就是普通的md, 无front matter，整个md就是正文，进入到prompt正文的候选区
+  首行是"---"无闭合的"---"，视为普通的md, 整个md就是正文,进度到prompt正文的候选区，不判断为front matter
+
+### 2 正文能否进入/进入多少到system prompt 
+  <- 由预算/空白/缺失/范围决定，与front matter无关
   最终决定哪些内容进步到system prompt中的判断依据是：
   - 有front matter的就取body部分，没有的就取整个文件内容
   - 然后经过：空白->预算->范围-> 三道过滤，剩下的才是真正放入到system prompt中的内容
 
 对于启动文件来说，没有front matter时整个文件内容放入到system prompt反而是期望行为，因为AGENTS.md/SOUL.md本质就是“要喂给模型的指令”，用户写的
 多长、写什么，就该让模型看到什么（只要不超预算）。
+
+## 5 多Agent支持时
+### 1. 以agents形式提供给UI
+  多agent的“名单”不是前端写死的，而是在数据库中配置，通过UI界面面向用户提供管理管理功能。系统将以getAgents形式提供agents列表功能。
+
+### 2. 有后端服务决定“谁是默认、是否必须让用户选择”
+  表t_agent配置default字段，表示是否有默认的agent，而OpenClaw中通过defaultId,ownership,selectionRequired这三个字段决定了用户的行为
+  单个agent不显式选择器，多个agent且无default时且selectionRequired则强制用户选择。
+
+### 3. UI端的agent数据来源
+  面向用户选择了agent时，应向用户显示agent的identity（姓名/emoj/头像）和默认模型、runtime.
+
+  OpenClaw的“多agent+UI聊天”本质是一条“配置 -> agents列表 -> 选择器 -> selection状态 -> session key -> chat.send -> 网关按惰性
+  加载并运行”
+
+## 6 session管理
+### 1. 把“选中的agent”变成会话上下文（session key）
+选中agent后，前端要将这个这个选择“钉”进会话。先选择agent，再选择session（顺序保证订阅者只看到一次有序状态迁移），如OpenClaw的ts代码
+
+    export function selectApplicationSession(params) : void {
+      const agentId = params.agentId.trim() || parseAgentSessionKey(params.sessionKey)?.agentId
+      if (agentId) {
+        params.selection.set(normalizeAgentId(agentId)) // 更新agentSelection
+      }
+      params.gateway.setSessionKey(params.sessionKey) //更新当前的session key
+    }
+  
+    New Session后，则跳到聊天页面：
+    async navigate(context,started){
+      selectionApplicationSession({
+        selection:context.agentSelection,
+        gateway:context.gateway,
+        sessionKey:started.key, //
+        agentId:started.agentId
+      })
+    }
 
 

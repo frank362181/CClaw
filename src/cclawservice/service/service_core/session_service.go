@@ -49,24 +49,6 @@ type SessionService struct {
 	mu sync.Mutex
 }
 
-// 单例模式
-var sessionService = common.GetSingleton(func() *SessionService {
-	return &SessionService{
-		memoryDB: nil,
-		idleTTL:  time.Duration(basic.MemoryTokenExpireTime) * time.Second,
-		//absoluteLifetime: time.Duration(DefaultAbsoluteSessionLifetime) * time.Second,
-	}
-}).Instance()
-
-func GetSessionService(memoryDB memoryDbCommon.IMemoryDB) (*SessionService, error) {
-	if memoryDB == nil {
-		return nil, exception.ParameterEmptyErrorEx("session store: memory database is nil")
-	}
-
-	sessionService.memoryDB = memoryDB
-	return sessionService, nil
-}
-
 func NewSessionService(memoryDB memoryDbCommon.IMemoryDB) (*SessionService, error) {
 	if memoryDB == nil {
 		return nil, exception.ParameterEmptyErrorEx("session store: memory database is nil")

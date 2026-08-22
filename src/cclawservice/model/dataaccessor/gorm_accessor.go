@@ -1,6 +1,7 @@
 package dataaccessor
 
 import (
+	"errors"
 	"strings"
 
 	"gorm.io/gorm"
@@ -68,14 +69,21 @@ func (g *GormAccessor) GetUserByAccount(username string) (*dataobject.TAccount, 
 		return nil, exception.ParameterEmptyErrorEx("username must not be empty")
 	}
 
-	//gormDb := g.db.(*core.GormDatabase)
 	var user dataobject.TAccount
 	err := g.gormDb.First(&user, "login_name = ?", username).Error
 
-	return &user, err
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil // 未命中,约定返回(nil,nil),由调用方判空
+	}
+
+	if err != nil {
+		return nil, err // 真实db错误透传
+	}
+
+	return &user, nil
 }
 
-func (g *GormAccessor) GetAllLLMProviders(providers *[]dataobject.TLLMProvider) error {
+func (g *GormAccessor) GetAllLLMProviders(providers []dataobject.TLLMProvider) error {
 	result := g.gormDb.Find(&providers)
 
 	//检查错误
@@ -87,7 +95,7 @@ func (g *GormAccessor) GetAllLLMProviders(providers *[]dataobject.TLLMProvider) 
 	return nil
 }
 
-func (g *GormAccessor) GetAllAgents(agents *[]dataobject.TAgent) error {
+func (g *GormAccessor) GetAllAgents(agents []dataobject.TAgent) error {
 	result := g.gormDb.Find(&agents)
 	if result.Error != nil {
 		logging.LogInfoF("load agents error:%s", result.Error.Error())
@@ -97,7 +105,7 @@ func (g *GormAccessor) GetAllAgents(agents *[]dataobject.TAgent) error {
 	return nil
 }
 
-func (g *GormAccessor) GetAllSkills(skills *[]dataobject.TSkill) error {
+func (g *GormAccessor) GetAllSkills(skills []dataobject.TSkill) error {
 	result := g.gormDb.Find(&skills)
 	if result.Error != nil {
 		logging.LogInfoF("load skills error:%s", result.Error.Error())

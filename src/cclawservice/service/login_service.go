@@ -45,7 +45,7 @@ func GetLoginService(memoryDB memoryDbCommon.IMemoryDB, db core.IBaseDatabase) (
 		return nil, err
 	}
 
-	ss, err := service_core.GetSessionService(memoryDB)
+	ss, err := service_core.NewSessionService(memoryDB)
 	if err != nil {
 		return nil, myException.TokenInvalidErrEx2("login service: token storage invalid")
 	}
@@ -138,7 +138,7 @@ func (service *LoginService) GetUserByToken(token string) (*model.LoginSession, 
 	if err != nil {
 		return nil, err
 	}
-	if user == nil || user.Disabled {
+	if user == nil || user.Disabled || user.Deleted {
 		_ = service.sessionService.Revoke(token)
 		return nil, myException.TokenInvalidErrEx("account unavailable")
 	}

@@ -251,8 +251,11 @@ func (m *ServiceMain) loadAgentConfigurations() error {
 	if m.promptRepo == nil {
 		m.promptRepo = repo.GetPromptRepository()
 	}
-	if err := m.promptRepo.LoadWorkspace(workSpaceDir); err != nil {
-		logging.LogWarnF("warm up default workspace error:%s", err.Error())
+	agents := m.agentRepo.GetAllAgents()
+	for _, agent := range agents {
+		if err := m.promptRepo.LoadWorkspace(agent.AgentId, agent.AgentDir); err != nil {
+			logging.LogWarnF("warm up default workspace error:%s", err.Error())
+		}
 	}
 
 	return nil

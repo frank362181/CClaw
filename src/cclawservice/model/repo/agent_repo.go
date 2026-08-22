@@ -96,7 +96,7 @@ func (repo *AgentRepository) AddAgent(agent dataobject.TAgent) {
 func (repo *AgentRepository) RemoveAgent(agentId string) {}
 
 func (repo *AgentRepository) GetAllSkills() []dataobject.TSkill {
-	out := make([]dataobject.TSkill, 0, repo.agents.Len())
+	out := make([]dataobject.TSkill, 0, repo.skills.Len())
 	repo.skills.Range(func(_ int, item dataobject.TSkill) bool {
 		out = append(out, item)
 		return true
@@ -140,7 +140,7 @@ func (repo *AgentRepository) loadLLMProviders() {
 func (repo *AgentRepository) loadAgents() {
 	var agents []dataobject.TAgent
 	err := repo.dataAccessor.GetAllAgents(&agents)
-	if err != nil {
+	if err == nil {
 		for _, a := range agents {
 			repo.agents.Append(a)
 		}
