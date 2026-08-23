@@ -29,12 +29,14 @@ var gormAccessor = pCommon.GetSingleton(func() *GormAccessor {
 
 func GetGormAccessor(db core.IBaseDatabase) IAccessor {
 	gormAccessor.db = db
-	_, ok := gormAccessor.db.(core.IBaseDatabase)
+
+	//仅仅支持gorm实现
+	gormDb, ok := gormAccessor.db.(*core.GormDatabase)
 	if !ok {
 		return nil
 	}
 
-	gormAccessor.gormDb = gormAccessor.db.(*core.GormDatabase).GetDB()
+	gormAccessor.gormDb = gormDb.GetDB()
 	return gormAccessor
 }
 
@@ -45,7 +47,6 @@ func (g *GormAccessor) GetUserByNameAndPassword(username, userpass string) (*dat
 		return nil, exception.ParameterEmptyErrorEx("username must not be empty")
 	}
 
-	//gormDb := g.db.(*core.GormDatabase)
 	var user dataobject.TAccount
 	err := g.gormDb.First(&user, "login_name = ?", username).Error
 	if err != nil {
@@ -129,7 +130,7 @@ func (g *GormAccessor) CreateLLMProvider(p *dataobject.TLLMProvider) error {
 	}
 
 	// 软删除记录占用唯一键时复活
-	values := llmProviderValues(p)
+	values := dataobject.LLMProviderValues(p)
 	values["deleted"] = 0
 	values["d_version"] = gorm.Expr("d_version + 1")
 	res := g.gormDb.Model(&dataobject.TLLMProvider{}).
@@ -139,6 +140,8 @@ func (g *GormAccessor) CreateLLMProvider(p *dataobject.TLLMProvider) error {
 		return exception2.DatabaseQueryErrEx2("revive llm provider error:%s", res.Error.Error())
 	}
 	if res.RowsAffected > 0 {
+		// 复活成功:回读最新 d_version 写回内存结构,避免仓库缓存携带旧版本导致后续 Update 误报 409
+		WriteBackRevivedVersion(g, &dataobject.TLLMProvider{}, "provider_id", p.ProviderId, &p.DVersion)
 		return nil
 	}
 
@@ -153,7 +156,7 @@ func (g *GormAccessor) CreateLLMProvider(p *dataobject.TLLMProvider) error {
 // UpdateLLMProvider 更新 LLM Provider(乐观锁:d_version 不匹配返回冲突)
 func (g *GormAccessor) UpdateLLMProvider(p *dataobject.TLLMProvider) error {
 	var cur dataobject.TLLMProvider
-	err := g.gormDb.Where("provider_id = ? AND deleted = 0", p.ProviderId).First(&cur).Error
+	err := g.gormDb.Where("provider_id = ? AND owner_id = ? AND deleted = 0", p.ProviderId, p.OwnerId).First(&cur).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return exception2.AgentNotFoundErrEx("llm provider not found:" + p.ProviderId)
 	}
@@ -164,10 +167,10 @@ func (g *GormAccessor) UpdateLLMProvider(p *dataobject.TLLMProvider) error {
 		return exception2.AgentConflictErrEx2("llm provider version conflict:%s", p.ProviderId)
 	}
 
-	values := llmProviderValues(p)
+	values := dataobject.LLMProviderValues(p)
 	values["d_version"] = gorm.Expr("d_version + 1")
 	res := g.gormDb.Model(&dataobject.TLLMProvider{}).
-		Where("provider_id = ? AND deleted = 0 AND d_version = ?", p.ProviderId, p.DVersion.Int64).
+		Where("provider_id = ? AND owner_id = ? AND deleted = 0 AND d_version = ?", p.ProviderId, p.OwnerId, p.DVersion.Int64).
 		Updates(values)
 	if res.Error != nil {
 		return exception2.DatabaseQueryErrEx2("update llm provider error:%s", res.Error.Error())
@@ -181,9 +184,9 @@ func (g *GormAccessor) UpdateLLMProvider(p *dataobject.TLLMProvider) error {
 }
 
 // DeleteLLMProvider 软删除 LLM Provider
-func (g *GormAccessor) DeleteLLMProvider(providerId string) error {
+func (g *GormAccessor) DeleteLLMProvider(ownerId, providerId string) error {
 	res := g.gormDb.Model(&dataobject.TLLMProvider{}).
-		Where("provider_id = ? AND deleted = 0", providerId).
+		Where("provider_id = ? AND owner_id = ? AND deleted = 0", providerId, ownerId).
 		Update("deleted", 1)
 	if res.Error != nil {
 		return exception2.DatabaseQueryErrEx2("delete llm provider error:%s", res.Error.Error())
@@ -192,29 +195,6 @@ func (g *GormAccessor) DeleteLLMProvider(providerId string) error {
 		return exception2.AgentNotFoundErrEx("llm provider not found:" + providerId)
 	}
 	return nil
-}
-
-func llmProviderValues(p *dataobject.TLLMProvider) map[string]interface{} {
-	return map[string]interface{}{
-		"owner_id":           p.OwnerId,
-		"provider_name":      p.ProviderName,
-		"alias_name":         p.AliasName,
-		"base_url":           p.BaseUrl,
-		"vendor":             p.Vendor,
-		"api":                p.Api,
-		"reasoning":          p.Reasoning,
-		"reasoning_ex":       p.ReasoningEx,
-		"input":              p.Input,
-		"input_cost":         p.InputCost,
-		"output_cost":        p.OutputCost,
-		"cached_read_cost":   p.CachedReadCost,
-		"cached_write_cost":  p.CachedWriteCost,
-		"context_window":     p.ContextWindow,
-		"max_tokens":         p.MaxTokens,
-		"usage_in_streaming": p.UsageInStreaming,
-		"auth_mode":          p.AuthMode,
-		"disabled":           p.Disabled,
-	}
 }
 
 // ============================== Agent 写操作 =============================
@@ -229,7 +209,7 @@ func (g *GormAccessor) CreateAgent(a *dataobject.TAgent) error {
 		return exception2.AgentConflictErrEx2("agent already exists:%s", a.AgentId)
 	}
 
-	values := agentValues(a)
+	values := dataobject.AgentValues(a)
 	values["deleted"] = 0
 	values["d_version"] = gorm.Expr("d_version + 1")
 	res := g.gormDb.Model(&dataobject.TAgent{}).
@@ -239,6 +219,8 @@ func (g *GormAccessor) CreateAgent(a *dataobject.TAgent) error {
 		return exception2.DatabaseQueryErrEx2("revive agent error:%s", res.Error.Error())
 	}
 	if res.RowsAffected > 0 {
+		// 复活成功:回读最新 d_version 写回内存结构,避免仓库缓存携带旧版本导致后续 Update 误报 409
+		WriteBackRevivedVersion(g, &dataobject.TAgent{}, "agent_id", a.AgentId, &a.DVersion)
 		return nil
 	}
 
@@ -250,7 +232,7 @@ func (g *GormAccessor) CreateAgent(a *dataobject.TAgent) error {
 }
 func (g *GormAccessor) UpdateAgent(a *dataobject.TAgent) error {
 	var cur dataobject.TAgent
-	err := g.gormDb.Where("agent_id = ? AND deleted = 0", a.AgentId).First(&cur).Error
+	err := g.gormDb.Where("agent_id = ? AND owner_id = ? AND deleted = 0", a.AgentId, a.OwnerId).First(&cur).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return exception2.AgentNotFoundErrEx("agent not found:" + a.AgentId)
 	}
@@ -261,10 +243,10 @@ func (g *GormAccessor) UpdateAgent(a *dataobject.TAgent) error {
 		return exception2.AgentConflictErrEx2("agent version conflict:%s", a.AgentId)
 	}
 
-	values := agentValues(a)
+	values := dataobject.AgentValues(a)
 	values["d_version"] = gorm.Expr("d_version + 1")
 	res := g.gormDb.Model(&dataobject.TAgent{}).
-		Where("agent_id = ? AND deleted = 0 AND d_version = ?", a.AgentId, a.DVersion.Int64).
+		Where("agent_id = ? AND owner_id = ? AND deleted = 0 AND d_version = ?", a.AgentId, a.OwnerId, a.DVersion.Int64).
 		Updates(values)
 	if res.Error != nil {
 		return exception2.DatabaseQueryErrEx2("update agent error:%s", res.Error.Error())
@@ -277,9 +259,9 @@ func (g *GormAccessor) UpdateAgent(a *dataobject.TAgent) error {
 	return nil
 }
 
-func (g *GormAccessor) DeleteAgent(agentId string) error {
+func (g *GormAccessor) DeleteAgent(ownerId, agentId string) error {
 	res := g.gormDb.Model(&dataobject.TAgent{}).
-		Where("agent_id = ? AND deleted = 0", agentId).
+		Where("agent_id = ? AND owner_id =? AND deleted = 0", agentId, ownerId).
 		Update("deleted", 1)
 	if res.Error != nil {
 		return exception2.DatabaseQueryErrEx2("delete agent error:%s", res.Error.Error())
@@ -288,27 +270,6 @@ func (g *GormAccessor) DeleteAgent(agentId string) error {
 		return exception2.AgentNotFoundErrEx("agent not found:" + agentId)
 	}
 	return nil
-}
-
-func agentValues(a *dataobject.TAgent) map[string]interface{} {
-	return map[string]interface{}{
-		"owner_id":            a.OwnerId,
-		"agent_name":          a.AgentName,
-		"primary_model":       a.PrimaryModel,
-		"fallbacks":           a.Fallbacks,
-		"agent_dir":           a.AgentDir,
-		"workspace":           a.Workspace,
-		"image_name":          a.ImageName,
-		"image_emoji":         a.ImageEmoji,
-		"image_theme":         a.ImageTheme,
-		"compaction_mode":     a.CompactionMode,
-		"reverse_token_floor": a.ReverseTokenFloor,
-		"max_concurrent":      a.MaxConcurrents,
-		"subagents":           a.SubAgents,
-		"reasoning_mode":      a.ReasoningMode,
-		"tool_progress":       a.ToolProgress,
-		"disabled":            a.Disabled,
-	}
 }
 
 // ============================== Skill 写操作 =============================
@@ -323,7 +284,7 @@ func (g *GormAccessor) CreateSkill(sk *dataobject.TSkill) error {
 		return exception2.AgentConflictErrEx2("skill already exists:%s", sk.SkillId)
 	}
 
-	values := skillValues(sk)
+	values := dataobject.SkillValues(sk)
 	values["deleted"] = 0
 	values["d_version"] = gorm.Expr("d_version + 1")
 	res := g.gormDb.Model(&dataobject.TSkill{}).
@@ -333,6 +294,8 @@ func (g *GormAccessor) CreateSkill(sk *dataobject.TSkill) error {
 		return exception2.DatabaseQueryErrEx2("revive skill error:%s", res.Error.Error())
 	}
 	if res.RowsAffected > 0 {
+		// 复活成功:回读最新 d_version 写回内存结构,避免仓库缓存携带旧版本导致后续 Update 误报 409
+		WriteBackRevivedVersion(g, &dataobject.TSkill{}, "skill_id", sk.SkillId, &sk.DVersion)
 		return nil
 	}
 
@@ -345,7 +308,7 @@ func (g *GormAccessor) CreateSkill(sk *dataobject.TSkill) error {
 
 func (g *GormAccessor) UpdateSkill(sk *dataobject.TSkill) error {
 	var cur dataobject.TSkill
-	err := g.gormDb.Where("skill_id = ? AND deleted = 0", sk.SkillId).First(&cur).Error
+	err := g.gormDb.Where("skill_id = ? AND owner_id = ? AND deleted = 0", sk.SkillId, sk.OwnerId).First(&cur).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return exception2.AgentNotFoundErrEx("skill not found:" + sk.SkillId)
 	}
@@ -356,10 +319,10 @@ func (g *GormAccessor) UpdateSkill(sk *dataobject.TSkill) error {
 		return exception2.AgentConflictErrEx2("skill version conflict:%s", sk.SkillId)
 	}
 
-	values := skillValues(sk)
+	values := dataobject.SkillValues(sk)
 	values["d_version"] = gorm.Expr("d_version + 1")
 	res := g.gormDb.Model(&dataobject.TSkill{}).
-		Where("skill_id = ? AND deleted = 0 AND d_version = ?", sk.SkillId, sk.DVersion.Int64).
+		Where("skill_id = ? AND owner_id = ? AND deleted = 0 AND d_version = ?", sk.SkillId, sk.OwnerId, sk.DVersion.Int64).
 		Updates(values)
 	if res.Error != nil {
 		return exception2.DatabaseQueryErrEx2("update skill error:%s", res.Error.Error())
@@ -372,9 +335,9 @@ func (g *GormAccessor) UpdateSkill(sk *dataobject.TSkill) error {
 	return nil
 }
 
-func (g *GormAccessor) DeleteSkill(skillId string) error {
+func (g *GormAccessor) DeleteSkill(ownerId, skillId string) error {
 	res := g.gormDb.Model(&dataobject.TSkill{}).
-		Where("skill_id = ? AND deleted = 0", skillId).
+		Where("skill_id = ? AND owner_id = ? AND deleted = 0", skillId, ownerId).
 		Update("deleted", 1)
 	if res.Error != nil {
 		return exception2.DatabaseQueryErrEx2("delete skill error:%s", res.Error.Error())
@@ -383,14 +346,4 @@ func (g *GormAccessor) DeleteSkill(skillId string) error {
 		return exception2.AgentNotFoundErrEx("skill not found:" + skillId)
 	}
 	return nil
-}
-
-func skillValues(sk *dataobject.TSkill) map[string]interface{} {
-	return map[string]interface{}{
-		"owner_id":    sk.OwnerId,
-		"skill_name":  sk.SkillName,
-		"skill_dir":   sk.SkillDir,
-		"skill_scope": sk.SkillScope,
-		"disabled":    sk.Disabled,
-	}
 }

@@ -43,17 +43,17 @@ type IAgentRepository interface {
 	GetLLMProviders(comCode string) []dataobject.TLLMProvider
 	AddLLMProvider(provider dataobject.TLLMProvider) error
 	UpdateLLMProvider(provider dataobject.TLLMProvider) error
-	RemoveLLMProvider(providerId string) error
+	RemoveLLMProvider(owerId, providerId string) error
 
 	GetAgents(comCode string) []dataobject.TAgent
 	AddAgent(agent dataobject.TAgent) error
 	UpdateAgent(agent dataobject.TAgent) error
-	RemoveAgent(agentId string) error
+	RemoveAgent(ownerId, agentId string) error
 
 	GetSkills(comCode string) []dataobject.TSkill
 	AddSkill(skill dataobject.TSkill) error
 	UpdateSkill(skill dataobject.TSkill) error
-	RemoveSkill(skillId string) error
+	RemoveSkill(ownerId, skillId string) error
 
 	Destroy()
 }
@@ -139,14 +139,14 @@ func (repo *AgentRepository) UpdateLLMProvider(provider dataobject.TLLMProvider)
 	return nil
 }
 
-func (repo *AgentRepository) RemoveLLMProvider(providerId string) error {
+func (repo *AgentRepository) RemoveLLMProvider(ownerId, providerId string) error {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 
 	if err := repo.requireAccessor(); err != nil {
 		return err
 	}
-	if err := repo.dataAccessor.DeleteLLMProvider(providerId); err != nil {
+	if err := repo.dataAccessor.DeleteLLMProvider(ownerId, providerId); err != nil {
 		return err
 	}
 	idx := common.FindIndex(repo.llmProviders, func(p dataobject.TLLMProvider) bool {
@@ -208,14 +208,14 @@ func (repo *AgentRepository) UpdateAgent(agent dataobject.TAgent) error {
 	return nil
 }
 
-func (repo *AgentRepository) RemoveAgent(agentId string) error {
+func (repo *AgentRepository) RemoveAgent(ownerId, agentId string) error {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 
 	if err := repo.requireAccessor(); err != nil {
 		return err
 	}
-	if err := repo.dataAccessor.DeleteAgent(agentId); err != nil {
+	if err := repo.dataAccessor.DeleteAgent(ownerId, agentId); err != nil {
 		return err
 	}
 	idx := common.FindIndex(repo.agents, func(a dataobject.TAgent) bool {
@@ -277,14 +277,14 @@ func (repo *AgentRepository) UpdateSkill(skill dataobject.TSkill) error {
 	return nil
 }
 
-func (repo *AgentRepository) RemoveSkill(skillId string) error {
+func (repo *AgentRepository) RemoveSkill(ownerId, skillId string) error {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 
 	if err := repo.requireAccessor(); err != nil {
 		return err
 	}
-	if err := repo.dataAccessor.DeleteSkill(skillId); err != nil {
+	if err := repo.dataAccessor.DeleteSkill(ownerId, skillId); err != nil {
 		return err
 	}
 	idx := common.FindIndex(repo.skills, func(s dataobject.TSkill) bool {

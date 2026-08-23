@@ -51,10 +51,8 @@ func GetLoginController(service pService.IService) *LoginController {
 //	@Failure		400			{object}	basic.CommonResponse
 //	@Router			/api/login [post]
 func (lc *LoginController) Login(c *gin.Context) {
-	loginService, ok := lc.GetService().(*service.LoginService)
-	if !ok || loginService == nil {
-		//内部服务器错误
-		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
+	loginService, ok := lc.getLoginService(c)
+	if !ok {
 		return
 	}
 
@@ -94,17 +92,28 @@ func (lc *LoginController) Login(c *gin.Context) {
 //	@Router			/api/logout [get]
 //	@Router			/api/logout [post]
 func (lc *LoginController) Logout(c *gin.Context) {
-	token := strings.TrimSpace(c.GetHeader(basic.ConstHeaderToken))
-	loginService, ok := lc.GetService().(*service.LoginService)
-	if !ok || loginService == nil {
-		//内部服务器错误
-		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
+	loginService, ok := lc.getLoginService(c)
+	if !ok {
 		return
 	}
 
+	token := strings.TrimSpace(c.GetHeader(basic.ConstHeaderToken))
 	if err := loginService.Logout(token); err != nil {
 		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
 		return
 	}
 	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, nil)
+}
+
+// ================== private functions & methods ========================
+
+func (lc *LoginController) getLoginService(c *gin.Context) (*service.LoginService, bool) {
+	ls, ok := lc.GetService().(*service.LoginService)
+	if !ok || ls == nil {
+		//服务器内部错误
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
+		return nil, false
+	}
+
+	return ls, true
 }

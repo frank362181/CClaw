@@ -43,6 +43,29 @@ type TLLMProvider struct {
 	DVersion optimisticlock.Version `json:"dVersion"` //乐观锁
 }
 
+func LLMProviderValues(p *TLLMProvider) map[string]interface{} {
+	return map[string]interface{}{
+		"owner_id":           p.OwnerId,
+		"provider_name":      p.ProviderName,
+		"alias_name":         p.AliasName,
+		"base_url":           p.BaseUrl,
+		"vendor":             p.Vendor,
+		"api":                p.Api,
+		"reasoning":          p.Reasoning,
+		"reasoning_ex":       p.ReasoningEx,
+		"input":              p.Input,
+		"input_cost":         p.InputCost,
+		"output_cost":        p.OutputCost,
+		"cached_read_cost":   p.CachedReadCost,
+		"cached_write_cost":  p.CachedWriteCost,
+		"context_window":     p.ContextWindow,
+		"max_tokens":         p.MaxTokens,
+		"usage_in_streaming": p.UsageInStreaming,
+		"auth_mode":          p.AuthMode,
+		"disabled":           p.Disabled,
+	}
+}
+
 func (llmProvider *TLLMProvider) ToJsonString() (string, error) {
 	jsonSting, err := json.Marshal(llmProvider)
 	if err != nil {
@@ -87,6 +110,27 @@ type TAgent struct {
 	DVersion optimisticlock.Version `json:"dVersion"`
 }
 
+func AgentValues(a *TAgent) map[string]interface{} {
+	return map[string]interface{}{
+		"owner_id":            a.OwnerId,
+		"agent_name":          a.AgentName,
+		"primary_model":       a.PrimaryModel,
+		"fallbacks":           a.Fallbacks,
+		"agent_dir":           a.AgentDir,
+		"workspace":           a.Workspace,
+		"image_name":          a.ImageName,
+		"image_emoji":         a.ImageEmoji,
+		"image_theme":         a.ImageTheme,
+		"compaction_mode":     a.CompactionMode,
+		"reverse_token_floor": a.ReverseTokenFloor,
+		"max_concurrent":      a.MaxConcurrents,
+		"subagents":           a.SubAgents,
+		"reasoning_mode":      a.ReasoningMode,
+		"tool_progress":       a.ToolProgress,
+		"disabled":            a.Disabled,
+	}
+}
+
 func (agent *TAgent) ToJsonString() (string, error) {
 	jsonSting, err := json.Marshal(agent)
 	if err != nil {
@@ -116,6 +160,16 @@ type TSkill struct {
 	DVersion optimisticlock.Version `json:"dVersion"`
 }
 
+func SkillValues(sk *TSkill) map[string]interface{} {
+	return map[string]interface{}{
+		"owner_id":    sk.OwnerId,
+		"skill_name":  sk.SkillName,
+		"skill_dir":   sk.SkillDir,
+		"skill_scope": sk.SkillScope,
+		"disabled":    sk.Disabled,
+	}
+}
+
 func (skill *TSkill) ToJsonString() (string, error) {
 	jsonSting, err := json.Marshal(skill)
 	if err != nil {
@@ -130,10 +184,4 @@ func (skill *TSkill) FromJsonString(jsonStr string) error {
 		return err
 	}
 	return nil
-}
-
-// TAgentSkills 定义Agent对应的Skill列表
-type TAgentSkills struct {
-	AgentId string   `json:"agentId"`
-	Skills  []TSkill `json:"skills"`
 }

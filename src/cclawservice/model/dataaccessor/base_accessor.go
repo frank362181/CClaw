@@ -22,15 +22,15 @@ type IAccessor interface {
 	// 写操作(新增/更新/软删除)
 	CreateLLMProvider(provider *dataobject.TLLMProvider) error
 	UpdateLLMProvider(provider *dataobject.TLLMProvider) error
-	DeleteLLMProvider(providerId string) error
+	DeleteLLMProvider(ownerId, providerId string) error
 
 	CreateAgent(agent *dataobject.TAgent) error
 	UpdateAgent(agent *dataobject.TAgent) error
-	DeleteAgent(agentId string) error
+	DeleteAgent(ownerId, agentId string) error
 
 	CreateSkill(skill *dataobject.TSkill) error
 	UpdateSkill(skill *dataobject.TSkill) error
-	DeleteSkill(skillId string) error
+	DeleteSkill(ownerId, skillId string) error
 }
 
 func (accessor *BaseAccessor) GetDatabase() core.IBaseDatabase {

@@ -74,6 +74,8 @@ const (
 	ConstErrorNonToken
 	ConstErrorInvalidToken
 
+	ConstErrorUnAuthenticated //未被授权
+
 	// ConstErrorAgentParameter agent 管理业务错误(400/404/409)
 	ConstErrorAgentParameter = iota + basic.ConstErrorMax + 2000 + 1
 	ConstErrorAgentNotFound
@@ -81,13 +83,15 @@ const (
 )
 
 const (
-	ConstErrorUserUnAuthorizedMsg        = "用户未授权,请登录"
+	ConstErrorUserUnAuthorizedMsg        = "用户未认证,请登录"
 	ConstErrorLoginParameterMsg          = "登录参数错误"
 	ConstErrorUserNamePasswordUnmatchMsg = "用户名或密码错误"
 	ConstErrorUserNotExistMsg            = "用户不存在"
 	ConstErrorUserDisabledMsg            = "用户被禁用,请联系管理员"
 	ConstErrorNonTokenMsg                = "Token不存在,请登录"
 	ConstErrorInvalidTokenMsg            = "Token无效,请登录"
+
+	ConstErrorUnAuthenticatedMsg = "用户未授权"
 
 	ConstErrorAgentParameterMsg = "参数错误"
 	ConstErrorAgentNotFoundMsg  = "记录不存在或已被删除"

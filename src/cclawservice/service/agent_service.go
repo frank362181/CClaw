@@ -72,12 +72,13 @@ func (s *AgentService) UpdateLLMProvider(p dataobject.TLLMProvider) error {
 	return s.agentRepo.UpdateLLMProvider(p)
 }
 
-func (s *AgentService) RemoveLLMProvider(providerId string) error {
+func (s *AgentService) RemoveLLMProvider(ownerId, providerId string) error {
+	ownerId = strings.TrimSpace(ownerId)
 	providerId = strings.TrimSpace(providerId)
-	if providerId == "" {
+	if len(ownerId) == 0 || len(providerId) == 0 {
 		return myException.AgentParameterErrEx("provider id is empty")
 	}
-	return s.agentRepo.RemoveLLMProvider(providerId)
+	return s.agentRepo.RemoveLLMProvider(ownerId, providerId)
 }
 
 // ============================== Agent =============================
@@ -102,12 +103,13 @@ func (s *AgentService) UpdateAgent(a dataobject.TAgent) error {
 	return s.agentRepo.UpdateAgent(a)
 }
 
-func (s *AgentService) RemoveAgent(agentId string) error {
+func (s *AgentService) RemoveAgent(ownerId, agentId string) error {
+	ownerId = strings.TrimSpace(ownerId)
 	agentId = strings.TrimSpace(agentId)
-	if agentId == "" {
+	if len(ownerId) == 0 || len(agentId) == 0 {
 		return myException.AgentParameterErrEx("agent id is empty")
 	}
-	return s.agentRepo.RemoveAgent(agentId)
+	return s.agentRepo.RemoveAgent(ownerId, agentId)
 }
 
 // ============================== Skill =============================
@@ -132,10 +134,11 @@ func (s *AgentService) UpdateSkill(sk dataobject.TSkill) error {
 	return s.agentRepo.UpdateSkill(sk)
 }
 
-func (s *AgentService) RemoveSkill(skillId string) error {
+func (s *AgentService) RemoveSkill(ownerId, skillId string) error {
+	ownerId = strings.TrimSpace(ownerId)
 	skillId = strings.TrimSpace(skillId)
-	if skillId == "" {
+	if len(ownerId) == 0 || len(skillId) == 0 {
 		return myException.AgentParameterErrEx("skill id is empty")
 	}
-	return s.agentRepo.RemoveSkill(skillId)
+	return s.agentRepo.RemoveSkill(ownerId, skillId)
 }
