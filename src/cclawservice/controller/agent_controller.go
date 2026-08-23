@@ -10,7 +10,6 @@ package controller
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	cclawcommon "my.favorite/cclawservice/common"
@@ -66,7 +65,7 @@ func (ac *AgentController) GetLLMProviders(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := ac.isAuthenticated(c, false, "")
+	loginSession, ok := ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -107,10 +106,11 @@ func (ac *AgentController) AddLLMProvider(c *gin.Context) {
 		return
 	}
 
-	_, ok = ac.isAuthenticated(c, true, p.OwnerId)
+	loginSession, ok := ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
+	p.OwnerId = loginSession.ComCode
 	if err := svc.AddLLMProvider(p); err != nil {
 		ac.respondAgentError(c, err)
 		return
@@ -146,11 +146,12 @@ func (ac *AgentController) UpdateLLMProvider(c *gin.Context) {
 		return
 	}
 
-	_, ok = ac.isAuthenticated(c, true, p.OwnerId)
+	loginSession, ok := ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
 
+	p.OwnerId = loginSession.ComCode
 	if err := svc.UpdateLLMProvider(p); err != nil {
 		ac.respondAgentError(c, err)
 		return
@@ -180,7 +181,7 @@ func (ac *AgentController) RemoveLLMProvider(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := ac.isAuthenticated(c, false, "")
+	loginSession, ok := ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -221,17 +222,11 @@ func (ac *AgentController) GetAgents(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := ac.isAuthenticated(c, false, "")
+	loginSession, ok := ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
 
-	// tempSession, exists := c.Get(cclawcommon.ContextAuthenticatedUser)
-	// if !exists {
-	// 	basic.GetBaseResponser().Failure(c, http.StatusUnauthorized, cclawcommon.ConstErrorUserUnAuthorized, cclawcommon.ConstErrorUserUnAuthorizedMsg, nil)
-	// 	return
-	// }
-	// loginSession, ok := tempSession.(*model2.LoginSession)
 	list, err := svc.GetAgents(loginSession.ComCode)
 	if err != nil {
 		ac.respondAgentError(c, err)
@@ -268,11 +263,12 @@ func (ac *AgentController) AddAgent(c *gin.Context) {
 		return
 	}
 
-	_, ok = ac.isAuthenticated(c, true, a.OwnerId)
+	loginSession, ok := ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
 
+	a.OwnerId = loginSession.ComCode
 	if err := svc.AddAgent(a); err != nil {
 		ac.respondAgentError(c, err)
 		return
@@ -308,11 +304,12 @@ func (ac *AgentController) UpdateAgent(c *gin.Context) {
 		return
 	}
 
-	_, ok = ac.isAuthenticated(c, true, a.OwnerId)
+	loginSession, ok := ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
 
+	a.OwnerId = loginSession.ComCode
 	if err := svc.UpdateAgent(a); err != nil {
 		ac.respondAgentError(c, err)
 		return
@@ -342,7 +339,7 @@ func (ac *AgentController) RemoveAgent(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := ac.isAuthenticated(c, false, "")
+	loginSession, ok := ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -382,16 +379,11 @@ func (ac *AgentController) GetSkills(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := ac.isAuthenticated(c, false, "")
+	loginSession, ok := ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
-	// tempSession, exists := c.Get(cclawcommon.ContextAuthenticatedUser)
-	// if !exists {
-	// 	basic.GetBaseResponser().Failure(c, http.StatusUnauthorized, cclawcommon.ConstErrorUserUnAuthorized, cclawcommon.ConstErrorUserUnAuthorizedMsg, nil)
-	// 	return
-	// }
-	// loginSession, ok := tempSession.(*model2.LoginSession)
+
 	list, err := svc.GetSkills(loginSession.ComCode)
 	if err != nil {
 		ac.respondAgentError(c, err)
@@ -428,11 +420,12 @@ func (ac *AgentController) AddSkill(c *gin.Context) {
 		return
 	}
 
-	_, ok = ac.isAuthenticated(c, true, sk.OwnerId)
+	loginSession, ok := ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
 
+	sk.OwnerId = loginSession.ComCode
 	if err := svc.AddSkill(sk); err != nil {
 		ac.respondAgentError(c, err)
 		return
@@ -468,11 +461,12 @@ func (ac *AgentController) UpdateSkill(c *gin.Context) {
 		return
 	}
 
-	_, ok = ac.isAuthenticated(c, true, sk.OwnerId)
+	loginSession, ok := ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
 
+	sk.OwnerId = loginSession.ComCode
 	if err := svc.UpdateSkill(sk); err != nil {
 		ac.respondAgentError(c, err)
 		return
@@ -502,7 +496,7 @@ func (ac *AgentController) RemoveSkill(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := ac.isAuthenticated(c, false, "")
+	loginSession, ok := ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -532,7 +526,7 @@ func (ac *AgentController) getAgentService(c *gin.Context) (*service.AgentServic
 	return svc, true
 }
 
-func (ac *AgentController) isAuthenticated(c *gin.Context, authenticate bool, ownerId string) (*model2.LoginSession, bool) {
+func (ac *AgentController) isAuthenticated(c *gin.Context) (*model2.LoginSession, bool) {
 	tempValue, exists := c.Get(cclawcommon.ContextAuthenticatedUser)
 	if !exists {
 		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusUnauthorized, cclawcommon.ConstErrorUserUnAuthorized, cclawcommon.ConstErrorUserUnAuthorizedMsg, nil)
@@ -542,14 +536,6 @@ func (ac *AgentController) isAuthenticated(c *gin.Context, authenticate bool, ow
 	if !ok {
 		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
 		return nil, false
-	}
-
-	if authenticate {
-		// 杜绝登录的用户修改了别人的数据
-		if !strings.EqualFold(loginSession.ComCode, ownerId) {
-			basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorUnAuthenticated, cclawcommon.ConstErrorUnAuthenticatedMsg, nil)
-			return nil, false
-		}
 	}
 
 	return loginSession, true
