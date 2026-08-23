@@ -6,6 +6,9 @@ import (
 )
 
 const (
+	// DefaultReloadDatabaseCacheTTLSeconds 配置缓存 TTL(多实例部署时,各实例从 DB 刷新 LLM provider/agent/skill 配置的过期时间)
+	DefaultReloadDatabaseCacheTTLSeconds = 30 // 默认 30 秒;<=0 表示禁用 TTL 刷新(仅启动时加载一次)
+
 	AgentServiceWorkspaceDirName = "workspace"         //agent workspace目录名称
 	DefaultAgentConfigFile       = "agentdefault.json" //agent 的默认配置所在的文件
 )
@@ -55,32 +58,40 @@ const (
 // skill 元数据目录预算
 
 const (
-	SkillDocFileName = "SKILL.md" //skill.md:技能定义
-)
-
-const (
-	MaxSkillsInPrompt    = 150   //注入 prompt 的 skill 数量上限
-	MaxSkillsPromptChars = 18000 //skill 元数据目录的字符上限
+	SkillDocFileName     = "SKILL.md" //skill.md:技能定义
+	MaxSkillsInPrompt    = 150        //注入 prompt 的 skill 数量上限
+	MaxSkillsPromptChars = 18000      //skill 元数据目录的字符上限
 )
 
 // 定义业务级的错误常量和错误信息
 
 const (
-	ConstErrorLoginParameter = iota + basic.ConstErrorMax + 1000 + 1
+	ConstErrorUserUnAuthorized = iota + basic.ConstErrorMax + 1000 + 1
+	ConstErrorLoginParameter
 	ConstErrorUserNamePasswordUnmatch
 	ConstErrorUserNotExist
 	ConstErrorUserDisabled
 	ConstErrorNonToken
 	ConstErrorInvalidToken
+
+	// ConstErrorAgentParameter agent 管理业务错误(400/404/409)
+	ConstErrorAgentParameter = iota + basic.ConstErrorMax + 2000 + 1
+	ConstErrorAgentNotFound
+	ConstErrorAgentConflict
 )
 
 const (
+	ConstErrorUserUnAuthorizedMsg        = "用户未授权,请登录"
 	ConstErrorLoginParameterMsg          = "登录参数错误"
 	ConstErrorUserNamePasswordUnmatchMsg = "用户名或密码错误"
 	ConstErrorUserNotExistMsg            = "用户不存在"
 	ConstErrorUserDisabledMsg            = "用户被禁用,请联系管理员"
 	ConstErrorNonTokenMsg                = "Token不存在,请登录"
 	ConstErrorInvalidTokenMsg            = "Token无效,请登录"
+
+	ConstErrorAgentParameterMsg = "参数错误"
+	ConstErrorAgentNotFoundMsg  = "记录不存在或已被删除"
+	ConstErrorAgentConflictMsg  = "记录已存在或版本冲突"
 )
 
 // ContextAuthenticatedUser is the gin.Context key for the server-verified user.
@@ -93,24 +104,20 @@ const (
 	RelativeLoginUrl  = "/login"
 	RelativeLogoutUrl = "/logout"
 
-	HealthUrl = BasePath + RelativeHealthUrl
-	LoginUrl  = BasePath + RelativeLoginUrl
-	LogoutUrl = BasePath + RelativeLogoutUrl
+	RelativeGetLLMProviders   = "/llmProviders"
+	RelativeAddLLMProvider    = "/llmProvider/add"
+	RelativeUpdateLLMProvider = "/llmProvider/update"
+	RelativeRemoveLLMProvider = "/llmProvider/remove"
 
-	RelativeCreateSession = "/createSession"
-	CreateSessionUrl      = BasePath + RelativeCreateSession
+	RelativeGetAgents   = "/agents"
+	RelativeAddAgent    = "/agent/add"
+	RelativeUpdateAgent = "/agent/update"
+	RelativeRemoveAgent = "/agent/remove"
 
-	RelativeGetSessions = "/getSessions"
-	GetSessionsUrl      = BasePath + RelativeGetSessions
-
-	RelativeDeleteSession = "/deleteSession"
-	DeleteSessionUrl      = BasePath + RelativeDeleteSession
-
-	RelativeChatUrl = "/chat"
-	ChatUrl         = BasePath + RelativeChatUrl
-
-	RelativeDeleteChat = "/deleteChat"
-	DeleteChatUrl      = BasePath + RelativeDeleteChat
+	RelativeGetSkills   = "/skills"
+	RelativeAddSkill    = "/skill/add"
+	RelativeUpdateSkill = "/skill/update"
+	RelativeRemoveSkill = "/skill/remove"
 )
 
 // ================ chat type ================

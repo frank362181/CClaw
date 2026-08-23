@@ -77,7 +77,7 @@ type TAgent struct {
 	CompactionMode    int `json:"CompactionMode"`    //压缩模式
 	ReverseTokenFloor int `json:"ReverseTokenFloor"` //压缩时保留的最小token数量
 
-	MaxConcurrents int `json:"MaxConcurrents"`
+	MaxConcurrents int `gorm:"column:max_concurrent" json:"MaxConcurrents"` // DDL 列为 max_concurrent
 	SubAgents      int `json:"SubAgents"`
 	ReasoningMode  int `json:"ReasoningMode"` //推理展示的方式 0/1/2:off/生成后附带/2 streaming
 	ToolProgress   int `json:"ToolProgress"`  //工具执行的进度

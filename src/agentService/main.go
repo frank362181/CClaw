@@ -84,6 +84,11 @@ func main() {
 		return
 	}
 
+	// 添加 agent 管理控制器(须在登录控制器之后安装,以复用认证 interceptor)
+	if err := mainApp.SetupAgentController(); err != nil {
+		return
+	}
+
 	// 1. setup server
 	if err := mainApp.SetupServer(); err != nil {
 		return

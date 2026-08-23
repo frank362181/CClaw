@@ -100,7 +100,6 @@ func (service *LoginService) Login(username, password string) (*model.LoginSessi
 
 	// 成功登录
 	service.throttleService.Reset(username)
-
 	token, err := hash.GenerateRandomString()
 	if err != nil {
 		return nil, err

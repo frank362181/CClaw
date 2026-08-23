@@ -22,6 +22,19 @@ func NewSafeList[T any]() *SafeList[T] {
 	}
 }
 
+// FindIndex 在 SafeList 中按谓词查找元素下标,未找到返回 -1
+func FindIndex[T any](list *SafeList[T], pred func(T) bool) int {
+	idx := -1
+	list.Range(func(i int, item T) bool {
+		if pred(item) {
+			idx = i
+			return false
+		}
+		return true
+	})
+	return idx
+}
+
 // Append 在列表末尾添加
 func (s *SafeList[T]) Append(item T) {
 	s.mu.Lock()

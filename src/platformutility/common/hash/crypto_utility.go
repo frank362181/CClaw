@@ -60,3 +60,7 @@ func HmacSha256(key, data string) string {
 	h.Write([]byte(data))
 	return hex.EncodeToString(h.Sum(nil))
 }
+
+func HmacEqual(originalData []byte, encryptedData []byte) bool {
+	return hmac.Equal(originalData, encryptedData)
+}

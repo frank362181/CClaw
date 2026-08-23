@@ -175,6 +175,44 @@ func (m *ServiceMain) SetupLoginController() error {
 	return nil
 }
 
+func (m *ServiceMain) SetupAgentController() error {
+	agentService, err := service.GetAgentService(m.database)
+	if err != nil {
+		logging.LogErrorF("failed to create agent service,err:%s", err.Error())
+		return exception.WebServerErrEx2("failed to create agent service,error:%s", err.Error())
+	}
+	agentController := selfController.GetAgentController(agentService)
+
+	urlFunMap := make(map[string]gin.HandlerFunc)
+	urlFunMap[cCommon.RelativeGetLLMProviders] = agentController.GetLLMProviders
+	urlFunMap[cCommon.RelativeAddLLMProvider] = agentController.AddLLMProvider
+	urlFunMap[cCommon.RelativeUpdateLLMProvider] = agentController.UpdateLLMProvider
+	urlFunMap[cCommon.RelativeRemoveLLMProvider] = agentController.RemoveLLMProvider
+
+	urlFunMap[cCommon.RelativeGetAgents] = agentController.GetAgents
+	urlFunMap[cCommon.RelativeAddAgent] = agentController.AddAgent
+	urlFunMap[cCommon.RelativeUpdateAgent] = agentController.UpdateAgent
+	urlFunMap[cCommon.RelativeRemoveAgent] = agentController.RemoveAgent
+
+	urlFunMap[cCommon.RelativeGetSkills] = agentController.GetSkills
+	urlFunMap[cCommon.RelativeAddSkill] = agentController.AddSkill
+	urlFunMap[cCommon.RelativeUpdateSkill] = agentController.UpdateSkill
+	urlFunMap[cCommon.RelativeRemoveSkill] = agentController.RemoveSkill
+
+	// 复用登录控制器创建的 APIGroupRequire 分组(其 DoFilter 已挂载认证 interceptor),
+	// 因此本方法必须后于 SetupLoginController 调用,即可保证新 API 自动经过 token 校验。
+	interceptors := interceptor.GetInterceptors()
+	err = m.baseRouter.SetupControllerEx(webbase.HttpMethodGet|webbase.HttpMethodPost, basic.APIGroupRequire, urlFunMap, interceptors)
+	if err != nil {
+		logging.LogErrorF("failed to setup agent controller,err:%s", err.Error())
+		urlFunMap = nil
+		return exception.WebServerErrEx2("failed to setup agent controller,error:%s", err.Error())
+	}
+
+	urlFunMap = nil //释放内存
+	return nil
+}
+
 func (m *ServiceMain) SetupServer() error {
 	err := m.baseRouter.SetupServer(m.configHelper)
 	if err != nil {
@@ -245,13 +283,15 @@ func (m *ServiceMain) loadAgentConfigurations() error {
 	if m.agentRepo == nil {
 		m.agentRepo = repo.GetAgentRepository(m.database)
 	}
-	m.agentRepo.LoadAllAgents()
+
+	// 3.1 agent 配置缓存 TTL(多实例下各实例从 DB 刷新配置;单位秒,<=0 禁用)
+	ttlSec, _ := m.configHelper.GetIntValueDefault("database", "reloadCacheTTL", cCommon.DefaultReloadDatabaseCacheTTLSeconds)
+	agents := m.agentRepo.LoadAllAgents(int64(ttlSec))
 
 	// 4. warm up the prompt repository with the default workspace (best-effort)
 	if m.promptRepo == nil {
 		m.promptRepo = repo.GetPromptRepository()
 	}
-	agents := m.agentRepo.GetAllAgents()
 	for _, agent := range agents {
 		if err := m.promptRepo.LoadWorkspace(agent.AgentId, agent.AgentDir); err != nil {
 			logging.LogWarnF("warm up default workspace error:%s", err.Error())

@@ -14,9 +14,23 @@ type IAccessor interface {
 	GetUserByNameAndPassword(username, userpass string) (*dataobject.TAccount, error)
 	GetUserByAccount(username string) (*dataobject.TAccount, error)
 
-	GetAllLLMProviders(providers []dataobject.TLLMProvider) error
-	GetAllAgents(agents []dataobject.TAgent) error
-	GetAllSkills(skills []dataobject.TSkill) error
+	// 读取(仅未删除记录)
+	GetAllLLMProviders() ([]dataobject.TLLMProvider, error)
+	GetAllAgents() ([]dataobject.TAgent, error)
+	GetAllSkills() ([]dataobject.TSkill, error)
+
+	// 写操作(新增/更新/软删除)
+	CreateLLMProvider(provider *dataobject.TLLMProvider) error
+	UpdateLLMProvider(provider *dataobject.TLLMProvider) error
+	DeleteLLMProvider(providerId string) error
+
+	CreateAgent(agent *dataobject.TAgent) error
+	UpdateAgent(agent *dataobject.TAgent) error
+	DeleteAgent(agentId string) error
+
+	CreateSkill(skill *dataobject.TSkill) error
+	UpdateSkill(skill *dataobject.TSkill) error
+	DeleteSkill(skillId string) error
 }
 
 func (accessor *BaseAccessor) GetDatabase() core.IBaseDatabase {

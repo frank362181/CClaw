@@ -9,7 +9,7 @@ func GetDBPool(config *config.ConfigurationHelper) IBaseDBPool {
 	dbHost, _ := config.GetStringValueDefault("database", "server", "")
 	dbPort, _ := config.GetIntValueDefault("database", "port", 5432)
 	dbName, _ := config.GetStringValueDefault("database", "dbname", "")
-	datadir, _ := config.GetStringValueDefault("database", "datadir", "")
+	dataDir, _ := config.GetStringValueDefault("database", "datadir", "")
 	sslMode, _ := config.GetBoolValueDefault("database", "sslmode", false)
 	dbUser, _ := config.GetStringValueDefault("database", "username", "")
 	dbPassword, _ := config.GetStringValueDefault("database", "password", "")
@@ -29,7 +29,7 @@ func GetDBPool(config *config.ConfigurationHelper) IBaseDBPool {
 		DBType:         dbType,
 		DBHost:         dbHost,
 		DBPort:         dbPort,
-		DataDir:        datadir,
+		DataDir:        dataDir,
 		DatabaseName:   dbName,
 		UserName:       dbUser,
 		UserPass:       dbPassword,

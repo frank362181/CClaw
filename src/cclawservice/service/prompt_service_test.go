@@ -241,7 +241,7 @@ func TestBuildSystemPromptRejectsNonSkillFile(t *testing.T) {
 	}
 
 	// 非法:skill 文件名必须为 SKILL.md
-	err := repo.GetPromptRepository().AddSkill("bad", filepath.Join(t.TempDir(), "not_a_skill.md"))
+	err := repo.GetPromptRepository().AddSkill("agent-3", "bad", filepath.Join(t.TempDir(), "not_a_skill.md"))
 	if err == nil {
 		t.Fatalf("expected non-SKILL.md file to be rejected")
 	}
@@ -259,7 +259,7 @@ func TestBuildSystemPromptRejectsOversizeFile(t *testing.T) {
 	hugeFile := filepath.Join(t.TempDir(), "SKILL.md")
 	writeFile(t, hugeFile, strings.Repeat("x", 300*1024)) // > 256KB
 
-	err := repo.GetPromptRepository().AddSkill("huge", hugeFile)
+	err := repo.GetPromptRepository().AddSkill("agent-4", "huge", hugeFile)
 	if err == nil {
 		t.Fatalf("expected oversize file to be rejected")
 	}

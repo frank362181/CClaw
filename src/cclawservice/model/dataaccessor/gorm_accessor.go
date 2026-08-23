@@ -11,7 +11,6 @@ import (
 	"my.favorite/platformutility/common/hash"
 	"my.favorite/platformutility/database/core"
 	"my.favorite/platformutility/exception"
-	"my.favorite/platformutility/logging"
 )
 
 type GormAccessor struct {
@@ -55,7 +54,8 @@ func (g *GormAccessor) GetUserByNameAndPassword(username, userpass string) (*dat
 	}
 
 	encryptedPass := hash.HmacSha256(user.LoginKey, userpass)
-	if encryptedPass == user.LoginPass {
+	// 恒定时间比较,避免时序侧信道泄露 LoginKey/LoginPass 信息
+	if hash.HmacEqual([]byte(encryptedPass), []byte(user.LoginPass)) {
 		return &user, nil
 	}
 
@@ -83,34 +83,314 @@ func (g *GormAccessor) GetUserByAccount(username string) (*dataobject.TAccount, 
 	return &user, nil
 }
 
-func (g *GormAccessor) GetAllLLMProviders(providers []dataobject.TLLMProvider) error {
-	result := g.gormDb.Find(&providers)
+// ============================== 读取(仅未删除记录) =============================
 
-	//检查错误
-	if result.Error != nil {
-		logging.LogInfoF("load LLM providers error:%s", result.Error.Error())
-		return exception2.DatabaseQueryErrEx2("load LLM providers error:%s", result.Error.Error())
+func (g *GormAccessor) GetAllLLMProviders() ([]dataobject.TLLMProvider, error) {
+	var list []dataobject.TLLMProvider
+	err := g.gormDb.Where("deleted = 0").Find(&list).Error
+	if err != nil {
+		return nil, exception2.DatabaseQueryErrEx2("load LLM providers error:%s", err.Error())
+	}
+	return list, nil
+}
+
+func (g *GormAccessor) GetAllAgents() ([]dataobject.TAgent, error) {
+	var list []dataobject.TAgent
+	err := g.gormDb.Where("deleted = 0").Find(&list).Error
+	if err != nil {
+		return nil, exception2.DatabaseQueryErrEx2("load agents error:%s", err.Error())
+	}
+	return list, nil
+}
+
+func (g *GormAccessor) GetAllSkills() ([]dataobject.TSkill, error) {
+	var list []dataobject.TSkill
+	err := g.gormDb.Where("deleted = 0").Find(&list).Error
+	if err != nil {
+		return nil, exception2.DatabaseQueryErrEx2("load skills error:%s", err.Error())
+	}
+	return list, nil
+}
+
+// ============================== LLM Provider 写操作 =============================
+
+// CreateLLMProvider 新增 LLM Provider:
+//   - 已存在活跃(未删除)记录 -> 冲突
+//   - 存在软删除记录占用唯一键 -> 复活该记录(覆盖字段, deleted=0)
+//   - 否则全新插入
+func (g *GormAccessor) CreateLLMProvider(p *dataobject.TLLMProvider) error {
+	var count int64
+	if err := g.gormDb.Model(&dataobject.TLLMProvider{}).
+		Where("provider_id = ? AND deleted = 0", p.ProviderId).Count(&count).Error; err != nil {
+		return exception2.DatabaseQueryErrEx2("check llm provider error:%s", err.Error())
+	}
+	if count > 0 {
+		return exception2.AgentConflictErrEx2("llm provider already exists:%s", p.ProviderId)
 	}
 
+	// 软删除记录占用唯一键时复活
+	values := llmProviderValues(p)
+	values["deleted"] = 0
+	values["d_version"] = gorm.Expr("d_version + 1")
+	res := g.gormDb.Model(&dataobject.TLLMProvider{}).
+		Where("provider_id = ? AND deleted = 1", p.ProviderId).
+		Updates(values)
+	if res.Error != nil {
+		return exception2.DatabaseQueryErrEx2("revive llm provider error:%s", res.Error.Error())
+	}
+	if res.RowsAffected > 0 {
+		return nil
+	}
+
+	// 全新插入。乐观锁插件 clause 会把 d_version 自动置为 1 并写回内存结构,
+	// 因此这里无需预置 DVersion。
+	if err := g.gormDb.Create(p).Error; err != nil {
+		return exception2.DatabaseQueryErrEx2("create llm provider error:%s", err.Error())
+	}
 	return nil
 }
 
-func (g *GormAccessor) GetAllAgents(agents []dataobject.TAgent) error {
-	result := g.gormDb.Find(&agents)
-	if result.Error != nil {
-		logging.LogInfoF("load agents error:%s", result.Error.Error())
-		return exception2.DatabaseQueryErrEx2("load agents error:%s", result.Error.Error())
+// UpdateLLMProvider 更新 LLM Provider(乐观锁:d_version 不匹配返回冲突)
+func (g *GormAccessor) UpdateLLMProvider(p *dataobject.TLLMProvider) error {
+	var cur dataobject.TLLMProvider
+	err := g.gormDb.Where("provider_id = ? AND deleted = 0", p.ProviderId).First(&cur).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return exception2.AgentNotFoundErrEx("llm provider not found:" + p.ProviderId)
+	}
+	if err != nil {
+		return exception2.DatabaseQueryErrEx2("load llm provider error:%s", err.Error())
+	}
+	if cur.DVersion != p.DVersion {
+		return exception2.AgentConflictErrEx2("llm provider version conflict:%s", p.ProviderId)
 	}
 
+	values := llmProviderValues(p)
+	values["d_version"] = gorm.Expr("d_version + 1")
+	res := g.gormDb.Model(&dataobject.TLLMProvider{}).
+		Where("provider_id = ? AND deleted = 0 AND d_version = ?", p.ProviderId, p.DVersion.Int64).
+		Updates(values)
+	if res.Error != nil {
+		return exception2.DatabaseQueryErrEx2("update llm provider error:%s", res.Error.Error())
+	}
+	if res.RowsAffected == 0 {
+		return exception2.AgentConflictErrEx2("llm provider version conflict:%s", p.ProviderId)
+	}
+
+	p.DVersion.Int64++ // 同步内存版本,供仓库缓存更新
 	return nil
 }
 
-func (g *GormAccessor) GetAllSkills(skills []dataobject.TSkill) error {
-	result := g.gormDb.Find(&skills)
-	if result.Error != nil {
-		logging.LogInfoF("load skills error:%s", result.Error.Error())
-		return exception2.DatabaseQueryErrEx2("load skills error:%s", result.Error.Error())
+// DeleteLLMProvider 软删除 LLM Provider
+func (g *GormAccessor) DeleteLLMProvider(providerId string) error {
+	res := g.gormDb.Model(&dataobject.TLLMProvider{}).
+		Where("provider_id = ? AND deleted = 0", providerId).
+		Update("deleted", 1)
+	if res.Error != nil {
+		return exception2.DatabaseQueryErrEx2("delete llm provider error:%s", res.Error.Error())
+	}
+	if res.RowsAffected == 0 {
+		return exception2.AgentNotFoundErrEx("llm provider not found:" + providerId)
+	}
+	return nil
+}
+
+func llmProviderValues(p *dataobject.TLLMProvider) map[string]interface{} {
+	return map[string]interface{}{
+		"owner_id":           p.OwnerId,
+		"provider_name":      p.ProviderName,
+		"alias_name":         p.AliasName,
+		"base_url":           p.BaseUrl,
+		"vendor":             p.Vendor,
+		"api":                p.Api,
+		"reasoning":          p.Reasoning,
+		"reasoning_ex":       p.ReasoningEx,
+		"input":              p.Input,
+		"input_cost":         p.InputCost,
+		"output_cost":        p.OutputCost,
+		"cached_read_cost":   p.CachedReadCost,
+		"cached_write_cost":  p.CachedWriteCost,
+		"context_window":     p.ContextWindow,
+		"max_tokens":         p.MaxTokens,
+		"usage_in_streaming": p.UsageInStreaming,
+		"auth_mode":          p.AuthMode,
+		"disabled":           p.Disabled,
+	}
+}
+
+// ============================== Agent 写操作 =============================
+
+func (g *GormAccessor) CreateAgent(a *dataobject.TAgent) error {
+	var count int64
+	if err := g.gormDb.Model(&dataobject.TAgent{}).
+		Where("agent_id = ? AND deleted = 0", a.AgentId).Count(&count).Error; err != nil {
+		return exception2.DatabaseQueryErrEx2("check agent error:%s", err.Error())
+	}
+	if count > 0 {
+		return exception2.AgentConflictErrEx2("agent already exists:%s", a.AgentId)
 	}
 
+	values := agentValues(a)
+	values["deleted"] = 0
+	values["d_version"] = gorm.Expr("d_version + 1")
+	res := g.gormDb.Model(&dataobject.TAgent{}).
+		Where("agent_id = ? AND deleted = 1", a.AgentId).
+		Updates(values)
+	if res.Error != nil {
+		return exception2.DatabaseQueryErrEx2("revive agent error:%s", res.Error.Error())
+	}
+	if res.RowsAffected > 0 {
+		return nil
+	}
+
+	// 乐观锁插件 clause 自动将 d_version 置为 1,无需预置
+	if err := g.gormDb.Create(a).Error; err != nil {
+		return exception2.DatabaseQueryErrEx2("create agent error:%s", err.Error())
+	}
 	return nil
+}
+func (g *GormAccessor) UpdateAgent(a *dataobject.TAgent) error {
+	var cur dataobject.TAgent
+	err := g.gormDb.Where("agent_id = ? AND deleted = 0", a.AgentId).First(&cur).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return exception2.AgentNotFoundErrEx("agent not found:" + a.AgentId)
+	}
+	if err != nil {
+		return exception2.DatabaseQueryErrEx2("load agent error:%s", err.Error())
+	}
+	if cur.DVersion != a.DVersion {
+		return exception2.AgentConflictErrEx2("agent version conflict:%s", a.AgentId)
+	}
+
+	values := agentValues(a)
+	values["d_version"] = gorm.Expr("d_version + 1")
+	res := g.gormDb.Model(&dataobject.TAgent{}).
+		Where("agent_id = ? AND deleted = 0 AND d_version = ?", a.AgentId, a.DVersion.Int64).
+		Updates(values)
+	if res.Error != nil {
+		return exception2.DatabaseQueryErrEx2("update agent error:%s", res.Error.Error())
+	}
+	if res.RowsAffected == 0 {
+		return exception2.AgentConflictErrEx2("agent version conflict:%s", a.AgentId)
+	}
+
+	a.DVersion.Int64++
+	return nil
+}
+
+func (g *GormAccessor) DeleteAgent(agentId string) error {
+	res := g.gormDb.Model(&dataobject.TAgent{}).
+		Where("agent_id = ? AND deleted = 0", agentId).
+		Update("deleted", 1)
+	if res.Error != nil {
+		return exception2.DatabaseQueryErrEx2("delete agent error:%s", res.Error.Error())
+	}
+	if res.RowsAffected == 0 {
+		return exception2.AgentNotFoundErrEx("agent not found:" + agentId)
+	}
+	return nil
+}
+
+func agentValues(a *dataobject.TAgent) map[string]interface{} {
+	return map[string]interface{}{
+		"owner_id":            a.OwnerId,
+		"agent_name":          a.AgentName,
+		"primary_model":       a.PrimaryModel,
+		"fallbacks":           a.Fallbacks,
+		"agent_dir":           a.AgentDir,
+		"workspace":           a.Workspace,
+		"image_name":          a.ImageName,
+		"image_emoji":         a.ImageEmoji,
+		"image_theme":         a.ImageTheme,
+		"compaction_mode":     a.CompactionMode,
+		"reverse_token_floor": a.ReverseTokenFloor,
+		"max_concurrent":      a.MaxConcurrents,
+		"subagents":           a.SubAgents,
+		"reasoning_mode":      a.ReasoningMode,
+		"tool_progress":       a.ToolProgress,
+		"disabled":            a.Disabled,
+	}
+}
+
+// ============================== Skill 写操作 =============================
+
+func (g *GormAccessor) CreateSkill(sk *dataobject.TSkill) error {
+	var count int64
+	if err := g.gormDb.Model(&dataobject.TSkill{}).
+		Where("skill_id = ? AND deleted = 0", sk.SkillId).Count(&count).Error; err != nil {
+		return exception2.DatabaseQueryErrEx2("check skill error:%s", err.Error())
+	}
+	if count > 0 {
+		return exception2.AgentConflictErrEx2("skill already exists:%s", sk.SkillId)
+	}
+
+	values := skillValues(sk)
+	values["deleted"] = 0
+	values["d_version"] = gorm.Expr("d_version + 1")
+	res := g.gormDb.Model(&dataobject.TSkill{}).
+		Where("skill_id = ? AND deleted = 1", sk.SkillId).
+		Updates(values)
+	if res.Error != nil {
+		return exception2.DatabaseQueryErrEx2("revive skill error:%s", res.Error.Error())
+	}
+	if res.RowsAffected > 0 {
+		return nil
+	}
+
+	// 乐观锁插件 clause 自动将 d_version 置为 1,无需预置
+	if err := g.gormDb.Create(sk).Error; err != nil {
+		return exception2.DatabaseQueryErrEx2("create skill error:%s", err.Error())
+	}
+	return nil
+}
+
+func (g *GormAccessor) UpdateSkill(sk *dataobject.TSkill) error {
+	var cur dataobject.TSkill
+	err := g.gormDb.Where("skill_id = ? AND deleted = 0", sk.SkillId).First(&cur).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return exception2.AgentNotFoundErrEx("skill not found:" + sk.SkillId)
+	}
+	if err != nil {
+		return exception2.DatabaseQueryErrEx2("load skill error:%s", err.Error())
+	}
+	if cur.DVersion != sk.DVersion {
+		return exception2.AgentConflictErrEx2("skill version conflict:%s", sk.SkillId)
+	}
+
+	values := skillValues(sk)
+	values["d_version"] = gorm.Expr("d_version + 1")
+	res := g.gormDb.Model(&dataobject.TSkill{}).
+		Where("skill_id = ? AND deleted = 0 AND d_version = ?", sk.SkillId, sk.DVersion.Int64).
+		Updates(values)
+	if res.Error != nil {
+		return exception2.DatabaseQueryErrEx2("update skill error:%s", res.Error.Error())
+	}
+	if res.RowsAffected == 0 {
+		return exception2.AgentConflictErrEx2("skill version conflict:%s", sk.SkillId)
+	}
+
+	sk.DVersion.Int64++
+	return nil
+}
+
+func (g *GormAccessor) DeleteSkill(skillId string) error {
+	res := g.gormDb.Model(&dataobject.TSkill{}).
+		Where("skill_id = ? AND deleted = 0", skillId).
+		Update("deleted", 1)
+	if res.Error != nil {
+		return exception2.DatabaseQueryErrEx2("delete skill error:%s", res.Error.Error())
+	}
+	if res.RowsAffected == 0 {
+		return exception2.AgentNotFoundErrEx("skill not found:" + skillId)
+	}
+	return nil
+}
+
+func skillValues(sk *dataobject.TSkill) map[string]interface{} {
+	return map[string]interface{}{
+		"owner_id":    sk.OwnerId,
+		"skill_name":  sk.SkillName,
+		"skill_dir":   sk.SkillDir,
+		"skill_scope": sk.SkillScope,
+		"disabled":    sk.Disabled,
+	}
 }

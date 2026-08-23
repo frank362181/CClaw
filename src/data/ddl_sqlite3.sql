@@ -1,8 +1,8 @@
 -- 创建 LLM 供应商配置表
 CREATE TABLE t_llm_provider (
     -- 主键与标识
-                                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,  -- 记录ID，自增
-                                provider_id VARCHAR(8) NOT NULL UNIQUE,         -- 大模型的ID，业务主键
+                                id INTEGER NOT NULL primary key AUTOINCREMENT,  -- 记录ID，自增
+                                provider_id VARCHAR(8) NOT NULL unique,         -- 大模型的ID，业务主键
 
     -- 归属与权限隔离
                                 owner_id VARCHAR(6) NOT NULL DEFAULT '000000',  -- 与登录用户的category有关
@@ -41,14 +41,13 @@ CREATE TABLE t_llm_provider (
 -- 创建索引以提升查询性能
 CREATE INDEX idx_t_llm_provider_owner_id ON t_llm_provider(owner_id);
 CREATE INDEX idx_t_llm_provider_vendor ON t_llm_provider(vendor);
-CREATE INDEX idx_t_llm_provider_status ON t_llm_provider(disabled, deleted);
 
 
 -- 创建 Agent 信息表
 CREATE TABLE t_agent (
     -- 主键与标识
-                         id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,   -- 记录ID，自增
-                         agent_id VARCHAR(8) NOT NULL UNIQUE,            -- Agent ID，业务主键
+                         id INTEGER NOT NULL primary key AUTOINCREMENT,   -- 记录ID，自增
+                         agent_id VARCHAR(8) NOT NULL unique,            -- Agent ID，业务主键
 
     -- 归属与权限隔离
                          owner_id VARCHAR(6) NOT NULL DEFAULT '000000',  -- 与登录用户的category有关
@@ -88,8 +87,6 @@ CREATE TABLE t_agent (
 -- 创建索引以提升查询性能
 CREATE INDEX idx_t_agent_owner_id ON t_agent(owner_id);
 CREATE INDEX idx_t_agent_agent_name ON t_agent(agent_name);
-CREATE INDEX idx_t_agent_primary_model ON t_agent(primary_model);
-CREATE INDEX idx_t_agent_status ON t_agent(deleted, disabled);
 
 -- 插入一条 Agent 记录
 INSERT INTO t_agent (
@@ -111,3 +108,20 @@ INSERT INTO t_agent (
              10,
              3
          );
+
+
+-- 创建 Skill 信息表
+CREATE TABLE t_skill (
+    id INTEGER NOT NULL primary key AUTOINCREMENT,
+    skill_id VARCHAR(8) NOT NULL unique,
+    owner_id VARCHAR(6) NOT NULL DEFAULT '000000',
+    skill_name VARCHAR(64) NOT NULL,
+    skill_dir VARCHAR(256) NOT NULL,
+    skill_scope INTEGER NOT NULL DEFAULT 0,
+    disabled INTEGER NOT NULL DEFAULT 0,
+    deleted INTEGER NOT NULL DEFAULT 0,
+    d_version INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX idx_t_skill_owner_id ON t_skill(owner_id);
+CREATE INDEX idx_t_skill_skill_name ON t_skill(skill_name);

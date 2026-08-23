@@ -15,6 +15,269 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/agent/add": {
+            "post": {
+                "description": "新增一个Agent,AgentId 重复时返回409",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent管理"
+                ],
+                "summary": "新增Agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "Agent 对象",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dataobject.TAgent"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/agent/remove": {
+            "post": {
+                "description": "软删除Agent,记录不存在时返回404",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent管理"
+                ],
+                "summary": "删除Agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "AgentId",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.AgentIDRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/agent/update": {
+            "post": {
+                "description": "更新Agent,需携带 dVersion(乐观锁),版本冲突时返回409",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent管理"
+                ],
+                "summary": "更新Agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "Agent 对象(含 dVersion)",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dataobject.TAgent"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/agents": {
+            "get": {
+                "description": "获取全部未删除的Agent列表",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent管理"
+                ],
+                "summary": "获取Agent列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/chat": {
             "post": {
                 "description": "新的聊天",
@@ -355,6 +618,269 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/llmProvider/add": {
+            "post": {
+                "description": "新增一个LLM Provider,ProviderId 重复时返回409",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent管理"
+                ],
+                "summary": "新增LLM Provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "LLM Provider 对象",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dataobject.TLLMProvider"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/llmProvider/remove": {
+            "post": {
+                "description": "软删除LLM Provider,记录不存在时返回404",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent管理"
+                ],
+                "summary": "删除LLM Provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "ProviderId",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.LLMProviderIDRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/llmProvider/update": {
+            "post": {
+                "description": "更新LLM Provider,需携带 dVersion(乐观锁),版本冲突时返回409",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent管理"
+                ],
+                "summary": "更新LLM Provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "LLM Provider 对象(含 dVersion)",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dataobject.TLLMProvider"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/llmProviders": {
+            "get": {
+                "description": "获取全部未删除的LLM Provider列表",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent管理"
+                ],
+                "summary": "获取LLM Provider列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/login": {
             "post": {
                 "description": "实现用户登录功能",
@@ -532,6 +1058,269 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/skill/add": {
+            "post": {
+                "description": "新增一个Skill,SkillId 重复时返回409",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent管理"
+                ],
+                "summary": "新增Skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "Skill 对象",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dataobject.TSkill"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/skill/remove": {
+            "post": {
+                "description": "软删除Skill,记录不存在时返回404",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent管理"
+                ],
+                "summary": "删除Skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "SkillId",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.SkillIDRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/skill/update": {
+            "post": {
+                "description": "更新Skill,需携带 dVersion(乐观锁),版本冲突时返回409",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent管理"
+                ],
+                "summary": "更新Skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "Skill 对象(含 dVersion)",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dataobject.TSkill"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/skills": {
+            "get": {
+                "description": "获取全部未删除的Skill列表",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent管理"
+                ],
+                "summary": "获取Skill列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/heartbeat": {
             "get": {
                 "description": "返回健康检测结果，JSON",
@@ -592,6 +1381,205 @@ const docTemplate = `{
                 },
                 "respTimestamp": {
                     "type": "integer"
+                }
+            }
+        },
+        "dataobject.TAgent": {
+            "type": "object",
+            "properties": {
+                "AgentDir": {
+                    "description": "agent启动文件所在的路径",
+                    "type": "string"
+                },
+                "AgentId": {
+                    "type": "string"
+                },
+                "AgentName": {
+                    "type": "string"
+                },
+                "CompactionMode": {
+                    "description": "压缩模式",
+                    "type": "integer"
+                },
+                "Deleted": {
+                    "type": "boolean"
+                },
+                "Disabled": {
+                    "type": "boolean"
+                },
+                "Fallbacks": {
+                    "type": "string"
+                },
+                "ImageEmoji": {
+                    "type": "string"
+                },
+                "ImageName": {
+                    "description": "agent的公众形象名称",
+                    "type": "string"
+                },
+                "ImageTheme": {
+                    "type": "string"
+                },
+                "MaxConcurrents": {
+                    "description": "DDL 列为 max_concurrent",
+                    "type": "integer"
+                },
+                "OwnerId": {
+                    "type": "string"
+                },
+                "PrimaryModel": {
+                    "description": "主要使用的AI模型,如deepseek,qwen-3.8-flash等",
+                    "type": "string"
+                },
+                "ReasoningMode": {
+                    "description": "推理展示的方式 0/1/2:off/生成后附带/2 streaming",
+                    "type": "integer"
+                },
+                "ReverseTokenFloor": {
+                    "description": "压缩时保留的最小token数量",
+                    "type": "integer"
+                },
+                "SubAgents": {
+                    "type": "integer"
+                },
+                "ToolProgress": {
+                    "description": "工具执行的进度",
+                    "type": "integer"
+                },
+                "Workspace": {
+                    "description": "表示该agent的工作空间",
+                    "type": "string"
+                },
+                "dVersion": {
+                    "$ref": "#/definitions/optimisticlock.Version"
+                }
+            }
+        },
+        "dataobject.TLLMProvider": {
+            "type": "object",
+            "properties": {
+                "AuthMode": {
+                    "type": "integer"
+                },
+                "CachedReadCost": {
+                    "description": "每百万命中缓存读的单价",
+                    "type": "number"
+                },
+                "CachedWriteCost": {
+                    "description": "每百万命中缓存写的单价",
+                    "type": "number"
+                },
+                "ContextWindow": {
+                    "type": "integer"
+                },
+                "Deleted": {
+                    "type": "boolean"
+                },
+                "Disabled": {
+                    "type": "boolean"
+                },
+                "Input": {
+                    "description": "支持的输入模态:0/1/2:text/image/audio...",
+                    "type": "integer"
+                },
+                "InputCost": {
+                    "description": "每百万token输入的单价",
+                    "type": "number"
+                },
+                "MaxTokens": {
+                    "type": "integer"
+                },
+                "OutputCost": {
+                    "description": "每百万token输出的单价",
+                    "type": "number"
+                },
+                "OwnerId": {
+                    "type": "string"
+                },
+                "UsageInStreaming": {
+                    "type": "boolean"
+                },
+                "aliasName": {
+                    "description": "供应商别名",
+                    "type": "string"
+                },
+                "api": {
+                    "description": "供应商的API协议类型",
+                    "type": "string"
+                },
+                "baseUrl": {
+                    "description": "供应商的基础URL",
+                    "type": "string"
+                },
+                "dVersion": {
+                    "description": "乐观锁",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/optimisticlock.Version"
+                        }
+                    ]
+                },
+                "providerId": {
+                    "description": "供应商ID",
+                    "type": "string"
+                },
+                "providerName": {
+                    "description": "供应商名称",
+                    "type": "string"
+                },
+                "reasoning": {
+                    "description": "是否支持推理",
+                    "type": "boolean"
+                },
+                "reasoningEx": {
+                    "description": "是否支持推理力度参数",
+                    "type": "boolean"
+                },
+                "vendor": {
+                    "description": "LLM厂家名称,如deepseek,anthropic,OpenAI等",
+                    "type": "string"
+                }
+            }
+        },
+        "dataobject.TSkill": {
+            "type": "object",
+            "properties": {
+                "Deleted": {
+                    "type": "boolean"
+                },
+                "Disabled": {
+                    "type": "boolean"
+                },
+                "OwnerId": {
+                    "type": "string"
+                },
+                "dVersion": {
+                    "$ref": "#/definitions/optimisticlock.Version"
+                },
+                "skillDir": {
+                    "description": "指向skill对应的相对路径,定位SKILL.md",
+                    "type": "string"
+                },
+                "skillId": {
+                    "type": "string"
+                },
+                "skillName": {
+                    "type": "string"
+                },
+                "skillScope": {
+                    "description": "指向skill的作用域",
+                    "type": "integer"
+                }
+            }
+        },
+        "model.AgentIDRequest": {
+            "type": "object",
+            "required": [
+                "agentId"
+            ],
+            "properties": {
+                "agentId": {
+                    "type": "string"
                 }
             }
         },
@@ -729,6 +1717,17 @@ const docTemplate = `{
                 },
                 "respTimestamp": {
                     "type": "integer"
+                }
+            }
+        },
+        "model.LLMProviderIDRequest": {
+            "type": "object",
+            "required": [
+                "providerId"
+            ],
+            "properties": {
+                "providerId": {
+                    "type": "string"
                 }
             }
         },
@@ -889,6 +1888,30 @@ const docTemplate = `{
                 },
                 "respTimestamp": {
                     "type": "integer"
+                }
+            }
+        },
+        "model.SkillIDRequest": {
+            "type": "object",
+            "required": [
+                "skillId"
+            ],
+            "properties": {
+                "skillId": {
+                    "type": "string"
+                }
+            }
+        },
+        "optimisticlock.Version": {
+            "type": "object",
+            "properties": {
+                "int64": {
+                    "type": "integer",
+                    "format": "int64"
+                },
+                "valid": {
+                    "description": "Valid is true if Int64 is not NULL",
+                    "type": "boolean"
                 }
             }
         }

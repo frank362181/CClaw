@@ -11,4 +11,7 @@ const (
 	ErrorIdBizInvalidToken
 	ErrorIdBizDatabase
 	ErrorIdBizPrompt
+	ErrorIdBizAgentParameter
+	ErrorIdBizAgentNotFound
+	ErrorIdBizAgentConflict
 )

@@ -10,10 +10,16 @@
 
 package utility
 
-import "strings"
+import (
+	"strings"
+
+	myException "my.favorite/cclawservice/exception"
+	"my.favorite/cclawservice/model/dataobject"
+)
 
 // FrontMatterDelimiter front matter 的定界符
 const FrontMatterDelimiter = "---"
+const OwnerIdPlatform = "000000"
 
 // SplitFrontMatter 把 markdown 文档拆分成 (frontMatter, content) 两部分。
 // 只有当文档以 "---" 行开头并且存在闭合的 "---" 行时才认为存在 front matter;
@@ -53,4 +59,60 @@ func HasFrontMatter(data []byte) bool {
 func StripFrontMatter(data []byte) string {
 	_, content := SplitFrontMatter(data)
 	return content
+}
+
+// ========================== 以下函数是对agent,llm provider,skills进行规整和校验 ============================
+
+func NormalizeOwner(ownerId *string) {
+	if strings.TrimSpace(*ownerId) == "" {
+		*ownerId = OwnerIdPlatform // 平台默认归属,与 DDL 默认值一致
+	}
+}
+
+func ValidateLLMProvider(p dataobject.TLLMProvider) error {
+	if strings.TrimSpace(p.ProviderId) == "" {
+		return myException.AgentParameterErrEx("provider id is empty")
+	}
+	if strings.TrimSpace(p.ProviderName) == "" {
+		return myException.AgentParameterErrEx("provider name is empty")
+	}
+	if strings.TrimSpace(p.BaseUrl) == "" {
+		return myException.AgentParameterErrEx("provider base url is empty")
+	}
+	return nil
+}
+
+func ValidateAgent(a dataobject.TAgent) error {
+	if strings.TrimSpace(a.AgentId) == "" {
+		return myException.AgentParameterErrEx("agent id is empty")
+	}
+	if strings.TrimSpace(a.AgentName) == "" {
+		return myException.AgentParameterErrEx("agent name is empty")
+	}
+	if strings.TrimSpace(a.PrimaryModel) == "" {
+		return myException.AgentParameterErrEx("agent primary model is empty")
+	}
+	if strings.TrimSpace(a.AgentDir) == "" {
+		return myException.AgentParameterErrEx("agent dir is empty")
+	}
+	if strings.TrimSpace(a.Workspace) == "" {
+		return myException.AgentParameterErrEx("agent workspace is empty")
+	}
+	return nil
+}
+
+func ValidateSkill(sk dataobject.TSkill) error {
+	if strings.TrimSpace(sk.SkillId) == "" {
+		return myException.AgentParameterErrEx("skill id is empty")
+	}
+	if strings.TrimSpace(sk.SkillName) == "" {
+		return myException.AgentParameterErrEx("skill name is empty")
+	}
+	if strings.TrimSpace(sk.SkillDir) == "" {
+		return myException.AgentParameterErrEx("skill dir is empty")
+	}
+	if sk.SkillScope < dataobject.SkillScopeSystem || sk.SkillScope > dataobject.SkillScopePlugin {
+		return myException.AgentParameterErrEx("skill scope is invalid")
+	}
+	return nil
 }

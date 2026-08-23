@@ -75,6 +75,7 @@ const (
 
 	ConstRequestBodyTooLarge
 
+	ConstErrorUnknow
 	ConstErrorMax = iota + 2000 //以上定义的是内部的常量,外部常量从这个开始
 )
 
@@ -91,4 +92,5 @@ const (
 	ConstInternalServerErrorMsg = "internal server error"
 	ConstTrafficOverflowMsg     = "traffic overflow"
 	ConstRequestBodyTooLargeMsg = "request body too large"
+	ConstErrorUnknowMsg         = "unknow error"
 )

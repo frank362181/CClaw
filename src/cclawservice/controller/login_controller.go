@@ -75,7 +75,6 @@ func (lc *LoginController) Login(c *gin.Context) {
 		return
 	}
 
-	//resp := model2.GenerationLoginResponse(user)
 	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, loginSession)
 }
 
