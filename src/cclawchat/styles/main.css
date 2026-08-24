@@ -2193,6 +2193,213 @@ body {
     }
 }
 
+/* 工作空间页签：可收缩区块头（标题 + 右侧展开/收缩图标按钮） */
+.agent-section-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    margin-left: auto; /* 靠右：与标题文字分隔 */
+    padding: 0;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.agent-section-toggle:hover {
+    color: var(--color-primary);
+    background: var(--color-primary-light);
+}
+
+.agent-section-toggle:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 1px;
+}
+
+/* 收缩时箭头由 ▼ 旋转为 ▶
+   注：SVG 元素上做 transform 过渡在部分嵌入式浏览器中不可靠（过渡停留在起始值），故即时翻转保证一致表现 */
+.agent-section-toggle.collapsed .agent-section-toggle-icon {
+    transform: rotate(-90deg);
+}
+
+/* 工作空间页签：启动文件 / 技能文件 文件列表（两套类名共用同一套样式，新增区块类请同步追加） */
+.startup-files-panel,
+.skill-files-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+/* 收缩/展开：display:flex 会覆盖 [hidden] 的 UA 样式，需显式隐藏 */
+.startup-files-panel[hidden],
+.skill-files-panel[hidden] {
+    display: none;
+}
+
+.startup-files-loading,
+.startup-files-empty,
+.startup-files-error,
+.skill-files-loading,
+.skill-files-empty,
+.skill-files-error {
+    padding: var(--space-md);
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+    text-align: center;
+}
+
+.startup-files-error,
+.skill-files-error {
+    color: #C0392B;
+}
+
+.startup-files-list,
+.skill-files-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+
+/* 文件行：左侧文件名 + 右侧标记（启动文件：必需/可选 + 大小/缺失；技能文件：大小） */
+.startup-file-item,
+.skill-file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    width: 100%;
+    padding: var(--space-sm) var(--space-md);
+    font-family: inherit;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-primary);
+    text-align: left;
+    background: var(--color-bg-white);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.startup-file-item:hover,
+.skill-file-item:hover {
+    border-color: var(--color-primary);
+    background: var(--color-primary-light);
+}
+
+.startup-file-item.active,
+.skill-file-item.active {
+    border-color: var(--color-primary);
+    background: var(--color-primary-light);
+    box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+
+.startup-file-item.missing,
+.skill-file-item.missing {
+    color: var(--color-text-muted);
+    opacity: 0.8;
+}
+
+.startup-file-item-name,
+.skill-file-item-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.startup-file-item-meta,
+.skill-file-item-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    flex-shrink: 0;
+}
+
+.tag-required,
+.tag-optional,
+.tag-missing,
+.tag-size {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 8px;
+    border-radius: var(--radius-full);
+    font-size: var(--font-size-xs);
+    white-space: nowrap;
+}
+
+.tag-required {
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+}
+
+.tag-optional {
+    background: var(--color-bg-page);
+    color: var(--color-text-secondary);
+}
+
+.tag-missing {
+    background: #FDEBD0;
+    color: #B9770E;
+}
+
+.tag-size {
+    background: var(--color-bg-page);
+    color: var(--color-text-muted);
+}
+
+/* 文件内容预览（点击列表项后展示） */
+.startup-file-viewer,
+.skill-file-viewer {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    border-top: 1px dashed var(--color-border);
+    padding-top: var(--space-md);
+}
+
+.startup-file-viewer-head,
+.skill-file-viewer-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.startup-file-viewer-name,
+.skill-file-viewer-name {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text-primary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.startup-file-viewer-meta,
+.skill-file-viewer-meta {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+}
+
+.startup-file-viewer-body,
+.skill-file-viewer-body {
+    width: 100%;
+    min-height: 240px;
+    max-height: 480px;
+    padding: var(--space-md);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: var(--font-size-xs);
+    line-height: 1.6;
+    color: var(--color-text-primary);
+    background: var(--color-bg-page);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    resize: vertical;
+}
+
 /* 悬停：提示被选中（主色描边 + 选中角标） */
 .agent-card:hover,
 .skill-card:hover,

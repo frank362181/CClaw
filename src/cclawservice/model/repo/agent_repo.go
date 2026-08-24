@@ -45,6 +45,7 @@ type IAgentRepository interface {
 	RemoveLLMProvider(owerId, providerId string) error
 
 	GetAgents(comCode string) []dataobject.TAgent
+	GetAgent(ownerId, agentId string) (dataobject.TAgent, bool)
 	AddAgent(agent dataobject.TAgent) error
 	UpdateAgent(agent dataobject.TAgent) error
 	RemoveAgent(ownerId, agentId string) error
@@ -170,6 +171,25 @@ func (repo *AgentRepository) GetAgents(comCode string) []dataobject.TAgent {
 	})
 
 	return out
+}
+
+// GetAgent 按业务主键 + 归属查询单个 agent,未找到或不属于该 owner 时返回 ok=false。
+// ownerId 必须精确匹配,确保只能访问本单位(comCode)名下的 agent。
+func (repo *AgentRepository) GetAgent(ownerId, agentId string) (dataobject.TAgent, bool) {
+	repo.refreshIfExpired()
+
+	var found dataobject.TAgent
+	ok := false
+	repo.agents.Range(func(_ int, item dataobject.TAgent) bool {
+		if strings.EqualFold(ownerId, item.OwnerId) && item.AgentId == agentId {
+			found = item
+			ok = true
+			return false // 命中即停止遍历
+		}
+		return true
+	})
+
+	return found, ok
 }
 
 func (repo *AgentRepository) AddAgent(agent dataobject.TAgent) error {

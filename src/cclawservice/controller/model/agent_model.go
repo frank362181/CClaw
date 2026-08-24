@@ -12,6 +12,12 @@ type AgentIDRequest struct {
 	AgentId string `json:"agentId" binding:"required"`
 }
 
+// AgentStartupFileRequest 按业务主键 + 文件名读取 agent 启动文件
+type AgentStartupFileRequest struct {
+	AgentId  string `json:"agentId" binding:"required"`
+	FileName string `json:"fileName" binding:"required"`
+}
+
 // SkillIDRequest 按业务主键操作 Skill(如删除)
 type SkillIDRequest struct {
 	SkillId string `json:"skillId" binding:"required"`

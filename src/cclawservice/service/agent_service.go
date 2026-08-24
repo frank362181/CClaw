@@ -28,7 +28,8 @@ import (
 type AgentService struct {
 	baseService.BaseService
 
-	agentRepo repo.IAgentRepository
+	agentRepo       repo.IAgentRepository
+	startupFileRepo repo.IAgentFileRepository
 }
 
 var agentService = common.GetSingleton(func() *AgentService {
@@ -37,7 +38,8 @@ var agentService = common.GetSingleton(func() *AgentService {
 			Name:        "agentService",
 			Description: "manage llm providers, agents and skills",
 		},
-		agentRepo: nil,
+		agentRepo:       nil,
+		startupFileRepo: nil,
 	}
 }).Instance()
 
@@ -47,6 +49,7 @@ func GetAgentService(db core.IBaseDatabase) (*AgentService, error) {
 		return nil, exception.ParameterEmptyErrorEx("agent service: database is nil")
 	}
 	agentService.agentRepo = repo.GetAgentRepository(db)
+	agentService.startupFileRepo = repo.GetAgentFileRepository()
 	return agentService, nil
 }
 
@@ -110,6 +113,93 @@ func (s *AgentService) RemoveAgent(ownerId, agentId string) error {
 		return myException.AgentParameterErrEx("agent id is empty")
 	}
 	return s.agentRepo.RemoveAgent(ownerId, agentId)
+}
+
+// ============================== Agent Startup Files =============================
+
+// GetAgentStartupFiles 获取某 agent 的启动文件清单(不含正文)。
+// 先按 ownerId + agentId 校验归属,再从该 agent 的工作区读取启动文件元数据。
+func (s *AgentService) GetAgentStartupFiles(ownerId, agentId string) ([]dataobject.AgentDocument, error) {
+	ownerId = strings.TrimSpace(ownerId)
+	agentId = strings.TrimSpace(agentId)
+	if len(ownerId) == 0 || len(agentId) == 0 {
+		return nil, myException.AgentParameterErrEx("agent id is empty")
+	}
+	if err := s.requireRepos(); err != nil {
+		return nil, err
+	}
+
+	workspaceRoot, err := s.resolveAgentWorkspace(ownerId, agentId)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.startupFileRepo.GetStartupFiles(workspaceRoot), nil
+}
+
+// GetAgentStartupFile 获取某 agent 指定启动文件的原始内容。
+// 文件必须命中 StartupDocFiles 白名单;文件缺失时返回 Missing=true 与空内容。
+func (s *AgentService) GetAgentStartupFile(ownerId, agentId, fileName string) (*dataobject.AgentDocument, error) {
+	ownerId = strings.TrimSpace(ownerId)
+	agentId = strings.TrimSpace(agentId)
+	fileName = strings.TrimSpace(fileName)
+	if len(ownerId) == 0 || len(agentId) == 0 {
+		return nil, myException.AgentParameterErrEx("agent id is empty")
+	}
+	if len(fileName) == 0 {
+		return nil, myException.AgentParameterErrEx("startup file name is empty")
+	}
+	if err := s.requireRepos(); err != nil {
+		return nil, err
+	}
+
+	workspaceRoot, err := s.resolveAgentWorkspace(ownerId, agentId)
+	if err != nil {
+		return nil, err
+	}
+
+	file, err := s.startupFileRepo.GetStartupFile(workspaceRoot, fileName)
+	if err != nil {
+		return nil, myException.MapStartupFileError(err)
+	}
+	return file, nil
+}
+
+// resolveAgentWorkspace 校验归属并解析 agent 的工作区根目录(启动文件两个接口共用的前置步骤)。
+// agent 不存在/不属于该 owner → AgentNotFoundErr;工作区目录缺失/非法 → AgentWorkspaceErr。
+func (s *AgentService) resolveAgentWorkspace(ownerId, agentId string) (string, error) {
+	agent, err := s.getAgentByOwner(ownerId, agentId)
+	if err != nil {
+		return "", err
+	}
+
+	workspaceRoot, ok := myUtility.BuildAgentWorkspaceRoot(*agent)
+	if !ok {
+		return "", myException.AgentWorkspaceErrEx("agent workspace is unavailable: " + agentId)
+	}
+
+	return workspaceRoot, nil
+}
+
+// getAgentByOwner 按归属 + 主键查找 agent,未找到或不属于该 owner 时返回业务错误。
+func (s *AgentService) getAgentByOwner(ownerId, agentId string) (*dataobject.TAgent, error) {
+	if s.agentRepo == nil {
+		return nil, myException.AgentInternalErrEx("agent service: repository not initialized")
+	}
+
+	agent, ok := s.agentRepo.GetAgent(ownerId, agentId)
+	if !ok {
+		return nil, myException.AgentNotFoundErrEx("agent not found: " + agentId)
+	}
+	return &agent, nil
+}
+
+// requireRepos 校验服务依赖已注入,避免未调用 GetAgentService 时空指针 panic。
+func (s *AgentService) requireRepos() error {
+	if s.agentRepo == nil || s.startupFileRepo == nil {
+		return myException.AgentInternalErrEx("agent service: repositories not initialized")
+	}
+	return nil
 }
 
 // ============================== Skill =============================

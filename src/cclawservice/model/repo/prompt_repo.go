@@ -20,7 +20,7 @@ import (
 	"gopkg.in/yaml.v2"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataobject"
-	"my.favorite/cclawservice/utility"
+	myUtility "my.favorite/cclawservice/utility"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
@@ -47,7 +47,8 @@ type PromptRepository struct {
 
 // IPromptRepository 定义 prompt 文档仓库的对外能力
 type IPromptRepository interface {
-	LoadWorkspace(agentId string, workspaceRoot string) error
+	LoadWorkspace(agent dataobject.TAgent) error
+
 	AddSkill(agentId, skillId, skillFile string) error
 	ClearSkills(agentId string)
 
@@ -71,13 +72,11 @@ func GetPromptRepository() IPromptRepository {
 // LoadWorkspace 加载并缓存一个工作区的启动文档。只是加载agent的工作区
 // 当工作区未变化(指纹相同)时直接复用缓存,避免重复读盘。
 // 单个文档缺失/失败不阻断整个工作区的加载。
-func (repo *PromptRepository) LoadWorkspace(agentId string, workspaceRoot string) error {
-	agentId = strings.TrimSpace(agentId)
-	workspaceRoot = strings.TrimSpace(workspaceRoot)
-	if len(agentId) == 0 || len(workspaceRoot) == 0 {
-		return exception.ParameterEmptyErrorEx("prompt repo: workspace root is empty")
+func (repo *PromptRepository) LoadWorkspace(agent dataobject.TAgent) error {
+	workspaceRoot, ok := myUtility.BuildAgentWorkspaceRoot(agent)
+	if !ok {
+		return exception.ParameterEmptyErrorEx("prompt repo: workspace root is unavailable")
 	}
-	workspaceRoot = pCommon.FormatPath(workspaceRoot)
 
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
@@ -87,7 +86,7 @@ func (repo *PromptRepository) LoadWorkspace(agentId string, workspaceRoot string
 		fileNames = append(fileNames, item.Name)
 	}
 
-	prompt := repo.promptMap[agentId]
+	prompt := repo.promptMap[agent.AgentId]
 	if prompt != nil {
 		// 判断是否修改过 *.md 文件
 		if prompt.workspaceRoot == workspaceRoot &&
@@ -102,7 +101,7 @@ func (repo *PromptRepository) LoadWorkspace(agentId string, workspaceRoot string
 	} else {
 		//初次加载
 		prompt = &agentPrompt{
-			agentId:           agentId,
+			agentId:           agent.AgentId,
 			workspaceRoot:     workspaceRoot,
 			documents:         pCommon.NewSafeList[dataobject.AgentDocument](),
 			skills:            pCommon.NewSafeList[dataobject.SkillDocument](),
@@ -122,7 +121,7 @@ func (repo *PromptRepository) LoadWorkspace(agentId string, workspaceRoot string
 	}
 
 	prompt.loadedFingerprint = pCommon.ComputeFileFingerprint(workspaceRoot, fileNames)
-	repo.promptMap[agentId] = prompt
+	repo.promptMap[agent.AgentId] = prompt
 	return nil
 }
 
@@ -158,7 +157,7 @@ func (repo *PromptRepository) AddSkill(agentId, skillId, skillFile string) error
 		return err
 	}
 
-	frontMatter, content := utility.SplitFrontMatter(data)
+	frontMatter, content := myUtility.SplitFrontMatter(data)
 
 	doc := &dataobject.SkillDocument{
 		SkillId:   skillId,
@@ -260,7 +259,7 @@ func (repo *PromptRepository) Destroy() {
 //   - ok=true 且 doc.Missing=true:必需文件缺失,content 为空,由组装层注入 [MISSING] 标记
 //   - ok=false:可选文件缺失,直接省略
 func (repo *PromptRepository) readAgentDocumentLocked(kind dataobject.AgentDocumentKind, workspaceRoot, fileName string, required bool) (*dataobject.AgentDocument, bool, error) {
-	filePath, err := repo.resolveStartupPathLocked(workspaceRoot, fileName)
+	filePath, err := myUtility.ResolveStartupPath(workspaceRoot, fileName)
 	if err != nil {
 		return nil, false, err
 	}
@@ -284,7 +283,7 @@ func (repo *PromptRepository) readAgentDocumentLocked(kind dataobject.AgentDocum
 		return nil, false, err
 	}
 
-	frontMatter, content := utility.SplitFrontMatter(data)
+	frontMatter, content := myUtility.SplitFrontMatter(data)
 
 	base.Content = content
 	base.ByteSize = size
@@ -296,16 +295,6 @@ func (repo *PromptRepository) readAgentDocumentLocked(kind dataobject.AgentDocum
 	}
 
 	return base, true, nil
-}
-
-// resolveStartupPathLocked 校验并解析启动文档路径:仅允许白名单内的纯文件名,禁止目录穿越。
-func (repo *PromptRepository) resolveStartupPathLocked(workspaceRoot, fileName string) (string, error) {
-	// 只允许纯文件名:不能包含路径分隔符、"." 或 ".."
-	if filepath.Base(fileName) != fileName || fileName == "." || fileName == ".." {
-		return "", exception.FilePathErrorEx("prompt repo: illegal document file name: " + fileName)
-	}
-
-	return pCommon.SafeJoin(workspaceRoot, filepath.Join(workspaceRoot, fileName)) //repo.safeJoinLocked(repo.workspaceRoot, filepath.Join(repo.workspaceRoot, fileName))
 }
 
 // resolveSkillPathLocked 解析 skill 文件路径:相对路径相对于工作区根,绝对路径直接使用。

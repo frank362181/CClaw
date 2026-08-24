@@ -14,7 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -64,10 +64,6 @@ func GetProcessID() int {
 	return os.Getpid()
 }
 
-func IsAbsolutePath(path string) bool {
-	return filepath.IsAbs(path)
-}
-
 // GetCurrentDir 返回的是工作目录
 func GetCurrentDir() string {
 	tmpDir, err := os.Getwd()
@@ -115,50 +111,11 @@ func GetRelativePath(path, cwd string) (string, bool) {
 		return ".", true
 	}
 
-	if rel == ".." || strings.HasPrefix(rel, ".."+sep) || IsAbsolutePath(rel) {
+	if rel == ".." || strings.HasPrefix(rel, ".."+sep) || filepath.IsAbs(rel) {
 		return "", false
 	}
 
 	return rel, true
-}
-
-func FormatPath(path string) string {
-	if len(path) == 0 {
-		return ""
-	}
-
-	s := strings.ReplaceAll(path, "\\", "/")
-	return s
-}
-
-func GetExtension(filename string) string {
-	if len(strings.TrimSpace(filename)) == 0 {
-		return ""
-	}
-
-	filename = strings.TrimSpace(filename)
-	index := strings.LastIndex(filename, ".")
-	if index == -1 || index == len(filename)-1 {
-		return ""
-	}
-
-	return strings.ToLower(filename[index+1:]) //全部转换成小写
-}
-
-// PathExists 判断文件或目录是否存在
-func PathExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-// DirExists 判断目录是否存在,是目录且存在 return true
-func DirExists(path string) bool {
-	ret, err := os.Stat(path)
-	if err != nil {
-		return false //路径不存在
-	}
-
-	return ret.IsDir()
 }
 
 func FileExists(filename string) bool {
@@ -186,15 +143,30 @@ func IsDir(path string) bool {
 	return ret.IsDir()
 }
 
-func CreateDir(path string) error {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		err := os.MkdirAll(path, 0755) //递归创建
-		if err != nil {
-			return err
-		}
+// IsSafeDir 校验 agent 目录是否为安全的相对路径:
+// 非空、非绝对路径、无 .. / . 等越界或冗余路径段(该目录会用于 filepath.Join 拼接工作区根)。
+func IsSafeDir(dir string) bool {
+	dir = strings.TrimSpace(dir)
+	if dir == "" || dir == "." || dir == ".." {
+		return false
+	}
+	if filepath.IsAbs(dir) {
+		return false
 	}
 
-	return nil
+	cleaned := filepath.Clean(dir)
+	if cleaned != dir {
+		return false // 含冗余分隔符或 . 段(如 a/./b、a//b)
+	}
+	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return false // 仍可能逃逸(如 ../x)
+	}
+
+	return true
+}
+
+func CreateDir(path string) error {
+	return os.MkdirAll(path, 0755) //递归创建
 }
 
 func CreateFile(filename string) (*os.File, error) {
@@ -297,7 +269,7 @@ func ResolveFile(baseDir, name string) (string, error) {
 	}
 
 	targetFileName := name
-	if !IsAbsolutePath(name) {
+	if !filepath.IsAbs(name) {
 		targetFileName = filepath.Join(baseDir, targetFileName)
 	}
 
@@ -323,12 +295,12 @@ func ResolvePath(input, baseDir string) string {
 	normalized := NormalizePath(input, "", false, false, false, false)
 	normalizedBaseDir := NormalizePath("", baseDir, false, true, false, false)
 
-	if IsAbsolutePath(normalized) {
+	if filepath.IsAbs(normalized) {
 		return filepath.Clean(normalized)
 	}
 
 	joined := filepath.Join(normalizedBaseDir, normalized)
-	if !IsAbsolutePath(joined) {
+	if !filepath.IsAbs(joined) {
 		joined, _ = filepath.Abs(joined)
 	}
 
@@ -422,6 +394,26 @@ func SafeJoin(base, target string) (string, error) {
 	return targetAbs, nil
 }
 
+// SafeJoinWithRoot 使用已解析好的真实根路径校验目标路径并返回其绝对路径,
+// 行为与 SafeJoin 一致,但省去对根路径的重复 EvalSymlinks
+// (同一请求内对多个文件校验时,根路径的真实路径只解析一次后复用)。
+func SafeJoinWithRoot(realRoot, target string) (string, error) {
+	targetAbs, err := filepath.Abs(target)
+	if err != nil {
+		return "", err
+	}
+	targetAbs = filepath.Clean(targetAbs)
+
+	realTarget := ResolveRealPath(targetAbs)
+
+	sep := string(filepath.Separator)
+	if realTarget != realRoot && !strings.HasPrefix(realTarget, realRoot+sep) {
+		return "", errors.New("prompt repo: document escapes workspace root: " + target)
+	}
+
+	return targetAbs, nil
+}
+
 // ComputeFileFingerprint 计算启动文档的指纹（文件名+大小+修改时间），用于是否从磁盘重新读取文件的判断
 func ComputeFileFingerprint(path string, fileNames []string) string {
 	var sb strings.Builder
@@ -442,25 +434,8 @@ func ComputeFileFingerprint(path string, fileNames []string) string {
 }
 
 func ReadFileAll(fileName string) ([]byte, error) {
-	if !FileExists(fileName) {
-		return nil, errors.New("file not found")
-	}
-	if IsDir(fileName) {
-		return nil, errors.New("file is a dir")
-	}
-
-	file, err := os.Open(fileName)
-	if err != nil {
-		return nil, errors.New("can not loaded")
-	}
-	defer Close(file)
-
-	jsonData, err := ioutil.ReadAll(file)
-	if err != nil {
-		return nil, errors.New("can not read")
-	}
-
-	return jsonData, nil
+	data, _, err := ReadFile(fileName, math.MaxInt64)
+	return data, err
 }
 
 // ReadFile 带上大小上限读取文件，防止超大文件导致内存耗尽

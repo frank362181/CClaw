@@ -60,8 +60,8 @@ CREATE TABLE t_agent (
                          is_default INTEGER NOT NULL DEFAULT 0,           -- 是否是默认模型
 
     -- 路径与工作空间
-                         agent_dir VARCHAR(128) NOT NULL,                 -- agent启动文件路径（相对路径）
-                         workspace VARCHAR(256) NOT NULL,                 -- 工作空间
+                         agent_dir VARCHAR(128) NOT NULL,                 -- agent启动文件路径（相对路径）,每个agent一个
+                         workspace VARCHAR(256) NOT NULL,                 -- 工作空间,每个所属的单位一个工作空间
 
     -- 形象配置
                          image_name VARCHAR(32) DEFAULT NULL,             -- 公共形象名称

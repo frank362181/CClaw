@@ -357,6 +357,90 @@ func (ac *AgentController) RemoveAgent(c *gin.Context) {
 	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, nil)
 }
 
+// ============================== Agent Startup Files =============================
+
+// GetStartupFiles 获取某 Agent 的启动文件列表
+//
+//	@Summary		获取Agent启动文件列表
+//	@Description	返回指定 Agent 的全部启动文件(AGENTS.md/SOUL.md/...),仅元数据,不含文件内容
+//	@Tags			Agent管理
+//	@Accept			json
+//	@Produce		json
+//	@Param			AUTHORIZATION	header		string				true	"Login成功返回后得到的token"
+//	@Param			NONCE			query		string				true	"盐"
+//	@Param			TIMESTAMP		query		string				true	"数值,表示请求端请求的时间(秒数)"
+//	@Param			SIGNATURE		query		string				true	"对请求内容的签名秒数"
+//	@Param			body			body		model.AgentIDRequest	true	"AgentId"
+//	@Success		200				{object}	basic.CommonResponse
+//	@Failure		400				{object}	basic.CommonResponse
+//	@Router			/api/agent/startupFiles [post]
+func (ac *AgentController) GetStartupFiles(c *gin.Context) {
+	svc, ok := ac.getAgentService(c)
+	if !ok {
+		return
+	}
+
+	loginSession, ok := ac.isAuthenticated(c)
+	if !ok {
+		return
+	}
+
+	var req model2.AgentIDRequest
+	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
+		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+		return
+	}
+
+	list, err := svc.GetAgentStartupFiles(loginSession.ComCode, req.AgentId)
+	if err != nil {
+		ac.respondAgentError(c, err)
+		return
+	}
+
+	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, list)
+}
+
+// GetStartupFile 获取某 Agent 指定启动文件的内容
+//
+//	@Summary		获取Agent启动文件内容
+//	@Description	返回指定 Agent 指定启动文件(须命中启动文件白名单)的原始内容
+//	@Tags			Agent管理
+//	@Accept			json
+//	@Produce		json
+//	@Param			AUTHORIZATION	header		string						true	"Login成功返回后得到的token"
+//	@Param			NONCE			query		string						true	"盐"
+//	@Param			TIMESTAMP		query		string						true	"数值,表示请求端请求的时间(秒数)"
+//	@Param			SIGNATURE		query		string						true	"对请求内容的签名秒数"
+//	@Param			body			body		model.AgentStartupFileRequest	true	"AgentId + 启动文件名"
+//	@Success		200				{object}	basic.CommonResponse
+//	@Failure		400				{object}	basic.CommonResponse
+//	@Router			/api/agent/startupFile [post]
+func (ac *AgentController) GetStartupFile(c *gin.Context) {
+	svc, ok := ac.getAgentService(c)
+	if !ok {
+		return
+	}
+
+	loginSession, ok := ac.isAuthenticated(c)
+	if !ok {
+		return
+	}
+
+	var req model2.AgentStartupFileRequest
+	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
+		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+		return
+	}
+
+	file, err := svc.GetAgentStartupFile(loginSession.ComCode, req.AgentId, req.FileName)
+	if err != nil {
+		ac.respondAgentError(c, err)
+		return
+	}
+
+	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, file)
+}
+
 // ============================== Skill =============================
 
 // GetSkills 获取 Skill 列表
@@ -548,8 +632,14 @@ func (ac *AgentController) respondAgentError(c *gin.Context, err error) {
 		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
 	case errors.Is(err, exception2.AgentNotFoundErr):
 		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorAgentNotFound, cclawcommon.ConstErrorAgentNotFoundMsg, nil)
+	case errors.Is(err, exception2.AgentWorkspaceErr):
+		// 智能体工作区目录缺失/非法:与"记录不存在"区分,便于前端给准确提示
+		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorAgentWorkspace, cclawcommon.ConstErrorAgentWorkspaceMsg, nil)
 	case errors.Is(err, exception2.AgentConflictErr):
 		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorAgentConflict, cclawcommon.ConstErrorAgentConflictMsg, nil)
+	case errors.Is(err, exception2.AgentInternalErr):
+		// 服务/仓库未初始化等内部错误
+		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
 	default:
 		basic.GetBaseResponser().Failure(c, http.StatusOK, basic.ConstErrorUnknow, basic.ConstErrorUnknowMsg, nil)
 	}

@@ -188,4 +188,104 @@ export const API = {
         }
         return json;
     },
+
+    /**
+     * 获取指定 Agent 的启动文件清单（仅元数据，不含文件内容）。
+     * - 遵循项目安全要求：POST 携带 TIMESTAMP / NONCE / SIGNATURE，认证头 AUTHORIZATION。
+     * @param {string} token 登录令牌（AUTHORIZATION 请求头）
+     * @param {string} agentId 智能体 ID
+     * @returns {Promise<Array<object>>} 启动文件列表（AgentDocument 数组）
+     */
+    async getStartupFiles(token, agentId) {
+        if (!token) throw new Error('未登录，无法获取启动文件');
+        const body = JSON.stringify({ agentId });
+        const TIMESTAMP = String(Math.floor(Date.now() / 1000));
+        const NONCE = getRandomNonce();
+        const SIGNATURE = await HmacSHA256Hex(CONFIG.SIGN_KEY, body + TIMESTAMP + NONCE);
+
+        const json = await http.post('/agent/startupFiles', { agentId }, {
+            params: { TIMESTAMP, NONCE, SIGNATURE },
+            headers: { AUTHORIZATION: token },
+        });
+        if (json && typeof json.respCode === 'number' && json.respCode !== 0) {
+            throw new Error(json.respMsg || '获取启动文件失败');
+        }
+        return Array.isArray(json?.data) ? json.data : [];
+    },
+
+    /**
+     * 获取指定 Agent 指定启动文件的内容（文件名须命中后端启动文件白名单）。
+     * - 遵循项目安全要求：POST 携带 TIMESTAMP / NONCE / SIGNATURE，认证头 AUTHORIZATION。
+     * @param {string} token 登录令牌（AUTHORIZATION 请求头）
+     * @param {string} agentId 智能体 ID
+     * @param {string} fileName 启动文件名（如 AGENTS.md）
+     * @returns {Promise<object>} 启动文件对象（AgentDocument，含 content）
+     */
+    async getStartupFile(token, agentId, fileName) {
+        if (!token) throw new Error('未登录，无法获取启动文件');
+        const body = JSON.stringify({ agentId, fileName });
+        const TIMESTAMP = String(Math.floor(Date.now() / 1000));
+        const NONCE = getRandomNonce();
+        const SIGNATURE = await HmacSHA256Hex(CONFIG.SIGN_KEY, body + TIMESTAMP + NONCE);
+
+        const json = await http.post('/agent/startupFile', { agentId, fileName }, {
+            params: { TIMESTAMP, NONCE, SIGNATURE },
+            headers: { AUTHORIZATION: token },
+        });
+        if (json && typeof json.respCode === 'number' && json.respCode !== 0) {
+            throw new Error(json.respMsg || '获取启动文件内容失败');
+        }
+        return json?.data || null;
+    },
+
+    /**
+     * 获取指定 Agent 的技能文件清单（仅元数据，不含文件内容）。
+     * - 遵循项目安全要求：POST 携带 TIMESTAMP / NONCE / SIGNATURE，认证头 AUTHORIZATION。
+     * - 注：后端 `/agent/skillFiles` 接口暂未实现，就绪后即可用（前端已按启动文件同样方式接入）。
+     * @param {string} token 登录令牌（AUTHORIZATION 请求头）
+     * @param {string} agentId 智能体 ID
+     * @returns {Promise<Array<object>>} 技能文件列表（SkillDocument 数组）
+     */
+    async getSkillFiles(token, agentId) {
+        if (!token) throw new Error('未登录，无法获取技能文件');
+        const body = JSON.stringify({ agentId });
+        const TIMESTAMP = String(Math.floor(Date.now() / 1000));
+        const NONCE = getRandomNonce();
+        const SIGNATURE = await HmacSHA256Hex(CONFIG.SIGN_KEY, body + TIMESTAMP + NONCE);
+
+        const json = await http.post('/agent/skillFiles', { agentId }, {
+            params: { TIMESTAMP, NONCE, SIGNATURE },
+            headers: { AUTHORIZATION: token },
+        });
+        if (json && typeof json.respCode === 'number' && json.respCode !== 0) {
+            throw new Error(json.respMsg || '获取技能文件失败');
+        }
+        return Array.isArray(json?.data) ? json.data : [];
+    },
+
+    /**
+     * 获取指定 Agent 指定技能文件的内容（文件名须命中后端技能文件白名单）。
+     * - 遵循项目安全要求：POST 携带 TIMESTAMP / NONCE / SIGNATURE，认证头 AUTHORIZATION。
+     * - 注：后端 `/agent/skillFile` 接口暂未实现，就绪后即可用。
+     * @param {string} token 登录令牌（AUTHORIZATION 请求头）
+     * @param {string} agentId 智能体 ID
+     * @param {string} fileName 技能文件名（如 SKILL.md）
+     * @returns {Promise<object>} 技能文件对象（SkillDocument，含 content）
+     */
+    async getSkillFile(token, agentId, fileName) {
+        if (!token) throw new Error('未登录，无法获取技能文件');
+        const body = JSON.stringify({ agentId, fileName });
+        const TIMESTAMP = String(Math.floor(Date.now() / 1000));
+        const NONCE = getRandomNonce();
+        const SIGNATURE = await HmacSHA256Hex(CONFIG.SIGN_KEY, body + TIMESTAMP + NONCE);
+
+        const json = await http.post('/agent/skillFile', { agentId, fileName }, {
+            params: { TIMESTAMP, NONCE, SIGNATURE },
+            headers: { AUTHORIZATION: token },
+        });
+        if (json && typeof json.respCode === 'number' && json.respCode !== 0) {
+            throw new Error(json.respMsg || '获取技能文件内容失败');
+        }
+        return json?.data || null;
+    },
 };

@@ -31,6 +31,14 @@ export function formatDate(ts) {
     return d.getMonth() + 1 + '/' + d.getDate();
 }
 
+/** 格式化字节数（用于文件大小展示） */
+export function formatBytes(bytes) {
+    const n = Number(bytes) || 0;
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
 /** 截断文本 */
 export function truncate(text, maxLen = 28) {
     if (!text) return '新对话';

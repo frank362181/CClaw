@@ -28,14 +28,17 @@ const (
 	MemoryDocFileName    = "MEMORY.md"    //长期记忆文件(存在才注入)
 )
 
-// StartupDocFiles 启动文档清单,按固定顺序加载。
-// required=true 的必需文件缺失时,仍会生成带 Missing 标记的文档,由 prompt 组装层注入 [MISSING] 提示;
-// required=false 的可选文件缺失时直接省略。
-var StartupDocFiles = []struct {
+// StartupDocSpec 启动文档清单中的一项(文件名/种类/是否必需)
+type StartupDocSpec struct {
 	Kind     dataobject.AgentDocumentKind
 	Name     string
 	Required bool
-}{
+}
+
+// StartupDocFiles 启动文档清单,按固定顺序加载。
+// required=true 的必需文件缺失时,仍会生成带 Missing 标记的文档,由 prompt 组装层注入 [MISSING] 提示;
+// required=false 的可选文件缺失时直接省略。
+var StartupDocFiles = []StartupDocSpec{
 	{dataobject.AgentDocAgent, AgentDocFileName, true},
 	{dataobject.AgentDocSoul, SoulDocFileName, false},
 	{dataobject.AgentDocIdentity, IdentityDocFileName, false},
@@ -47,6 +50,9 @@ var StartupDocFiles = []struct {
 
 // 启动文档注入预算(安全/性能,参考 OpenClaw bootstrap-budget)
 const (
+	// StartupFileCacheTTLSeconds 启动文件列表缓存的 TTL(秒):管理界面可接受短暂延迟,换取高并发下免重复磁盘 IO
+	StartupFileCacheTTLSeconds = 30
+
 	MaxAgentDocSize        = 256 * 1024 //agent 启动文档单文件读取上限:256KB
 	MaxSkillDocSize        = 256 * 1024 //skill 文档单文件读取上限:256KB
 	MaxBootstrapFileChars  = 20000      //单个启动文档注入上限(OpenClaw bootstrapMaxChars 默认值)
@@ -80,6 +86,7 @@ const (
 	ConstErrorAgentParameter = iota + basic.ConstErrorMax + 2000 + 1
 	ConstErrorAgentNotFound
 	ConstErrorAgentConflict
+	ConstErrorAgentWorkspace
 )
 
 const (
@@ -96,6 +103,7 @@ const (
 	ConstErrorAgentParameterMsg = "参数错误"
 	ConstErrorAgentNotFoundMsg  = "记录不存在或已被删除"
 	ConstErrorAgentConflictMsg  = "记录已存在或版本冲突"
+	ConstErrorAgentWorkspaceMsg = "智能体工作空间不可用"
 )
 
 // ContextAuthenticatedUser is the gin.Context key for the server-verified user.
@@ -117,6 +125,9 @@ const (
 	RelativeAddAgent    = "/agent/add"
 	RelativeUpdateAgent = "/agent/update"
 	RelativeRemoveAgent = "/agent/remove"
+
+	RelativeGetAgentStartupFiles = "/agent/startupFiles"
+	RelativeGetAgentStartupFile  = "/agent/startupFile"
 
 	RelativeGetSkills   = "/skills"
 	RelativeAddSkill    = "/skill/add"

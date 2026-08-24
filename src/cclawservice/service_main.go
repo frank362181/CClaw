@@ -51,6 +51,7 @@ type ServiceMain struct {
 	defaultAgentConfigHelper *config.ConfigurationHelper
 	agentRepo                repo.IAgentRepository
 	promptRepo               repo.IPromptRepository
+	startupFileRepo          repo.IAgentFileRepository
 }
 
 // NewMainApp 相当于构造函数
@@ -73,7 +74,7 @@ func (m *ServiceMain) Init() error {
 	}
 
 	// 1. format the configuration filename
-	m.configFileName = pCommon.FormatPath(m.configFileName)
+	m.configFileName = filepath.ToSlash(m.configFileName)
 
 	// 2. load configuration
 	var err error
@@ -194,6 +195,9 @@ func (m *ServiceMain) SetupAgentController() error {
 	urlFunMap[cCommon.RelativeUpdateAgent] = agentController.UpdateAgent
 	urlFunMap[cCommon.RelativeRemoveAgent] = agentController.RemoveAgent
 
+	urlFunMap[cCommon.RelativeGetAgentStartupFiles] = agentController.GetStartupFiles
+	urlFunMap[cCommon.RelativeGetAgentStartupFile] = agentController.GetStartupFile
+
 	urlFunMap[cCommon.RelativeGetSkills] = agentController.GetSkills
 	urlFunMap[cCommon.RelativeAddSkill] = agentController.AddSkill
 	urlFunMap[cCommon.RelativeUpdateSkill] = agentController.UpdateSkill
@@ -249,6 +253,10 @@ func (m *ServiceMain) Destroy() {
 		m.promptRepo.Destroy()
 	}
 
+	if m.startupFileRepo != nil {
+		m.startupFileRepo.Destroy()
+	}
+
 	if m.database != nil {
 		m.database.Close()
 	}
@@ -292,8 +300,11 @@ func (m *ServiceMain) loadAgentConfigurations() error {
 	if m.promptRepo == nil {
 		m.promptRepo = repo.GetPromptRepository()
 	}
+	if m.startupFileRepo == nil {
+		m.startupFileRepo = repo.GetAgentFileRepository()
+	}
 	for _, agent := range agents {
-		if err := m.promptRepo.LoadWorkspace(agent.AgentId, agent.AgentDir); err != nil {
+		if err := m.promptRepo.LoadWorkspace(agent); err != nil {
 			logging.LogWarnF("warm up default workspace error:%s", err.Error())
 		}
 	}

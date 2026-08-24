@@ -23,8 +23,8 @@ import (
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
+	"my.favorite/cclawservice/utility"
 	common2 "my.favorite/platformutility/common"
-	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
 	baseService "my.favorite/platformutility/webbase/middleware/service"
 )
@@ -48,29 +48,25 @@ func GetPromptService() *PromptService {
 }
 
 // BuildSystemPrompt 以正常会话范围组装 system prompt(兼容旧调用)。
-//   - agentId:       agent 标识
-//   - workspaceRoot: agent 的工作区根目录
+//   - agent:       agent 对象
 //   - skillFiles:    需要载入元数据的 SKILL.md 文件列表(可为空)
-func (service *PromptService) BuildSystemPrompt(agentId, workspaceRoot string, skillFiles []string) (*dataobject.SystemPrompt, error) {
-	return service.BuildSystemPromptEx(agentId, workspaceRoot, skillFiles, dataobject.BootstrapScopeNormal)
+func (service *PromptService) BuildSystemPrompt(agent dataobject.TAgent, skillFiles []string) (*dataobject.SystemPrompt, error) {
+	return service.BuildSystemPromptEx(agent, skillFiles, dataobject.BootstrapScopeNormal)
 }
 
 // BuildSystemPromptEx 按指定会话范围组装 system prompt。
 // 使用时机与 OpenClaw 一致:新会话首轮注入完整启动文档,后续每轮按指纹复用缓存
 // (文件未变零读盘),从而让长会话能看到工作区文件的编辑。
-func (service *PromptService) BuildSystemPromptEx(agentId, workspaceRoot string, skillFiles []string, scope dataobject.BootstrapScope) (*dataobject.SystemPrompt, error) {
-	workspaceRoot = strings.TrimSpace(workspaceRoot)
-	if len(workspaceRoot) == 0 {
-		return nil, exception.ParameterEmptyErrorEx("prompt service: workspace root is empty")
-	}
+func (service *PromptService) BuildSystemPromptEx(agent dataobject.TAgent, skillFiles []string, scope dataobject.BootstrapScope) (*dataobject.SystemPrompt, error) {
+	workspaceRoot, _ := utility.BuildAgentWorkspaceRoot(agent)
 
 	// 1. 加载并缓存 agent 启动文档(指纹未变化时直接命中缓存)
-	if err := service.promptRepo.LoadWorkspace(agentId, workspaceRoot); err != nil {
+	if err := service.promptRepo.LoadWorkspace(agent); err != nil {
 		return nil, err
 	}
 
 	// 2. 加载 skill 元数据(只解析 front matter,不加载正文)
-	service.promptRepo.ClearSkills(agentId)
+	service.promptRepo.ClearSkills(agent.AgentId)
 	for _, skillFile := range skillFiles {
 		skillFile = strings.TrimSpace(skillFile)
 		if len(skillFile) == 0 {
@@ -78,19 +74,19 @@ func (service *PromptService) BuildSystemPromptEx(agentId, workspaceRoot string,
 		}
 
 		skillId := filepath.Base(skillFile)
-		if err := service.promptRepo.AddSkill(agentId, skillId, skillFile); err != nil {
+		if err := service.promptRepo.AddSkill(agent.AgentId, skillId, skillFile); err != nil {
 			logging.LogWarnF("prompt service: load skill %s error:%s", skillFile, err.Error())
 		}
 	}
 
 	// 3. 组装 system prompt
-	return service.assembleSystemPrompt(agentId, workspaceRoot, scope)
+	return service.assembleSystemPrompt(agent, workspaceRoot, scope)
 }
 
 // assembleSystemPrompt 按规范顺序组装,应用会话范围过滤、缺失标记与预算控制。
-func (service *PromptService) assembleSystemPrompt(agentId, workspaceRoot string, scope dataobject.BootstrapScope) (*dataobject.SystemPrompt, error) {
-	documents := service.promptRepo.GetAllDocuments(agentId) // 已按规范顺序加载
-	skills := service.promptRepo.GetAllSkills(agentId)
+func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, workspaceRoot string, scope dataobject.BootstrapScope) (*dataobject.SystemPrompt, error) {
+	documents := service.promptRepo.GetAllDocuments(agent.AgentId) // 已按规范顺序加载
+	skills := service.promptRepo.GetAllSkills(agent.AgentId)
 
 	var missing, truncated []string
 	sections := make([]dataobject.SystemPromptSection, 0, len(documents)+1)
@@ -146,9 +142,7 @@ func (service *PromptService) assembleSystemPrompt(agentId, workspaceRoot string
 	}
 
 	// ---- 总预算控制:优先保留高优先级文件,超限从尾部压缩 ----
-	if cCommon.MaxBootstrapTotalChars > 0 {
-		sections, truncated = enforceTotalBudget(sections, cCommon.MaxBootstrapTotalChars, truncated)
-	}
+	sections, truncated = enforceTotalBudget(sections, cCommon.MaxBootstrapTotalChars, truncated)
 
 	// ---- 截断提示(OpenClaw: "## Bootstrap Context Notice") ----
 	if len(truncated) > 0 {
@@ -175,7 +169,7 @@ func (service *PromptService) assembleSystemPrompt(agentId, workspaceRoot string
 	}
 
 	return &dataobject.SystemPrompt{
-		AgentId:   agentId,
+		AgentId:   agent.AgentId,
 		Workspace: workspaceRoot,
 		Scope:     scope,
 		Sections:  sections,

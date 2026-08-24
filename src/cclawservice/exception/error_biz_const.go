@@ -14,4 +14,6 @@ const (
 	ErrorIdBizAgentParameter
 	ErrorIdBizAgentNotFound
 	ErrorIdBizAgentConflict
+	ErrorIdBizAgentWorkspace
+	ErrorIdBizAgentInternal
 )

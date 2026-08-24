@@ -1,10 +1,10 @@
 package config
 
 import (
+	"path/filepath"
 	"strings"
 	"sync"
 
-	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/exception"
 )
 
@@ -119,7 +119,7 @@ func findHelper(filename string) (*ConfigurationHelper, error) {
 }
 
 func addHelper(filename string) (*ConfigurationHelper, error) {
-	ext := common.GetExtension(filename)
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(filename)), ".")
 	if ext == "" {
 		return nil, exception.FileExtensionErrorEx("cannot determine config file type from " + filename)
 	}

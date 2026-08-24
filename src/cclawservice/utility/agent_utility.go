@@ -11,10 +11,14 @@
 package utility
 
 import (
+	"path/filepath"
 	"strings"
 
+	"my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
+	pCommon "my.favorite/platformutility/common"
+	pException "my.favorite/platformutility/exception"
 )
 
 // FrontMatterDelimiter front matter 的定界符
@@ -95,6 +99,9 @@ func ValidateAgent(a dataobject.TAgent) error {
 	if strings.TrimSpace(a.AgentDir) == "" {
 		return myException.AgentParameterErrEx("agent dir is empty")
 	}
+	if !pCommon.IsSafeDir(a.AgentDir) {
+		return myException.AgentParameterErrEx("agent dir is an illegal path")
+	}
 	if strings.TrimSpace(a.Workspace) == "" {
 		return myException.AgentParameterErrEx("agent workspace is empty")
 	}
@@ -115,4 +122,41 @@ func ValidateSkill(sk dataobject.TSkill) error {
 		return myException.AgentParameterErrEx("skill scope is invalid")
 	}
 	return nil
+}
+
+// BuildAgentWorkspaceRoot 根据agent的信息构建agent的工作目录
+// 安全:agent_dir 必须为合法相对路径,防止工作区根逃出 <exeDir>/workspace。
+func BuildAgentWorkspaceRoot(agent dataobject.TAgent) (string, bool) {
+	if !pCommon.IsSafeDir(agent.AgentDir) {
+		return "", false
+	}
+
+	agentWorkspaceRoot := filepath.Join(pCommon.GetExecutableDir(), "workspace", agent.OwnerId, agent.AgentDir)
+	if pCommon.IsDir(agentWorkspaceRoot) {
+		return agentWorkspaceRoot, true
+	}
+
+	return "", false
+}
+
+// ResolveStartupPath 校验并解析启动文档路径:仅允许纯文件名,禁止目录穿越与符号链接逃逸。
+// 供 prompt 组装(LoadWorkspace)与启动文件管理(StartupFileRepository)共用,
+// 保证同一套安全路径规则。文件名非法/越界时返回平台 FilePathError。
+func ResolveStartupPath(workspaceRoot, fileName string) (string, error) {
+	// 只允许纯文件名:不能包含路径分隔符、"." 或 ".."
+	if filepath.Base(fileName) != fileName || fileName == "." || fileName == ".." {
+		return "", pException.FilePathErrorEx("illegal document file name: " + fileName)
+	}
+
+	return pCommon.SafeJoin(workspaceRoot, filepath.Join(workspaceRoot, fileName))
+}
+
+// FindStartupDocFile 按文件名(精确匹配)在启动文件清单中查找,未命中返回 ok=false。
+func FindStartupDocFile(fileName string) (common.StartupDocSpec, bool) {
+	for _, f := range common.StartupDocFiles {
+		if f.Name == fileName {
+			return f, true
+		}
+	}
+	return common.StartupDocSpec{}, false
 }
