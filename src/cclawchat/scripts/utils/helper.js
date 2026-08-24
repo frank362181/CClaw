@@ -51,6 +51,17 @@ export function safeJSON(str, fallback = null) {
     try { return JSON.parse(str); } catch { return fallback; }
 }
 
+/** HTML 转义（渲染后端数据时必须使用，防止 XSS 注入） */
+export function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+    }[ch]));
+}
+
 /** 获取用户首字母 */
 export function getInitials(name) {
     if (!name) return 'U';

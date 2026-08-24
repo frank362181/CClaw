@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "check": "node --check scripts/main.js && node --check scripts/modules/api.js && node --check scripts/modules/auth.js && node --check scripts/modules/state.js && node --check scripts/modules/stream.js"
+    "check": "node --check scripts/main.js && node --check scripts/modules/api.js && node --check scripts/modules/auth.js && node --check scripts/modules/state.js && node --check scripts/modules/stream.js && node --check scripts/modules/home.js && node --check scripts/utils/helper.js"
   },
   "engines": {
     "node": ">=22"

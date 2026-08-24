@@ -3,7 +3,7 @@
  * 主页组件控制器 (HomePage)
  * ============================================================
  * 登录成功后显示的主页面：
- *   - 左侧边栏：目录树菜单（dashboard / 我的项目 / 系统设置）
+ *   - 左侧边栏：目录树菜单（我的项目 / 系统设置）
  *   - 右侧核心内容显示区域（按菜单动态渲染）
  *   - 右上角聊天气泡：点击后由外部以抽屉方式打开 chat.html
  *
@@ -12,24 +12,77 @@
  *         打开聊天抽屉、退出登录等跨组件动作交由外部处理。
  */
 
-import { getInitials, genId } from '../utils/helper.js';
+import { getInitials, genId, escapeHtml } from '../utils/helper.js';
 import { State } from './state.js';
+import { API } from './api.js';
+import { CONFIG } from './config.js';
 
 /* ---------- 菜单定义（目录树） ---------- */
 const MENUS = {
-    dashboard: { id: 'dashboard', label: 'dashboard', title: '数据总览' },
     npa: { id: 'npa', label: '我的项目', title: '我的项目' },
     settings: { id: 'settings', label: '系统设置', title: '系统设置' },
 };
 
-/* ---------- 系统设置：Agents / Skills / MCP / Storages / Knowledge 图卡数据（参考 OpenClaw 设置结构，预留后端接入位置） ---------- */
-const AGENTS = [
+/* 登录后的默认落地页：取菜单定义中的第一个 */
+const DEFAULT_MENU = Object.keys(MENUS)[0];
+
+/* ---------- 系统设置：Agents / Skills / MCP / Storages / Knowledge 图卡数据 ---------- */
+/* Agents 本地示例数据：后端不可用或 Mock 模式下降级使用（真实数据来自 GET /api/agents） */
+const AGENTS_FALLBACK = [
     { id: 'assistant', name: '通用助手', icon: '🤖', desc: '日常问答与通用任务处理', model: 'cclaw-gpt-4o', status: '运行中', default: true },
     { id: 'npa-manager', name: '不良资产管理', icon: '🏦', desc: '不良资产处置、分析与进度跟踪', model: 'cclaw-gpt-4o', status: '运行中', default: false },
     { id: 'data-analyst', name: '数据分析', icon: '📊', desc: '数据统计、洞察与可视化', model: 'cclaw-gpt-4o-mini', status: '运行中', default: false },
     { id: 'report-writer', name: '报告撰写', icon: '📝', desc: '自动生成结构化业务报告', model: 'cclaw-gpt-4o-mini', status: '已暂停', default: false },
     { id: 'risk-watch', name: '风险预警', icon: '⚠️', desc: '实时监控风险并生成预警', model: 'cclaw-gpt-4o', status: '运行中', default: false },
 ];
+
+/* 智能体详情 Tab 页签定义 */
+const AGENT_TABS = [
+    { id: 'basic', label: '基本信息' },
+    { id: 'workspace', label: '工作空间' },
+];
+
+/* 智能体详情编辑表单字段（显式排除 owner_id / agent_id / d_version 等只读或后端维护字段）
+   tab: basic=基本信息页签（身份/模型/形象 + 运行配置）；workspace=工作空间页签（仅工作空间/目录） */
+const AGENT_FORM_FIELDS = [
+    // 基本信息页签
+    { key: 'AgentName', label: '名称', type: 'text', required: true, maxlength: 64, tab: 'basic', section: '基本信息' },
+    { key: 'Description', label: '描述', type: 'text', maxlength: 128, tab: 'basic', section: '基本信息' },
+    { key: 'IsDefault', label: '默认 Agent', type: 'switch', tab: 'basic', section: '基本信息' },
+    { key: 'Disabled', label: '已禁用', type: 'switch', tab: 'basic', section: '基本信息' },
+    { key: 'PrimaryModel', label: '主模型', type: 'text', required: true, maxlength: 32, tab: 'basic', section: '模型配置' },
+    { key: 'Fallbacks', label: '兜底模型', type: 'text', maxlength: 128, tab: 'basic', section: '模型配置' },
+    { key: 'ImageName', label: '形象名称', type: 'text', maxlength: 32, tab: 'basic', section: '形象配置' },
+    { key: 'ImageEmoji', label: '形象表情', type: 'emoji', tab: 'basic', section: '形象配置' },
+    { key: 'ImageTheme', label: '形象主题', type: 'text', maxlength: 64, tab: 'basic', section: '形象配置' },
+    { key: 'CompactionMode', label: '压缩模式', type: 'select', options: [{ value: 0, label: '整体摘要' }, { value: 1, label: '分块摘要' }], tab: 'basic', section: '上下文与压缩' },
+    { key: 'ReverseTokenFloor', label: '保留 Token 下限', type: 'number', min: 1, tab: 'basic', section: '上下文与压缩' },
+    { key: 'MaxConcurrents', label: '最大并发数', type: 'number', min: 1, max: 10, tab: 'basic', section: '并发与限制' },
+    { key: 'SubAgents', label: '子 Agent 上限', type: 'number', min: 1, max: 8, step: 1, tab: 'basic', section: '并发与限制' },
+    { key: 'ReasoningMode', label: '推理展示方式', type: 'select', options: [{ value: 0, label: '不展示' }, { value: 1, label: '生成后附带' }, { value: 2, label: '实时流' }], tab: 'basic', section: '推理与工具' },
+    { key: 'ToolProgress', label: '工具执行进度', type: 'select', options: [{ value: 0, label: '简洁' }, { value: 1, label: '附具体命令' }], tab: 'basic', section: '推理与工具' },
+    // 工作空间页签（仅工作空间 / 目录）
+    { key: 'Workspace', label: '工作空间', type: 'text', required: true, maxlength: 256, tab: 'workspace', section: '工作空间' },
+    { key: 'AgentDir', label: 'Agent 目录', type: 'text', required: true, maxlength: 128, tab: 'workspace', section: '工作空间' },
+];
+
+/* 形象表情选择列表（表情选择器） */
+const EMOJI_PICKER_OPTIONS = [
+    '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇', '🙂', '😉',
+    '😍', '🥰', '😘', '😜', '🤪', '😎', '🤓', '🥳', '😏', '😌', '😴', '🤔',
+    '🤗', '🤩', '😭', '😢', '😡', '😱', '😷', '🤒', '🥺', '😳', '🤯', '😇',
+    '🤖', '👾', '👽', '🤝', '👍', '👎', '👏', '🙌', '👌', '🤙', '💪', '✌️',
+    '🐱', '🐶', '🦊', '🐼', '🐨', '🐯', '🦁', '🐮', '🐷', '🐸', '🐵', '🦄',
+    '🌈', '⭐', '🔥', '💡', '💎', '💰', '🏆', '🎯', '🎨', '🚀', '🏦', '⚖️',
+];
+
+/* 详情表单必填校验提示 */
+const AGENT_FORM_REQUIRED = {
+    AgentName: '名称',
+    PrimaryModel: '主模型',
+    AgentDir: 'Agent 目录',
+    Workspace: '工作空间',
+};
 
 const SKILLS = [
     { id: 'code-search', name: '代码搜索', icon: '🔍', desc: '在工作区中检索代码与文档', enabled: true },
@@ -54,30 +107,6 @@ const STORAGES = [
 const KNOWLEDGE = [
     { id: 'assets', name: '资产知识库', icon: '📚', entries: 1286, enabled: true },
     { id: 'npa', name: '不良资产知识库', icon: '🗃️', entries: 342, enabled: true },
-];
-
-/* ---------- 内容 Mock 数据（预留后端接入位置） ---------- */
-const DASH_STATS = [
-    { label: '资产总数', value: '1,286', icon: '📦', delta: '+3.2%', up: true },
-    { label: '在用设备', value: '1,054', icon: '🖥️', delta: '+1.1%', up: true },
-    { label: '待处理告警', value: '12', icon: '⚠️', delta: '-18%', up: false },
-    { label: '今日巡检', value: '96', icon: '✅', delta: '+24', up: true },
-];
-
-const CATEGORY_DATA = [
-    { label: 'IT设备', value: 42 },
-    { label: '办公设备', value: 26 },
-    { label: '网络设备', value: 15 },
-    { label: '安防设备', value: 10 },
-    { label: '电力设备', value: 7 },
-];
-
-const RECENT_ACTIVITY = [
-    { time: '10:32', text: '张伟 更新了资产「服务器集群 A1」的状态' },
-    { time: '09:18', text: '系统完成每日资产巡检，共发现 2 项异常' },
-    { time: '08:45', text: '李娜 新增资产「台式工作站 X3」' },
-    { time: '昨天 17:20', text: '王强 提交了「激光打印机 HP」的维修工单' },
-    { time: '昨天 15:05', text: '系统已完成本周数据同步' },
 ];
 
 /* ========== 我的项目（NPA）：数据与本地存储 ========== */
@@ -203,13 +232,47 @@ function formatAmount(value) {
     return Number(value || 0).toLocaleString('zh-CN');
 }
 
+/* 宽松布尔转换：兼容 true/false、1/0、'1'/'true' 等后端常见取值 */
+function toBool(value) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    if (typeof value === 'string') {
+        const t = value.trim().toLowerCase();
+        return t === '1' || t === 'true' || t === 'yes';
+    }
+    return false;
+}
+
+/* 后端 TAgent → 前端展示卡片模型（防御性归一化，兼容大小写字段） */
+function normalizeAgent(agent) {
+    if (!agent || typeof agent !== 'object') return null;
+    const id = String(agent.AgentId || agent.agentId || genId());
+    const disabled = Boolean(agent.Disabled ?? agent.disabled);
+    return {
+        id,
+        name: String(agent.AgentName || agent.ImageName || agent.agentName || '未命名智能体'),
+        icon: String(agent.ImageEmoji || agent.imageEmoji || '🤖'),
+        desc: String(agent.Description || agent.description || agent.Workspace || agent.workspace || ''),
+        model: String(agent.PrimaryModel || agent.primaryModel || '—'),
+        status: disabled ? '已暂停' : '运行中',
+        // 默认 Agent 标记：兼容后端字段 is_default / IsDefault
+        default: toBool(agent.is_default ?? agent.IsDefault),
+        // 保留后端原始对象，供详情页展示完整字段
+        raw: agent,
+    };
+}
+
 export const HomePage = {
     comp: null,
     els: {},
     handlers: {},
     username: '',
-    currentMenu: 'dashboard',
+    currentMenu: DEFAULT_MENU,
     skillsFilter: 'all',
+    agents: null,          // 智能体列表（null=尚未加载，由后端接口填充）
+    agentsLoading: false,  // 防止重复并发加载
+    currentAgentDetail: null, // 当前智能体详情（null=不在详情页）
+    currentAgentTab: 'basic', // 详情页当前激活页签（basic / workspace）
     npaProjects: [],
     pendingDeleteId: null,
     currentHousehold: null,
@@ -229,6 +292,7 @@ export const HomePage = {
             homeSidebarOverlay: comp.query('#homeSidebarOverlay'),
             menuTree: comp.query('#menuTree'),
             contentTitle: comp.query('#contentTitle'),
+            contentBreadcrumb: comp.query('.content-breadcrumb'),
             contentView: comp.query('#contentView'),
             chatBubble: comp.query('#chatBubble'),
             btnHomeLogout: comp.query('#btnHomeLogout'),
@@ -283,6 +347,11 @@ export const HomePage = {
             item.addEventListener('click', () => this.selectMenu(item.dataset.menu));
         });
 
+        // 面包屑：智能体详情内点击「首页 / 系统设置」返回系统设置
+        this.els.contentBreadcrumb.addEventListener('click', () => {
+            if (this.currentAgentDetail) this.closeAgentDetail();
+        });
+
         // 聊天气泡：通知外部以抽屉方式打开聊天窗口（低耦合，交由 App 处理）
         this.els.chatBubble.addEventListener('click', () => this.handlers.onToggleChat?.());
 
@@ -298,8 +367,24 @@ export const HomePage = {
             if (e.target === this.els.logoutConfirm) this.closeLogoutConfirm();
         });
 
-        // 我的项目：动态内容通过事件委托绑定（内容随菜单切换重建，避免重复绑定）
+        // 动态内容通过事件委托绑定（内容随菜单切换重建，避免重复绑定）
         this.els.contentView.addEventListener('click', (e) => {
+            // 表情选择：点击弹层与打开按钮之外先关闭所有表情弹层
+            const emojiPopup = e.target.closest('[data-emoji-popup]');
+            const emojiPicker = e.target.closest('[data-emoji-picker]');
+            if (!emojiPopup && !emojiPicker) this._closeEmojiPopups();
+            if (emojiPicker) { this.toggleEmojiPicker(emojiPicker.dataset.emojiPicker); return; }
+            const emojiItem = e.target.closest('[data-emoji-item]');
+            if (emojiItem) { this.pickEmoji(emojiItem.dataset.emojiItem); return; }
+
+            // 系统设置：智能体卡片 → 详情二级页；详情页返回/保存按钮
+            const agentCard = e.target.closest('[data-agent]');
+            if (agentCard) { this.openAgentDetail(agentCard.dataset.agent); return; }
+            if (e.target.closest('#btnBackToSettings')) { this.closeAgentDetail(); return; }
+            if (e.target.closest('#btnSaveAgent')) { this.submitAgentEdit(); return; }
+            const agentTab = e.target.closest('[data-agent-tab]');
+            if (agentTab) { this.switchAgentTab(agentTab.dataset.agentTab); return; }
+
             if (e.target.closest('#btnNpaAdd')) { this.openNpaCreate(); return; }
             const expandBtn = e.target.closest('[data-npa-expand]');
             if (expandBtn) { this.toggleNpaExpand(expandBtn.dataset.npaExpand); return; }
@@ -365,8 +450,8 @@ export const HomePage = {
             if (e.target === this.els.editProfileModal) this.closeEditProfileModal();
         });
 
-        // 默认展示 dashboard
-        this.selectMenu('dashboard');
+        // 默认展示首个菜单（我的项目）
+        this.selectMenu(DEFAULT_MENU);
     },
 
     show() {
@@ -397,8 +482,12 @@ export const HomePage = {
      * @param {string} menuId
      */
     selectMenu(menuId) {
-        const menu = MENUS[menuId] || MENUS.dashboard;
+        const menu = MENUS[menuId] || MENUS[DEFAULT_MENU];
         this.currentMenu = menu.id;
+        // 切换菜单时退出智能体详情二级页
+        this.currentAgentDetail = null;
+        // 面包屑退出链接态（仅智能体详情内可点击返回）
+        this.els.contentBreadcrumb.classList.remove('linkable');
 
         // 高亮目录树菜单项
         this.els.menuTree.querySelectorAll('.tree-item').forEach(item => {
@@ -409,11 +498,13 @@ export const HomePage = {
         this.els.contentTitle.textContent = menu.label;
 
         // 渲染核心内容区
-        this.els.contentView.innerHTML = menu.id === 'settings'
-            ? this.renderSettings()
-            : menu.id === 'npa'
-                ? this.renderNpa()
-                : this.renderDashboard();
+        if (menu.id === 'settings') {
+            this.els.contentView.innerHTML = this.renderSettings();
+            // 智能体列表来自后端，异步加载完成后原地刷新该区块
+            this._loadSettingsAgents();
+        } else {
+            this.els.contentView.innerHTML = this.renderNpa();
+        }
 
         // 移动端选中菜单后收起主侧边栏
         if (window.innerWidth <= 768) {
@@ -421,73 +512,10 @@ export const HomePage = {
         }
     },
 
-    /* ========== dashboard 内容 ========== */
-    renderDashboard() {
-        const statsHtml = DASH_STATS.map(s => `
-            <div class="stat-card">
-                <div class="stat-icon">${s.icon}</div>
-                <div class="stat-info">
-                    <div class="stat-value">${s.value}</div>
-                    <div class="stat-label">${s.label}</div>
-                </div>
-                <div class="stat-delta ${s.up ? 'up' : 'down'}">${s.delta}</div>
-            </div>
-        `).join('');
-
-        const maxCat = Math.max(...CATEGORY_DATA.map(c => c.value));
-        const barsHtml = CATEGORY_DATA.map(c => `
-            <div class="chart-bar-row">
-                <span class="chart-bar-label">${c.label}</span>
-                <div class="chart-bar-track">
-                    <div class="chart-bar-fill" style="width:${Math.round(c.value / maxCat * 100)}%"></div>
-                </div>
-                <span class="chart-bar-value">${c.value}%</span>
-            </div>
-        `).join('');
-
-        const activityHtml = RECENT_ACTIVITY.map(a => `
-            <li class="activity-item">
-                <span class="activity-time">${a.time}</span>
-                <span class="activity-text">${a.text}</span>
-            </li>
-        `).join('');
-
-        return `
-            <div class="stat-grid">
-                ${statsHtml}
-            </div>
-
-            <div class="dash-panels">
-                <div class="panel-card">
-                    <div class="panel-title">资产分类分布</div>
-                    <div class="chart-bars">
-                        ${barsHtml}
-                    </div>
-                </div>
-                <div class="panel-card">
-                    <div class="panel-title">最近动态</div>
-                    <ul class="activity-list">
-                        ${activityHtml}
-                    </ul>
-                </div>
-            </div>
-        `;
-    },
-
     /* ========== 系统设置内容：Agents / Skills / MCP / Storages / Knowledge 图卡 ========== */
     renderSettings() {
-        const agentsHtml = AGENTS.map(a => `
-            <div class="agent-card" data-agent="${a.id}">
-                <span class="card-check">✓</span>
-                <div class="card-icon">${a.icon}</div>
-                <div class="card-name">${a.name}${a.default ? '<span class="card-badge">默认</span>' : ''}</div>
-                <div class="card-desc">${a.desc}</div>
-                <div class="card-meta">模型：${a.model}</div>
-                <div class="card-status">
-                    <span class="card-status-dot ${a.status === '运行中' ? 'on' : 'off'}"></span>${a.status}
-                </div>
-            </div>
-        `).join('');
+        // 智能体列表：后端优先，this.agents 由 _loadSettingsAgents() 填充
+        const agentsHtml = this._renderAgentCards();
 
         const skillsHtml = SKILLS.map(s => `
             <div class="skill-card" data-skill="${s.id}" data-skill-name="${s.name.toLowerCase()}" data-skill-status="${s.enabled ? 'enabled' : 'disabled'}">
@@ -546,9 +574,9 @@ export const HomePage = {
 
             <div class="settings-section">
                 <div class="settings-section-head">
-                    <div class="settings-section-title">Agents（智能体）<span class="settings-section-count">共 ${AGENTS.length} 个</span></div>
+                    <div class="settings-section-title">Agents（智能体）<span class="settings-section-count" id="agentCount">${this.agents === null ? '' : `共 ${this.agents.length} 个`}</span></div>
                 </div>
-                <div class="agent-grid">
+                <div class="agent-grid" id="agentGrid">
                     ${agentsHtml}
                 </div>
             </div>
@@ -593,6 +621,353 @@ export const HomePage = {
                 </div>
             </div>
         `;
+    },
+
+    /* ========== 系统设置：Agents 数据加载（后端优先） ========== */
+
+    /* 渲染智能体卡片区（含加载 / 空状态） */
+    _renderAgentCards() {
+        if (this.agents === null) {
+            return '<div class="settings-state">正在加载智能体列表…</div>';
+        }
+        if (this.agents.length === 0) {
+            return '<div class="settings-state">暂无智能体</div>';
+        }
+        return this.agents.map(a => this._agentCardHtml(a)).join('');
+    },
+
+    /* 单个智能体卡片 HTML（对后端字段做 HTML 转义，防 XSS） */
+    _agentCardHtml(a) {
+        return `
+            <div class="agent-card" data-agent="${escapeHtml(a.id)}">
+                <span class="card-check">✓</span>
+                <div class="card-icon">${escapeHtml(a.icon)}</div>
+                <div class="card-name">${escapeHtml(a.name)}${a.default ? '<span class="card-badge">默认</span>' : ''}</div>
+                <div class="card-desc">${escapeHtml(a.desc)}</div>
+                <div class="card-meta">模型：${escapeHtml(a.model)}</div>
+                <div class="card-status">
+                    <span class="card-status-dot ${a.status === '运行中' ? 'on' : 'off'}"></span>${escapeHtml(a.status)}
+                </div>
+            </div>
+        `;
+    },
+
+    /**
+     * 加载当前登录用户的智能体列表（后端 GET /api/agents）。
+     * - 以当前登录用户 token 调后端，后端据此识别 owner，前端无需传用户标识。
+     * - Mock 模式直接使用本地示例数据；后端异常时降级示例数据保证页面可用。
+     * - 结果缓存在 this.agents，仅首次进入设置页触发，避免重复请求。
+     */
+    async _loadSettingsAgents() {
+        if (this.agents !== null || this.agentsLoading) return;
+        this.agentsLoading = true;
+        try {
+            if (CONFIG.ENABLE_MOCK) {
+                this.agents = AGENTS_FALLBACK;
+            } else {
+                try {
+                    const list = await API.getAgents(State.user?.token);
+                    // 后端返回空列表时展示空状态（不混入示例数据）
+                    this.agents = (Array.isArray(list) ? list : []).map(normalizeAgent).filter(Boolean);
+                } catch (error) {
+                    console.warn('[Agents] 获取智能体列表失败，使用本地示例数据：', error);
+                    this.agents = AGENTS_FALLBACK;
+                }
+            }
+        } finally {
+            this.agentsLoading = false;
+        }
+        this._refreshAgentsSection();
+    },
+
+    /* 智能体加载完成后，原地刷新已渲染的设置页区块（未在设置页则跳过） */
+    _refreshAgentsSection() {
+        const grid = this.els.contentView?.querySelector('#agentGrid');
+        const count = this.els.contentView?.querySelector('#agentCount');
+        if (grid) {
+            grid.innerHTML = this._renderAgentCards();
+            if (count) count.textContent = `共 ${this.agents.length} 个`;
+        }
+    },
+
+    /* ========== 系统设置：智能体详情二级页 ========== */
+
+    /* 打开智能体详情（替换当前内容区，可从详情页返回系统设置） */
+    openAgentDetail(agentId) {
+        const agent = (this.agents || []).find(a => String(a.id) === String(agentId));
+        if (!agent) return;
+        this.currentAgentDetail = agent;
+        this.currentAgentTab = 'basic'; // 每次进入详情默认展示第一个页签
+        // 面包屑保持「首页 / 系统设置」并支持点击返回
+        this.els.contentBreadcrumb.classList.add('linkable');
+        this.els.contentView.innerHTML = this.renderAgentDetail(agent);
+    },
+
+    /* 关闭详情页：返回系统设置（列表已缓存，直接重渲染，无需重新请求） */
+    closeAgentDetail() {
+        this.currentAgentDetail = null;
+        this.selectMenu('settings');
+    },
+
+    /* 渲染智能体详情页：顶部概览 + 可编辑分组表单（除 owner_id 外字段均可改） */
+    renderAgentDetail(agent) {
+        const raw = (agent && typeof agent.raw === 'object') ? agent.raw : this._agentCardAsRaw(agent);
+        // 形象表情用该 agent 实际展示的 emoji：raw 为空时回退到卡片默认（避免字段留空）
+        const formRaw = { ...raw, ImageEmoji: String(raw.ImageEmoji || agent.icon) };
+
+        return `
+            <div class="agent-detail">
+                <!-- 操作状态提示（顶部醒目横幅，成功自动消失） -->
+                <div class="agent-form-status" id="agentFormStatus"></div>
+
+                <!-- 合并后的概览 banner：名称 + 描述(版本号徽标) + 返回/保存 按钮 -->
+                <div class="agent-detail-head">
+                    <span class="agent-detail-icon">${escapeHtml(agent.icon)}</span>
+                    <div class="agent-detail-brief">
+                        <div class="agent-detail-name">
+                            ${escapeHtml(agent.name)}${agent.default ? '<span class="card-badge">默认</span>' : ''}
+                            <span class="agent-status-dot ${agent.status === '运行中' ? 'on' : 'off'}" title="${escapeHtml(agent.status)}"></span>
+                        </div>
+                        <div class="agent-detail-desc">
+                            ${escapeHtml(agent.desc)}
+                            <span class="agent-detail-version" title="版本号">版本 ${escapeHtml(this._agentFieldText(raw.dVersion))}</span>
+                        </div>
+                    </div>
+                    <div class="agent-detail-actions">
+                        <button type="button" class="btn-modal-cancel" id="btnBackToSettings">← 返回系统设置</button>
+                        <button type="button" class="btn-primary-add" id="btnSaveAgent">保存修改</button>
+                    </div>
+                </div>
+
+                <div class="agent-form-card">
+                    <div class="agent-tabs" role="tablist">
+                        ${AGENT_TABS.map(t => `
+                            <button type="button" class="agent-tab ${t.id === 'basic' ? 'active' : ''}" role="tab" data-agent-tab="${t.id}">${t.label}</button>
+                        `).join('')}
+                    </div>
+                    ${AGENT_TABS.map(t => `
+                        <div class="agent-tab-panel" role="tabpanel" data-agent-panel="${t.id}" ${t.id === 'basic' ? '' : 'hidden'}>
+                            ${this._agentFormSections(formRaw, t.id)}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    },
+
+    /* 分组生成表单区块（AGENT_FORM_FIELDS 按 tab 过滤、再按 section 聚合） */
+    _agentFormSections(raw, tabId) {
+        const groups = [];
+        AGENT_FORM_FIELDS
+            .filter(field => field.tab === tabId)
+            .forEach(field => {
+                const group = groups.find(g => g.title === field.section);
+                const item = this._agentFormItemHtml(field, raw);
+                if (group) group.items.push(item);
+                else groups.push({ title: field.section, items: [item] });
+            });
+        return groups.map(group => `
+            <div class="agent-form-section">
+                <div class="agent-form-section-title">${group.title}</div>
+                <div class="agent-form-grid">
+                    ${group.items.join('')}
+                </div>
+            </div>
+        `).join('');
+    },
+
+    /* 切换详情页签（基本信息 / 工作空间） */
+    switchAgentTab(tabId) {
+        this.currentAgentTab = tabId;
+        this.els.contentView.querySelectorAll('.agent-tab').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.agentTab === tabId);
+        });
+        this.els.contentView.querySelectorAll('.agent-tab-panel').forEach(panel => {
+            panel.hidden = panel.dataset.agentPanel !== tabId;
+        });
+    },
+
+    /* 单个表单项 HTML（text / number / select / switch / emoji，值经 HTML 转义防 XSS） */
+    _agentFormItemHtml(field, raw) {
+        const value = raw?.[field.key];
+        const id = 'f_' + field.key;
+        const required = field.required ? ' <span class="req">*</span>' : '';
+
+        let control;
+        if (field.type === 'switch') {
+            control = `
+                <label class="switch">
+                    <input type="checkbox" id="${id}" data-key="${field.key}" ${toBool(value) ? 'checked' : ''} />
+                    <span class="switch-slider"></span>
+                </label>`;
+        } else if (field.type === 'emoji') {
+            // 高亮该 agent 原本的形象表情（当前输入框的值）
+            const currentEmoji = String(value ?? '');
+            const emojiItems = EMOJI_PICKER_OPTIONS.map((e, i) =>
+                `<button type="button" class="agent-emoji-item${currentEmoji === e ? ' selected' : ''}" data-emoji-item="${i}" title="${e}">${e}</button>`
+            ).join('');
+            control = `
+                <div class="agent-emoji-control">
+                    <input type="text" id="${id}" class="setting-input agent-form-input" data-key="${field.key}" value="${escapeHtml(String(value ?? ''))}" maxlength="32" placeholder="点击 ⋯ 选择表情" />
+                    <button type="button" class="btn-emoji-picker" data-emoji-picker="${field.key}" title="选择表情">⋯</button>
+                    <div class="agent-emoji-popup" data-emoji-popup="${field.key}" hidden>
+                        ${emojiItems}
+                    </div>
+                </div>`;
+        } else if (field.type === 'select') {
+            const options = (field.options || []).map(o =>
+                `<option value="${Number(o.value)}"${Number(value) === Number(o.value) ? ' selected' : ''}>${escapeHtml(o.label)}</option>`
+            ).join('');
+            control = `<select id="${id}" class="setting-input agent-form-input" data-key="${field.key}">${options}</select>`;
+        } else if (field.type === 'number') {
+            const attrs = [
+                field.min !== undefined ? `min="${field.min}"` : '',
+                field.max !== undefined ? `max="${field.max}"` : '',
+                field.step ? `step="${field.step}"` : '',
+            ].filter(Boolean).join(' ');
+            control = `<input type="number" id="${id}" class="setting-input agent-form-input" data-key="${field.key}" value="${Number(value) || 0}" ${attrs} />`;
+        } else {
+            control = `<input type="text" id="${id}" class="setting-input agent-form-input" data-key="${field.key}" value="${escapeHtml(String(value ?? ''))}" maxlength="${field.maxlength || ''}" />`;
+        }
+
+        return `
+            <div class="agent-form-item ${field.type === 'switch' ? 'agent-form-item-switch' : ''}">
+                <label class="agent-form-label" for="${id}">${field.label}${required}</label>
+                ${control}
+            </div>`;
+    },
+
+    /* 收集表单值：select/number 转数字、switch 转布尔、文本去首尾空格 */
+    _collectAgentForm() {
+        const values = {};
+        this.els.contentView.querySelectorAll('[data-key]').forEach(el => {
+            const key = el.dataset.key;
+            if (el.type === 'checkbox') values[key] = el.checked;
+            else if (el.type === 'select-one' || el.type === 'number') values[key] = Number(el.value) || 0;
+            else values[key] = el.value.trim();
+        });
+        return values;
+    },
+
+    /* 保存修改：校验必填 → 调后端更新接口 → 成功后更新本地缓存并刷新详情页 */
+    async submitAgentEdit() {
+        const raw = this.currentAgentDetail?.raw;
+        if (!raw) return;
+
+        const values = this._collectAgentForm();
+        for (const [key, label] of Object.entries(AGENT_FORM_REQUIRED)) {
+            if (!String(values[key] ?? '').trim()) {
+                this._setAgentFormStatus('error', `「${label}」不能为空`);
+                // 若必填字段位于未激活页签，自动切到该页签方便定位
+                const field = AGENT_FORM_FIELDS.find(f => f.key === key);
+                if (field && field.tab !== this.currentAgentTab) this.switchAgentTab(field.tab);
+                return;
+            }
+        }
+
+        // 数值范围校验（min / max）
+        for (const field of AGENT_FORM_FIELDS) {
+            if (field.type !== 'number' || (field.min === undefined && field.max === undefined)) continue;
+            const num = Number(values[field.key]);
+            if (!Number.isFinite(num)) continue;
+            const tooLow = field.min !== undefined && num < field.min;
+            const tooHigh = field.max !== undefined && num > field.max;
+            if (!tooLow && !tooHigh) continue;
+            const range = field.min !== undefined && field.max !== undefined
+                ? `须在 ${field.min}~${field.max} 之间`
+                : field.min !== undefined
+                    ? `不能小于 ${field.min}`
+                    : `不能大于 ${field.max}`;
+            this._setAgentFormStatus('error', `「${field.label}」${range}`);
+            if (field.tab !== this.currentAgentTab) this.switchAgentTab(field.tab);
+            return;
+        }
+
+        // 乐观锁：提交「当前服务端版本号」（后端校验相等后自增），不能 +1
+        const baseVersion = Number(raw.dVersion || 0);
+        const updatedRaw = { ...raw, ...values, dVersion: baseVersion };
+        this._setAgentFormStatus('saving', '保存中…');
+        try {
+            await API.updateAgent(State.user?.token, updatedRaw);
+        } catch (error) {
+            this._setAgentFormStatus('error', error.message || '保存失败，请重试');
+            return;
+        }
+
+        // 保存成功后服务端版本号 +1，本地同步，供下次编辑使用
+        const card = normalizeAgent({ ...updatedRaw, dVersion: baseVersion + 1 });
+        const idx = (this.agents || []).findIndex(a => String(a.id) === String(card.id));
+        if (idx >= 0) this.agents[idx] = card;
+        this.currentAgentDetail = card;
+        this.els.contentView.innerHTML = this.renderAgentDetail(card);
+        // 保持当前所在页签，再提示成功
+        this.switchAgentTab(this.currentAgentTab);
+        this._setAgentFormStatus('success', '保存成功');
+    },
+
+    /* ========== 系统设置：形象表情选择 ========== */
+
+    /* 切换表情选择弹层（打开/关闭） */
+    toggleEmojiPicker(fieldKey) {
+        const popup = this.els.contentView?.querySelector(`[data-emoji-popup="${fieldKey}"]`);
+        if (!popup) return;
+        const willOpen = popup.hidden;
+        this._closeEmojiPopups();
+        if (willOpen) popup.hidden = false;
+    },
+
+    /* 选中表情：写入对应输入框并关闭弹层 */
+    pickEmoji(index) {
+        const emoji = EMOJI_PICKER_OPTIONS[Number(index)];
+        if (!emoji) return;
+        const popup = this.els.contentView?.querySelector('[data-emoji-popup]:not([hidden])');
+        if (!popup) return;
+        const input = popup.closest('.agent-emoji-control')?.querySelector('input[data-key]');
+        if (input) input.value = emoji;
+        popup.hidden = true;
+    },
+
+    /* 关闭所有表情弹层 */
+    _closeEmojiPopups() {
+        this.els.contentView?.querySelectorAll('[data-emoji-popup]:not([hidden])').forEach(p => {
+            p.hidden = true;
+        });
+    },
+
+    /* 表单操作状态提示（顶部醒目横幅：success/error/saving；成功自动消失） */
+    _setAgentFormStatus(type, msg) {
+        const el = this.els.contentView?.querySelector('#agentFormStatus');
+        if (!el) return;
+        const icon = type === 'success' ? '✓' : type === 'error' ? '⚠' : '…';
+        el.textContent = (icon ? `${icon} ` : '') + msg;
+        el.className = 'agent-form-status' + (type ? ` ${type}` : '');
+        clearTimeout(this._agentStatusTimer);
+        if (type === 'success') {
+            this._agentStatusTimer = setTimeout(() => {
+                el.textContent = '';
+                el.className = 'agent-form-status';
+            }, 2500);
+        }
+    },
+
+    /* 详情字段值格式化：空值占位、布尔转中文 */
+    _agentFieldText(value) {
+        if (value === null || value === undefined || value === '') return '—';
+        if (typeof value === 'boolean') return value ? '是' : '否';
+        return String(value);
+    },
+
+    /* 无后端原始对象时（如本地示例数据）由卡片模型派生展示字段 */
+    _agentCardAsRaw(agent) {
+        return {
+            AgentId: agent.id,
+            AgentName: agent.name,
+            Description: agent.desc,
+            PrimaryModel: agent.model,
+            ImageEmoji: agent.icon,
+            IsDefault: agent.default,
+            Disabled: agent.status === '已暂停',
+        };
     },
 
     /* ========== 我的项目（NPA）内容 ========== */
@@ -917,7 +1292,7 @@ export const HomePage = {
         const display = displayName || username || '用户';
         this.els.homeUserName.textContent = display;
         this.els.homeAvatar.textContent = getInitials(display);
-        // 用户名变化后重渲染当前菜单内容（如 dashboard 欢迎语）
+        // 用户名变化后重渲染当前菜单内容
         if (this.els.contentView) {
             this.selectMenu(this.currentMenu);
         }
@@ -1052,7 +1427,11 @@ export const HomePage = {
         this.pendingDeleteId = null;
         this.currentHousehold = null;
         this.currentFileText = '';
+        // 清空智能体缓存：切换登录用户后按新用户重新拉取（避免跨用户数据残留）
+        this.agents = null;
+        this.agentsLoading = false;
+        this.currentAgentDetail = null;
         this.updateUserInfo('');
-        this.selectMenu('dashboard');
+        this.selectMenu(DEFAULT_MENU);
     },
 };

@@ -138,4 +138,54 @@ export const API = {
         await http.post('/logout', null, { headers: { AUTHORIZATION: token } });
         return { success: true };
     },
+
+    /**
+     * 获取当前登录用户的 Agents（智能体）列表。
+     * - 后端通过 token 识别当前用户（owner），无需前端传用户标识。
+     * - 遵循项目安全要求：GET 请求同样携带 TIMESTAMP / NONCE / SIGNATURE（防重放）。
+     * @param {string} token 登录令牌（AUTHORIZATION 请求头）
+     * @returns {Promise<Array<object>>} 后端返回的 Agent 原始对象数组
+     */
+    async getAgents(token) {
+        if (!token) throw new Error('未登录，无法获取智能体列表');
+        // 签名基于「请求内容 + TIMESTAMP + NONCE」；GET 无请求体，内容为空串
+        const TIMESTAMP = String(Math.floor(Date.now() / 1000));
+        const NONCE = getRandomNonce();
+        const SIGNATURE = await HmacSHA256Hex(CONFIG.SIGN_KEY, '' + TIMESTAMP + NONCE);
+
+        const json = await http.get('/agents', {
+            params: { TIMESTAMP, NONCE, SIGNATURE },
+            headers: { AUTHORIZATION: token },
+        });
+        // 后端 CommonResponse 字段为 respCode/respMsg（camelCase）
+        if (json && typeof json.respCode === 'number' && json.respCode !== 0) {
+            throw new Error(json.respMsg || '获取智能体列表失败');
+        }
+        return Array.isArray(json?.data) ? json.data : [];
+    },
+
+    /**
+     * 更新当前登录用户的一个 Agent（后端乐观锁，body 需携带 dVersion）。
+     * - 遵循项目安全要求：POST 携带 TIMESTAMP / NONCE / SIGNATURE，认证头 AUTHORIZATION。
+     * @param {string} token 登录令牌（AUTHORIZATION 请求头）
+     * @param {object} agent TAgent 对象（含 dVersion 乐观锁）
+     * @returns {Promise<object>} 后端 CommonResponse
+     */
+    async updateAgent(token, agent) {
+        if (!token) throw new Error('未登录，无法保存智能体');
+        // 签名基于「请求内容 + TIMESTAMP + NONCE」；内容为实际发送的 JSON 字符串
+        const body = JSON.stringify(agent);
+        const TIMESTAMP = String(Math.floor(Date.now() / 1000));
+        const NONCE = getRandomNonce();
+        const SIGNATURE = await HmacSHA256Hex(CONFIG.SIGN_KEY, body + TIMESTAMP + NONCE);
+
+        const json = await http.post('/agent/update', agent, {
+            params: { TIMESTAMP, NONCE, SIGNATURE },
+            headers: { AUTHORIZATION: token },
+        });
+        if (json && typeof json.respCode === 'number' && json.respCode !== 0) {
+            throw new Error(json.respMsg || '保存智能体失败');
+        }
+        return json;
+    },
 };

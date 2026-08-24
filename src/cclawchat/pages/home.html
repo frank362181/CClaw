@@ -7,7 +7,7 @@
     交互逻辑由 scripts/modules/home.js 控制。
 
     页面结构：
-      - 左侧边栏：目录树菜单（dashboard / 我的项目 / 系统设置）
+      - 左侧边栏：目录树菜单（我的项目 / 系统设置）
       - 右侧核心内容显示区域（按菜单动态渲染）
       - 右上角聊天气泡：点击后由外部以抽屉方式打开 chat.html
     注意：初始不带 active 类，登录组件优先展示，
@@ -32,11 +32,6 @@
         <nav class="menu-tree" id="menuTree">
             <div class="tree-group-label">导航</div>
 
-            <div class="tree-item" data-menu="dashboard" title="dashboard">
-                <span class="tree-icon">📊</span>
-                <span class="tree-label">dashboard</span>
-            </div>
-
             <div class="tree-item" data-menu="npa" title="我的项目">
                 <span class="tree-icon">🏦</span>
                 <span class="tree-label">我的项目</span>
@@ -58,7 +53,7 @@
                 <div class="content-breadcrumb">
                     <span class="crumb-root">首页</span>
                     <span class="crumb-sep">/</span>
-                    <span id="contentTitle" class="crumb-current">dashboard</span>
+                    <span id="contentTitle" class="crumb-current">我的项目</span>
                 </div>
             </div>
             <div class="content-actions">

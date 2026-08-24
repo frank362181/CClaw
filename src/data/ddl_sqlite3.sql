@@ -54,8 +54,10 @@ CREATE TABLE t_agent (
 
     -- 基本信息
                          agent_name VARCHAR(64) NOT NULL,                 -- Agent名称（可重复）
+                         description VARCHAR(128) DEFAULT NULL,           -- Agent描述（用于列表展示）
                          primary_model VARCHAR(32) NOT NULL,              -- 主模型（LLM Provider ID）
                          fallbacks VARCHAR(128) DEFAULT NULL,             -- 兜底模型，逗号分割
+                         is_default INTEGER NOT NULL DEFAULT 0,           -- 是否是默认模型
 
     -- 路径与工作空间
                          agent_dir VARCHAR(128) NOT NULL,                 -- agent启动文件路径（相对路径）
@@ -93,6 +95,7 @@ INSERT INTO t_agent (
     agent_id,
     owner_id,
     agent_name,
+    description,
     primary_model,
     agent_dir,
     workspace,
@@ -102,6 +105,7 @@ INSERT INTO t_agent (
              'agent_001',
              '100001',
              '不良资产智能助手',
+             '生成不良资产尽调报告',
              'deep_seek_v4_flash',
              'amc_jk',
              'jk',

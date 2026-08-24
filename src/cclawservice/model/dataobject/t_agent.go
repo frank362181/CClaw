@@ -88,10 +88,12 @@ type TAgent struct {
 	OwnerId      string `json:"OwnerId"`
 	AgentId      string `json:"AgentId"`
 	AgentName    string `json:"AgentName"`
+	Description  string `json:"Description"`
 	PrimaryModel string `json:"PrimaryModel"` //主要使用的AI模型,如deepseek,qwen-3.8-flash等
 	Fallbacks    string `json:"Fallbacks"`
 	AgentDir     string `json:"AgentDir"`  //agent启动文件所在的路径
 	Workspace    string `json:"Workspace"` //表示该agent的工作空间
+	IsDefault    bool   `json:"IsDefault"`
 
 	ImageName  string `json:"ImageName"` //agent的公众形象名称
 	ImageEmoji string `json:"ImageEmoji"`
@@ -114,10 +116,12 @@ func AgentValues(a *TAgent) map[string]interface{} {
 	return map[string]interface{}{
 		"owner_id":            a.OwnerId,
 		"agent_name":          a.AgentName,
+		"description":         a.Description,
 		"primary_model":       a.PrimaryModel,
 		"fallbacks":           a.Fallbacks,
 		"agent_dir":           a.AgentDir,
 		"workspace":           a.Workspace,
+		"is_default":          a.IsDefault,
 		"image_name":          a.ImageName,
 		"image_emoji":         a.ImageEmoji,
 		"image_theme":         a.ImageTheme,

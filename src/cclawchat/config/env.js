@@ -19,7 +19,7 @@ export const ENV = {
     // 是否启用 Mock 数据 (开发调试用)
     // true: 使用模拟流式回复 (无需后端)
     // false: 调用真实后端接口
-    ENABLE_MOCK: true,
+    ENABLE_MOCK: false,
 
     // 真实聊天接口返回格式: 'sse' | 'text'
     CHAT_STREAM_FORMAT: 'sse',

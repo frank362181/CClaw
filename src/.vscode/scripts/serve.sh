@@ -29,7 +29,9 @@ if [ -z "$PY" ]; then
 fi
 
 # 3) 后台启动静态服务器（与 VS Code 生命周期解耦，调试结束后仍可复用）
-nohup "$PY" -m http.server "$PORT" --bind 127.0.0.1 --directory "$DIR" >/dev/null 2>&1 &
+#    绑定 :: （IPv6 双栈）同时服务 IPv4/IPv6 的 localhost。
+#    否则只绑 127.0.0.1 时，Safari 解析 localhost 优先走 IPv6 ::1 会连接失败一直转圈。
+nohup "$PY" -m http.server "$PORT" --bind :: --directory "$DIR" >/dev/null 2>&1 &
 
 # 4) 等待端口就绪（最多约 8 秒）
 i=0
