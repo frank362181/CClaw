@@ -33,8 +33,7 @@ type AgentRepository struct {
 
 	// 配置缓存 TTL 刷新
 	configTTL  int64 // 缓存过期时间;<=0 表示禁用 TTL 刷新(仅启动时加载一次)
-	lastLoaded int64 //time.Time     // 最近一次从 DB 全量加载的时间
-	refreshing bool  // 是否正在重载(防止并发读造成重载风暴)
+	lastLoaded int64 // 最近一次从 DB 全量加载的时间(秒级时间戳)
 }
 
 type IAgentRepository interface {
@@ -323,9 +322,8 @@ func (repo *AgentRepository) loadAllAgents() {
 	repo.loadAgents()
 	repo.loadSkills()
 
-	// 记录本次加载时间并复位刷新标记(供 TTL 判断与防重载风暴使用)
-	repo.lastLoaded = common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp //time.Now()
-	repo.refreshing = false
+	// 记录本次加载时间(供 TTL 判断使用;调用方需持有 mu)
+	repo.lastLoaded = common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 }
 
 func (repo *AgentRepository) loadLLMProviders() {
@@ -377,24 +375,19 @@ func (repo *AgentRepository) requireAccessor() error {
 
 // refreshIfExpired 在读取缓存前调用:当缓存超过 TTL 时触发一次全量重载(多实例一致性)。
 //   - configTTL<=0 时禁用(仅启动时加载一次);
-//   - refreshing 标记防止并发读造成"重载风暴":同一时刻只有一个 goroutine 真正重载,
-//     其余并发读继续返回旧缓存,不阻塞业务;
-//   - 实际重载由 loadAllAgents 完成,其内部重新加锁并在结束后更新 lastLoaded/refreshing。
+//   - 重载在 mu 锁内完成:同一时刻只有一个 goroutine 执行重载,其余并发读/写阻塞在 mu 上,
+//     本地缓存因此始终是某个时刻的一致快照(无短暂过期窗口);
+//   - 重载结束后由 loadAllAgents 更新 lastLoaded,供下一次 TTL 判断。
 func (repo *AgentRepository) refreshIfExpired() {
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+
 	if repo.configTTL <= 0 {
 		return
 	}
 
 	nowTimestamp := common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
-	repo.mu.Lock()
-	expired := (nowTimestamp - repo.lastLoaded) >= repo.configTTL
-	if !expired || repo.refreshing {
-		repo.mu.Unlock()
-		return
+	if (nowTimestamp - repo.lastLoaded) >= repo.configTTL {
+		repo.loadAllAgents()
 	}
-	repo.refreshing = true // 先标记再释放锁,阻止其他 goroutine 重复发起重载
-	repo.mu.Unlock()
-
-	// 锁外重载,可能会导致 TTL时间过了，存在 几个CPU 时钟周期的缓存
-	repo.loadAllAgents()
 }
