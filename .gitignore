@@ -66,6 +66,10 @@ build/
 ### VS Code ###
 .vscode/cclawchat/
 
+### document ###
+/document/**/~*
+/document/~**
+
 
 ### Mac OS ###
 .DS_Store
