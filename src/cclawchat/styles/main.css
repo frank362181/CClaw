@@ -2226,7 +2226,7 @@ body {
     transform: rotate(-90deg);
 }
 
-/* 工作空间页签：启动文件 / 技能文件 文件列表（两套类名共用同一套样式，新增区块类请同步追加） */
+/* 工作空间页签：启动文件 / 技能 文件列表（两套类名共用同一套样式，新增区块类请同步追加） */
 .startup-files-panel,
 .skill-files-panel {
     display: flex;
@@ -2264,7 +2264,7 @@ body {
     gap: var(--space-xs);
 }
 
-/* 文件行：左侧文件名 + 右侧标记（启动文件：必需/可选 + 大小/缺失；技能文件：大小） */
+/* 文件行：左侧名称 + 右侧标记（启动文件：必需/可选 + 大小/缺失；技能：作用域/启用状态） */
 .startup-file-item,
 .skill-file-item {
     display: flex;
@@ -2321,10 +2321,21 @@ body {
     flex-shrink: 0;
 }
 
+/* 技能行：仅展示（无点击查看正文），覆盖共享行样式的 pointer/hover */
+.skill-files-list .skill-file-item {
+    cursor: default;
+}
+
+.skill-files-list .skill-file-item:hover {
+    border-color: var(--color-border);
+    background: var(--color-bg-white);
+}
+
 .tag-required,
 .tag-optional,
 .tag-missing,
-.tag-size {
+.tag-size,
+.tag-version {
     display: inline-flex;
     align-items: center;
     padding: 1px 8px;
@@ -2351,6 +2362,12 @@ body {
 .tag-size {
     background: var(--color-bg-page);
     color: var(--color-text-muted);
+}
+
+/* 技能版本标识（来源 GetSkills 的 d_version，乐观锁版本号） */
+.tag-version {
+    background: var(--color-bg-page);
+    color: var(--color-text-secondary);
 }
 
 /* 文件内容预览（点击列表项后展示） */

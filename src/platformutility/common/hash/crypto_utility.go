@@ -10,6 +10,7 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -63,4 +64,9 @@ func HmacSha256(key, data string) string {
 
 func HmacEqual(originalData []byte, encryptedData []byte) bool {
 	return hmac.Equal(originalData, encryptedData)
+}
+
+func LoadX509KeyPair(certFile, keyFile string) (cert tls.Certificate, err error) {
+	cert, err = tls.LoadX509KeyPair(certFile, keyFile)
+	return cert, err
 }

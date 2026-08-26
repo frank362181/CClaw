@@ -134,6 +134,10 @@ func (c *ConfigurationHelper) GetDoubleValueDefault(section string, key string, 
 }
 
 func (c *ConfigurationHelper) Destroy() {
+	// 防御：配置文件加载失败等情况下 storage 可能为 nil，避免清理时空指针崩溃
+	if c == nil || c.storage == nil {
+		return
+	}
 	c.storage.Destroy()
 	c.storage = nil
 }

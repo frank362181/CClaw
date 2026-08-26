@@ -5,7 +5,7 @@ CREATE TABLE t_llm_provider (
                                 provider_id VARCHAR(8) NOT NULL unique,         -- 大模型的ID，业务主键
 
     -- 归属与权限隔离
-                                owner_id VARCHAR(6) NOT NULL DEFAULT '000000',  -- 与登录用户的category有关
+                                owner_id VARCHAR(16) NOT NULL DEFAULT '000000',  -- 与登录用户的category有关
 
     -- 基本信息
                                 provider_name VARCHAR(64) NOT NULL,              -- LLM名称
@@ -50,7 +50,7 @@ CREATE TABLE t_agent (
                          agent_id VARCHAR(8) NOT NULL unique,            -- Agent ID，业务主键
 
     -- 归属与权限隔离
-                         owner_id VARCHAR(6) NOT NULL DEFAULT '000000',  -- 与登录用户的category有关
+                         owner_id VARCHAR(16) NOT NULL DEFAULT '000000',  -- 与登录用户的category有关
 
     -- 基本信息
                          agent_name VARCHAR(64) NOT NULL,                 -- Agent名称（可重复）
@@ -118,7 +118,7 @@ INSERT INTO t_agent (
 CREATE TABLE t_skill (
     id INTEGER NOT NULL primary key AUTOINCREMENT,
     skill_id VARCHAR(8) NOT NULL unique,
-    owner_id VARCHAR(6) NOT NULL DEFAULT '000000',
+    owner_id VARCHAR(16) NOT NULL DEFAULT '000000',
     skill_name VARCHAR(64) NOT NULL,
     skill_dir VARCHAR(256) NOT NULL,
     skill_scope INTEGER NOT NULL DEFAULT 0,

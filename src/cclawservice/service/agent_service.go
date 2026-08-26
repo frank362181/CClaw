@@ -165,6 +165,39 @@ func (s *AgentService) GetAgentStartupFile(ownerId, agentId, fileName string) (*
 	return file, nil
 }
 
+// ============================== Skill =============================
+
+func (s *AgentService) GetSkills(comCode string) ([]dataobject.TSkill, error) {
+	return s.agentRepo.GetSkills(comCode), nil
+}
+
+func (s *AgentService) AddSkill(sk dataobject.TSkill) error {
+	if err := myUtility.ValidateSkill(sk); err != nil {
+		return err
+	}
+	myUtility.NormalizeOwner(&sk.OwnerId)
+	return s.agentRepo.AddSkill(sk)
+}
+
+func (s *AgentService) UpdateSkill(sk dataobject.TSkill) error {
+	if err := myUtility.ValidateSkill(sk); err != nil {
+		return err
+	}
+	myUtility.NormalizeOwner(&sk.OwnerId)
+	return s.agentRepo.UpdateSkill(sk)
+}
+
+func (s *AgentService) RemoveSkill(ownerId, skillId string) error {
+	ownerId = strings.TrimSpace(ownerId)
+	skillId = strings.TrimSpace(skillId)
+	if len(ownerId) == 0 || len(skillId) == 0 {
+		return myException.AgentParameterErrEx("skill id is empty")
+	}
+	return s.agentRepo.RemoveSkill(ownerId, skillId)
+}
+
+// ==================== private functions & methods ==========================
+
 // resolveAgentWorkspace 校验归属并解析 agent 的工作区根目录(启动文件两个接口共用的前置步骤)。
 // agent 不存在/不属于该 owner → AgentNotFoundErr;工作区目录缺失/非法 → AgentWorkspaceErr。
 func (s *AgentService) resolveAgentWorkspace(ownerId, agentId string) (string, error) {
@@ -200,35 +233,4 @@ func (s *AgentService) requireRepos() error {
 		return myException.AgentInternalErrEx("agent service: repositories not initialized")
 	}
 	return nil
-}
-
-// ============================== Skill =============================
-
-func (s *AgentService) GetSkills(comCode string) ([]dataobject.TSkill, error) {
-	return s.agentRepo.GetSkills(comCode), nil
-}
-
-func (s *AgentService) AddSkill(sk dataobject.TSkill) error {
-	if err := myUtility.ValidateSkill(sk); err != nil {
-		return err
-	}
-	myUtility.NormalizeOwner(&sk.OwnerId)
-	return s.agentRepo.AddSkill(sk)
-}
-
-func (s *AgentService) UpdateSkill(sk dataobject.TSkill) error {
-	if err := myUtility.ValidateSkill(sk); err != nil {
-		return err
-	}
-	myUtility.NormalizeOwner(&sk.OwnerId)
-	return s.agentRepo.UpdateSkill(sk)
-}
-
-func (s *AgentService) RemoveSkill(ownerId, skillId string) error {
-	ownerId = strings.TrimSpace(ownerId)
-	skillId = strings.TrimSpace(skillId)
-	if len(ownerId) == 0 || len(skillId) == 0 {
-		return myException.AgentParameterErrEx("skill id is empty")
-	}
-	return s.agentRepo.RemoveSkill(ownerId, skillId)
 }

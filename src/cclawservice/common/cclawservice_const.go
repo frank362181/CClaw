@@ -6,6 +6,8 @@ import (
 )
 
 const (
+	OwnerIdPlatform = "000000" //属于平台资产定义
+
 	// DefaultReloadDatabaseCacheTTLSeconds 配置缓存 TTL(多实例部署时,各实例从 DB 刷新 LLM provider/agent/skill 配置的过期时间)
 	DefaultReloadDatabaseCacheTTLSeconds = 30 // 默认 30 秒;<=0 表示禁用 TTL 刷新(仅启动时加载一次)
 

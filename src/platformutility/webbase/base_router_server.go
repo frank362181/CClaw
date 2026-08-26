@@ -2,6 +2,8 @@ package webbase
 
 import (
 	"context"
+	"errors"
+	"net"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"my.favorite/platformutility/common"
+	"my.favorite/platformutility/common/hash"
 	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
@@ -43,7 +46,7 @@ func (router *BaseRouter) SetupFilter(filters ...basic.IFilter) error {
 	}
 
 	for _, f := range filters {
-		router.filterInterceptorMgr.RegisterFilter(f, router.GinEngine)
+		_ = router.filterInterceptorMgr.RegisterFilter(f, router.GinEngine)
 	}
 
 	return nil
@@ -159,31 +162,45 @@ func (router *BaseRouter) SetupServer(configHelper *config.ConfigurationHelper) 
 	return nil
 }
 
+// Startup 启动 HTTP/HTTPS 服务。
+// 返回 true 表示监听端口绑定成功并已进入服务状态；false 表示启动失败（证书缺失/无效、端口被占用等）。
+// 说明：原实现在 goroutine 内调用 ListenAndServeTLS，绑定失败只能打日志，进程会「假活」（存活但无监听）。
+// 现改为同步校验证书 + 同步绑定端口，失败可立即感知并返回 false，由调用方决定退出并清理资源。
 func (router *BaseRouter) Startup(ssl bool) bool {
 	if router.Server == nil {
 		return false
 	}
-	// 3 start the server
+
+	// 同步校验证书：缺失/无效立即失败，避免进程启动后才暴露证书问题
 	if ssl {
 		if !common.FileExists(router.certFile) || !common.FileExists(router.keyFile) {
 			logging.LogErrorF("[Startup] SSL certificate file %s or %s does not exist", router.certFile, router.keyFile)
 			return false
 		}
+		if _, err := hash.LoadX509KeyPair(router.certFile, router.keyFile); err != nil {
+			logging.LogErrorF("[Startup] invalid SSL certificate/key: %s", err.Error())
+			return false
+		}
 	}
-	//启动服务
+
+	// 同步绑定监听端口：绑定失败（如端口被占用）立即返回失败，避免进程「假活」（无监听却继续运行）
+	listener, err := net.Listen("tcp", router.Server.Addr)
+	if err != nil {
+		logging.LogErrorF("[Startup] can not listen on %s: %s", router.Server.Addr, err.Error())
+		return false
+	}
+
+	// 在 goroutine 中启动服务：ServeTLS 会同时启用 HTTP/2；
+	// ErrServerClosed 属正常关闭（由 Shutdown 触发），其余错误视为服务异常并记录。
 	go func() {
+		var serveErr error
 		if ssl {
-			err := router.Server.ListenAndServeTLS(router.certFile, router.keyFile)
-			if err != nil {
-				logging.LogErrorF("[Startup] can not start the server at :%s with SSL.", router.Server.Addr)
-				return
-			}
+			serveErr = router.Server.ServeTLS(listener, router.certFile, router.keyFile)
 		} else {
-			err := router.Server.ListenAndServe()
-			if err != nil {
-				logging.LogErrorF("[Startup] can not start the server at :%s.", router.Server.Addr)
-				return
-			}
+			serveErr = router.Server.Serve(listener)
+		}
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			logging.LogErrorF("[Startup] server at %s stopped with error: %s", router.Server.Addr, serveErr.Error())
 		}
 	}()
 
@@ -192,6 +209,11 @@ func (router *BaseRouter) Startup(ssl bool) bool {
 }
 
 func (router *BaseRouter) Shutdown() error {
+	// 防御：未完成 SetupServer 或启动失败时 Server 可能为 nil，避免清理时空指针崩溃
+	if router == nil || router.Server == nil {
+		return nil
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

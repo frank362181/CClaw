@@ -94,8 +94,10 @@ func main() {
 		return
 	}
 
-	// 2. start the server
-	_ = mainApp.Startup()
+	// 2. start the server（启动失败（如端口被占用）时直接返回，defer mainApp.Destroy() 会完成资源清理）
+	if err := mainApp.Startup(); err != nil {
+		return
+	}
 
 	// 3. wait the exit signal
 	mainApp.Shutdown()

@@ -23,7 +23,6 @@ import (
 
 // FrontMatterDelimiter front matter 的定界符
 const FrontMatterDelimiter = "---"
-const OwnerIdPlatform = "000000"
 
 // SplitFrontMatter 把 markdown 文档拆分成 (frontMatter, content) 两部分。
 // 只有当文档以 "---" 行开头并且存在闭合的 "---" 行时才认为存在 front matter;
@@ -69,7 +68,7 @@ func StripFrontMatter(data []byte) string {
 
 func NormalizeOwner(ownerId *string) {
 	if strings.TrimSpace(*ownerId) == "" {
-		*ownerId = OwnerIdPlatform // 平台默认归属,与 DDL 默认值一致
+		*ownerId = common.OwnerIdPlatform // 平台默认归属,与 DDL 默认值一致
 	}
 }
 
@@ -131,7 +130,7 @@ func BuildAgentWorkspaceRoot(agent dataobject.TAgent) (string, bool) {
 		return "", false
 	}
 
-	agentWorkspaceRoot := filepath.Join(pCommon.GetExecutableDir(), "workspace", agent.OwnerId, agent.AgentDir)
+	agentWorkspaceRoot := filepath.Join(pCommon.GetExecutableDir(), common.AgentServiceWorkspaceDirName, agent.OwnerId, agent.AgentDir)
 	if pCommon.IsDir(agentWorkspaceRoot) {
 		return agentWorkspaceRoot, true
 	}

@@ -229,7 +229,11 @@ func (m *ServiceMain) SetupServer() error {
 
 func (m *ServiceMain) Startup() error {
 	sslEnabled, _ := m.configHelper.GetBoolValueDefault("server", "ssl", false)
-	m.baseRouter.Startup(sslEnabled)
+	// 启动失败（如端口被占用）时返回错误，由入口退出并执行 Destroy 清理资源，避免进程「假活」
+	if !m.baseRouter.Startup(sslEnabled) {
+		logging.LogErrorF("[Startup] web server failed to start")
+		return exception.WebServerErrEx("web server start failed")
+	}
 
 	return nil
 }
@@ -340,16 +344,16 @@ func (m *ServiceMain) setupApiFilters() bool {
 	}
 
 	// 1 setup business filter
-	loggingFilter := filter.NewLoggingFilter(basic.FilterOrderLogging)                //filter.GetLoggingFilter()
-	reqPreprocessFilter := filter.NewRequestPreprocessFilter(basic.FilterOrderReqPre) //filter.GetRequestPreprocessFilter()
-	addressFilter := filter.NewAddressFilter(basic.FilterOrderAddress)                //filter.GetAddressFilter()
+	loggingFilter := filter.GetLoggingFilter()        //NewLoggingFilter(basic.FilterOrderLogging)
+	reqPreprocessFilter := filter.GetRecoveryFilter() //NewRequestPreprocessFilter(basic.FilterOrderReqPre)
+	addressFilter := filter.GetAddressFilter()        //NewAddressFilter(basic.FilterOrderAddress)
 	tempStr, _ := m.configHelper.GetStringValueDefault("security", "allowedUrl", "")
 	urls := strings.Split(tempStr, ",")
 	addressFilter.SetupAllowedUrls(urls)
 
-	trafficFilter := filter.NewTrafficFilter(basic.FilterOrderTraffic, m.memoryDB) //filter.GetTrafficFilter(m.memoryDB)
+	trafficFilter := filter.GetTrafficFilter(m.memoryDB) //NewTrafficFilter(basic.FilterOrderTraffic, m.memoryDB)
 
-	securityFilter := filter.NewSecurityFilter(basic.FilterOrderSecurity, m.memoryDB, signKey) //filter.GetSecurityFilter(m.memoryDB, signKey)
+	securityFilter := filter.GetSecurityFilter(m.memoryDB, signKey) //NewSecurityFilter(basic.FilterOrderSecurity, m.memoryDB, signKey)
 	tempStr, _ = m.configHelper.GetStringValueDefault("security", "deSecurityUrl", "")
 	urls = strings.Split(tempStr, ",")
 	securityFilter.SetupDeSecurityFilter(urls)

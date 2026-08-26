@@ -43,7 +43,7 @@ const AGENT_TABS = [
 ];
 
 /* 智能体详情编辑表单字段（显式排除 owner_id / agent_id / d_version 等只读或后端维护字段）
-   tab: basic=基本信息页签（身份/模型/形象 + 运行配置）；workspace=工作空间页签（启动文件 + 技能文件，见 _renderWorkspaceFiles） */
+   tab: basic=基本信息页签（身份/模型/形象 + 运行配置）；workspace=工作空间页签（启动文件 + 技能，见 _renderWorkspaceFiles） */
 const AGENT_FORM_FIELDS = [
     // 基本信息页签
     { key: 'AgentName', label: '名称', type: 'text', required: true, maxlength: 64, tab: 'basic', section: '基本信息' },
@@ -257,6 +257,32 @@ function normalizeAgent(agent) {
     };
 }
 
+/* SKILL 作用域文案：与后端 SkillScope 常量一致（0 系统 / 1 个人 / 2 项目 / 3 插件） */
+const SKILL_SCOPE_LABELS = ['系统', '个人', '项目', '插件'];
+
+function skillScopeLabel(scope) {
+    return SKILL_SCOPE_LABELS[Number(scope)] || '未知';
+}
+
+/* 后端 TSkill → 前端展示模型（防御性归一化，兼容大小写字段与本地示例字段） */
+function normalizeSkill(skill) {
+    if (!skill || typeof skill !== 'object') return null;
+    const scope = Number(skill.skillScope ?? skill.SkillScope ?? 0);
+    // 兼容后端字段 Disabled/disabled 与本地示例字段 enabled
+    const disabled = Boolean(skill.Disabled ?? skill.disabled ?? (skill.enabled !== undefined && !skill.enabled));
+    return {
+        id: String(skill.skillId || skill.SkillId || skill.id || genId()),
+        name: String(skill.skillName || skill.SkillName || skill.name || '未命名技能'),
+        dir: String(skill.skillDir || skill.SkillDir || ''),
+        version: Number(skill.dVersion ?? skill.DVersion ?? 0) || 0,
+        scope,
+        scopeLabel: skillScopeLabel(scope),
+        enabled: !disabled,
+        status: disabled ? '未启用' : '已启用',
+        raw: skill,
+    };
+}
+
 export const HomePage = {
     comp: null,
     els: {},
@@ -269,7 +295,8 @@ export const HomePage = {
     currentAgentDetail: null, // 当前智能体详情（null=不在详情页）
     currentAgentTab: 'basic', // 详情页当前激活页签（basic / workspace）
     startupFilesCache: null,  // 当前智能体启动文件清单缓存 { agentId, list }（离开详情页/切换 agent 时失效）
-    skillFilesCache: null,    // 当前智能体技能文件清单缓存 { agentId, list }（离开详情页/切换 agent 时失效）
+    skills: null,             // 技能列表（null=尚未加载，由后端 GetSkills 填充；公司级，非按 agent）
+    _skillsLoadPromise: null, // 进行中的技能列表加载 Promise（去重 + 供等待）
     npaProjects: [],
     pendingDeleteId: null,
     currentHousehold: null,
@@ -385,8 +412,6 @@ export const HomePage = {
             if (agentCollapse) { this.toggleAgentSection(agentCollapse.dataset.agentCollapse, agentCollapse); return; }
             const startupFileBtn = e.target.closest('[data-startup-file]');
             if (startupFileBtn) { this.openStartupFile(startupFileBtn.dataset.startupFile); return; }
-            const skillFileBtn = e.target.closest('[data-skill-file]');
-            if (skillFileBtn) { this.openSkillFile(skillFileBtn.dataset.skillFile); return; }
 
             if (e.target.closest('#btnNpaAdd')) { this.openNpaCreate(); return; }
             const expandBtn = e.target.closest('[data-npa-expand]');
@@ -490,7 +515,6 @@ export const HomePage = {
         // 切换菜单时退出智能体详情二级页
         this.currentAgentDetail = null;
         this.startupFilesCache = null; // 离开详情页释放启动文件缓存（防跨 agent 残留）
-        this.skillFilesCache = null;   // 同上：释放技能文件缓存（防跨 agent 残留）
         // 面包屑退出链接态（仅智能体详情内可点击返回）
         this.els.contentBreadcrumb.classList.remove('linkable');
 
@@ -507,6 +531,8 @@ export const HomePage = {
             this.els.contentView.innerHTML = this.renderSettings();
             // 智能体列表来自后端，异步加载完成后原地刷新该区块
             this._loadSettingsAgents();
+            // 技能列表来自后端 GetSkills（agent 详情页工作空间页签使用），异步加载一次并缓存
+            this._loadSettingsSkills();
         } else {
             this.els.contentView.innerHTML = this.renderNpa();
         }
@@ -695,6 +721,38 @@ export const HomePage = {
         }
     },
 
+    /**
+     * 加载当前登录用户的技能列表（后端 GET /api/skills，即 GetSkills）。
+     * - 以当前登录用户 token 调后端，后端据此识别 owner（comCode），前端无需传用户标识。
+     * - 与 _loadSettingsAgents 策略一致：Mock 用本地示例数据、后端异常时降级、结果缓存在 this.skills。
+     * - 技能为「公司级」数据（非按 agent），故全局缓存一次，agent 详情页工作空间页签复用，避免重复请求。
+     * @returns {Promise<Array<object>>} 归一化后的技能列表
+     */
+    async _loadSettingsSkills() {
+        if (this.skills !== null) return this.skills;
+        // 已有进行中的加载则复用其 Promise，避免重复请求
+        if (this._skillsLoadPromise) return this._skillsLoadPromise;
+        this._skillsLoadPromise = (async () => {
+            try {
+                if (CONFIG.ENABLE_MOCK) {
+                    this.skills = SKILLS.map(normalizeSkill);
+                } else {
+                    try {
+                        const list = await API.getSkills(State.user?.token);
+                        this.skills = (Array.isArray(list) ? list : []).map(normalizeSkill).filter(Boolean);
+                    } catch (error) {
+                        console.warn('[Skills] 获取技能列表失败，使用本地示例数据：', error);
+                        this.skills = SKILLS.map(normalizeSkill);
+                    }
+                }
+            } finally {
+                this._skillsLoadPromise = null;
+            }
+            return this.skills;
+        })();
+        return this._skillsLoadPromise;
+    },
+
     /* ========== 系统设置：智能体详情二级页 ========== */
 
     /* 打开智能体详情（替换当前内容区，可从详情页返回系统设置） */
@@ -783,7 +841,7 @@ export const HomePage = {
         `).join('');
     },
 
-    /* 工作空间页签：启动文件 + 技能文件 可收缩区块（数据经后端 API 异步加载，仅元数据不含正文） */
+    /* 工作空间页签：启动文件 + 技能 可收缩区块（数据经后端 API 异步加载，仅元数据不含正文） */
     _renderWorkspaceFiles(agentId) {
         return `
             <div class="agent-form-section">
@@ -795,7 +853,7 @@ export const HomePage = {
                     : '<div class="startup-files-error">暂无可用的智能体，无法加载启动文件</div>'}
             </div>
             <div class="agent-form-section">
-                ${this._agentSectionHead('技能文件', 'skillsFilesPanel')}
+                ${this._agentSectionHead('技能', 'skillsPanel')}
                 ${this._renderSkillsPanel(agentId)}
             </div>`;
     },
@@ -815,13 +873,13 @@ export const HomePage = {
             </div>`;
     },
 
-    /* 工作空间页签：技能文件列表面板（数据经后端 API 异步加载，仅元数据不含正文） */
+    /* 工作空间页签：技能列表面板（数据经后端 GetSkills 异步加载，仅元数据不含正文） */
     _renderSkillsPanel(agentId) {
         return agentId
-            ? `<div class="skill-files-panel" id="skillsFilesPanel" data-agent-id="${escapeHtml(agentId)}">
+            ? `<div class="skill-files-panel" id="skillsPanel">
                 <div class="skill-files-loading">加载中…</div>
             </div>`
-            : '<div class="skill-files-error">暂无可用的智能体，无法加载技能文件</div>';
+            : '<div class="skill-files-error">暂无可用的智能体，无法加载技能列表</div>';
     },
 
     /* 渲染启动文件清单（文件名 + 必需/可选 + 缺失/大小；值经 HTML 转义防 XSS） */
@@ -918,94 +976,38 @@ export const HomePage = {
         `;
     },
 
-    /* 渲染技能文件清单（文件名 + 大小；值经 HTML 转义防 XSS） */
-    _renderSkillFilesList(list) {
+    /* 渲染技能清单（技能名 + 版本/作用域/启用状态；值经 HTML 转义防 XSS） */
+    _renderSkillsList(list) {
         if (!Array.isArray(list) || list.length === 0) {
-            return '<div class="skill-files-empty">暂无技能文件</div>';
+            return '<div class="skill-files-empty">暂无技能</div>';
         }
         return `
             <div class="skill-files-list">
-                ${list.map(doc => {
-                    const name = String(doc.fileName || doc.skillFile || doc.frontMatter?.name || doc.name || '未命名技能文件');
-                    const size = doc.byteSize != null ? `<span class="tag-size">${formatBytes(doc.byteSize)}</span>` : '';
-                    return `
-                        <button type="button" class="skill-file-item"
-                                data-skill-file="${escapeHtml(name)}"
-                                title="查看 ${escapeHtml(name)}">
-                            <span class="skill-file-item-name">${escapeHtml(name)}</span>
-                            <span class="skill-file-item-meta">${size}</span>
-                        </button>`;
-                }).join('')}
+                ${list.map(s => `
+                    <div class="skill-file-item" title="${escapeHtml(s.name)}${s.dir ? `（${escapeHtml(s.dir)}）` : ''}">
+                        <span class="skill-file-item-name">${escapeHtml(s.name)}</span>
+                        <span class="skill-file-item-meta">
+                            <span class="tag-version">版本 ${escapeHtml(s.version)}</span>
+                            <span class="tag-optional">${escapeHtml(s.scopeLabel)}</span>
+                            <span class="${s.enabled ? 'tag-required' : 'tag-missing'}">${s.enabled ? '已启用' : '未启用'}</span>
+                        </span>
+                    </div>`).join('')}
             </div>`;
     },
 
-    /* 加载当前智能体技能文件清单：有缓存直接渲染，否则请求一次并缓存（避免重复请求） */
-    async loadSkillFiles() {
-        const panel = this.els.contentView?.querySelector('#skillsFilesPanel');
-        const agentId = panel?.dataset.agentId;
-        if (!panel || !agentId) return;
+    /* 加载技能清单：复用全局技能缓存 this.skills（公司级，非按 agent），避免重复请求 */
+    async loadSkills() {
+        const panel = this.els.contentView?.querySelector('#skillsPanel');
+        if (!panel) return;
 
-        if (this.skillFilesCache && this.skillFilesCache.agentId === agentId) {
-            panel.innerHTML = this._renderSkillFilesList(this.skillFilesCache.list);
-            return;
+        if (this.skills === null) {
+            panel.innerHTML = '<div class="skill-files-loading">加载中…</div>';
+            await this._loadSettingsSkills();
         }
-
-        panel.innerHTML = '<div class="skill-files-loading">加载中…</div>';
-        try {
-            const list = await API.getSkillFiles(State.user?.token, agentId);
-            this.skillFilesCache = { agentId, list };
-            panel.innerHTML = this._renderSkillFilesList(list);
-        } catch (error) {
-            panel.innerHTML = `<div class="skill-files-error">${escapeHtml(error.message || '加载技能文件失败')}</div>`;
-        }
+        panel.innerHTML = this._renderSkillsList(this.skills || []);
     },
 
-    /* 点击技能文件：加载并展示其内容（仅点击时请求正文，列表本身不含正文，节省带宽） */
-    async openSkillFile(fileName) {
-        const panel = this.els.contentView?.querySelector('#skillsFilesPanel');
-        if (!panel || !fileName) return;
-        const agentId = panel.dataset.agentId;
-
-        // 高亮选中项
-        panel.querySelectorAll('[data-skill-file]').forEach(el => {
-            el.classList.toggle('active', el.dataset.skillFile === fileName);
-        });
-
-        // 复用 / 创建内容预览区（位于列表下方）
-        let viewer = panel.querySelector('#skillFileViewer');
-        if (!viewer) {
-            viewer = document.createElement('div');
-            viewer.id = 'skillFileViewer';
-            viewer.className = 'skill-file-viewer';
-            panel.appendChild(viewer);
-        }
-        viewer.innerHTML = '<div class="skill-files-loading">加载中…</div>';
-
-        try {
-            const file = await API.getSkillFile(State.user?.token, agentId, fileName);
-            viewer.innerHTML = this._renderSkillFileContent(file);
-        } catch (error) {
-            viewer.innerHTML = `<div class="skill-files-error">${escapeHtml(error.message || '加载文件内容失败')}</div>`;
-        }
-    },
-
-    /* 渲染单个技能文件内容（正文经 HTML 转义放入只读文本框，防 XSS） */
-    _renderSkillFileContent(file) {
-        if (!file) return '<div class="skill-files-error">文件不存在</div>';
-        const name = String(file.fileName || file.skillFile || file.frontMatter?.name || file.name || '未命名技能文件');
-        const size = file.byteSize != null ? ` · ${formatBytes(file.byteSize)}` : '';
-        const content = String(file.content || '');
-        return `
-            <div class="skill-file-viewer-head">
-                <span class="skill-file-viewer-name">${escapeHtml(name)}</span>
-                <span class="skill-file-viewer-meta">${size}</span>
-            </div>
-            ${content
-                ? `<textarea class="skill-file-viewer-body" readonly spellcheck="false">${escapeHtml(content)}</textarea>`
-                : '<div class="skill-files-error">该文件暂无内容</div>'}`;
-    },
-
-    /* 切换工作空间页签下文件区块的展开/收缩（启动文件 / 技能文件） */
+    /* 切换工作空间页签下文件区块的展开/收缩（启动文件 / 技能） */
     toggleAgentSection(bodyId, btn) {
         const body = this.els.contentView?.querySelector(`#${bodyId}`);
         if (!body || !btn) return;
@@ -1025,10 +1027,10 @@ export const HomePage = {
         this.els.contentView.querySelectorAll('.agent-tab-panel').forEach(panel => {
             panel.hidden = panel.dataset.agentPanel !== tabId;
         });
-        // 工作空间页签：懒加载启动文件 / 技能文件清单（有缓存则直接渲染，不重复请求）
+        // 工作空间页签：懒加载启动文件 / 技能清单（有缓存则直接渲染，不重复请求）
         if (tabId === 'workspace') {
             this.loadStartupFiles();
-            this.loadSkillFiles();
+            this.loadSkills();
         }
     },
 
@@ -1677,7 +1679,8 @@ export const HomePage = {
         this.agentsLoading = false;
         this.currentAgentDetail = null;
         this.startupFilesCache = null; // 切换登录用户后按新用户重新拉取（避免跨用户残留）
-        this.skillFilesCache = null;   // 同上：技能文件缓存（避免跨用户残留）
+        this.skills = null;            // 技能列表（公司级）切换用户后重新拉取（避免跨用户残留）
+        this._skillsLoadPromise = null;
         this.updateUserInfo('');
         this.selectMenu(DEFAULT_MENU);
     },
