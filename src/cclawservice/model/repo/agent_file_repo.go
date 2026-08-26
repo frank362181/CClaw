@@ -52,7 +52,7 @@ type startupFileEntry struct {
 // startupFileCache 启动文件读取的轻量缓存(按工作区划分)
 type startupFileCache struct {
 	mu      sync.Mutex
-	entries map[string]*startupFileEntry
+	entries map[string]*startupFileEntry // key = workspaceRoot
 }
 
 // maxStartupFileCacheEntries 缓存条目上限,超过则整体清空(防陈旧条目无限累积)

@@ -26,7 +26,7 @@ const MENUS = {
 /* 登录后的默认落地页：取菜单定义中的第一个 */
 const DEFAULT_MENU = Object.keys(MENUS)[0];
 
-/* ---------- 系统设置：Agents / Skills / MCP / Storages / Knowledge 图卡数据 ---------- */
+/* ---------- 系统设置：Agents / Skills 展示数据（MCP / Storages / Knowledge 暂无后端数据） ---------- */
 /* Agents 本地示例数据：后端不可用或 Mock 模式下降级使用（真实数据来自 GET /api/agents） */
 const AGENTS_FALLBACK = [
     { id: 'assistant', name: '通用助手', icon: '🤖', desc: '日常问答与通用任务处理', model: 'cclaw-gpt-4o', status: '运行中', default: true },
@@ -86,22 +86,6 @@ const SKILLS = [
     { id: 'file-parse', name: '文件解析', icon: '📄', desc: '解析 JSON / CSV / 文本文件', enabled: true },
     { id: 'memory', name: '记忆管理', icon: '🧠', desc: '跨会话持久化知识与偏好', enabled: true },
     { id: 'scheduler', name: '定时任务', icon: '⏰', desc: '按计划自动执行任务', enabled: false },
-];
-
-const MCP_SERVERS = [
-    { id: 'fs', name: 'filesystem', icon: '🗂️', transport: 'stdio', enabled: true },
-    { id: 'db', name: 'database', icon: '🗄️', transport: 'stdio', enabled: true },
-    { id: 'web', name: 'fetch', icon: '🌐', transport: 'SSE', enabled: false },
-];
-
-const STORAGES = [
-    { id: 'session', name: '会话存储', icon: '💾', type: 'memory', enabled: true },
-    { id: 'redis', name: 'Redis 缓存', icon: '📦', type: 'redis', enabled: true },
-];
-
-const KNOWLEDGE = [
-    { id: 'assets', name: '资产知识库', icon: '📚', entries: 1286, enabled: true },
-    { id: 'npa', name: '不良资产知识库', icon: '🗃️', entries: 342, enabled: true },
 ];
 
 /* ========== 我的项目（NPA）：数据与本地存储 ========== */
@@ -264,16 +248,27 @@ function skillScopeLabel(scope) {
     return SKILL_SCOPE_LABELS[Number(scope)] || '未知';
 }
 
+/* 后端 Skill 作用域 → 卡片图标（后端无图标字段，按作用域映射兜底，保持 Mock 卡片图标位风格） */
+const SKILL_SCOPE_ICONS = ['🛠️', '👤', '📁', '🧩'];
+
+function skillScopeIcon(scope) {
+    return SKILL_SCOPE_ICONS[Number(scope)] || '🧩';
+}
+
 /* 后端 TSkill → 前端展示模型（防御性归一化，兼容大小写字段与本地示例字段） */
 function normalizeSkill(skill) {
     if (!skill || typeof skill !== 'object') return null;
     const scope = Number(skill.skillScope ?? skill.SkillScope ?? 0);
     // 兼容后端字段 Disabled/disabled 与本地示例字段 enabled
     const disabled = Boolean(skill.Disabled ?? skill.disabled ?? (skill.enabled !== undefined && !skill.enabled));
+    const dir = String(skill.skillDir || skill.SkillDir || '');
     return {
         id: String(skill.skillId || skill.SkillId || skill.id || genId()),
         name: String(skill.skillName || skill.SkillName || skill.name || '未命名技能'),
-        dir: String(skill.skillDir || skill.SkillDir || ''),
+        // 卡片展示字段：优先取显式提供（Mock 示例），否则按作用域映射图标、用目录/作用域作描述兜底
+        icon: String(skill.icon || skillScopeIcon(scope)),
+        desc: String(skill.desc || dir || `${skillScopeLabel(scope)}技能`),
+        dir,
         version: Number(skill.dVersion ?? skill.DVersion ?? 0) || 0,
         scope,
         scopeLabel: skillScopeLabel(scope),
@@ -543,58 +538,13 @@ export const HomePage = {
         }
     },
 
-    /* ========== 系统设置内容：Agents / Skills / MCP / Storages / Knowledge 图卡 ========== */
+    /* ========== 系统设置内容：Agents / Skills / MCP / Storages / Knowledge 设置区块 ========== */
     renderSettings() {
         // 智能体列表：后端优先，this.agents 由 _loadSettingsAgents() 填充
         const agentsHtml = this._renderAgentCards();
 
-        const skillsHtml = SKILLS.map(s => `
-            <div class="skill-card" data-skill="${s.id}" data-skill-name="${s.name.toLowerCase()}" data-skill-status="${s.enabled ? 'enabled' : 'disabled'}">
-                <span class="card-check">✓</span>
-                <div class="card-icon">${s.icon}</div>
-                <div class="card-name">${s.name}</div>
-                <div class="card-desc">${s.desc}</div>
-                <div class="card-status">
-                    <span class="card-status-dot ${s.enabled ? 'on' : 'off'}"></span>${s.enabled ? '已启用' : '未启用'}
-                </div>
-            </div>
-        `).join('');
-
-        const mcpHtml = MCP_SERVERS.map(m => `
-            <div class="mini-card mcp-card" data-mcp="${m.id}">
-                <span class="card-check">✓</span>
-                <div class="card-icon">${m.icon}</div>
-                <div class="card-name">${m.name}</div>
-                <div class="card-desc">传输：${m.transport}</div>
-                <div class="card-status">
-                    <span class="card-status-dot ${m.enabled ? 'on' : 'off'}"></span>${m.enabled ? '已连接' : '未连接'}
-                </div>
-            </div>
-        `).join('');
-
-        const storageHtml = STORAGES.map(s => `
-            <div class="mini-card storage-card" data-storage="${s.id}">
-                <span class="card-check">✓</span>
-                <div class="card-icon">${s.icon}</div>
-                <div class="card-name">${s.name}</div>
-                <div class="card-desc">类型：${s.type}</div>
-                <div class="card-status">
-                    <span class="card-status-dot ${s.enabled ? 'on' : 'off'}"></span>${s.enabled ? '可用' : '不可用'}
-                </div>
-            </div>
-        `).join('');
-
-        const knowledgeHtml = KNOWLEDGE.map(k => `
-            <div class="mini-card knowledge-card" data-knowledge="${k.id}">
-                <span class="card-check">✓</span>
-                <div class="card-icon">${k.icon}</div>
-                <div class="card-name">${k.name}</div>
-                <div class="card-desc">条目：${formatAmount(k.entries)}</div>
-                <div class="card-status">
-                    <span class="card-status-dot ${k.enabled ? 'on' : 'off'}"></span>${k.enabled ? '已索引' : '未索引'}
-                </div>
-            </div>
-        `).join('');
+        // 技能列表：后端优先（GetSkills，按当前登录用户 owner 过滤），this.skills 由 _loadSettingsSkills() 填充
+        const skillsHtml = this._renderSkillCards();
 
         return `
             <div class="content-toolbar">
@@ -614,41 +564,41 @@ export const HomePage = {
 
             <div class="settings-section">
                 <div class="settings-section-head">
-                    <div class="settings-section-title">Skills（技能）<span class="settings-section-count">共 ${SKILLS.length} 个</span><span class="skills-filter" role="tablist">
+                    <div class="settings-section-title">Skills（技能）<span class="settings-section-count" id="skillCount">${this.skills === null ? '' : `共 ${this.skills.length} 个`}</span><span class="skills-filter" role="tablist">
                         <button type="button" class="skills-filter-btn active" data-skills-filter="all">全部</button>
                         <button type="button" class="skills-filter-btn" data-skills-filter="enabled">已启用</button>
                         <button type="button" class="skills-filter-btn" data-skills-filter="disabled">未启用</button>
                     </span><input type="text" id="skillsSearch" class="setting-input skills-search" placeholder="搜索技能" /></div>
                 </div>
-                <div class="skill-grid">
+                <div class="skill-grid" id="skillGrid">
                     ${skillsHtml}
                 </div>
             </div>
 
             <div class="settings-section">
                 <div class="settings-section-head">
-                    <div class="settings-section-title">MCP Servers（MCP 服务器）<span class="settings-section-count">共 ${MCP_SERVERS.length} 个</span></div>
+                    <div class="settings-section-title">MCP Servers（MCP 服务器）<span class="settings-section-count">共 0 个</span></div>
                 </div>
                 <div class="mini-grid">
-                    ${mcpHtml}
+                    <div class="settings-state">无对应内容</div>
                 </div>
             </div>
 
             <div class="settings-section">
                 <div class="settings-section-head">
-                    <div class="settings-section-title">Storages（存储）<span class="settings-section-count">共 ${STORAGES.length} 个</span></div>
+                    <div class="settings-section-title">Storages（存储）<span class="settings-section-count">共 0 个</span></div>
                 </div>
                 <div class="mini-grid">
-                    ${storageHtml}
+                    <div class="settings-state">无对应内容</div>
                 </div>
             </div>
 
             <div class="settings-section">
                 <div class="settings-section-head">
-                    <div class="settings-section-title">Knowledge（知识库）<span class="settings-section-count">共 ${KNOWLEDGE.length} 个</span></div>
+                    <div class="settings-section-title">Knowledge（知识库）<span class="settings-section-count">共 0 个</span></div>
                 </div>
                 <div class="mini-grid">
-                    ${knowledgeHtml}
+                    <div class="settings-state">无对应内容</div>
                 </div>
             </div>
         `;
@@ -678,6 +628,32 @@ export const HomePage = {
                 <div class="card-meta">模型：${escapeHtml(a.model)}</div>
                 <div class="card-status">
                     <span class="card-status-dot ${a.status === '运行中' ? 'on' : 'off'}"></span>${escapeHtml(a.status)}
+                </div>
+            </div>
+        `;
+    },
+
+    /* 渲染技能卡片区（含加载 / 空状态；数据来自后端 GetSkills，按当前登录用户 owner 过滤） */
+    _renderSkillCards() {
+        if (this.skills === null) {
+            return '<div class="settings-state">正在加载技能列表…</div>';
+        }
+        if (this.skills.length === 0) {
+            return '<div class="settings-state">暂无技能</div>';
+        }
+        return this.skills.map(s => this._skillCardHtml(s)).join('');
+    },
+
+    /* 单个技能卡片 HTML（对后端字段做 HTML 转义，防 XSS；结构与 Mock 示例卡片保持一致） */
+    _skillCardHtml(s) {
+        return `
+            <div class="skill-card" data-skill="${escapeHtml(s.id)}" data-skill-name="${escapeHtml(s.name.toLowerCase())}" data-skill-status="${s.enabled ? 'enabled' : 'disabled'}">
+                <span class="card-check">✓</span>
+                <div class="card-icon">${escapeHtml(s.icon)}</div>
+                <div class="card-name">${escapeHtml(s.name)}</div>
+                <div class="card-desc">${escapeHtml(s.desc)}</div>
+                <div class="card-status">
+                    <span class="card-status-dot ${s.enabled ? 'on' : 'off'}"></span>${escapeHtml(s.status)}
                 </div>
             </div>
         `;
@@ -721,6 +697,18 @@ export const HomePage = {
         }
     },
 
+    /* 技能加载完成后，原地刷新已渲染的设置页区块（未在设置页则跳过），并保留筛选/搜索状态 */
+    _refreshSkillsSection() {
+        const grid = this.els.contentView?.querySelector('#skillGrid');
+        const count = this.els.contentView?.querySelector('#skillCount');
+        if (grid) {
+            grid.innerHTML = this._renderSkillCards();
+            if (count) count.textContent = `共 ${this.skills.length} 个`;
+            // 重渲染后重新应用筛选/搜索（若用户已设置）
+            this._applySkillFilters();
+        }
+    },
+
     /**
      * 加载当前登录用户的技能列表（后端 GET /api/skills，即 GetSkills）。
      * - 以当前登录用户 token 调后端，后端据此识别 owner（comCode），前端无需传用户标识。
@@ -748,6 +736,8 @@ export const HomePage = {
             } finally {
                 this._skillsLoadPromise = null;
             }
+            // 数据就绪后原地刷新已渲染的设置页技能区块（未在设置页则跳过）
+            this._refreshSkillsSection();
             return this.skills;
         })();
         return this._skillsLoadPromise;
