@@ -1,4 +1,4 @@
-import { API } from './api.js';
+import { API } from './api.js?v=20260826';
 import { State } from './state.js';
 import { ChatPage } from './chat.js';
 import { genId } from '../utils/helper.js';

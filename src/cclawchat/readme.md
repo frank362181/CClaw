@@ -16,7 +16,7 @@ python -m http.server 8080
 
 - `API_BASE_URL`：后端 API 地址。
 - `ENABLE_MOCK`：`true` 使用本地模拟回复；`false` 调用 `/chat` 流式接口。
-- `CHAT_STREAM_FORMAT`：真实聊天响应格式，支持 `sse` 或 `text`。
+- `CHAT_STREAM_FORMAT`：预留字段，LLM 流式引擎接入后的响应格式（当前真实聊天为一次性 JSON 应答）。
 - `SESSION_CHECK_PATH`：恢复页面会话时用于验证令牌的受保护只读接口。
 - `REQUEST_TIMEOUT`：Axios 普通请求超时。
 

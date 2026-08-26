@@ -36,6 +36,8 @@ definitions:
         type: integer
       Deleted:
         type: boolean
+      Description:
+        type: string
       Disabled:
         type: boolean
       Fallbacks:
@@ -47,6 +49,8 @@ definitions:
         type: string
       ImageTheme:
         type: string
+      IsDefault:
+        type: boolean
       MaxConcurrents:
         description: DDL 列为 max_concurrent
         type: integer
@@ -160,8 +164,27 @@ definitions:
     required:
     - agentId
     type: object
+  model.AgentStartupFileRequest:
+    properties:
+      agentId:
+        type: string
+      fileName:
+        type: string
+    required:
+    - agentId
+    - fileName
+    type: object
   model.ChatRequest:
     properties:
+      agentId:
+        description: 可选:会话对应的目标Agent(暂未启用)
+        type: string
+      chatChannel:
+        description: 聊天的频道,1=WEB,2=FEISHU 等
+        type: integer
+      chatType:
+        description: 聊天类型，0/1:私聊/群聊
+        type: integer
       genAt:
         description: 消息的发送时间
         type: integer
@@ -169,7 +192,7 @@ definitions:
         description: 聊天的内容
         type: string
       senderId:
-        description: 发送者,如果为空,则采用系统默认的
+        description: 发送者,以服务端认证信息为准
         type: string
       sessionId:
         description: 表示会话的session，在一个会话中的就属于同一个session
@@ -186,8 +209,11 @@ definitions:
       chatType:
         description: 聊天类型，0/1:私聊/群聊
         type: integer
+      reply:
+        description: AI 回复内容(LLM 引擎接入前为演示应答)
+        type: string
       senderId:
-        description: 发送者,如果为空,则采用系统默认的
+        description: 发送者,以服务端认证信息为准
         type: string
       sessionId:
         type: string
@@ -486,6 +512,98 @@ paths:
       summary: 删除Agent
       tags:
       - Agent管理
+  /api/agent/startupFile:
+    post:
+      consumes:
+      - application/json
+      description: 返回指定 Agent 指定启动文件(须命中启动文件白名单)的原始内容
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: AgentId + 启动文件名
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/model.AgentStartupFileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 获取Agent启动文件内容
+      tags:
+      - Agent管理
+  /api/agent/startupFiles:
+    post:
+      consumes:
+      - application/json
+      description: 返回指定 Agent 的全部启动文件(AGENTS.md/SOUL.md/...),仅元数据,不含文件内容
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: AgentId
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/model.AgentIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 获取Agent启动文件列表
+      tags:
+      - Agent管理
   /api/agent/update:
     post:
       consumes:
@@ -576,7 +694,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 新的聊天
+      description: 接收 cclawchat 聊天界面发来的消息并返回 AI 应答
       parameters:
       - description: Login成功返回后得到的token
         in: header
@@ -615,7 +733,7 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/basic.CommonResponse'
-      summary: 新的聊天
+      summary: 发送聊天消息
       tags:
       - 聊天管理
   /api/createSession:

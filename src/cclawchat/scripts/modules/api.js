@@ -27,60 +27,37 @@ async function runMockStream(content, signal, onChunk, onComplete) {
     if (!signal.aborted) onComplete(current);
 }
 
-async function runRealStream(convId, content, token, signal, onChunk, onComplete) {
-    const response = await fetch(`${CONFIG.API_BASE}/chat`, {
-        method: 'POST',
-        signal,
-        credentials: 'omit',
-        headers: {
-            'Content-Type': 'application/json',
-            'Accept': CONFIG.CHAT_STREAM_FORMAT === 'sse' ? 'text/event-stream' : 'text/plain',
-            ...(token ? { AUTHORIZATION: token } : {}),
-        },
-        body: JSON.stringify({ request_msg: content, session_id: convId, chat_type: 0, chat_channel: 1 }),
-    });
-    if (!response.ok) throw new Error(`聊天请求失败 (HTTP ${response.status})`);
-    if (!response.body) throw new Error('服务器未返回可读取的响应流');
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let fullContent = '';
-    let pending = '';
-    const consumeSseEvent = event => {
-        const data = event.split(/\r?\n/)
-            .filter(line => line.startsWith('data:'))
-            .map(line => line.slice(5).trimStart())
-            .join('\n');
-        if (!data || data === '[DONE]') return;
-        let chunk = data;
-        try {
-            const parsed = JSON.parse(data);
-            chunk = parsed.content ?? parsed.delta ?? parsed.data?.content ?? '';
-        } catch { /* plain SSE data */ }
-        fullContent += chunk;
-        onChunk(fullContent);
+/**
+ * 真实聊天请求：POST /api/chat。
+ * - 与 GetAgents/GetSkills 等受保护接口一致，携带 TIMESTAMP/NONCE/SIGNATURE（防重放），
+ *   并附 AUTHORIZATION 令牌，故会经过后端全局 filter 与认证 interceptor。
+ * - 请求体字段与后端 model.ChatRequest 的 json 标签（camelCase）对齐。
+ * - 当前后端返回一次性 JSON 应答（ChatResponse.reply）；LLM 流式引擎接入后可平滑扩展为 SSE。
+ */
+async function runRealChat(convId, content, token, signal, onChunk, onComplete) {
+    const body = {
+        sessionId: convId,
+        requestMsg: content,
+        chatType: 0,    // 私聊
+        chatChannel: 1, // WEB 端
     };
-    while (!signal.aborted) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        pending += decoder.decode(value, { stream: true });
-        if (CONFIG.CHAT_STREAM_FORMAT === 'sse') {
-            const events = pending.split(/\r?\n\r?\n/);
-            pending = events.pop() || '';
-            events.forEach(consumeSseEvent);
-        } else {
-            fullContent += pending;
-            pending = '';
-            onChunk(fullContent);
-        }
+    // 签名基于实际发送的 JSON 字符串计算（与 login 一致）
+    const TIMESTAMP = String(Math.floor(Date.now() / 1000));
+    const NONCE = getRandomNonce();
+    const SIGNATURE = await HmacSHA256Hex(CONFIG.SIGN_KEY, JSON.stringify(body) + TIMESTAMP + NONCE);
+
+    const json = await http.post('/chat', body, {
+        params: { TIMESTAMP, NONCE, SIGNATURE },
+        headers: { AUTHORIZATION: token },
+        signal,
+    });
+    // 后端 CommonResponse 字段为 respCode/respMsg（camelCase）
+    if (json && typeof json.respCode === 'number' && json.respCode !== 0) {
+        throw new Error(json.respMsg || '聊天请求失败');
     }
-    pending += decoder.decode();
-    if (CONFIG.CHAT_STREAM_FORMAT === 'sse' && pending.trim()) consumeSseEvent(pending);
-    if (CONFIG.CHAT_STREAM_FORMAT === 'text' && pending) {
-        fullContent += pending;
-        onChunk(fullContent);
-    }
-    if (!signal.aborted) onComplete(fullContent);
+    const reply = json?.data?.reply || '';
+    onChunk(reply);
+    onComplete(reply);
 }
 
 export const API = {
@@ -88,7 +65,7 @@ export const API = {
         const controller = new AbortController();
         const task = CONFIG.ENABLE_MOCK
             ? runMockStream(content, controller.signal, onChunk, onComplete)
-            : runRealStream(convId, content, token, controller.signal, onChunk, onComplete);
+            : runRealChat(convId, content, token, controller.signal, onChunk, onComplete);
         task.catch(error => {
             if (error.name !== 'AbortError' && !controller.signal.aborted) onError?.(error);
         });

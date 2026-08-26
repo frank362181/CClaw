@@ -151,6 +151,142 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/agent/startupFile": {
+            "post": {
+                "description": "返回指定 Agent 指定启动文件(须命中启动文件白名单)的原始内容",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent管理"
+                ],
+                "summary": "获取Agent启动文件内容",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "AgentId + 启动文件名",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.AgentStartupFileRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/agent/startupFiles": {
+            "post": {
+                "description": "返回指定 Agent 的全部启动文件(AGENTS.md/SOUL.md/...),仅元数据,不含文件内容",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent管理"
+                ],
+                "summary": "获取Agent启动文件列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "盐",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求端请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "对请求内容的签名秒数",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "AgentId",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.AgentIDRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/agent/update": {
             "post": {
                 "description": "更新Agent,需携带 dVersion(乐观锁),版本冲突时返回409",
@@ -280,7 +416,7 @@ const docTemplate = `{
         },
         "/api/chat": {
             "post": {
-                "description": "新的聊天",
+                "description": "接收 cclawchat 聊天界面发来的消息并返回 AI 应答",
                 "consumes": [
                     "application/json"
                 ],
@@ -290,7 +426,7 @@ const docTemplate = `{
                 "tags": [
                     "聊天管理"
                 ],
-                "summary": "新的聊天",
+                "summary": "发送聊天消息",
                 "parameters": [
                     {
                         "type": "string",
@@ -1404,6 +1540,9 @@ const docTemplate = `{
                 "Deleted": {
                     "type": "boolean"
                 },
+                "Description": {
+                    "type": "string"
+                },
                 "Disabled": {
                     "type": "boolean"
                 },
@@ -1419,6 +1558,9 @@ const docTemplate = `{
                 },
                 "ImageTheme": {
                     "type": "string"
+                },
+                "IsDefault": {
+                    "type": "boolean"
                 },
                 "MaxConcurrents": {
                     "description": "DDL 列为 max_concurrent",
@@ -1583,9 +1725,36 @@ const docTemplate = `{
                 }
             }
         },
+        "model.AgentStartupFileRequest": {
+            "type": "object",
+            "required": [
+                "agentId",
+                "fileName"
+            ],
+            "properties": {
+                "agentId": {
+                    "type": "string"
+                },
+                "fileName": {
+                    "type": "string"
+                }
+            }
+        },
         "model.ChatRequest": {
             "type": "object",
             "properties": {
+                "agentId": {
+                    "description": "可选:会话对应的目标Agent(暂未启用)",
+                    "type": "string"
+                },
+                "chatChannel": {
+                    "description": "聊天的频道,1=WEB,2=FEISHU 等",
+                    "type": "integer"
+                },
+                "chatType": {
+                    "description": "聊天类型，0/1:私聊/群聊",
+                    "type": "integer"
+                },
                 "genAt": {
                     "description": "消息的发送时间",
                     "type": "integer"
@@ -1595,7 +1764,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "senderId": {
-                    "description": "发送者,如果为空,则采用系统默认的",
+                    "description": "发送者,以服务端认证信息为准",
                     "type": "string"
                 },
                 "sessionId": {
@@ -1619,8 +1788,12 @@ const docTemplate = `{
                     "description": "聊天类型，0/1:私聊/群聊",
                     "type": "integer"
                 },
+                "reply": {
+                    "description": "AI 回复内容(LLM 引擎接入前为演示应答)",
+                    "type": "string"
+                },
                 "senderId": {
-                    "description": "发送者,如果为空,则采用系统默认的",
+                    "description": "发送者,以服务端认证信息为准",
                     "type": "string"
                 },
                 "sessionId": {

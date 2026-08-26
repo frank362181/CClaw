@@ -217,6 +217,27 @@ func (m *ServiceMain) SetupAgentController() error {
 	return nil
 }
 
+func (m *ServiceMain) SetupChatController() error {
+	chatService := service.GetChatService()
+	chatController := selfController.GetChatController(chatService)
+
+	urlFunMap := make(map[string]gin.HandlerFunc)
+	urlFunMap[cCommon.RelativeChatUrl] = chatController.Chat
+
+	// 复用登录控制器创建的 APIGroupRequire 分组(含认证 interceptor),
+	// 因此本方法必须后于 SetupLoginController 调用。
+	interceptors := interceptor.GetInterceptors()
+	err := m.baseRouter.SetupControllerEx(webbase.HttpMethodPost, basic.APIGroupRequire, urlFunMap, interceptors)
+	if err != nil {
+		logging.LogErrorF("failed to setup chat controller,err:%s", err.Error())
+		urlFunMap = nil
+		return exception.WebServerErrEx2("failed to setup chat controller,error:%s", err.Error())
+	}
+
+	urlFunMap = nil //释放内存
+	return nil
+}
+
 func (m *ServiceMain) SetupServer() error {
 	err := m.baseRouter.SetupServer(m.configHelper)
 	if err != nil {

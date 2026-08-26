@@ -16,4 +16,5 @@ const (
 	ErrorIdBizAgentConflict
 	ErrorIdBizAgentWorkspace
 	ErrorIdBizAgentInternal
+	ErrorIdBizChatParameter
 )

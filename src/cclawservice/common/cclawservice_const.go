@@ -89,6 +89,9 @@ const (
 	ConstErrorAgentNotFound
 	ConstErrorAgentConflict
 	ConstErrorAgentWorkspace
+
+	// ConstErrorChatParameter chat 业务错误
+	ConstErrorChatParameter = iota + basic.ConstErrorMax + 3000 + 1
 )
 
 const (
@@ -106,6 +109,8 @@ const (
 	ConstErrorAgentNotFoundMsg  = "记录不存在或已被删除"
 	ConstErrorAgentConflictMsg  = "记录已存在或版本冲突"
 	ConstErrorAgentWorkspaceMsg = "智能体工作空间不可用"
+
+	ConstErrorChatParameterMsg = "聊天参数错误"
 )
 
 // ContextAuthenticatedUser is the gin.Context key for the server-verified user.
@@ -135,6 +140,8 @@ const (
 	RelativeAddSkill    = "/skill/add"
 	RelativeUpdateSkill = "/skill/update"
 	RelativeRemoveSkill = "/skill/remove"
+
+	RelativeChatUrl = "/chat"
 )
 
 // ================ chat type ================

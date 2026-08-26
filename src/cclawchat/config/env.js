@@ -21,7 +21,7 @@ export const ENV = {
     // false: 调用真实后端接口
     ENABLE_MOCK: false,
 
-    // 真实聊天接口返回格式: 'sse' | 'text'
+    // 预留:LLM 流式引擎接入后的聊天返回格式: 'sse' | 'text'（当前真实聊天为一次性 JSON 应答）
     CHAT_STREAM_FORMAT: 'sse',
 
     // 使用一个受保护的只读接口验证恢复的会话

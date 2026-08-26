@@ -373,24 +373,14 @@ func (rdb *RedisClient) connectMemoryDb() error {
 	return nil
 }
 
+// reconnect 后台断线重建(由健康检查 goroutine 调用),带指数退避。
+// 注意:不在请求路径调用;退避与拨号期间不持有写锁、不清空 mClient,
+// 旧连接继续服务,避免重连窗口期误伤在线请求。
 func (rdb *RedisClient) reconnect() error {
-	rdb.mu.Lock()
-	defer rdb.mu.Unlock()
-
-	if rdb.IsClosed() {
-		return exception.MemoryDbErrEx("redis client is closed")
-	}
-
-	// 关闭旧链接
-	if rdb.mClient != nil {
-		_ = rdb.mClient.Close()
-		rdb.mClient = nil
-	}
-
 	var lastErr error
 	for i := 0; i < rdb.MConfig.MaxRetries; i++ {
 		// 指数退避算法
-		exponent := int(math.Pow(2, float64(i))) // 转换为Int
+		exponent := int(math.Pow(2, float64(i)))
 		wait := time.Duration(exponent*rdb.MConfig.ReconnectBaseDelay) * time.Millisecond
 		if wait > 30*time.Second {
 			wait = 30 * time.Second
@@ -404,15 +394,26 @@ func (rdb *RedisClient) reconnect() error {
 		case <-time.After(wait):
 		}
 
-		//尝试新建链接
+		// 先拨号并验证,成功后再原子替换旧连接
 		rClient, err := rdb.connecting(nil)
 		if err != nil {
 			lastErr = err
 			continue
 		}
 
+		rdb.mu.Lock()
+		if rdb.IsClosed() {
+			rdb.mu.Unlock()
+			_ = rClient.Close()
+			return exception.MemoryDbErrEx("redis client is closed")
+		}
+		old := rdb.mClient
 		rdb.mClient = rClient
 		rdb.isClosed = false
+		rdb.mu.Unlock()
+		if old != nil {
+			_ = old.Close()
+		}
 		return nil
 	}
 
@@ -439,7 +440,8 @@ func (rdb *RedisClient) connecting(fn func(ctx context.Context, cn *redis.Conn) 
 	ctx, cancel := context.WithTimeout(rdb.Ctx, 5*time.Second)
 	defer cancel()
 	if err := rClient.Ping(ctx).Err(); err != nil {
-		_ = rdb.mClient.Close()
+		// 关闭新建的失败客户端(勿关旧 mClient:可能在重连中为 nil 或仍被使用)
+		_ = rClient.Close()
 		return nil, err
 	}
 
@@ -452,29 +454,54 @@ func (rdb *RedisClient) executeWithRetry(operation func(client *redis.Client) er
 		return nil
 	}
 
-	// 判断是否需要重连(链接拒绝、EOF、连接池耗尽等)
-	if isNetworkError(err) {
-		logging.LogInfoF("[Redis] network error detected:%s,%s,trying reconnect.", rdb.MConfig.Address, err.Error())
-
-		if reconErr := rdb.reconnect(); reconErr != nil {
-			logging.LogInfoF("[redis] reconnect failed:%s:%s", rdb.MConfig.Address, reconErr.Error())
-			return reconErr
-		}
-
-		//重试操作
-		rdb.mu.RLock()
-		rClient := rdb.mClient
-		isClosed := rdb.IsClosed()
-		rdb.mu.RUnlock()
-
-		if rClient == nil || isClosed {
-			return exception.MemoryDbErrEx("redis client not available after  reconnect")
-		}
-
-		return operation(rClient)
+	// 非网络类错误(业务错误等)直接返回,不重试
+	if !isNetworkError(err) {
+		return err
 	}
 
-	return err
+	// A1:网络错误时,请求路径只做一次"快速重连"(无指数退避),失败立即返回,
+	// 避免请求被后台式重连的退避阻塞数秒;真正的断线重建由健康检查 goroutine 负责。
+	logging.LogInfoF("[Redis] network error detected:%s,%s,trying fast reconnect.", rdb.MConfig.Address, err.Error())
+	if reconErr := rdb.fastReconnect(); reconErr != nil {
+		logging.LogInfoF("[redis] fast reconnect failed:%s:%s", rdb.MConfig.Address, reconErr.Error())
+		return reconErr
+	}
+
+	rdb.mu.RLock()
+	rClient := rdb.mClient
+	isClosed := rdb.IsClosed()
+	rdb.mu.RUnlock()
+	if rClient == nil || isClosed {
+		return exception.MemoryDbErrEx("redis client not available after fast reconnect")
+	}
+
+	// 在新连接上重试一次;仍失败则快速返回
+	return operation(rClient)
+}
+
+// fastReconnect 请求路径使用的轻量重连:立即新建并验证连接(无指数退避),失败立即返回。
+// 与后台 reconnect() 的区别:不做退避;连接替换原子化,不会出现
+// "重连窗口期 mClient 为 nil 导致在线请求被误伤"的问题。
+func (rdb *RedisClient) fastReconnect() error {
+	rClient, err := rdb.connecting(nil)
+	if err != nil {
+		return exception.MemoryDbErrEx2("fast reconnect failed:%s", err.Error())
+	}
+
+	rdb.mu.Lock()
+	defer rdb.mu.Unlock()
+	if rdb.IsClosed() {
+		_ = rClient.Close()
+		return exception.MemoryDbErrEx("redis client is closed")
+	}
+
+	old := rdb.mClient
+	rdb.mClient = rClient
+	rdb.isClosed = false
+	if old != nil {
+		_ = old.Close()
+	}
+	return nil
 }
 
 func (rdb *RedisClient) onConnected(ctx context.Context, cn *redis.Conn) error {

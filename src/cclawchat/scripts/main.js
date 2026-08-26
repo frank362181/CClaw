@@ -6,7 +6,7 @@
 
 import { State } from './modules/state.js';
 import { Auth } from './modules/auth.js';
-import { StreamEngine } from './modules/stream.js';
+import { StreamEngine } from './modules/stream.js?v=20260826';
 import { LoginPage } from './modules/login.js';
 import { ChatPage } from './modules/chat.js';
 import { HomePage } from './modules/home.js';

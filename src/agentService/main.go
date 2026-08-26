@@ -89,6 +89,11 @@ func main() {
 		return
 	}
 
+	// 添加聊天控制器(复用认证 interceptor,POST /api/chat)
+	if err := mainApp.SetupChatController(); err != nil {
+		return
+	}
+
 	// 1. setup server
 	if err := mainApp.SetupServer(); err != nil {
 		return

@@ -11,15 +11,34 @@
 package utility
 
 import (
+	"net/http"
 	"path/filepath"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"my.favorite/cclawservice/common"
+	"my.favorite/cclawservice/controller/model"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
+	"my.favorite/platformutility/webbase/middleware/basic"
 )
+
+func GetAuthentication(c *gin.Context) (*model.LoginSession, bool) {
+	tempValue, exists := c.Get(common.ContextAuthenticatedUser)
+	if !exists {
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusUnauthorized, common.ConstErrorUserUnAuthorized, common.ConstErrorUserUnAuthorizedMsg, nil)
+		return nil, false
+	}
+	loginSession, ok := tempValue.(*model.LoginSession)
+	if !ok {
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
+		return nil, false
+	}
+
+	return loginSession, true
+}
 
 // FrontMatterDelimiter front matter 的定界符
 const FrontMatterDelimiter = "---"

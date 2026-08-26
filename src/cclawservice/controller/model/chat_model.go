@@ -54,20 +54,22 @@ type SessionsResponseEx struct {
 
 // ChatRequest =================聊天所需的信令==================
 type ChatRequest struct {
-	SenderId  string `json:"senderId"`  //发送者,如果为空,则采用系统默认的
-	SessionId string `json:"sessionId"` //表示会话的session，在一个会话中的就属于同一个session
-
-	ReqMsg string `json:"requestMsg"` //聊天的内容
-	GenAt  int64  `json:"genAt"`      // 消息的发送时间
+	SenderId    string `json:"senderId"`    //发送者,以服务端认证信息为准
+	SessionId   string `json:"sessionId"`   //表示会话的session，在一个会话中的就属于同一个session
+	ReqMsg      string `json:"requestMsg"`  //聊天的内容
+	ChatType    int    `json:"chatType"`    //聊天类型，0/1:私聊/群聊
+	ChatChannel int    `json:"chatChannel"` //聊天的频道,1=WEB,2=FEISHU 等
+	AgentId     string `json:"agentId"`     //可选:会话对应的目标Agent(暂未启用)
+	GenAt       int64  `json:"genAt"`       // 消息的发送时间
 }
 
 type ChatResponse struct {
-	SenderId  string `json:"senderId"` //发送者,如果为空,则采用系统默认的
-	SessionId string `json:"sessionId"`
-	ChatType  int    `json:"chatType"` //聊天类型，0/1:私聊/群聊
-
-	ChatChannel int   `json:"chatChannel"` //聊天的频道,1=WEB,2,FEISHU 等
-	ChatId      int64 `json:"chatId"`      //本次聊天的消息ID,用于标识本次聊天的位置
+	SenderId    string `json:"senderId"`    //发送者,以服务端认证信息为准
+	SessionId   string `json:"sessionId"`
+	ChatType    int    `json:"chatType"`    //聊天类型，0/1:私聊/群聊
+	ChatChannel int    `json:"chatChannel"` //聊天的频道,1=WEB,2,FEISHU 等
+	ChatId      int64  `json:"chatId"`      //本次聊天的消息ID,用于标识本次聊天的位置
+	Reply       string `json:"reply"`       //AI 回复内容(LLM 引擎接入前为演示应答)
 }
 
 type ChatResponseEx struct {
