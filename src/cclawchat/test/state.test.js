@@ -51,3 +51,17 @@ test('conversation enforces message limit', () => {
     }
     assert.equal(State.getCurrentConversation().messages.length, CONFIG.MAX_MESSAGES_PER_CONV);
 });
+
+test('updateMessageStatus stores transient status without persisting to storage', () => {
+    reset();
+    State.login('alice', 'token');
+    const msg = State.addMessage(State.currentConvId, 'assistant', '');
+    State.updateMessageStatus(State.currentConvId, msg.id, '正在思考…');
+    const found = () => State.getCurrentConversation().messages.find(m => m.id === msg.id);
+    assert.equal(found().statusText, '正在思考…');
+    State.updateMessageStatus(State.currentConvId, msg.id, '');
+    assert.equal(found().statusText, '');
+    // 该字段仅存于内存:重新加载会话(从 localStorage)后不残留
+    State.loadConversations();
+    assert.equal(found().statusText, undefined);
+});

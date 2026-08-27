@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"my.favorite/cclawservice/controller/model"
 	myException "my.favorite/cclawservice/exception"
@@ -227,7 +229,7 @@ func TestChatCompletionStream_Success(t *testing.T) {
 
 	client := NewClient()
 	var got []string
-	full, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), func(delta string) { got = append(got, delta) })
+	full, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), func(delta string) { got = append(got, delta) }, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -247,7 +249,7 @@ func TestChatCompletionStream_UpstreamErrorEvent(t *testing.T) {
 	srv := newMockServer(t, http.StatusOK, streamBody, nil)
 
 	client := NewClient()
-	_, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), nil)
+	_, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "boom during stream") {
 		t.Fatalf("expected upstream stream error, got: %v", err)
 	}
@@ -257,9 +259,72 @@ func TestChatCompletionStream_EmptyContent(t *testing.T) {
 	srv := newMockServer(t, http.StatusOK, "data: [DONE]\n", nil)
 
 	client := NewClient()
-	_, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), nil)
+	_, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), nil, nil)
 	if err == nil {
 		t.Fatal("expected empty stream content error, got nil")
+	}
+}
+
+// TestChatCompletionStream_ReasoningContent 验证思考过程增量(reasoning_content)单独转发、
+// 且不并入正式回复:content 只累计正式内容,reasoning 回调只收到思考增量。
+func TestChatCompletionStream_ReasoningContent(t *testing.T) {
+	streamBody := "" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"让我\",\"content\":\"\"}}]}\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"想想\",\"content\":\"\"}}]}\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"\",\"content\":\"你好\"}}]}\n" +
+		"data: [DONE]\n"
+	srv := newMockServer(t, http.StatusOK, streamBody, nil)
+
+	client := NewClient()
+	var content []string
+	var reasoning []string
+	full, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"),
+		func(delta string) { content = append(content, delta) },
+		func(delta string) { reasoning = append(reasoning, delta) })
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if full != "你好" {
+		t.Errorf("full = %q, want 你好(不含思考过程)", full)
+	}
+	if len(content) != 1 || content[0] != "你好" {
+		t.Errorf("content chunks = %v, want [你好]", content)
+	}
+	if len(reasoning) != 2 || reasoning[0] != "让我" || reasoning[1] != "想想" {
+		t.Errorf("reasoning chunks = %v, want [让我 想想]", reasoning)
+	}
+}
+
+// TestChatCompletionStream_NoOverallTimeout 回归测试(A13):流式客户端不得有整体超时。
+// 同步客户端被配置为极短超时(150ms),mock 上游却以 3×100ms 缓慢输出(总计约 300ms)。
+// 修复前流式复用同步客户端 → 整体超时在内容输出中触发并报错;
+// 修复后流式使用独立客户端(Timeout=0) → 完整收到全部增量。
+func TestChatCompletionStream_NoOverallTimeout(t *testing.T) {
+	client := newClient(150 * time.Millisecond)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		for _, ch := range []string{"a", "b", "c"} {
+			time.Sleep(100 * time.Millisecond)
+			fmt.Fprintf(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"%s\"}}]}\n\n", ch)
+			fl.Flush()
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		fl.Flush()
+	}))
+	defer srv.Close()
+
+	var got []string
+	full, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), func(delta string) { got = append(got, delta) }, nil)
+	if err != nil {
+		t.Fatalf("stream longer than sync timeout should succeed, got error: %v", err)
+	}
+	if full != "abc" {
+		t.Errorf("full = %q, want %q", full, "abc")
+	}
+	if len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "c" {
+		t.Errorf("chunks = %v, want [a b c]", got)
 	}
 }
 

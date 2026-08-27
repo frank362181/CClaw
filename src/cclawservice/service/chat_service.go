@@ -18,7 +18,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"strings"
 
@@ -74,7 +73,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *model.ChatRequest, s
 	// 调用 LLM 引擎取回完整回复
 	reply, err := s.llmClient.ChatCompletion(ctx, llmProvider, systemPrompt, req)
 	if err != nil {
-		return nil, s.llmError(err, "chat service: llm call error")
+		return nil, myException.LlmError(err, "chat service: llm call error")
 	}
 
 	// 组装应答
@@ -95,7 +94,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *model.ChatRequest, s
 //   - onStatus: 内容开始前报告 Agent 所处阶段(如解析任务/思考),由控制器以 status 事件转发
 //   - 返回值:   完整回复文本
 //   - 与 SendMessage 共用 prepareChat,保证同步/流式两条路径的校验与解析完全一致
-func (s *ChatService) ChatStream(ctx context.Context, req *model.ChatRequest, sender, comCode string, onChunk func(string), onStatus func(status, text string)) (string, error) {
+func (s *ChatService) ChatStream(ctx context.Context, req *model.ChatRequest, sender, comCode string, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string)) (string, error) {
 	if onStatus != nil {
 		onStatus(cCommon.ChatStatusPreparing, "正在解析任务…")
 	}
@@ -107,9 +106,9 @@ func (s *ChatService) ChatStream(ctx context.Context, req *model.ChatRequest, se
 	if onStatus != nil {
 		onStatus(cCommon.ChatStatusThinking, "正在思考…")
 	}
-	reply, err := s.llmClient.ChatCompletionStream(ctx, llmProvider, systemPrompt, req, onChunk)
+	reply, err := s.llmClient.ChatCompletionStream(ctx, llmProvider, systemPrompt, req, onChunk, onReasoning)
 	if err != nil {
-		return "", s.llmError(err, "chat service: llm stream error")
+		return "", myException.LlmError(err, "chat service: llm stream error")
 	}
 	return reply, nil
 }
@@ -174,16 +173,6 @@ func (s *ChatService) prepareChat(req *model.ChatRequest, sender, comCode string
 }
 
 // ==================== private functions & methods ==========================
-
-// llmError 统一转换 LLM 调用错误:客户端取消 → ChatCanceledErr(静默),其余 → ChatLLMErr。
-func (s *ChatService) llmError(err error, logPrefix string) error {
-	if errors.Is(err, myException.ErrRequestCanceled) {
-		logging.LogDebugF("%s: request canceled by client", logPrefix)
-		return myException.ChatCanceledErrEx("chat request canceled")
-	}
-	logging.LogErrorF("%s:%s", logPrefix, err.Error())
-	return myException.ChatLLMErrEx2("%s:%s", logPrefix, err.Error())
-}
 
 // resolveAgent 解析本次会话的目标 Agent。
 //   - agentId 非空:按 (comCode, agentId) 精确查找,未命中/被禁用返回 ChatAgentNotFoundErr

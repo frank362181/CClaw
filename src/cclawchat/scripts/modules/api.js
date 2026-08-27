@@ -72,7 +72,7 @@ async function runRealChat(convId, content, token, signal, onChunk, onComplete) 
  * - 携带 TIMESTAMP/NONCE/SIGNATURE（防重放）与 AUTHORIZATION 令牌，与登录一致。
  * - 支持 signal 取消（AbortController），取消时静默结束不触发完成回调。
  */
-async function runRealChatStream(convId, content, token, signal, onChunk, onComplete, onStatus) {
+async function runRealChatStream(convId, content, token, signal, onChunk, onComplete, onStatus, onReasoning) {
     const body = {
         sessionId: convId,
         requestMsg: content,
@@ -122,6 +122,11 @@ async function runRealChatStream(convId, content, token, signal, onChunk, onComp
             onStatus?.(payload);
             return false;
         }
+        if (payload && typeof payload.delta === 'string' && payload.delta) {
+            // 思考过程增量（reasoning_content），独立于正式回复
+            onReasoning?.(payload.delta);
+            return false;
+        }
         if (payload && typeof payload.reply === 'string' && payload.reply) {
             accumulated += payload.reply;
             onChunk(accumulated);
@@ -158,14 +163,14 @@ async function runRealChatStream(convId, content, token, signal, onChunk, onComp
 }
 
 export const API = {
-    sendMessageStream(convId, content, token, onChunk, onComplete, onError, onStatus) {
+    sendMessageStream(convId, content, token, onChunk, onComplete, onError, onStatus, onReasoning) {
         const controller = new AbortController();
         // SSE 为默认真实路径；ENABLE_MOCK 时走模拟流；CHAT_STREAM_FORMAT 非 'sse' 时回退同步 JSON
         const useStream = CONFIG.CHAT_STREAM_FORMAT === 'sse';
         const task = CONFIG.ENABLE_MOCK
             ? runMockStream(content, controller.signal, onChunk, onComplete, onStatus)
             : useStream
-                ? runRealChatStream(convId, content, token, controller.signal, onChunk, onComplete, onStatus)
+                ? runRealChatStream(convId, content, token, controller.signal, onChunk, onComplete, onStatus, onReasoning)
                 : runRealChat(convId, content, token, controller.signal, onChunk, onComplete);
         task.catch(error => {
             if (error.name !== 'AbortError' && !controller.signal.aborted) onError?.(error);

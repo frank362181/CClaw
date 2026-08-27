@@ -10,7 +10,7 @@ export const StreamEngine = {
         this.cancel();
         const requestId = genId();
         const msgId = genId();
-        const request = { requestId, convId, msgId, controller: null, content: '' };
+        const request = { requestId, convId, msgId, controller: null, content: '', statusText: '', reasoning: '' };
         this._activeRequest = request;
         State.isStreaming = true;
         State.addMessage(convId, 'assistant', '', msgId);
@@ -39,6 +39,7 @@ export const StreamEngine = {
             content => {
                 if (!isCurrent()) return;
                 request.content = content || request.content;
+                State.updateMessageStatus(convId, msgId, '');
                 State.updateMessageContent(convId, msgId, request.content);
                 ChatPage.updateStreamingMessage(msgId, request.content, true);
                 if (!finish()) return;
@@ -46,7 +47,17 @@ export const StreamEngine = {
             },
             error => {
                 if (!isCurrent()) return;
+                // 内容已送达过:保留已输出内容,不再用错误提示整体覆盖(内容对用户仍有价值)
+                if (request.content) {
+                    State.updateMessageStatus(convId, msgId, '');
+                    State.updateMessageContent(convId, msgId, request.content);
+                    ChatPage.updateStreamingMessage(msgId, request.content, true);
+                    if (!finish()) return;
+                    onComplete?.(request.content);
+                    return;
+                }
                 const message = `⚠️ ${error?.message || '网络错误，请稍后重试'}`;
+                State.updateMessageStatus(convId, msgId, '');
                 State.updateMessageContent(convId, msgId, message);
                 ChatPage.updateStreamingMessage(msgId, message, true);
                 if (!finish()) return;
@@ -55,7 +66,16 @@ export const StreamEngine = {
             status => {
                 // 内容开始前,展示 Agent 当前阶段(拆解任务/思考/推理等)
                 if (!isCurrent()) return;
+                request.statusText = status?.text || '';
+                State.updateMessageStatus(convId, msgId, request.statusText);
                 ChatPage.updateStreamingStatus(msgId, status?.text);
+            },
+            delta => {
+                // 思考过程(reasoning_content)增量:实时展示思考过程(不写入 content)
+                if (!isCurrent()) return;
+                request.reasoning = (request.reasoning || '') + delta;
+                State.updateMessageReasoning(convId, msgId, request.reasoning);
+                ChatPage.updateStreamingReasoning(msgId, request.reasoning);
             },
         );
         return { msgId, cancel: () => this.cancel(requestId) };
@@ -67,6 +87,7 @@ export const StreamEngine = {
         this._activeRequest = null;
         State.isStreaming = false;
         request.controller?.abort();
+        State.updateMessageStatus(request.convId, request.msgId, '');
         State.updateMessageContent(request.convId, request.msgId, request.content);
         ChatPage.updateStreamingMessage(request.msgId, request.content, true);
         ChatPage.setInputEnabled(true);

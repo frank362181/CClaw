@@ -1,6 +1,8 @@
 package common
 
 import (
+	"time"
+
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
@@ -173,4 +175,15 @@ const (
 const (
 	ChatStatusPreparing = "preparing" //解析任务/准备上下文
 	ChatStatusThinking  = "thinking"  //思考/推理中(等待首个 token)
+)
+
+// LLM 调用关联的constants
+const (
+	// MaxResponseBytes 单次应答读取上限(8MB),防止超大响应耗尽内存。
+	MaxResponseBytes = 8 << 20
+
+	// DefaultTimeout 单次 LLM 请求的默认超时。
+	// 真实模型推理(大上下文 + 大 max_tokens)可能耗时较长,10s 过短会在读响应时因
+	// 上下文被取消(客户端断开/超时)而中断;这里放宽到 60s(需与服务端 writeTimeout、前端超时对齐)。
+	DefaultTimeout = 60 * time.Second
 )

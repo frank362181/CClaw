@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"my.favorite/platformutility/exception"
+	"my.favorite/platformutility/logging"
 )
 
 // MapStartupFileError 把启动文件相关的仓库层/平台错误转换为 agent 管理业务错误,
@@ -18,4 +19,14 @@ func MapStartupFileError(err error) error {
 	default:
 		return err
 	}
+}
+
+// LlmError 统一转换 LLM 调用错误:客户端取消 → ChatCanceledErr(静默),其余 → ChatLLMErr。
+func LlmError(err error, logPrefix string) error {
+	if errors.Is(err, ErrRequestCanceled) {
+		logging.LogDebugF("%s: request canceled by client", logPrefix)
+		return ChatCanceledErrEx("chat request canceled")
+	}
+	logging.LogErrorF("%s:%s", logPrefix, err.Error())
+	return ChatLLMErrEx2("%s:%s", logPrefix, err.Error())
 }

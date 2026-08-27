@@ -101,7 +101,39 @@ export const ChatPage = {
 
             const bubble = document.createElement('div');
             bubble.className = 'bubble';
-            bubble.innerHTML = msg.content.replace(/\n/g, '<br/>');
+
+            if (isUser) {
+                bubble.innerHTML = msg.content.replace(/\n/g, '<br/>');
+            } else {
+                // 思考过程块(会话内存中存在时渲染;默认折叠展示)
+                if (msg.reasoningText) {
+                    const rw = document.createElement('details');
+                    rw.className = 'reasoning-wrap';
+                    const summary = document.createElement('summary');
+                    summary.textContent = '🧠 思考过程';
+                    const textEl = document.createElement('div');
+                    textEl.className = 'reasoning-text';
+                    textEl.innerHTML = this._escapeHtml(msg.reasoningText).replace(/\n/g, '<br/>');
+                    rw.appendChild(summary);
+                    rw.appendChild(textEl);
+                    bubble.appendChild(rw);
+                }
+
+                const contentEl = document.createElement('span');
+                contentEl.className = 'stream-content';
+                if (!msg.content && msg.statusText && State.isStreaming) {
+                    // 流式"思考/准备"阶段内容尚未到达:抽屉收起再展开触发全量重渲染时,
+                    // 依据暂存的 statusText 恢复 thinking 指示(仅 UI,不写 content)。
+                    contentEl.innerHTML = `<span class="thinking-indicator"></span><span class="thinking-text">${this._escapeHtml(msg.statusText)}</span>`;
+                    div.classList.add('streaming');
+                } else {
+                    contentEl.innerHTML = msg.content.replace(/\n/g, '<br/>');
+                }
+                bubble.appendChild(contentEl);
+                if (div.classList.contains('streaming')) {
+                    bubble.appendChild(this._makeCursor());
+                }
+            }
 
             const time = document.createElement('div');
             time.className = 'timestamp';
@@ -148,7 +180,10 @@ export const ChatPage = {
 
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
-        bubble.innerHTML = '<span class="cursor-blink"></span>';
+        const contentEl = document.createElement('span');
+        contentEl.className = 'stream-content';
+        bubble.appendChild(contentEl);
+        bubble.appendChild(this._makeCursor());
 
         const time = document.createElement('div');
         time.className = 'timestamp';
@@ -173,16 +208,18 @@ export const ChatPage = {
         const bubble = msgEl.querySelector('.bubble');
         if (!bubble) return;
 
-        const escaped = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const html = escaped.replace(/\n/g, '<br/>');
+        const contentEl = bubble.querySelector('.stream-content');
+        if (!contentEl) return;
+
+        contentEl.innerHTML = this._escapeHtml(content).replace(/\n/g, '<br/>');
 
         if (isComplete) {
-            bubble.innerHTML = html;
+            bubble.querySelectorAll('.cursor-blink').forEach(el => el.remove());
             msgEl.classList.remove('streaming');
             const timeEl = msgEl.querySelector('.timestamp');
             if (timeEl) timeEl.textContent = formatTime(Date.now());
-        } else {
-            bubble.innerHTML = html + '<span class="cursor-blink"></span>';
+        } else if (!bubble.querySelector('.cursor-blink')) {
+            bubble.appendChild(this._makeCursor());
         }
         this.scrollToBottom();
     },
@@ -196,8 +233,45 @@ export const ChatPage = {
         const bubble = msgEl.querySelector('.bubble');
         if (!bubble) return;
 
-        const text = (statusText || '思考中…').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        bubble.innerHTML = `<span class="thinking-indicator"></span><span class="thinking-text">${text}</span><span class="cursor-blink"></span>`;
+        const contentEl = bubble.querySelector('.stream-content');
+        if (!contentEl) return;
+
+        contentEl.innerHTML = `<span class="thinking-indicator"></span><span class="thinking-text">${this._escapeHtml(statusText || '思考中…')}</span>`;
+        if (!bubble.querySelector('.cursor-blink')) {
+            bubble.appendChild(this._makeCursor());
+        }
+        this.scrollToBottom();
+    },
+
+    // 内容开始前,实时展示模型思考过程(reasoning_content)增量文本。
+    // 首次收到增量时创建可折叠块(展开状态实时可见);后续只更新文本,不打断用户手动折叠。
+    updateStreamingReasoning(msgId, reasoningText) {
+        const container = this.els.messageList;
+        const msgEl = container.querySelector(`.message[data-msg-id="${msgId}"]`);
+        if (!msgEl) return;
+
+        const bubble = msgEl.querySelector('.bubble');
+        if (!bubble) return;
+
+        let rw = bubble.querySelector('.reasoning-wrap');
+        if (!rw) {
+            rw = document.createElement('details');
+            rw.className = 'reasoning-wrap';
+            rw.open = true; // 实时思考过程默认展开
+            const summary = document.createElement('summary');
+            summary.textContent = '🧠 思考过程';
+            const textEl = document.createElement('div');
+            textEl.className = 'reasoning-text';
+            rw.appendChild(summary);
+            rw.appendChild(textEl);
+            const contentEl = bubble.querySelector('.stream-content');
+            bubble.insertBefore(rw, contentEl || bubble.firstChild);
+            // 思考过程已可见,清掉"正在思考…"占位
+            if (contentEl) contentEl.innerHTML = '';
+        }
+
+        const textEl = rw.querySelector('.reasoning-text');
+        textEl.innerHTML = this._escapeHtml(reasoningText).replace(/\n/g, '<br/>');
         this.scrollToBottom();
     },
 
@@ -206,6 +280,18 @@ export const ChatPage = {
         requestAnimationFrame(() => {
             container.scrollTop = container.scrollHeight;
         });
+    },
+
+    // HTML 转义(与各流式更新方法保持一致的转义规则)
+    _escapeHtml(str) {
+        return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    },
+
+    // 创建流式光标元素
+    _makeCursor() {
+        const c = document.createElement('span');
+        c.className = 'cursor-blink';
+        return c;
     },
 
     // 输入框与发送按钮是否可用。

@@ -734,6 +734,31 @@ body {
     color: var(--color-text-secondary);
 }
 
+/* 思考过程(reasoning_content)折叠块 */
+.message.assistant .bubble .reasoning-wrap {
+    margin-bottom: 8px;
+    padding: 8px 10px;
+    border: 1px solid rgba(142, 142, 160, 0.25);
+    border-radius: var(--radius-sm);
+    background: rgba(142, 142, 160, 0.06);
+    font-size: var(--font-size-xs);
+}
+
+.message.assistant .bubble .reasoning-wrap summary {
+    cursor: pointer;
+    color: var(--color-text-secondary);
+    font-weight: 500;
+    user-select: none;
+}
+
+.message.assistant .bubble .reasoning-text {
+    margin-top: 6px;
+    color: var(--color-text-muted);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .message .timestamp {
     font-size: var(--font-size-xs);
     color: var(--color-text-muted);

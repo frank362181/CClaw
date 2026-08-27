@@ -11,10 +11,16 @@
 package exception
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"runtime"
 )
+
+// IsContextCanceled 判断错误是否源于请求上下文取消,以便上层区分处理。
+func IsContextCanceled(ctx context.Context, err error) bool {
+	return errors.Is(err, context.Canceled) || ctx.Err() != nil
+}
 
 type ErrorDescription struct {
 	ErrTxt   string

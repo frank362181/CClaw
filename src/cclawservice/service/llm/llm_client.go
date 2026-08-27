@@ -28,18 +28,12 @@ import (
 	"strings"
 	"time"
 
+	myCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/controller/model"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
+	pException "my.favorite/platformutility/exception"
 )
-
-// MaxResponseBytes 单次应答读取上限(8MB),防止超大响应耗尽内存。
-const MaxResponseBytes = 8 << 20
-
-// DefaultTimeout 单次 LLM 请求的默认超时。
-// 真实模型推理(大上下文 + 大 max_tokens)可能耗时较长,10s 过短会在读响应时因
-// 上下文被取消(客户端断开/超时)而中断;这里放宽到 60s(需与服务端 writeTimeout、前端超时对齐)。
-const DefaultTimeout = 60 * time.Second
 
 // ChatCompletionChoice 一条候选回复
 type ChatCompletionChoice struct {
@@ -78,30 +72,59 @@ type ChatCompletionChunk struct {
 	Error   *APIError                   `json:"error,omitempty"`
 }
 
-// ChatCompletionChunkChoice 流式块中的单个候选(增量文本在 delta.content)
+// ChatCompletionChunkDelta 流式块中的增量(delta)。
+// reasoning_content 是推理模型的思考过程增量(如 DeepSeek reasoner),仅在流式响应中出现、
+// 不参与请求体;这里把它实时转发给浏览器展示,不并入正式回复。
+type ChatCompletionChunkDelta struct {
+	Role             string `json:"role"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
+}
+
+// ChatCompletionChunkChoice 流式块中的单个候选(增量文本在 delta.content / delta.reasoning_content)
 type ChatCompletionChunkChoice struct {
-	Index        int         `json:"index"`
-	Delta        ChatMessage `json:"delta"`
-	FinishReason *string     `json:"finish_reason"`
+	Index        int                      `json:"index"`
+	Delta        ChatCompletionChunkDelta `json:"delta"`
+	FinishReason *string                  `json:"finish_reason"`
 }
 
 // Client 一个可复用的 LLM chat/completions 客户端(线程安全)。
 type Client struct {
+	// 同步请求客户端:固定整体超时,防止单次同步调用无限挂起。
 	httpClient *http.Client
+	// 流式请求客户端:无整体超时;长推理/长输出会合法地超过任何固定上限,
+	// 若沿用同步的整体超时,会在内容已输出后把整次调用判为失败(见 A13)。
+	streamClient *http.Client
+}
+
+// newClient 构造 LLM 客户端。
+//   - timeout: 同步请求的整体超时,同时也是流式请求的首字节等待上限
+//   - 流式客户端刻意不设整体超时(Timeout=0):流式输出时长由模型推理决定,
+//     整体超时会在内容已送达后触发,浏览器端把已输出内容覆盖成"引擎不可用"。
+//     断开/取消由调用方 ctx 负责(浏览器断开 → gin 取消请求 ctx → 上游读失败 →
+//     ErrRequestCanceled → 静默结束),不会无限挂起。
+func newClient(timeout time.Duration) *Client {
+	streamTransport := http.DefaultTransport.(*http.Transport).Clone()
+	streamTransport.ResponseHeaderTimeout = timeout // 仅限制"等待首个字节",不影响已开始的流
+	return &Client{
+		httpClient: &http.Client{Timeout: timeout},
+		streamClient: &http.Client{
+			Timeout:   0,
+			Transport: streamTransport,
+		},
+	}
 }
 
 // NewClient 构造 LLM 客户端。
 // 鉴权密钥与 max_tokens 均来自每次调用传入的 TLlm(数据库配置),
 // 客户端本身不持有任何供应商特定配置。
 func NewClient() *Client {
-	return &Client{
-		httpClient: &http.Client{Timeout: DefaultTimeout},
-	}
+	return newClient(myCommon.DefaultTimeout)
 }
 
 // responseError 非 2xx 时把响应体解析为可读的错误信息返回。
 func responseError(resp *http.Response) error {
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBytes))
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, myCommon.MaxResponseBytes))
 	var apiErr APIError
 	if json.Unmarshal(respBody, &apiErr) == nil && apiErr.Message != "" {
 		return fmt.Errorf("llm client: http %d: %s", resp.StatusCode, apiErr.Message)
@@ -123,7 +146,7 @@ func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm
 
 	httpResp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		if isContextCanceled(ctx, err) {
+		if pException.IsContextCanceled(ctx, err) {
 			return "", myException.ErrRequestCanceled
 		}
 		return "", fmt.Errorf("llm client: request failed: %w", err)
@@ -136,9 +159,9 @@ func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm
 		return "", responseError(httpResp)
 	}
 
-	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, MaxResponseBytes))
+	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, myCommon.MaxResponseBytes))
 	if err != nil {
-		if isContextCanceled(ctx, err) {
+		if pException.IsContextCanceled(ctx, err) {
 			return "", myException.ErrRequestCanceled
 		}
 		return "", fmt.Errorf("llm client: read response: %w", err)
@@ -167,16 +190,22 @@ func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm
 //   - onChunk: 每个增量文本到达时被调用,参数为该次增量 delta(非累计)
 //   - 返回值: 完整回复文本(累计)
 //   - 客户端断开/取消:返回 myException.ErrRequestCanceled,由上层区分处理
-func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *model.ChatRequest, onChunk func(delta string)) (string, error) {
+//
+// ChatCompletionStream 以流式(SSE)方式调用 chat/completions。
+//   - onChunk:    每个正式回复增量到达时被调用,参数为该次增量 delta
+//   - onReasoning: 思考过程增量(reasoning_content)到达时被调用(如推理模型);不并入返回的正式回复
+//   - 返回值:     正式回复文本(累计,不含思考过程)
+func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *model.ChatRequest, onChunk func(delta string), onReasoning func(delta string)) (string, error) {
 	req := BuildChatCompletionRequest(llmProvider, systemPrompt, chatReq, true) // 已强制 stream=true
 	httpReq, err := c.prepareRequest(ctx, llmProvider, req)
 	if err != nil {
 		return "", err
 	}
 
-	httpResp, err := c.httpClient.Do(httpReq)
+	// 流式使用独立客户端:无整体超时,长流不会被固定上限(如 60s)中断
+	httpResp, err := c.streamClient.Do(httpReq)
 	if err != nil {
-		if isContextCanceled(ctx, err) {
+		if pException.IsContextCanceled(ctx, err) {
 			return "", myException.ErrRequestCanceled
 		}
 		return "", fmt.Errorf("llm client: request failed: %w", err)
@@ -193,7 +222,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobjec
 	// 单行上限与 MaxResponseBytes 对齐,防止恶意超长行耗尽内存。
 	var sb strings.Builder
 	scanner := bufio.NewScanner(httpResp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), MaxResponseBytes)
+	scanner.Buffer(make([]byte, 0, 64*1024), myCommon.MaxResponseBytes)
 	for scanner.Scan() {
 		if ctx.Err() != nil {
 			return "", myException.ErrRequestCanceled // 客户端已断开
@@ -216,18 +245,25 @@ func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobjec
 		if chunk.Error != nil && chunk.Error.Message != "" {
 			return "", fmt.Errorf("llm client: upstream stream error: %s", chunk.Error.Message)
 		}
-		if len(chunk.Choices) == 0 || chunk.Choices[0].Delta.Content == "" {
+		if len(chunk.Choices) == 0 {
 			continue
 		}
 
-		delta := chunk.Choices[0].Delta.Content
-		sb.WriteString(delta)
+		delta := chunk.Choices[0].Delta
+		// 思考过程增量(reasoning_content):只转发给调用方(前端实时展示),不并入正式回复
+		if delta.ReasoningContent != "" && onReasoning != nil {
+			onReasoning(delta.ReasoningContent)
+		}
+		if delta.Content == "" {
+			continue
+		}
+		sb.WriteString(delta.Content)
 		if onChunk != nil {
-			onChunk(delta)
+			onChunk(delta.Content)
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		if isContextCanceled(ctx, err) {
+		if pException.IsContextCanceled(ctx, err) {
 			return "", myException.ErrRequestCanceled
 		}
 		return "", fmt.Errorf("llm client: read stream: %w", err)
@@ -274,9 +310,4 @@ func (c *Client) prepareRequest(ctx context.Context, llmProvider dataobject.TLlm
 		httpReq.Header.Set("Authorization", "Bearer "+key)
 	}
 	return httpReq, nil
-}
-
-// isContextCanceled 判断错误是否源于请求上下文取消,以便上层区分处理。
-func isContextCanceled(ctx context.Context, err error) bool {
-	return errors.Is(err, context.Canceled) || ctx.Err() != nil
 }

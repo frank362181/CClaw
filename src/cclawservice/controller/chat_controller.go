@@ -182,19 +182,34 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 
 	// 逐块转发上游增量给浏览器(仅在 LLM 流式读取循环内同步调用,无并发写竞争);
 	// 内容开始前先以 status 事件报告 Agent 阶段(解析任务/思考等)
+	streamed := false
 	_, err := chatService.ChatStream(c.Request.Context(), &req, sender, comCode,
 		func(delta string) {
+			streamed = true
 			c.SSEvent("message", gin.H{"reply": delta})
 			flusher.Flush()
 		},
 		func(status, text string) {
 			c.SSEvent("status", gin.H{"status": status, "text": text})
 			flusher.Flush()
+		},
+		func(delta string) {
+			// 思考过程增量:独立事件转发,供前端实时展示思考过程(不并入正式回复)
+			c.SSEvent("thinking", gin.H{"delta": delta})
+			flusher.Flush()
 		})
 
 	if err != nil {
 		if errors.Is(err, exception2.ChatCanceledErr) || c.Request.Context().Err() != nil {
 			return // 客户端已断开/取消:响应写不出去,静默结束
+		}
+		if streamed {
+			// 已向浏览器输出过内容:保留已送达部分,以 [DONE] 正常收尾,
+			// 避免 error 事件把已输出的回复覆盖成"引擎不可用"
+			// (上游错误已在 chat_service.LlmError 记录日志,不影响诊断)。
+			c.SSEvent("message", "[DONE]")
+			flusher.Flush()
+			return
 		}
 		// 头部已作为 SSE 发送,无法再返回普通 JSON,改以 error 事件告知前端
 		c.SSEvent("error", gin.H{"msg": cclawcommon.ConstErrorChatLLMMsg})

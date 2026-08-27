@@ -262,3 +262,9 @@ sequenceDiagram
 需要的话，将来落地工具调用时我可以按这个结构来设计，届时再把这段分析沉淀到 repo memory。
 
 
+# 2 todo 需要压缩或流式输出很慢的原因
+B. 压缩 system prompt（调低 60K 预算 / 精简大文件正文）	中等，降低 prefill	cclawservice_const.go 预算常量 + 文档内容
+C. 给 agent/provider/skills 加内存缓存	低-中，省每次请求的 DB 往返	repo 层加缓存（参照 prompt 的指纹缓存模式）
+D. 对 TTFT 敏感场景改用 deepseek-v4-flash 或调低推理强度	直接降低首 token 延迟	agent 配置 primary_model
+
+

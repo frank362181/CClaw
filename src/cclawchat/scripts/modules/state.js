@@ -121,6 +121,29 @@ export const State = {
         return true;
     },
 
+    // 记录流式"思考/准备"阶段的状态文案(仅内存,不持久化到 localStorage)。
+    // 内容尚未到达时抽屉被收起再展开会触发 renderMessages 全量重渲染,
+    // 该字段用于在此场景下恢复 thinking 指示;内容到达/结束/取消时以空字符串清除。
+    updateMessageStatus(convId, msgId, statusText, { persist = false } = {}) {
+        const conv = this.conversations.find(c => c.id === convId);
+        const msg = conv?.messages.find(item => item.id === msgId);
+        if (!msg) return false;
+        msg.statusText = String(statusText ?? '');
+        if (persist) this.save();
+        return true;
+    },
+
+    // 记录流式思考过程(reasoning_content)的增量文本(仅内存,不持久化)。
+    // 与 statusText 类似,供抽屉重渲染/消息重渲染时恢复"思考过程"折叠块。
+    updateMessageReasoning(convId, msgId, reasoningText, { persist = false } = {}) {
+        const conv = this.conversations.find(c => c.id === convId);
+        const msg = conv?.messages.find(item => item.id === msgId);
+        if (!msg) return false;
+        msg.reasoningText = String(reasoningText ?? '');
+        if (persist) this.save();
+        return true;
+    },
+
     clearCurrentConversation() {
         const conv = this.getCurrentConversation();
         if (!conv) return false;
