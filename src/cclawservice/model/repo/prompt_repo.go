@@ -28,8 +28,8 @@ import (
 
 // 表示一个agent的prompt DOCUMENT缓存
 type agentPrompt struct {
-	agentId       string
-	workspaceRoot string
+	agentId            string
+	agentBootstrapRoot string
 
 	documents *pCommon.SafeList[dataobject.AgentDocument]
 	skills    *pCommon.SafeList[dataobject.SkillDocument]
@@ -47,7 +47,7 @@ type PromptRepository struct {
 
 // IPromptRepository 定义 prompt 文档仓库的对外能力
 type IPromptRepository interface {
-	LoadWorkspace(agent dataobject.TAgent) error
+	LoadAgentBootstrap(agent dataobject.TAgent) error
 
 	AddSkill(agentId, skillId, skillFile string) error
 	ClearSkills(agentId string)
@@ -69,11 +69,11 @@ func GetPromptRepository() IPromptRepository {
 	return promptRepository
 }
 
-// LoadWorkspace 加载并缓存一个工作区的启动文档。只是加载agent的工作区
+// LoadAgentBootstrap 加载并缓存一个工作区的启动文档。只是加载agent的工作区
 // 当工作区未变化(指纹相同)时直接复用缓存,避免重复读盘。
 // 单个文档缺失/失败不阻断整个工作区的加载。
-func (repo *PromptRepository) LoadWorkspace(agent dataobject.TAgent) error {
-	workspaceRoot, ok := myUtility.BuildAgentWorkspaceRoot(agent)
+func (repo *PromptRepository) LoadAgentBootstrap(agent dataobject.TAgent) error {
+	agentBootstrapRoot, ok := myUtility.BuildAgentBootstrapRoot(agent)
 	if !ok {
 		return exception.ParameterEmptyErrorEx("prompt repo: workspace root is unavailable")
 	}
@@ -89,28 +89,28 @@ func (repo *PromptRepository) LoadWorkspace(agent dataobject.TAgent) error {
 	prompt := repo.promptMap[agent.AgentId]
 	if prompt != nil {
 		// 判断是否修改过 *.md 文件
-		if prompt.workspaceRoot == workspaceRoot &&
-			prompt.loadedFingerprint == pCommon.ComputeFileFingerprint(workspaceRoot, fileNames) {
+		if prompt.agentBootstrapRoot == agentBootstrapRoot &&
+			prompt.loadedFingerprint == pCommon.ComputeFileFingerprint(agentBootstrapRoot, fileNames) {
 			return nil // 未变化,直接复用缓存
 		}
 
 		// *.md文件已经被修改过
 		prompt.documents.Clear()
 		prompt.skills.Clear()
-		prompt.workspaceRoot = workspaceRoot
+		prompt.agentBootstrapRoot = agentBootstrapRoot
 	} else {
 		//初次加载
 		prompt = &agentPrompt{
-			agentId:           agent.AgentId,
-			workspaceRoot:     workspaceRoot,
-			documents:         pCommon.NewSafeList[dataobject.AgentDocument](),
-			skills:            pCommon.NewSafeList[dataobject.SkillDocument](),
-			loadedFingerprint: "",
+			agentId:            agent.AgentId,
+			agentBootstrapRoot: agentBootstrapRoot,
+			documents:          pCommon.NewSafeList[dataobject.AgentDocument](),
+			skills:             pCommon.NewSafeList[dataobject.SkillDocument](),
+			loadedFingerprint:  "",
 		}
 	}
 
 	for _, item := range cCommon.StartupDocFiles {
-		doc, ok, err := repo.readAgentDocumentLocked(item.Kind, workspaceRoot, item.Name, item.Required)
+		doc, ok, err := repo.readAgentDocumentLocked(item.Kind, agentBootstrapRoot, item.Name, item.Required)
 		if err != nil {
 			logging.LogWarnF("prompt repo: load %s error:%s", item.Name, err.Error())
 			continue
@@ -120,7 +120,7 @@ func (repo *PromptRepository) LoadWorkspace(agent dataobject.TAgent) error {
 		}
 	}
 
-	prompt.loadedFingerprint = pCommon.ComputeFileFingerprint(workspaceRoot, fileNames)
+	prompt.loadedFingerprint = pCommon.ComputeFileFingerprint(agentBootstrapRoot, fileNames)
 	repo.promptMap[agent.AgentId] = prompt
 	return nil
 }
@@ -143,7 +143,7 @@ func (repo *PromptRepository) AddSkill(agentId, skillId, skillFile string) error
 		return exception.UnMatchErrorEx2("prompt repo: agent id not found")
 	}
 
-	filePath, err := repo.resolveSkillPathLocked(agentPrompt.workspaceRoot, skillFile)
+	filePath, err := repo.resolveSkillPathLocked(agentPrompt.agentBootstrapRoot, skillFile)
 	if err != nil {
 		return err
 	}
@@ -240,7 +240,7 @@ func (repo *PromptRepository) Destroy() {
 			continue
 		}
 
-		item.workspaceRoot = ""
+		item.agentBootstrapRoot = ""
 		item.loadedFingerprint = ""
 		if item.documents != nil {
 			item.documents.Clear()

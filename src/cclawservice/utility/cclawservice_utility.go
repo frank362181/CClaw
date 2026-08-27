@@ -142,16 +142,16 @@ func ValidateSkill(sk dataobject.TSkill) error {
 	return nil
 }
 
-// BuildAgentWorkspaceRoot 根据agent的信息构建agent的工作目录
+// BuildAgentBootstrapRoot 根据agent的信息构建agent的工作目录
 // 安全:agent_dir 必须为合法相对路径,防止工作区根逃出 <exeDir>/workspace。
-func BuildAgentWorkspaceRoot(agent dataobject.TAgent) (string, bool) {
+func BuildAgentBootstrapRoot(agent dataobject.TAgent) (string, bool) {
 	if !pCommon.IsSafeDir(agent.AgentDir) {
 		return "", false
 	}
 
-	agentWorkspaceRoot := filepath.Join(pCommon.GetExecutableDir(), common.AgentServiceWorkspaceDirName, agent.OwnerId, agent.AgentDir)
-	if pCommon.IsDir(agentWorkspaceRoot) {
-		return agentWorkspaceRoot, true
+	agentBootstrapRoot := filepath.Join(pCommon.GetExecutableDir(), common.AgentBootstrapDir, agent.OwnerId, agent.AgentDir)
+	if pCommon.IsDir(agentBootstrapRoot) {
+		return agentBootstrapRoot, true
 	}
 
 	return "", false

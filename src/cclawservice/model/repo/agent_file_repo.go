@@ -52,25 +52,11 @@ type startupFileEntry struct {
 // startupFileCache 启动文件读取的轻量缓存(按工作区划分)
 type startupFileCache struct {
 	mu      sync.Mutex
-	entries map[string]*startupFileEntry // key = workspaceRoot
+	entries map[string]*startupFileEntry // key = agent的bootstrap dir
 }
 
 // maxStartupFileCacheEntries 缓存条目上限,超过则整体清空(防陈旧条目无限累积)
 const maxStartupFileCacheEntries = 64
-
-// entry 取/建指定工作区的缓存条目(调用方需持有 mu)
-func (c *startupFileCache) entry(workspaceRoot string) *startupFileEntry {
-	entry := c.entries[workspaceRoot]
-	if entry != nil {
-		return entry
-	}
-	if len(c.entries) >= maxStartupFileCacheEntries {
-		c.entries = make(map[string]*startupFileEntry)
-	}
-	entry = &startupFileEntry{contents: make(map[string]startupFileContent)}
-	c.entries[workspaceRoot] = entry
-	return entry
-}
 
 // AgentFileRepository 负责读取 agent 工作区内的启动文件(清单 + 内容),带轻量缓存。
 type AgentFileRepository struct {
@@ -79,8 +65,8 @@ type AgentFileRepository struct {
 
 // IAgentFileRepository 定义启动文件仓库的对外能力
 type IAgentFileRepository interface {
-	GetStartupFiles(workspaceRoot string) []dataobject.AgentDocument
-	GetStartupFile(workspaceRoot, fileName string) (*dataobject.AgentDocument, error)
+	GetStartupFiles(bootstrapRoot string) []dataobject.AgentDocument
+	GetStartupFile(bootstrapRoot, fileName string) (*dataobject.AgentDocument, error)
 
 	Destroy()
 }
@@ -103,9 +89,9 @@ func GetAgentFileRepository() IAgentFileRepository {
 // 列表项复用 AgentDocument,不携带正文(Content/FrontMatter 为空)。
 // 性能:结果按工作区做 TTL 轻量缓存,TTL 内零磁盘访问。
 // 安全:只统计白名单内的启动文件;符号链接视为缺失(与正文读取的 O_NOFOLLOW 语义一致)。
-func (repo *AgentFileRepository) GetStartupFiles(workspaceRoot string) []dataobject.AgentDocument {
-	workspaceRoot = strings.TrimSpace(workspaceRoot)
-	if len(workspaceRoot) == 0 {
+func (repo *AgentFileRepository) GetStartupFiles(agentBootstrapRoot string) []dataobject.AgentDocument {
+	agentBootstrapRoot = strings.TrimSpace(agentBootstrapRoot)
+	if len(agentBootstrapRoot) == 0 {
 		return nil
 	}
 
@@ -113,13 +99,13 @@ func (repo *AgentFileRepository) GetStartupFiles(workspaceRoot string) []dataobj
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 
-	entry := cache.entry(workspaceRoot)
+	entry := cache.entry(agentBootstrapRoot)
 	now := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 	if entry.list != nil && now-entry.loadedAt < cCommon.StartupFileCacheTTLSeconds {
 		return entry.list
 	}
 
-	entry.list = repo.buildStartupFilesList(workspaceRoot)
+	entry.list = repo.buildStartupFilesList(agentBootstrapRoot)
 	entry.loadedAt = now
 	return entry.list
 }
@@ -130,10 +116,10 @@ func (repo *AgentFileRepository) GetStartupFiles(workspaceRoot string) []dataobj
 // 内容受 MaxAgentDocSize 大小上限约束(防内存耗尽)。
 // 性能:单文件正文按 (size, mtime) 指纹缓存,文件未变则零读盘。
 // 文件缺失时返回 Missing=true 与空内容(不视为错误),便于前端展示"待创建"。
-func (repo *AgentFileRepository) GetStartupFile(workspaceRoot, fileName string) (*dataobject.AgentDocument, error) {
-	workspaceRoot = strings.TrimSpace(workspaceRoot)
+func (repo *AgentFileRepository) GetStartupFile(agentBootstrapRoot, fileName string) (*dataobject.AgentDocument, error) {
+	agentBootstrapRoot = strings.TrimSpace(agentBootstrapRoot)
 	fileName = strings.TrimSpace(fileName)
-	if len(workspaceRoot) == 0 || len(fileName) == 0 {
+	if len(agentBootstrapRoot) == 0 || len(fileName) == 0 {
 		return nil, exception.ParameterEmptyErrorEx("startup file repo: workspace root or file name is empty")
 	}
 
@@ -143,7 +129,7 @@ func (repo *AgentFileRepository) GetStartupFile(workspaceRoot, fileName string) 
 		return nil, exception.FilePathErrorEx("startup file repo: not a startup file: " + fileName)
 	}
 
-	filePath, err := myUtility.ResolveStartupPath(workspaceRoot, fileName)
+	filePath, err := myUtility.ResolveStartupPath(agentBootstrapRoot, fileName)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +161,7 @@ func (repo *AgentFileRepository) GetStartupFile(workspaceRoot, fileName string) 
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 
-	entry := cache.entry(workspaceRoot)
+	entry := cache.entry(agentBootstrapRoot)
 	if c, hit := entry.contents[fileName]; hit && c.size == stat.Size() && c.modTime == modTime {
 		doc.Content = c.content
 		doc.ByteSize = c.size
@@ -209,8 +195,8 @@ func (repo *AgentFileRepository) Destroy() {
 // ======================= private functions & methods ================================
 // buildStartupFilesList 按白名单统计工作区启动文件的元数据(不读正文)。
 // 性能:一次性解析工作区根的真实路径,供全部文件复用(避免重复 EvalSymlinks)。
-func (repo *AgentFileRepository) buildStartupFilesList(workspaceRoot string) []dataobject.AgentDocument {
-	rootAbs, err := filepath.Abs(workspaceRoot)
+func (repo *AgentFileRepository) buildStartupFilesList(agentBootstrapRoot string) []dataobject.AgentDocument {
+	rootAbs, err := filepath.Abs(agentBootstrapRoot)
 	if err != nil {
 		return nil
 	}
@@ -225,7 +211,7 @@ func (repo *AgentFileRepository) buildStartupFilesList(workspaceRoot string) []d
 			Missing:  true,
 		}
 
-		filePath, joinErr := pCommon.SafeJoinWithRoot(realRoot, filepath.Join(workspaceRoot, item.Name))
+		filePath, joinErr := pCommon.SafeJoinWithRoot(realRoot, filepath.Join(agentBootstrapRoot, item.Name))
 		if joinErr == nil {
 			// 符号链接视为缺失,与正文读取的 O_NOFOLLOW 语义一致
 			if stat, statErr := os.Lstat(filePath); statErr == nil && !stat.IsDir() && stat.Mode()&os.ModeSymlink == 0 {
@@ -237,4 +223,18 @@ func (repo *AgentFileRepository) buildStartupFilesList(workspaceRoot string) []d
 	}
 
 	return list
+}
+
+// entry 取/建指定工作区的缓存条目(调用方需持有 mu)
+func (c *startupFileCache) entry(bootstrapRoot string) *startupFileEntry {
+	entry := c.entries[bootstrapRoot]
+	if entry != nil {
+		return entry
+	}
+	if len(c.entries) >= maxStartupFileCacheEntries {
+		c.entries = make(map[string]*startupFileEntry)
+	}
+	entry = &startupFileEntry{contents: make(map[string]startupFileContent)}
+	c.entries[bootstrapRoot] = entry
+	return entry
 }

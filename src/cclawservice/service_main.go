@@ -329,7 +329,7 @@ func (m *ServiceMain) loadAgentConfigurations() error {
 		m.startupFileRepo = repo.GetAgentFileRepository()
 	}
 	for _, agent := range agents {
-		if err := m.promptRepo.LoadWorkspace(agent); err != nil {
+		if err := m.promptRepo.LoadAgentBootstrap(agent); err != nil {
 			logging.LogWarnF("warm up default workspace error:%s", err.Error())
 		}
 	}

@@ -101,14 +101,14 @@ func (ac *AgentController) AddLLMProvider(c *gin.Context) {
 		return
 	}
 
-	var p dataobject.TLLMProvider
-	if err := c.ShouldBindBodyWithJSON(&p); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	if !ok {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
-	if !ok {
+	var p dataobject.TLLMProvider
+	if err := c.ShouldBindBodyWithJSON(&p); err != nil {
+		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
 		return
 	}
 	p.OwnerId = loginSession.ComCode
@@ -141,14 +141,14 @@ func (ac *AgentController) UpdateLLMProvider(c *gin.Context) {
 		return
 	}
 
-	var p dataobject.TLLMProvider
-	if err := c.ShouldBindBodyWithJSON(&p); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	if !ok {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
-	if !ok {
+	var p dataobject.TLLMProvider
+	if err := c.ShouldBindBodyWithJSON(&p); err != nil {
+		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
 		return
 	}
 
@@ -258,14 +258,14 @@ func (ac *AgentController) AddAgent(c *gin.Context) {
 		return
 	}
 
-	var a dataobject.TAgent
-	if err := c.ShouldBindBodyWithJSON(&a); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	if !ok {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
-	if !ok {
+	var a dataobject.TAgent
+	if err := c.ShouldBindBodyWithJSON(&a); err != nil {
+		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
 		return
 	}
 
@@ -299,14 +299,14 @@ func (ac *AgentController) UpdateAgent(c *gin.Context) {
 		return
 	}
 
-	var a dataobject.TAgent
-	if err := c.ShouldBindBodyWithJSON(&a); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	if !ok {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
-	if !ok {
+	var a dataobject.TAgent
+	if err := c.ShouldBindBodyWithJSON(&a); err != nil {
+		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
 		return
 	}
 
@@ -499,14 +499,14 @@ func (ac *AgentController) AddSkill(c *gin.Context) {
 		return
 	}
 
-	var sk dataobject.TSkill
-	if err := c.ShouldBindBodyWithJSON(&sk); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	if !ok {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
-	if !ok {
+	var sk dataobject.TSkill
+	if err := c.ShouldBindBodyWithJSON(&sk); err != nil {
+		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
 		return
 	}
 
@@ -540,14 +540,14 @@ func (ac *AgentController) UpdateSkill(c *gin.Context) {
 		return
 	}
 
-	var sk dataobject.TSkill
-	if err := c.ShouldBindBodyWithJSON(&sk); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	if !ok {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
-	if !ok {
+	var sk dataobject.TSkill
+	if err := c.ShouldBindBodyWithJSON(&sk); err != nil {
+		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
 		return
 	}
 

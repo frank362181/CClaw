@@ -11,8 +11,11 @@ const (
 	// DefaultReloadDatabaseCacheTTLSeconds 配置缓存 TTL(多实例部署时,各实例从 DB 刷新 LLM provider/agent/skill 配置的过期时间)
 	DefaultReloadDatabaseCacheTTLSeconds = 30 // 默认 30 秒;<=0 表示禁用 TTL 刷新(仅启动时加载一次)
 
-	AgentServiceWorkspaceDirName = "workspace"         //agent workspace目录名称
+	AgentServiceWorkspaceDirName = "workspace"         //agent工作目录
+	AgentBootstrapDir            = "cclaw"             //agent 启动文件目录名称
 	DefaultAgentConfigFile       = "agentdefault.json" //agent 的默认配置所在的文件
+
+	AgentExtensionDirName = "extension"
 )
 
 // ==================== agent 启动文档与 skill 文档 ====================

@@ -206,7 +206,7 @@ func (s *AgentService) resolveAgentWorkspace(ownerId, agentId string) (string, e
 		return "", err
 	}
 
-	workspaceRoot, ok := myUtility.BuildAgentWorkspaceRoot(*agent)
+	workspaceRoot, ok := myUtility.BuildAgentBootstrapRoot(*agent)
 	if !ok {
 		return "", myException.AgentWorkspaceErrEx("agent workspace is unavailable: " + agentId)
 	}
