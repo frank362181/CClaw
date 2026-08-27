@@ -6,18 +6,21 @@ package dataobject
 
 import (
 	"encoding/json"
+	"strings"
 
 	"gorm.io/plugin/optimisticlock"
 )
 
-// TLLMProvider 表示大模型供应商数据对象
-type TLLMProvider struct {
+// TLlm 表示大模型供应商数据对象
+type TLlm struct {
 	OwnerId      string `json:"OwnerId"`
 	ProviderId   string `json:"providerId"`   //供应商ID
 	ProviderName string `json:"providerName"` //供应商名称
 	AliasName    string `json:"aliasName"`    //供应商别名
 
 	BaseUrl string `json:"baseUrl"` //供应商的基础URL
+	Model   string `json:"model"`   //实际请求使用的模型名(厂商命名,如 deepseek-v4-pro);为空回退 ProviderId
+	ApiKey  string `json:"-"`       //api key
 	Vendor  string `json:"vendor"`  //LLM厂家名称,如deepseek,anthropic,OpenAI等
 	Api     string `json:"api"`     //供应商的API协议类型
 
@@ -43,12 +46,13 @@ type TLLMProvider struct {
 	DVersion optimisticlock.Version `json:"dVersion"` //乐观锁
 }
 
-func LLMProviderValues(p *TLLMProvider) map[string]interface{} {
+func LlmValues(p *TLlm) map[string]interface{} {
 	return map[string]interface{}{
 		"owner_id":           p.OwnerId,
 		"provider_name":      p.ProviderName,
 		"alias_name":         p.AliasName,
 		"base_url":           p.BaseUrl,
+		"model":              p.Model,
 		"vendor":             p.Vendor,
 		"api":                p.Api,
 		"reasoning":          p.Reasoning,
@@ -66,8 +70,17 @@ func LLMProviderValues(p *TLLMProvider) map[string]interface{} {
 	}
 }
 
-func (llmProvider *TLLMProvider) ToJsonString() (string, error) {
-	jsonSting, err := json.Marshal(llmProvider)
+// GetModelName 返回请求厂商使用的模型名(provider.Model 优先,未配置回退 ProviderId)。
+func (llm *TLlm) GetModelName() string {
+	if m := strings.TrimSpace(llm.Model); m != "" {
+		return m
+	}
+
+	return llm.ProviderId
+}
+
+func (llm *TLlm) ToJsonString() (string, error) {
+	jsonSting, err := json.Marshal(llm)
 	if err != nil {
 		return "", err
 	}
@@ -75,8 +88,8 @@ func (llmProvider *TLLMProvider) ToJsonString() (string, error) {
 	return string(jsonSting), nil
 }
 
-func (llmProvider *TLLMProvider) FromJsonString(jsonStr string) error {
-	err := json.Unmarshal([]byte(jsonStr), llmProvider)
+func (llm *TLlm) FromJsonString(jsonStr string) error {
+	err := json.Unmarshal([]byte(jsonStr), llm)
 	if err != nil {
 		return err
 	}

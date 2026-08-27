@@ -15,7 +15,8 @@ function selectMockReply(content) {
     return `我明白了。关于「${content}」，建议先明确目标和约束，再逐步验证可行方案。`;
 }
 
-async function runMockStream(content, signal, onChunk, onComplete) {
+async function runMockStream(content, signal, onChunk, onComplete, onStatus) {
+    onStatus?.({ status: 'thinking', text: '思考中…' });
     let current = '';
     for (const char of selectMockReply(content)) {
         if (signal.aborted) return;
@@ -28,11 +29,12 @@ async function runMockStream(content, signal, onChunk, onComplete) {
 }
 
 /**
- * 真实聊天请求：POST /api/chat。
+ * 真实聊天请求（同步模式）：POST /api/chat。
  * - 与 GetAgents/GetSkills 等受保护接口一致，携带 TIMESTAMP/NONCE/SIGNATURE（防重放），
  *   并附 AUTHORIZATION 令牌，故会经过后端全局 filter 与认证 interceptor。
  * - 请求体字段与后端 model.ChatRequest 的 json 标签（camelCase）对齐。
- * - 当前后端返回一次性 JSON 应答（ChatResponse.reply）；LLM 流式引擎接入后可平滑扩展为 SSE。
+ * - 一次性返回 JSON 应答（ChatResponse.reply）；默认走流式（runRealChatStream），
+ *   当 CHAT_STREAM_FORMAT 非 'sse' 时作为回退路径使用。
  */
 async function runRealChat(convId, content, token, signal, onChunk, onComplete) {
     const body = {
@@ -60,12 +62,111 @@ async function runRealChat(convId, content, token, signal, onChunk, onComplete) 
     onComplete(reply);
 }
 
+/**
+ * 真实流式聊天请求：POST /api/chat/stream（SSE）。
+ * - 通过原生 fetch 读取 response.body 流并解析 SSE 事件：
+ *     data: {"status":"...","text":"..."} → Agent 阶段状态，回调 onStatus(内容开始前)
+ *     data: {"reply":"..."} → 增量文本，累加后回调 onChunk(累计内容)
+ *     data: [DONE]            → 结束标记，触发 onComplete
+ *     data: {"msg":"..."}     → 后端错误事件，抛出 Error
+ * - 携带 TIMESTAMP/NONCE/SIGNATURE（防重放）与 AUTHORIZATION 令牌，与登录一致。
+ * - 支持 signal 取消（AbortController），取消时静默结束不触发完成回调。
+ */
+async function runRealChatStream(convId, content, token, signal, onChunk, onComplete, onStatus) {
+    const body = {
+        sessionId: convId,
+        requestMsg: content,
+        chatType: 0,    // 私聊
+        chatChannel: 1, // WEB 端
+    };
+    const TIMESTAMP = String(Math.floor(Date.now() / 1000));
+    const NONCE = getRandomNonce();
+    const SIGNATURE = await HmacSHA256Hex(CONFIG.SIGN_KEY, JSON.stringify(body) + TIMESTAMP + NONCE);
+
+    const resp = await fetch(
+        `${CONFIG.API_BASE}/chat/stream?TIMESTAMP=${encodeURIComponent(TIMESTAMP)}&NONCE=${encodeURIComponent(NONCE)}&SIGNATURE=${encodeURIComponent(SIGNATURE)}`,
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'text/event-stream',
+                'AUTHORIZATION': token || '',
+            },
+            body: JSON.stringify(body),
+            signal,
+        }
+    );
+
+    if (!resp.ok) {
+        let msg = `请求失败 (HTTP ${resp.status})`;
+        try {
+            const j = await resp.json();
+            msg = j.respMsg || msg;
+        } catch (_) { /* 忽略非 JSON 响应 */ }
+        throw new Error(msg);
+    }
+    if (!resp.body) throw new Error('当前浏览器不支持流式响应');
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let accumulated = '';
+
+    // 处理单个 data 事件；返回 true 表示收到结束标记 [DONE]
+    const handleEvent = (data) => {
+        if (data === '[DONE]') return true;
+        let payload;
+        try { payload = JSON.parse(data); } catch (_) { return false; }
+        if (payload && payload.status) {
+            // Agent 阶段状态（拆解任务/思考等），仅在内容开始前出现
+            onStatus?.(payload);
+            return false;
+        }
+        if (payload && typeof payload.reply === 'string' && payload.reply) {
+            accumulated += payload.reply;
+            onChunk(accumulated);
+        } else if (payload && payload.msg) {
+            throw new Error(payload.msg);
+        }
+        return false;
+    };
+
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // 按空行切分 SSE 事件块
+        let sep;
+        while ((sep = buffer.indexOf('\n\n')) !== -1) {
+            const block = buffer.slice(0, sep);
+            buffer = buffer.slice(sep + 2);
+            for (const line of block.split('\n')) {
+                if (!line.startsWith('data:')) continue;
+                if (handleEvent(line.slice(5).trim())) {
+                    onComplete(accumulated);
+                    return;
+                }
+            }
+        }
+        if (signal.aborted) break;
+    }
+
+    // 客户端主动取消：不再触发完成回调
+    if (signal.aborted) return;
+    onComplete(accumulated);
+}
+
 export const API = {
-    sendMessageStream(convId, content, token, onChunk, onComplete, onError) {
+    sendMessageStream(convId, content, token, onChunk, onComplete, onError, onStatus) {
         const controller = new AbortController();
+        // SSE 为默认真实路径；ENABLE_MOCK 时走模拟流；CHAT_STREAM_FORMAT 非 'sse' 时回退同步 JSON
+        const useStream = CONFIG.CHAT_STREAM_FORMAT === 'sse';
         const task = CONFIG.ENABLE_MOCK
-            ? runMockStream(content, controller.signal, onChunk, onComplete)
-            : runRealChat(convId, content, token, controller.signal, onChunk, onComplete);
+            ? runMockStream(content, controller.signal, onChunk, onComplete, onStatus)
+            : useStream
+                ? runRealChatStream(convId, content, token, controller.signal, onChunk, onComplete, onStatus)
+                : runRealChat(convId, content, token, controller.signal, onChunk, onComplete);
         task.catch(error => {
             if (error.name !== 'AbortError' && !controller.signal.aborted) onError?.(error);
         });

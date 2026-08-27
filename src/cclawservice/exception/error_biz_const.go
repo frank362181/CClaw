@@ -17,4 +17,7 @@ const (
 	ErrorIdBizAgentWorkspace
 	ErrorIdBizAgentInternal
 	ErrorIdBizChatParameter
+	ErrorIdBizChatAgentNotFound
+	ErrorIdBizChatLLM
+	ErrorIdBizChatCanceled
 )

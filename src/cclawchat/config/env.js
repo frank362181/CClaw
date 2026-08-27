@@ -27,8 +27,8 @@ export const ENV = {
     // 使用一个受保护的只读接口验证恢复的会话
     SESSION_CHECK_PATH: '/getsessionlist',
 
-    // 请求超时时间 (毫秒)
-    REQUEST_TIMEOUT: 30000,
+    // 请求超时时间 (毫秒) — LLM 真实推理较慢,放宽到 120s 以免浏览器提前断开
+    REQUEST_TIMEOUT: 120000,
 
     // 是否开启调试日志
     DEBUG: true,

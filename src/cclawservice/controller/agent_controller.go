@@ -106,7 +106,7 @@ func (ac *AgentController) AddLLMProvider(c *gin.Context) {
 		return
 	}
 
-	var p dataobject.TLLMProvider
+	var p dataobject.TLlm
 	if err := c.ShouldBindBodyWithJSON(&p); err != nil {
 		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
 		return
@@ -146,7 +146,7 @@ func (ac *AgentController) UpdateLLMProvider(c *gin.Context) {
 		return
 	}
 
-	var p dataobject.TLLMProvider
+	var p dataobject.TLlm
 	if err := c.ShouldBindBodyWithJSON(&p); err != nil {
 		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
 		return

@@ -64,12 +64,12 @@ type ChatRequest struct {
 }
 
 type ChatResponse struct {
-	SenderId    string `json:"senderId"`    //发送者,以服务端认证信息为准
+	SenderId    string `json:"senderId"` //发送者,以服务端认证信息为准
 	SessionId   string `json:"sessionId"`
 	ChatType    int    `json:"chatType"`    //聊天类型，0/1:私聊/群聊
 	ChatChannel int    `json:"chatChannel"` //聊天的频道,1=WEB,2,FEISHU 等
 	ChatId      int64  `json:"chatId"`      //本次聊天的消息ID,用于标识本次聊天的位置
-	Reply       string `json:"reply"`       //AI 回复内容(LLM 引擎接入前为演示应答)
+	Reply       string `json:"reply"`       //AI 回复内容(由 LLM 引擎返回的真实回复)
 }
 
 type ChatResponseEx struct {
@@ -90,27 +90,4 @@ type ChatsResponse struct {
 type ChatsResponseEx struct {
 	basic.CommonResponse
 	Data ChatsResponse `json:"data"`
-}
-
-// GenerateSessionRequest 创建一个新的Session 请求/*
-func GenerateSessionRequest(senderId, sessionName string, chatType, chatChannel int) *SessionRequest {
-	if len(senderId) == 0 || len(sessionName) == 0 {
-		return nil
-	}
-
-	return nil
-}
-
-// GenerateSessionResponse 创建针对创建Session的响应/*
-func GenerateSessionResponse(senderId, sessionName string, chatType, chatChannel int, sessionData string) *SessionResponse {
-	return nil
-}
-
-// GenerateChatRequest 创建一个聊天请求/*
-func GenerateChatRequest(senderId, sessionId, chatTxt string) *ChatRequest {
-	return nil
-}
-
-func GenerateChatResponse(senderId, sessionId, chatTxt string) *ChatResponse {
-	return nil
 }

@@ -14,51 +14,106 @@ import (
 	"my.favorite/platformutility/exception"
 )
 
-// ErrorChatParameter 聊天参数错误(HTTP 400)
-type ErrorChatParameter struct {
+// ErrorChatLLM LLM 引擎调用失败(HTTP 502:上游智能体引擎不可用)
+type ErrorChatLLM struct {
 	exception.ErrorDescription
 }
 
-var ChatParameterErr = &ErrorChatParameter{
+var ChatLLMErr = &ErrorChatLLM{
 	exception.ErrorDescription{
 		ErrTxt:   "",
-		ErrId:    ErrorIdBizChatParameter,
+		ErrId:    ErrorIdBizChatLLM,
 		FileName: "",
 		LineNo:   -1,
 	},
 }
 
-func ChatParameterErrEx(errTxt string) *ErrorChatParameter {
+func ChatLLMErrEx(errTxt string) *ErrorChatLLM {
 	_, file, line, _ := runtime.Caller(1)
-	return &ErrorChatParameter{
+	return &ErrorChatLLM{
 		exception.ErrorDescription{
 			ErrTxt:   errTxt,
-			ErrId:    ErrorIdBizChatParameter,
+			ErrId:    ErrorIdBizChatLLM,
 			FileName: file,
 			LineNo:   line,
 		},
 	}
 }
 
-func ChatParameterErrEx2(errTxt string, a ...interface{}) *ErrorChatParameter {
+func ChatLLMErrEx2(errTxt string, a ...interface{}) *ErrorChatLLM {
 	argsString := fmt.Sprintf(errTxt, a...)
 	_, file, line, _ := runtime.Caller(1)
-	return &ErrorChatParameter{
+	return &ErrorChatLLM{
 		exception.ErrorDescription{
 			ErrTxt:   argsString,
-			ErrId:    ErrorIdBizChatParameter,
+			ErrId:    ErrorIdBizChatLLM,
 			FileName: file,
 			LineNo:   line,
 		},
 	}
 }
 
-func (te *ErrorChatParameter) Error() string {
+func (te *ErrorChatLLM) Error() string {
 	return fmt.Sprintf("ERROR: [%s:%d]:%d: %s", te.FileName, te.LineNo, te.ErrId, te.ErrTxt)
 }
 
-func (te *ErrorChatParameter) Is(target error) bool {
-	if ed, ok := errors.AsType[*ErrorChatParameter](target); ok {
+func (te *ErrorChatLLM) Is(target error) bool {
+	if ed, ok := errors.AsType[*ErrorChatLLM](target); ok {
+		return ed.ErrId == te.ErrId
+	}
+	return false
+}
+
+// ErrorChatCanceled 请求上下文被取消(客户端断开/超时);HTTP 499(客户端关闭请求)或直接静默结束
+// 模式与 error_agent.go 保持一致。
+type ErrorChatCanceled struct {
+	exception.ErrorDescription
+}
+
+var ChatCanceledErr = &ErrorChatCanceled{
+	exception.ErrorDescription{
+		ErrTxt:   "",
+		ErrId:    ErrorIdBizChatCanceled,
+		FileName: "",
+		LineNo:   -1,
+	},
+}
+
+func ChatCanceledErrEx(errTxt string) *ErrorChatCanceled {
+	_, file, line, _ := runtime.Caller(1)
+	return &ErrorChatCanceled{
+		exception.ErrorDescription{
+			ErrTxt:   errTxt,
+			ErrId:    ErrorIdBizChatCanceled,
+			FileName: file,
+			LineNo:   line,
+		},
+	}
+}
+
+func ChatCanceledErrEx2(errTxt string, a ...interface{}) *ErrorChatCanceled {
+	argsString := fmt.Sprintf(errTxt, a...)
+	_, file, line, _ := runtime.Caller(1)
+	return &ErrorChatCanceled{
+		exception.ErrorDescription{
+			ErrTxt:   argsString,
+			ErrId:    ErrorIdBizChatCanceled,
+			FileName: file,
+			LineNo:   line,
+		},
+	}
+}
+
+// ErrRequestCanceled 表示请求上下文被取消(客户端断开/超时),而非上游故障。
+// 上层可用 errors.Is(err, ErrRequestCanceled) 区分"客户端主动取消"与"引擎异常"。
+var ErrRequestCanceled = errors.New("llm client: request context canceled")
+
+func (te *ErrorChatCanceled) Error() string {
+	return fmt.Sprintf("ERROR: [%s:%d]:%d: %s", te.FileName, te.LineNo, te.ErrId, te.ErrTxt)
+}
+
+func (te *ErrorChatCanceled) Is(target error) bool {
+	if ed, ok := errors.AsType[*ErrorChatCanceled](target); ok {
 		return ed.ErrId == te.ErrId
 	}
 	return false

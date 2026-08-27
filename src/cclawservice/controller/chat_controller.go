@@ -11,6 +11,7 @@ import (
 	"my.favorite/cclawservice/service"
 	"my.favorite/cclawservice/utility"
 	"my.favorite/platformutility/common"
+	pException "my.favorite/platformutility/exception"
 	"my.favorite/platformutility/webbase/middleware/basic"
 	baseController "my.favorite/platformutility/webbase/middleware/controller"
 	pService "my.favorite/platformutility/webbase/middleware/service"
@@ -33,27 +34,6 @@ var chatController = common.GetSingleton(func() *ChatController {
 func GetChatController(svc pService.IService) *ChatController {
 	chatController.Service = svc
 	return chatController
-}
-
-// getChatService 获取当前注入的 ChatService
-func (cc *ChatController) getChatService(c *gin.Context) (*service.ChatService, bool) {
-	svc, ok := cc.GetService().(*service.ChatService)
-	if !ok || svc == nil {
-		//内部服务器错误
-		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
-		return nil, false
-	}
-	return svc, true
-}
-
-// respondChatError 将聊天业务错误映射为 HTTP 状态码
-func (cc *ChatController) respondChatError(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, exception2.ChatParameterErr):
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorChatParameter, cclawcommon.ConstErrorChatParameterMsg, nil)
-	default:
-		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
-	}
 }
 
 // CreateSession
@@ -141,15 +121,90 @@ func (cc *ChatController) Chat(c *gin.Context) {
 		return
 	}
 
-	// 发送者以服务端认证信息为准(认证 interceptor 已写入上下文,防止客户端伪造身份)
+	// 发送者与单位编码以服务端认证信息为准(认证 interceptor 已写入上下文,防止客户端伪造身份)
 	sender := loginSession.LoginName
-	resp, err := chatService.SendMessage(&req, sender)
+	comCode := loginSession.ComCode
+	resp, err := chatService.SendMessage(c.Request.Context(), &req, sender, comCode)
 	if err != nil {
 		cc.respondChatError(c, err)
 		return
 	}
 
 	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, resp)
+}
+
+// ChatStream 接收一条聊天消息并以 SSE 流式返回 AI 应答
+//
+//	@Summary		流式发送聊天消息
+//	@Description	接收 cclawchat 聊天界面发来的消息,以 SSE(Server-Sent Events)流式返回 AI 应答;增量在 data 的 {"reply":"..."} 中,[DONE] 表示结束,error 事件表示失败
+//	@Tags			聊天管理
+//	@Accept			json
+//	@Produce		text/event-stream
+//	@Param			AUTHORIZATION	header		string			true	"Login成功返回后得到的token"
+//	@Param			NONCE			query		string			true	"盐"
+//	@Param			TIMESTAMP		query		string			true	"数值,表示请求端请求的时间(秒数)"
+//	@Param			SIGNATURE		query		string			true	"对请求内容的签名秒数"
+//	@Param			body		body		model.ChatRequest	true	"聊天内容"
+//	@Success		200			{object}	model.ChatResponseEx
+//	@Router			/api/chat/stream [post]
+func (cc *ChatController) ChatStream(c *gin.Context) {
+	chatService, ok := cc.getChatService(c)
+	if !ok {
+		return
+	}
+
+	loginSession, ok := utility.GetAuthentication(c)
+	if !ok {
+		return
+	}
+
+	var req model2.ChatRequest
+	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
+		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorChatParameter, cclawcommon.ConstErrorChatParameterMsg, nil)
+		return
+	}
+
+	// 先确认支持 flush,再设置 SSE 头(头一旦按 SSE 发送,后续错误只能走事件通道)
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
+		return
+	}
+
+	// 设置 SSE 响应头(必须在任何写入之前)
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no") // 关闭反向代理缓冲,保证逐块到达浏览器
+
+	sender := loginSession.LoginName
+	comCode := loginSession.ComCode
+
+	// 逐块转发上游增量给浏览器(仅在 LLM 流式读取循环内同步调用,无并发写竞争);
+	// 内容开始前先以 status 事件报告 Agent 阶段(解析任务/思考等)
+	_, err := chatService.ChatStream(c.Request.Context(), &req, sender, comCode,
+		func(delta string) {
+			c.SSEvent("message", gin.H{"reply": delta})
+			flusher.Flush()
+		},
+		func(status, text string) {
+			c.SSEvent("status", gin.H{"status": status, "text": text})
+			flusher.Flush()
+		})
+
+	if err != nil {
+		if errors.Is(err, exception2.ChatCanceledErr) || c.Request.Context().Err() != nil {
+			return // 客户端已断开/取消:响应写不出去,静默结束
+		}
+		// 头部已作为 SSE 发送,无法再返回普通 JSON,改以 error 事件告知前端
+		c.SSEvent("error", gin.H{"msg": cclawcommon.ConstErrorChatLLMMsg})
+		flusher.Flush()
+		return
+	}
+
+	// 正常结束标记
+	c.SSEvent("message", "[DONE]")
+	flusher.Flush()
 }
 
 // DeleteChat
@@ -169,4 +224,34 @@ func (cc *ChatController) Chat(c *gin.Context) {
 //	@Router			/api/deleteChat [post]
 func (cc *ChatController) DeleteChat(c *gin.Context) {
 
+}
+
+// ======================== private functions & methods =======================
+
+// getChatService 获取当前注入的 ChatService
+func (cc *ChatController) getChatService(c *gin.Context) (*service.ChatService, bool) {
+	svc, ok := cc.GetService().(*service.ChatService)
+	if !ok || svc == nil {
+		//内部服务器错误
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
+		return nil, false
+	}
+	return svc, true
+}
+
+// respondChatError 将聊天业务错误映射为 HTTP 状态码
+func (cc *ChatController) respondChatError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, pException.ParameterEmptyError):
+		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorChatParameter, cclawcommon.ConstErrorChatParameterMsg, nil)
+	case errors.Is(err, pException.UnMatchError):
+		basic.GetBaseResponser().Failure(c, http.StatusNotFound, cclawcommon.ConstErrorChatAgentNotFound, cclawcommon.ConstErrorChatAgentNotFoundMsg, nil)
+	case errors.Is(err, exception2.ChatLLMErr):
+		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatLLM, cclawcommon.ConstErrorChatLLMMsg, nil)
+	case errors.Is(err, exception2.ChatCanceledErr):
+		// 客户端已断开/取消请求:响应写不出去,静默结束即可
+		return
+	default:
+		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
+	}
 }

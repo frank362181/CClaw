@@ -1,5 +1,5 @@
 -- 创建 LLM 供应商配置表
-CREATE TABLE t_llm_provider (
+CREATE TABLE t_llm (
     -- 主键与标识
                                 id INTEGER NOT NULL primary key AUTOINCREMENT,  -- 记录ID，自增
                                 provider_id VARCHAR(8) NOT NULL unique,         -- 大模型的ID，业务主键
@@ -13,6 +13,7 @@ CREATE TABLE t_llm_provider (
 
     -- API连接信息
                                 base_url VARCHAR(128) NOT NULL,                  -- API端点地址
+                                model VARCHAR(64) DEFAULT NULL,                  -- 实际请求使用的模型名(厂商命名,如 deepseek-v4-pro);为空回退 provider_id
                                 vendor VARCHAR(32) NOT NULL,                     -- LLM厂家名称
                                 api VARCHAR(32) NOT NULL,                        -- API协议类型
 
@@ -33,14 +34,15 @@ CREATE TABLE t_llm_provider (
 
     -- 认证与状态
                                 auth_mode INTEGER NOT NULL DEFAULT 0,            -- 认证方式 (0/1/2/3)
+                                api_key VARCHAR(128) DEFAULT NULL,               -- 供应商鉴权密钥(不入 JSON,仅服务端读取)
                                 disabled INTEGER NOT NULL DEFAULT 0,             -- 是否禁用 (0/1)
                                 deleted INTEGER NOT NULL DEFAULT 0,              -- 是否删除 (0/1)
                                 d_version INTEGER NOT NULL DEFAULT 0             -- 乐观锁版本号
 );
 
 -- 创建索引以提升查询性能
-CREATE INDEX idx_t_llm_provider_owner_id ON t_llm_provider(owner_id);
-CREATE INDEX idx_t_llm_provider_vendor ON t_llm_provider(vendor);
+CREATE INDEX idx_t_llm_owner_id ON t_llm(owner_id);
+CREATE INDEX idx_t_llm_vendor ON t_llm(vendor);
 
 
 -- 创建 Agent 信息表

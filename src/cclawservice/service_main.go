@@ -218,11 +218,12 @@ func (m *ServiceMain) SetupAgentController() error {
 }
 
 func (m *ServiceMain) SetupChatController() error {
-	chatService := service.GetChatService()
+	chatService := service.GetChatService(m.database)
 	chatController := selfController.GetChatController(chatService)
 
 	urlFunMap := make(map[string]gin.HandlerFunc)
 	urlFunMap[cCommon.RelativeChatUrl] = chatController.Chat
+	urlFunMap[cCommon.RelativeChatStreamUrl] = chatController.ChatStream
 
 	// 复用登录控制器创建的 APIGroupRequire 分组(含认证 interceptor),
 	// 因此本方法必须后于 SetupLoginController 调用。
@@ -373,6 +374,10 @@ func (m *ServiceMain) setupApiFilters() bool {
 	addressFilter.SetupAllowedUrls(urls)
 
 	trafficFilter := filter.GetTrafficFilter(m.memoryDB) //NewTrafficFilter(basic.FilterOrderTraffic, m.memoryDB)
+	// 免除流量控制的 URL(如交互式聊天流接口,避免被 IP/IP+API 频率上限在长会话中误伤)
+	tempStr, _ = m.configHelper.GetStringValueDefault("security", "unTrafficUrl", "")
+	urls = strings.Split(tempStr, ",")
+	trafficFilter.SetupUnTrafficUrl(urls)
 
 	securityFilter := filter.GetSecurityFilter(m.memoryDB, signKey) //NewSecurityFilter(basic.FilterOrderSecurity, m.memoryDB, signKey)
 	tempStr, _ = m.configHelper.GetStringValueDefault("security", "deSecurityUrl", "")

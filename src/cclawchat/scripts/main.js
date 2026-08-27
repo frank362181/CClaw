@@ -100,9 +100,97 @@ const App = {
                 }
             }
         });
+
+        // 聊天抽屉：宽度可拖拽调节
+        this._initDrawerResize();
     },
 
     /* ================= 聊天抽屉（chat.html 以抽屉方式展示） ================= */
+
+    /**
+     * 聊天抽屉宽度拖拽调节（桌面端）。
+     * - 拖动抽屉左缘的调节条即可改宽度（带最小/最大钳制）。
+     * - 消息列表为 flex 自适应，宽度会跟随抽屉同步放大/缩小。
+     * - 记住用户上次的宽度（localStorage）；移动端强制全宽。
+     */
+    _initDrawerResize() {
+        const resizer = document.getElementById('drawerResizer');
+        const panel = document.querySelector('#chatDrawer .drawer-panel');
+        if (!resizer || !panel) return;
+
+        const rootStyle = getComputedStyle(document.documentElement);
+        const parsePx = (v) => parseInt(v, 10) || 0;
+        const MIN_W = parsePx(rootStyle.getPropertyValue('--chat-drawer-min-width')) || 320;
+        const MAX_W = parsePx(rootStyle.getPropertyValue('--chat-drawer-max-width')) || 960;
+        const STORE_KEY = 'cclaw.chatDrawerWidth';
+
+        /* 恢复上次宽度（仅桌面端；移动端由 CSS 全宽接管） */
+        const restoreWidth = () => {
+            if (window.innerWidth <= 768) {
+                panel.style.width = '';
+                return;
+            }
+            const saved = parseInt(localStorage.getItem(STORE_KEY), 10);
+            if (Number.isFinite(saved) && saved >= MIN_W && saved <= MAX_W) {
+                panel.style.width = `${saved}px`;
+            }
+        };
+
+        let dragging = false;
+        let startX = 0;
+        let startWidth = 0;
+
+        const clampWidth = (w) => {
+            const maxAllowed = Math.min(MAX_W, window.innerWidth - 16);
+            return Math.max(MIN_W, Math.min(maxAllowed, w));
+        };
+
+        const onMove = (e) => {
+            if (!dragging) return;
+            // 面板锚定右侧：向左拖动（clientX 变小）则加宽
+            const w = clampWidth(startWidth + (startX - e.clientX));
+            panel.style.width = `${w}px`;
+        };
+
+        const onUp = () => {
+            if (!dragging) return;
+            dragging = false;
+            resizer.classList.remove('active');
+            document.body.classList.remove('drawer-resizing');
+            resizer.removeEventListener('pointermove', onMove);
+            resizer.removeEventListener('pointerup', onUp);
+            resizer.removeEventListener('pointercancel', onUp);
+            const w = parseInt(panel.style.width, 10);
+            if (Number.isFinite(w) && w >= MIN_W) {
+                try { localStorage.setItem(STORE_KEY, String(w)); } catch (err) { /* 忽略存储失败 */ }
+            }
+        };
+
+        resizer.addEventListener('pointerdown', (e) => {
+            if (window.innerWidth <= 768) return; // 移动端不启用拖拽
+            dragging = true;
+            startX = e.clientX;
+            startWidth = panel.getBoundingClientRect().width;
+            resizer.classList.add('active');
+            document.body.classList.add('drawer-resizing');
+            try { resizer.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
+            resizer.addEventListener('pointermove', onMove);
+            resizer.addEventListener('pointerup', onUp);
+            resizer.addEventListener('pointercancel', onUp);
+            e.preventDefault();
+        });
+
+        // 视口跨断点：进入移动端恢复全宽，回到桌面端恢复上次宽度
+        window.addEventListener('resize', () => {
+            if (window.innerWidth <= 768) {
+                panel.style.width = '';
+            } else {
+                restoreWidth();
+            }
+        });
+
+        restoreWidth();
+    },
 
     isChatDrawerOpen() {
         const drawer = document.getElementById('chatDrawer');

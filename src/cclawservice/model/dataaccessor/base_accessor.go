@@ -15,13 +15,13 @@ type IAccessor interface {
 	GetUserByAccount(username string) (*dataobject.TAccount, error)
 
 	// 读取(仅未删除记录)
-	GetAllLLMProviders() ([]dataobject.TLLMProvider, error)
+	GetAllLLMProviders() ([]dataobject.TLlm, error)
 	GetAllAgents() ([]dataobject.TAgent, error)
 	GetAllSkills() ([]dataobject.TSkill, error)
 
 	// 写操作(新增/更新/软删除)
-	CreateLLMProvider(provider *dataobject.TLLMProvider) error
-	UpdateLLMProvider(provider *dataobject.TLLMProvider) error
+	CreateLLMProvider(provider *dataobject.TLlm) error
+	UpdateLLMProvider(provider *dataobject.TLlm) error
 	DeleteLLMProvider(ownerId, providerId string) error
 
 	CreateAgent(agent *dataobject.TAgent) error

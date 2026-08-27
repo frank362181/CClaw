@@ -1,27 +1,39 @@
 {
-    "version": "2.0.0",
-    "tasks": [
-        {
-            "label": "cclawchat: start web server (5500)",
-            "type": "shell",
-            "command": "sh",
-            "args": [
-                "${workspaceFolder}/.vscode/scripts/serve.sh",
-                "5500"
-            ],
-            "windows": {
-                "command": "powershell",
-                "args": [
-                    "-NoProfile",
-                    "-ExecutionPolicy", "Bypass",
-                    "-File", "${workspaceFolder}/.vscode/scripts/serve.ps1"
-                ]
-            },
-            "presentation": {
-                "reveal": "silent",
-                "panel": "dedicated",
-                "clear": true
-            }
-        }
-    ]
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "cclawchat: start web server (5500)",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"${workspaceFolder}/.vscode/scripts/serve.sh",
+				"5500"
+			],
+			"windows": {
+				"command": "powershell",
+				"args": [
+					"-NoProfile",
+					"-ExecutionPolicy",
+					"Bypass",
+					"-File",
+					"${workspaceFolder}/.vscode/scripts/serve.ps1"
+				]
+			},
+			"presentation": {
+				"reveal": "silent",
+				"panel": "dedicated",
+				"clear": true
+			}
+		},
+		{
+			"label": "cclawchat: start web server (5500)",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"${workspaceFolder}/.vscode/scripts/serve.sh",
+				"5500"
+			],
+			"isBackground": true
+		}
+	]
 }

@@ -52,6 +52,11 @@ export const StreamEngine = {
                 if (!finish()) return;
                 onError?.(error);
             },
+            status => {
+                // 内容开始前,展示 Agent 当前阶段(拆解任务/思考/推理等)
+                if (!isCurrent()) return;
+                ChatPage.updateStreamingStatus(msgId, status?.text);
+            },
         );
         return { msgId, cancel: () => this.cancel(requestId) };
     },

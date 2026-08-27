@@ -55,11 +55,11 @@ func GetAgentService(db core.IBaseDatabase) (*AgentService, error) {
 
 // ============================== LLM Provider =============================
 
-func (s *AgentService) GetLLMProviders(comCode string) ([]dataobject.TLLMProvider, error) {
+func (s *AgentService) GetLLMProviders(comCode string) ([]dataobject.TLlm, error) {
 	return s.agentRepo.GetLLMProviders(comCode), nil
 }
 
-func (s *AgentService) AddLLMProvider(p dataobject.TLLMProvider) error {
+func (s *AgentService) AddLLMProvider(p dataobject.TLlm) error {
 	if err := myUtility.ValidateLLMProvider(p); err != nil {
 		return err
 	}
@@ -67,7 +67,7 @@ func (s *AgentService) AddLLMProvider(p dataobject.TLLMProvider) error {
 	return s.agentRepo.AddLLMProvider(p)
 }
 
-func (s *AgentService) UpdateLLMProvider(p dataobject.TLLMProvider) error {
+func (s *AgentService) UpdateLLMProvider(p dataobject.TLlm) error {
 	if err := myUtility.ValidateLLMProvider(p); err != nil {
 		return err
 	}

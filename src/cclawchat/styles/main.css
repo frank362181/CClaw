@@ -39,6 +39,11 @@
     --space-lg: 24px;
     --space-xl: 32px;
 
+    /* 布局：聊天抽屉宽度（默认 486px = 原 405px × 1.2，放大 20%） */
+    --chat-drawer-width: 486px;
+    --chat-drawer-min-width: 320px;
+    --chat-drawer-max-width: 960px;
+
     /* 圆角 */
     --radius-sm: 8px;
     --radius-md: 12px;
@@ -586,7 +591,8 @@ body {
 .message-list {
     flex: 1;
     overflow-y: auto;
-    padding: var(--space-lg) var(--space-xl);
+    /* 中间内容放宽：水平内边距 32px → 24px（配合抽屉加宽，内容区约放大 30%） */
+    padding: var(--space-lg) var(--space-lg);
     display: flex;
     flex-direction: column;
     gap: var(--space-md);
@@ -626,7 +632,7 @@ body {
 .message {
     display: flex;
     gap: var(--space-sm);
-    max-width: 82%;
+    max-width: 88%;
     animation: messageIn 0.3s ease-out;
 }
 
@@ -711,6 +717,23 @@ body {
     }
 }
 
+/* 内容开始前的 Agent 状态提示(拆解任务/思考/推理等) */
+.message.assistant .bubble .thinking-indicator {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    margin-right: 6px;
+    border: 2px solid rgba(142, 142, 160, 0.35);
+    border-top-color: var(--color-primary);
+    border-radius: var(--radius-full);
+    animation: spin 0.8s linear infinite;
+    vertical-align: -1px;
+}
+
+.message.assistant .bubble .thinking-text {
+    color: var(--color-text-secondary);
+}
+
 .message .timestamp {
     font-size: var(--font-size-xs);
     color: var(--color-text-muted);
@@ -785,6 +808,7 @@ body {
 
 .chat-input-area .input-wrapper textarea:disabled {
     opacity: 0.6;
+    cursor: not-allowed;
 }
 
 .btn-send {
@@ -949,6 +973,11 @@ body {
     /* 聊天抽屉：移动端占满全宽 */
     .chat-drawer .drawer-panel {
         width: 100%;
+    }
+
+    /* 移动端隐藏抽屉宽度拖拽条（全宽模式下无需缩放） */
+    .drawer-resizer {
+        display: none;
     }
 }
 
@@ -2523,7 +2552,7 @@ body {
     top: 0;
     right: 0;
     bottom: 0;
-    width: 405px; /* 540px × 75%：按需求再缩减 25% */
+    width: var(--chat-drawer-width);
     max-width: 100%;
     display: flex;
     flex-direction: column;
@@ -2536,6 +2565,47 @@ body {
 
 .chat-drawer.open .drawer-panel {
     transform: translateX(0);
+}
+
+/* 抽屉宽度拖拽调节条（桌面端；悬停/拖拽时高亮） */
+.drawer-resizer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 8px;
+    cursor: col-resize;
+    z-index: 10;
+    background: transparent;
+    transition: background var(--transition-fast);
+    touch-action: none;
+}
+
+.drawer-resizer::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 3px;
+    bottom: 0;
+    width: 2px;
+    background: transparent;
+    transition: background var(--transition-fast);
+}
+
+.drawer-resizer:hover::after,
+.drawer-resizer.active::after {
+    background: var(--color-primary);
+}
+
+.drawer-resizer:hover,
+.drawer-resizer.active {
+    background: rgba(74, 108, 247, 0.08);
+}
+
+/* 拖拽过程中全局禁止选中文本、统一光标 */
+body.drawer-resizing {
+    user-select: none;
+    cursor: col-resize;
 }
 
 .drawer-header {

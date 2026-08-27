@@ -187,6 +187,20 @@ export const ChatPage = {
         this.scrollToBottom();
     },
 
+    // 内容开始前展示 Agent 当前阶段状态(拆解任务/思考/推理等)
+    updateStreamingStatus(msgId, statusText) {
+        const container = this.els.messageList;
+        const msgEl = container.querySelector(`.message[data-msg-id="${msgId}"]`);
+        if (!msgEl) return;
+
+        const bubble = msgEl.querySelector('.bubble');
+        if (!bubble) return;
+
+        const text = (statusText || '思考中…').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        bubble.innerHTML = `<span class="thinking-indicator"></span><span class="thinking-text">${text}</span><span class="cursor-blink"></span>`;
+        this.scrollToBottom();
+    },
+
     scrollToBottom() {
         const container = this.els.messageList;
         requestAnimationFrame(() => {
@@ -194,12 +208,15 @@ export const ChatPage = {
         });
     },
 
+    // 输入框与发送按钮是否可用。
+    // 以 State.isStreaming 为最终约束:流式输出未结束前始终灰化,直到流式结束才恢复可用,
+    // 避免抽屉开关等其它调用方在流式期间误把输入区重新启用。
     setInputEnabled(enabled) {
         const input = this.els.chatInput;
         const btn = this.els.btnSend;
-        input.disabled = !enabled;
-        btn.disabled = !enabled;
-        if (enabled) {
+        input.disabled = !enabled || State.isStreaming;
+        btn.disabled = !enabled || State.isStreaming;
+        if (enabled && !State.isStreaming) {
             input.focus();
         }
     },

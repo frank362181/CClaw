@@ -95,6 +95,9 @@ const (
 
 	// ConstErrorChatParameter chat 业务错误
 	ConstErrorChatParameter = iota + basic.ConstErrorMax + 3000 + 1
+	ConstErrorChatAgentNotFound
+	ConstErrorChatLLM
+	ConstErrorChatCanceled
 )
 
 const (
@@ -113,7 +116,10 @@ const (
 	ConstErrorAgentConflictMsg  = "记录已存在或版本冲突"
 	ConstErrorAgentWorkspaceMsg = "智能体工作空间不可用"
 
-	ConstErrorChatParameterMsg = "聊天参数错误"
+	ConstErrorChatParameterMsg     = "聊天参数错误"
+	ConstErrorChatAgentNotFoundMsg = "聊天目标Agent不存在或已禁用"
+	ConstErrorChatLLMMsg           = "智能体引擎暂时不可用,请稍后再试"
+	ConstErrorChatCanceledMsg      = "请求已被取消"
 )
 
 // ContextAuthenticatedUser is the gin.Context key for the server-verified user.
@@ -144,7 +150,8 @@ const (
 	RelativeUpdateSkill = "/skill/update"
 	RelativeRemoveSkill = "/skill/remove"
 
-	RelativeChatUrl = "/chat"
+	RelativeChatUrl       = "/chat"
+	RelativeChatStreamUrl = "/chat/stream"
 )
 
 // ================ chat type ================
@@ -159,4 +166,11 @@ const (
 	ChatChannelFeishu   = 2 //飞书端
 	ChatChannelWechat   = 3 //微信端
 	ChatChannelDingTalk = 4 //钉钉端
+)
+
+// ==================== chat 流式状态 ====================
+// 流式接口在返回内容前,用 status 事件向 UI 报告 Agent 当前所处阶段(如拆解任务/思考/推理)。
+const (
+	ChatStatusPreparing = "preparing" //解析任务/准备上下文
+	ChatStatusThinking  = "thinking"  //思考/推理中(等待首个 token)
 )

@@ -91,7 +91,7 @@ func NormalizeOwner(ownerId *string) {
 	}
 }
 
-func ValidateLLMProvider(p dataobject.TLLMProvider) error {
+func ValidateLLMProvider(p dataobject.TLlm) error {
 	if strings.TrimSpace(p.ProviderId) == "" {
 		return myException.AgentParameterErrEx("provider id is empty")
 	}

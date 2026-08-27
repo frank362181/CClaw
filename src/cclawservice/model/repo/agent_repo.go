@@ -27,7 +27,7 @@ type AgentRepository struct {
 
 	dataAccessor dataaccessor.IAccessor
 
-	llmProviders *common.SafeList[dataobject.TLLMProvider]
+	llmProviders *common.SafeList[dataobject.TLlm]
 	agents       *common.SafeList[dataobject.TAgent]
 	skills       *common.SafeList[dataobject.TSkill]
 
@@ -39,9 +39,9 @@ type AgentRepository struct {
 type IAgentRepository interface {
 	LoadAllAgents(ttl int64) []dataobject.TAgent
 
-	GetLLMProviders(comCode string) []dataobject.TLLMProvider
-	AddLLMProvider(provider dataobject.TLLMProvider) error
-	UpdateLLMProvider(provider dataobject.TLLMProvider) error
+	GetLLMProviders(comCode string) []dataobject.TLlm
+	AddLLMProvider(provider dataobject.TLlm) error
+	UpdateLLMProvider(provider dataobject.TLlm) error
 	RemoveLLMProvider(owerId, providerId string) error
 
 	GetAgents(comCode string) []dataobject.TAgent
@@ -63,7 +63,7 @@ var agentRepository = common.GetSingleton(func() *AgentRepository {
 		dataAccessor: nil,
 		configTTL:    cCommon.DefaultReloadDatabaseCacheTTLSeconds,
 
-		llmProviders: common.NewSafeList[dataobject.TLLMProvider](),
+		llmProviders: common.NewSafeList[dataobject.TLlm](),
 		agents:       common.NewSafeList[dataobject.TAgent](),
 		skills:       common.NewSafeList[dataobject.TSkill](),
 	}
@@ -90,11 +90,11 @@ func (repo *AgentRepository) LoadAllAgents(ttl int64) []dataobject.TAgent {
 	return out
 }
 
-func (repo *AgentRepository) GetLLMProviders(comCode string) []dataobject.TLLMProvider {
+func (repo *AgentRepository) GetLLMProviders(comCode string) []dataobject.TLlm {
 	repo.refreshIfExpired()
 
-	out := make([]dataobject.TLLMProvider, 0, repo.llmProviders.Len())
-	repo.llmProviders.Range(func(_ int, item dataobject.TLLMProvider) bool {
+	out := make([]dataobject.TLlm, 0, repo.llmProviders.Len())
+	repo.llmProviders.Range(func(_ int, item dataobject.TLlm) bool {
 		if strings.EqualFold(comCode, item.OwnerId) {
 			out = append(out, item)
 		}
@@ -104,7 +104,7 @@ func (repo *AgentRepository) GetLLMProviders(comCode string) []dataobject.TLLMPr
 	return out
 }
 
-func (repo *AgentRepository) AddLLMProvider(provider dataobject.TLLMProvider) error {
+func (repo *AgentRepository) AddLLMProvider(provider dataobject.TLlm) error {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 
@@ -119,7 +119,7 @@ func (repo *AgentRepository) AddLLMProvider(provider dataobject.TLLMProvider) er
 	return nil
 }
 
-func (repo *AgentRepository) UpdateLLMProvider(provider dataobject.TLLMProvider) error {
+func (repo *AgentRepository) UpdateLLMProvider(provider dataobject.TLlm) error {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 
@@ -129,7 +129,7 @@ func (repo *AgentRepository) UpdateLLMProvider(provider dataobject.TLLMProvider)
 	if err := repo.dataAccessor.UpdateLLMProvider(&provider); err != nil {
 		return err
 	}
-	idx := common.FindIndex(repo.llmProviders, func(p dataobject.TLLMProvider) bool {
+	idx := common.FindIndex(repo.llmProviders, func(p dataobject.TLlm) bool {
 		return p.ProviderId == provider.ProviderId
 	})
 	if idx >= 0 {
@@ -149,7 +149,7 @@ func (repo *AgentRepository) RemoveLLMProvider(ownerId, providerId string) error
 	if err := repo.dataAccessor.DeleteLLMProvider(ownerId, providerId); err != nil {
 		return err
 	}
-	idx := common.FindIndex(repo.llmProviders, func(p dataobject.TLLMProvider) bool {
+	idx := common.FindIndex(repo.llmProviders, func(p dataobject.TLlm) bool {
 		return p.ProviderId == providerId
 	})
 	if idx >= 0 {
@@ -338,18 +338,11 @@ func (repo *AgentRepository) loadAllAgents() {
 	repo.agents.Clear()
 	repo.skills.Clear()
 
-	repo.loadLLMProviders()
-	repo.loadAgents()
-	repo.loadSkills()
-
-	// 记录本次加载时间(供 TTL 判断使用;调用方需持有 mu)
-	repo.lastLoaded = common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
-}
-
-func (repo *AgentRepository) loadLLMProviders() {
 	if err := repo.requireAccessor(); err != nil {
 		return
 	}
+
+	// load llm
 	providers, err := repo.dataAccessor.GetAllLLMProviders()
 	if err != nil {
 		return
@@ -357,12 +350,8 @@ func (repo *AgentRepository) loadLLMProviders() {
 	for _, p := range providers {
 		repo.llmProviders.Append(p)
 	}
-}
 
-func (repo *AgentRepository) loadAgents() {
-	if err := repo.requireAccessor(); err != nil {
-		return
-	}
+	// load agents
 	agents, err := repo.dataAccessor.GetAllAgents()
 	if err != nil {
 		return
@@ -370,12 +359,8 @@ func (repo *AgentRepository) loadAgents() {
 	for _, a := range agents {
 		repo.agents.Append(a)
 	}
-}
 
-func (repo *AgentRepository) loadSkills() {
-	if err := repo.requireAccessor(); err != nil {
-		return
-	}
+	// load skills
 	skills, err := repo.dataAccessor.GetAllSkills()
 	if err != nil {
 		return
@@ -383,6 +368,9 @@ func (repo *AgentRepository) loadSkills() {
 	for _, s := range skills {
 		repo.skills.Append(s)
 	}
+
+	// 记录本次加载时间(供 TTL 判断使用;调用方需持有 mu)
+	repo.lastLoaded = common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 }
 
 // requireAccessor 检查 data accessor 是否可用(GetAgentRepository 可能因数据库类型不支持返回 nil)

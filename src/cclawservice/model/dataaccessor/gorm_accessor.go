@@ -86,8 +86,8 @@ func (g *GormAccessor) GetUserByAccount(username string) (*dataobject.TAccount, 
 
 // ============================== 读取(仅未删除记录) =============================
 
-func (g *GormAccessor) GetAllLLMProviders() ([]dataobject.TLLMProvider, error) {
-	var list []dataobject.TLLMProvider
+func (g *GormAccessor) GetAllLLMProviders() ([]dataobject.TLlm, error) {
+	var list []dataobject.TLlm
 	err := g.gormDb.Where("deleted = 0").Find(&list).Error
 	if err != nil {
 		return nil, exception2.DatabaseQueryErrEx2("load LLM providers error:%s", err.Error())
@@ -119,9 +119,9 @@ func (g *GormAccessor) GetAllSkills() ([]dataobject.TSkill, error) {
 //   - 已存在活跃(未删除)记录 -> 冲突
 //   - 存在软删除记录占用唯一键 -> 复活该记录(覆盖字段, deleted=0)
 //   - 否则全新插入
-func (g *GormAccessor) CreateLLMProvider(p *dataobject.TLLMProvider) error {
+func (g *GormAccessor) CreateLLMProvider(p *dataobject.TLlm) error {
 	var count int64
-	if err := g.gormDb.Model(&dataobject.TLLMProvider{}).
+	if err := g.gormDb.Model(&dataobject.TLlm{}).
 		Where("provider_id = ? AND deleted = 0", p.ProviderId).Count(&count).Error; err != nil {
 		return exception2.DatabaseQueryErrEx2("check llm provider error:%s", err.Error())
 	}
@@ -130,10 +130,10 @@ func (g *GormAccessor) CreateLLMProvider(p *dataobject.TLLMProvider) error {
 	}
 
 	// 软删除记录占用唯一键时复活
-	values := dataobject.LLMProviderValues(p)
+	values := dataobject.LlmValues(p)
 	values["deleted"] = 0
 	values["d_version"] = gorm.Expr("d_version + 1")
-	res := g.gormDb.Model(&dataobject.TLLMProvider{}).
+	res := g.gormDb.Model(&dataobject.TLlm{}).
 		Where("provider_id = ? AND deleted = 1", p.ProviderId).
 		Updates(values)
 	if res.Error != nil {
@@ -141,7 +141,7 @@ func (g *GormAccessor) CreateLLMProvider(p *dataobject.TLLMProvider) error {
 	}
 	if res.RowsAffected > 0 {
 		// 复活成功:回读最新 d_version 写回内存结构,避免仓库缓存携带旧版本导致后续 Update 误报 409
-		WriteBackRevivedVersion(g, &dataobject.TLLMProvider{}, "provider_id", p.ProviderId, &p.DVersion)
+		WriteBackRevivedVersion(g, &dataobject.TLlm{}, "provider_id", p.ProviderId, &p.DVersion)
 		return nil
 	}
 
@@ -154,8 +154,8 @@ func (g *GormAccessor) CreateLLMProvider(p *dataobject.TLLMProvider) error {
 }
 
 // UpdateLLMProvider 更新 LLM Provider(乐观锁:d_version 不匹配返回冲突)
-func (g *GormAccessor) UpdateLLMProvider(p *dataobject.TLLMProvider) error {
-	var cur dataobject.TLLMProvider
+func (g *GormAccessor) UpdateLLMProvider(p *dataobject.TLlm) error {
+	var cur dataobject.TLlm
 	err := g.gormDb.Where("provider_id = ? AND owner_id = ? AND deleted = 0", p.ProviderId, p.OwnerId).First(&cur).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return exception2.AgentNotFoundErrEx("llm provider not found:" + p.ProviderId)
@@ -167,9 +167,9 @@ func (g *GormAccessor) UpdateLLMProvider(p *dataobject.TLLMProvider) error {
 		return exception2.AgentConflictErrEx2("llm provider version conflict:%s", p.ProviderId)
 	}
 
-	values := dataobject.LLMProviderValues(p)
+	values := dataobject.LlmValues(p)
 	values["d_version"] = gorm.Expr("d_version + 1")
-	res := g.gormDb.Model(&dataobject.TLLMProvider{}).
+	res := g.gormDb.Model(&dataobject.TLlm{}).
 		Where("provider_id = ? AND owner_id = ? AND deleted = 0 AND d_version = ?", p.ProviderId, p.OwnerId, p.DVersion.Int64).
 		Updates(values)
 	if res.Error != nil {
@@ -185,7 +185,7 @@ func (g *GormAccessor) UpdateLLMProvider(p *dataobject.TLLMProvider) error {
 
 // DeleteLLMProvider 软删除 LLM Provider
 func (g *GormAccessor) DeleteLLMProvider(ownerId, providerId string) error {
-	res := g.gormDb.Model(&dataobject.TLLMProvider{}).
+	res := g.gormDb.Model(&dataobject.TLlm{}).
 		Where("provider_id = ? AND owner_id = ? AND deleted = 0", providerId, ownerId).
 		Update("deleted", 1)
 	if res.Error != nil {
