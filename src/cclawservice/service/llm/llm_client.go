@@ -122,16 +122,6 @@ func NewClient() *Client {
 	return newClient(myCommon.DefaultTimeout)
 }
 
-// responseError 非 2xx 时把响应体解析为可读的错误信息返回。
-func responseError(resp *http.Response) error {
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, myCommon.MaxResponseBytes))
-	var apiErr APIError
-	if json.Unmarshal(respBody, &apiErr) == nil && apiErr.Message != "" {
-		return fmt.Errorf("llm client: http %d: %s", resp.StatusCode, apiErr.Message)
-	}
-	return fmt.Errorf("llm client: http %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
-}
-
 // ChatCompletion 调用指定 baseURL 的 chat/completions 端点,返回回复文本(已去首尾空白)。
 // 同步模式:等待上游完整返回后再解析。
 //   - req: 模型与消息;max_tokens 已按 context_window 动态推导(BuildChatCompletionRequest)
@@ -156,7 +146,7 @@ func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm
 	}(httpResp.Body)
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return "", responseError(httpResp)
+		return "", myException.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
 	}
 
 	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, myCommon.MaxResponseBytes))
@@ -210,7 +200,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobjec
 	}(httpResp.Body)
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return "", responseError(httpResp)
+		return "", myException.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
 	}
 
 	// 按行读取 SSE;每行形如 "data: {json}"。

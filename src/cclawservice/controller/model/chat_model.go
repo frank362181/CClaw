@@ -1,57 +1,5 @@
 package model
 
-import "my.favorite/platformutility/webbase/middleware/basic"
-
-// SessionRequest ================== session 管理命令=============================
-type SessionRequest struct {
-	SessionId   string `json:"sessionId"` //标识会话session
-	SessionName string `json:"sessionName"`
-
-	SenderId string `json:"senderId"` //发起新会话的userName
-
-	ChatType    int `json:"chatType"`    //聊天类型
-	ChatChannel int `json:"chatChannel"` //聊天渠道
-
-	AgentId string `json:"agentId"` //session对应的调用目标Agent
-}
-
-type SessionResponse struct {
-	SessionId   string `json:"sessionId"`
-	SessionName string `json:"sessionName"` //session name
-	SenderId    string `json:"senderId"`    //发起新会话的userName
-	ChatType    int    `json:"chatType"`
-	ChatChannel int    `json:"chatChannel"`
-
-	GenAt int `json:"genAt"` // session创建的时间
-
-	SessionData string `json:"sessionData"` //用来存放session所有交互历史的文件名,内容格式为JSON
-
-	Removed int `json:"removed"` //是否删除的标记
-}
-
-type SessionResponseEx struct {
-	basic.CommonResponse
-	Data SessionResponse `json:"data"`
-}
-
-type SessionsRequest struct {
-	SenderId string `json:"senderId"` //userName
-
-	sessions []string //session list
-
-	StartTime int64 `json:"startTime"`
-	EndTime   int64 `json:"endTime"`
-}
-type SessionsResponse struct {
-	SenderId string            `json:"senderId"`
-	sessions []SessionResponse `json:"sessions"`
-}
-
-type SessionsResponseEx struct {
-	basic.CommonResponse
-	Data SessionsResponse `json:"data"`
-}
-
 // ChatRequest =================聊天所需的信令==================
 type ChatRequest struct {
 	SenderId    string `json:"senderId"`    //发送者,以服务端认证信息为准
