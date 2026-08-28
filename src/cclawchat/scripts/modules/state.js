@@ -14,6 +14,7 @@ function normalizeConversation(conv) {
                 role: msg.role,
                 content: String(msg.content ?? ''),
                 timestamp: Number(msg.timestamp) || Date.now(),
+                interrupted: Boolean(msg.interrupted),
             })),
         createdAt: Number(conv.createdAt) || Date.now(),
         updatedAt: Number(conv.updatedAt) || Date.now(),
@@ -141,6 +142,17 @@ export const State = {
         if (!msg) return false;
         msg.reasoningText = String(reasoningText ?? '');
         if (persist) this.save();
+        return true;
+    },
+
+    // 标记消息为“已中断”（用户点击中断按钮停止流式聊天）。
+    // 持久化，便于重渲染/刷新后仍展示中断标记。
+    markMessageInterrupted(convId, msgId) {
+        const conv = this.conversations.find(c => c.id === convId);
+        const msg = conv?.messages.find(item => item.id === msgId);
+        if (!msg) return false;
+        msg.interrupted = true;
+        this.save();
         return true;
     },
 

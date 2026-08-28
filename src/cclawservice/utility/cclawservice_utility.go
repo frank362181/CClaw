@@ -178,3 +178,9 @@ func FindStartupDocFile(fileName string) (common.StartupDocSpec, bool) {
 	}
 	return common.StartupDocSpec{}, false
 }
+
+// BuildChatStreamKey 构造进行中流式聊天的注册键:发送者 + 会话号。
+// 以发送者(服务端认证,防伪造)为前缀,隔离不同用户;会话号隔离同一用户的不同会话。
+func BuildChatStreamKey(sender, sessionId string) string {
+	return strings.TrimSpace(sender) + ":" + strings.TrimSpace(sessionId)
+}

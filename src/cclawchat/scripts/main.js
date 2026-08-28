@@ -31,6 +31,7 @@ const App = {
 
             ChatPage.init(chatComp, {
                 onSend: () => this.sendMessage(),
+                onInterrupt: () => this.interruptChat(),
                 onNewChat: () => this.newConversation(),
                 onClearChat: () => this.clearConversation(),
                 onHideChat: () => this.toggleChatDrawer(false),
@@ -285,6 +286,14 @@ const App = {
                 console.error('Stream error:', err);
             }
         );
+    },
+
+    /** 中断当前会话进行中的流式聊天（用户点击中断按钮，按钮已变为中断态） */
+    interruptChat() {
+        if (!State.isStreaming) return;
+        const conv = State.getCurrentConversation();
+        if (!conv) return;
+        StreamEngine.interrupt(conv.id);
     },
 
     newConversation() {

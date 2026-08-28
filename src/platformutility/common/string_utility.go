@@ -6,8 +6,24 @@ import (
 	"strings"
 )
 
-// SplitPath 把点分路径拆成段，并忽略空段（如 "a..b" 视为 "a.b"）。
-func SplitPath(dottedKey string) []string {
+// IsCJK 判断字符是否属于中日韩(CJK)文字区。
+// 这些字符在多数 tokenizer 中每字符约 0.5~1 token,与拉丁字符(约 4 字符/token)差异明显,
+// 分开统计可让估算更贴近真实用量。
+func IsCJK(r rune) bool {
+	switch {
+	case r >= 0x3400 && r <= 0x4DBF, // CJK 扩展 A
+		r >= 0x4E00 && r <= 0x9FFF, // CJK 统一表意文字
+		r >= 0x3040 && r <= 0x30FF, // 平假名/片假名
+		r >= 0xAC00 && r <= 0xD7AF, // 谚文(Hangul)
+		r >= 0xF900 && r <= 0xFAFF: // CJK 兼容表意文字
+		return true
+	default:
+		return false
+	}
+}
+
+// SplitString 把点分路径拆成段，并忽略空段（如 "a..b" 视为 "a.b"）。
+func SplitString(dottedKey string) []string {
 	raw := strings.Split(dottedKey, ".")
 	segments := make([]string, 0, len(raw))
 	for _, seg := range raw {

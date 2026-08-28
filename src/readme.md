@@ -1,3 +1,37 @@
+# LLM 配置信息
+
+    主流厂商 context window 一览
+    DeepSeek（官网数据）
+    模型	Context Length	最大输出
+    deepseek-v4-flash	1M (100万)	384K
+    deepseek-v4-pro	1M (100万)	384K
+    deepseek-v4-flash-vision-exp	1M (100万)	384K
+    deepseek-v3 / v3.1 / v3.2 / r1（旧）	128K	—
+    Qwen 通义千问（阿里云百炼）
+    模型	上下文窗口
+    qwen3.8-max / qwen3.7-max	1M
+    qwen3.7-plus / qwen3.7-flash	1M
+    qwen3-coder-plus / coder-flash	1M
+    qwen-long（超长文本专用）	10M (1000万)
+    qwen-turbo / qwq-plus	128K
+    qwen3 系列开源版	128K~256K
+    GLM 智谱（开放平台 + 百炼三方）
+    模型	上下文窗口	最大输出
+    GLM-4-Plus	128K	4K
+    GLM-4-Air-250414	128K	16K
+    GLM-4-AirX	8K（低延迟版，注意偏小）	4K
+    GLM-4-Flash-250414 / FlashX	128K	16K
+    glm-5.2（最新，百炼）	1M	—
+    glm-5 / 5.1 / 4.7	198K	—
+    glm-4.5	128K	—
+    Kimi（月之暗面）& MiniMax
+    模型	上下文窗口
+    kimi-k2.7-code	256K
+    kimi-k2.5 / k2-thinking	256K
+    MiniMax-M3	192K
+    mimo-v2.5-pro	1M
+    MiniMax-M2.7 / M2.5 / M2.1	192K / 200K
+
 # 项目简介
 
 ## 1. done
@@ -260,7 +294,6 @@ sequenceDiagram
 - **等做「工具调用循环」时**，再按上面的生产者/消费者结构演进，并把「上游读取」抽成可注入的组件，其它逻辑（写端、错误、取消）保持不变。
 
 需要的话，将来落地工具调用时我可以按这个结构来设计，届时再把这段分析沉淀到 repo memory。
-
 
 # 2 todo 需要压缩或流式输出很慢的原因
 B. 压缩 system prompt（调低 60K 预算 / 精简大文件正文）	中等，降低 prefill	cclawservice_const.go 预算常量 + 文档内容

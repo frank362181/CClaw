@@ -871,6 +871,30 @@ body {
 
 .btn-send .send-icon {
     line-height: 1;
+    /* 强制以文本(非 emoji)呈现字形,避免部分系统为 ⏹/➤ 绘制带背景图样的 emoji */
+    font-variant-emoji: text;
+}
+
+/* 流式/思考中:发送按钮变为中断按钮(红色,始终可点) */
+.btn-send.interrupt {
+    background: #e5484d;
+}
+.btn-send.interrupt:hover:not(:disabled) {
+    background: #d33a3f;
+}
+
+/* 消息"已中断"标记 */
+.interrupted-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    background: rgba(0, 0, 0, 0.04);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: var(--radius-sm);
+    padding: 2px 8px;
 }
 
 /* ---------- 响应式适配 ---------- */

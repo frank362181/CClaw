@@ -35,7 +35,7 @@ type TLlm struct {
 	CachedWriteCost float32 `json:"CachedWriteCost"` //每百万命中缓存写的单价
 
 	ContextWindow    uint32 `json:"ContextWindow"`
-	MaxTokens        uint32 `json:"MaxTokens"`
+	MaxTokens        int    `json:"MaxTokens"` // 单词聊天返回的最大的token数量大小
 	UsageInStreaming bool   `json:"UsageInStreaming"`
 
 	AuthMode uint8 `json:"AuthMode"`

@@ -43,9 +43,9 @@ type ChatCompletionChoice struct {
 
 // ChatCompletionUsage token 用量(可选,部分供应商流式返回时可能为空)
 type ChatCompletionUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens     int `json:"prompt_tokens"`     // 本次请求的全部token,=请求的token+历史消息+工具调用结果+prompt token
+	CompletionTokens int `json:"completion_tokens"` // 本次请求的输出token
+	TotalTokens      int `json:"total_tokens"`      //prompt token + completion tokens
 }
 
 // ChatCompletionResponse chat/completions 应答体
@@ -116,8 +116,8 @@ func newClient(timeout time.Duration) *Client {
 }
 
 // NewClient 构造 LLM 客户端。
-// 鉴权密钥与 max_tokens 均来自每次调用传入的 TLlm(数据库配置),
-// 客户端本身不持有任何供应商特定配置。
+// 鉴权密钥来自每次调用传入的 TLlm(数据库配置);max_tokens 由
+// BuildChatCompletionRequest 按 context_window 动态推导,客户端本身不持有任何供应商特定配置。
 func NewClient() *Client {
 	return newClient(myCommon.DefaultTimeout)
 }
@@ -134,7 +134,7 @@ func responseError(resp *http.Response) error {
 
 // ChatCompletion 调用指定 baseURL 的 chat/completions 端点,返回回复文本(已去首尾空白)。
 // 同步模式:等待上游完整返回后再解析。
-//   - req: 模型与消息;maxTokens 为空时自动填充客户端默认值
+//   - req: 模型与消息;max_tokens 已按 context_window 动态推导(BuildChatCompletionRequest)
 //
 // 错误语义:网络/HTTP/协议错误均包装后返回,由上层映射为业务错误。
 func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *model.ChatRequest) (string, error) {
@@ -186,11 +186,6 @@ func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm
 	return content, nil
 }
 
-// ChatCompletionStream 以流式(SSE)方式调用 chat/completions。
-//   - onChunk: 每个增量文本到达时被调用,参数为该次增量 delta(非累计)
-//   - 返回值: 完整回复文本(累计)
-//   - 客户端断开/取消:返回 myException.ErrRequestCanceled,由上层区分处理
-//
 // ChatCompletionStream 以流式(SSE)方式调用 chat/completions。
 //   - onChunk:    每个正式回复增量到达时被调用,参数为该次增量 delta
 //   - onReasoning: 思考过程增量(reasoning_content)到达时被调用(如推理模型);不并入返回的正式回复
@@ -288,11 +283,6 @@ func (c *Client) prepareRequest(ctx context.Context, llmProvider dataobject.TLlm
 	baseURL := strings.TrimSpace(llmProvider.BaseUrl)
 	if baseURL == "" {
 		return nil, errors.New("llm client: base url is empty")
-	}
-
-	// 填充默认 max_tokens(取 provider 数据库配置;未配置则省略该字段)
-	if req.MaxTokens == nil && llmProvider.MaxTokens > 0 {
-		req.MaxTokens = new(int(llmProvider.MaxTokens))
 	}
 
 	body, err := json.Marshal(req)

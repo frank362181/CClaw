@@ -20,4 +20,5 @@ const (
 	ErrorIdBizChatAgentNotFound
 	ErrorIdBizChatLLM
 	ErrorIdBizChatCanceled
+	ErrorIdBizChatNotActive
 )

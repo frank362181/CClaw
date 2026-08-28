@@ -65,3 +65,19 @@ test('updateMessageStatus stores transient status without persisting to storage'
     State.loadConversations();
     assert.equal(found().statusText, undefined);
 });
+
+test('markMessageInterrupted marks message and persists across reload', () => {
+    reset();
+    State.login('alice', 'token');
+    const msg = State.addMessage(State.currentConvId, 'assistant', '部分内容');
+    const found = () => State.getCurrentConversation().messages.find(m => m.id === msg.id);
+    // 默认未标记
+    assert.equal(found().interrupted, undefined);
+    // 标记后生效并持久化:重新加载会话(从 localStorage)后仍保留
+    assert.equal(State.markMessageInterrupted(State.currentConvId, msg.id), true);
+    assert.equal(found().interrupted, true);
+    State.loadConversations();
+    assert.equal(found().interrupted, true);
+    // 不存在的消息返回 false,不产生副作用
+    assert.equal(State.markMessageInterrupted(State.currentConvId, 'no-such-id'), false);
+});

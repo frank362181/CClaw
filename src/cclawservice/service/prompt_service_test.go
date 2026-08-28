@@ -10,9 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/cclawservice/utility"
+	pCommon "my.favorite/platformutility/common"
 )
 
 // writeFile 创建测试工作区文件
@@ -24,6 +26,42 @@ func writeFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write file error:%s", err.Error())
 	}
+}
+
+// agentWorkspaceRoot 返回测试 agent 的启动文档根目录(<exeDir>/cclaw/<ownerId>/<agentDir>)。
+// 与生产路径 BuildAgentBootstrapRoot 保持一致,prompt 组装才能命中真实文件系统。
+func agentWorkspaceRoot(ownerId, agentDir string) string {
+	return filepath.Join(pCommon.GetExecutableDir(), cCommon.AgentBootstrapDir, ownerId, agentDir)
+}
+
+// newTestAgent 在 <exeDir>/cclaw/<ownerId>/<agentDir> 下创建测试工作区(目录必须存在),
+// 通过 fn 写入启动文档,返回对应的 TAgent;测试结束自动清理。
+func newTestAgent(t *testing.T, ownerId, agentId, agentDir string, fn func(root string)) dataobject.TAgent {
+	t.Helper()
+	root := agentWorkspaceRoot(ownerId, agentDir)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir workspace error:%s", err.Error())
+	}
+	if fn != nil {
+		fn(root)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(root)
+	})
+	return dataobject.TAgent{
+		OwnerId:  ownerId,
+		AgentId:  agentId,
+		AgentDir: agentDir,
+	}
+}
+
+// writeSkillFile 在独立临时目录创建 SKILL.md(工作区外,模拟 TSkill.SkillFile 指向)。
+func writeSkillFile(t *testing.T, content string) string {
+	t.Helper()
+	skillDir := t.TempDir()
+	skillFile := filepath.Join(skillDir, "SKILL.md")
+	writeFile(t, skillFile, content)
+	return skillFile
 }
 
 func TestSplitFrontMatter(t *testing.T) {
@@ -58,22 +96,20 @@ func TestSplitFrontMatter(t *testing.T) {
 }
 
 func TestBuildSystemPrompt(t *testing.T) {
-	root := t.TempDir()
-
-	writeFile(t, filepath.Join(root, "AGENTS.md"),
-		"---\nsummary: \"rules\"\ntitle: \"AGENTS.md\"\nread_when:\n  - Session startup\n---\n# Rules\n- Read before edit.\n")
-	writeFile(t, filepath.Join(root, "SOUL.md"),
-		"---\nsummary: \"persona\"\ntitle: \"SOUL.md\"\n---\n# Soul\nBe direct and technical.\n")
-	writeFile(t, filepath.Join(root, "TOOLS.md"), "# Tools\nUse read/write tools.\n")
+	agent := newTestAgent(t, "t-owner", "agent-1", "agent-1", func(root string) {
+		writeFile(t, filepath.Join(root, "AGENTS.md"),
+			"---\nsummary: \"rules\"\ntitle: \"AGENTS.md\"\nread_when:\n  - Session startup\n---\n# Rules\n- Read before edit.\n")
+		writeFile(t, filepath.Join(root, "SOUL.md"),
+			"---\nsummary: \"persona\"\ntitle: \"SOUL.md\"\n---\n# Soul\nBe direct and technical.\n")
+		writeFile(t, filepath.Join(root, "TOOLS.md"), "# Tools\nUse read/write tools.\n")
+	})
 
 	// skill 放在工作区外的独立目录,模拟通过 TSkill.SkillFile 指向
-	skillDir := t.TempDir()
-	skillFile := filepath.Join(skillDir, "SKILL.md")
-	writeFile(t, skillFile,
+	skillFile := writeSkillFile(t,
 		"---\nname: test-skill\nuser-invocable: false\ndescription: 'A test skill for validation'\n---\n# Skill Body\nDo the thing.\n")
 
 	promptService := GetPromptService()
-	prompt, err := promptService.BuildSystemPrompt("agent-1", root, []string{skillFile})
+	prompt, err := promptService.BuildSystemPrompt(agent, []string{skillFile})
 	if err != nil {
 		t.Fatalf("BuildSystemPrompt error:%s", err.Error())
 	}
@@ -101,7 +137,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 	}
 
 	// 幂等 + 缓存:再次构建应成功且结果一致
-	prompt2, err := promptService.BuildSystemPrompt("agent-1", root, []string{skillFile})
+	prompt2, err := promptService.BuildSystemPrompt(agent, []string{skillFile})
 	if err != nil {
 		t.Fatalf("second BuildSystemPrompt error:%s", err.Error())
 	}
@@ -120,12 +156,13 @@ func TestBuildSystemPrompt(t *testing.T) {
 }
 
 func TestBuildSystemPromptMissingRequired(t *testing.T) {
-	root := t.TempDir()
 	// 只有 SOUL.md,缺必需的 AGENTS.md —— 应注入 [MISSING] 标记,不应报错
-	writeFile(t, filepath.Join(root, "SOUL.md"), "# Soul only")
+	agent := newTestAgent(t, "t-owner", "agent-2", "agent-2", func(root string) {
+		writeFile(t, filepath.Join(root, "SOUL.md"), "# Soul only")
+	})
 
 	promptService := GetPromptService()
-	prompt, err := promptService.BuildSystemPrompt("agent-2", root, nil)
+	prompt, err := promptService.BuildSystemPrompt(agent, nil)
 	if err != nil {
 		t.Fatalf("BuildSystemPrompt error:%s", err.Error())
 	}
@@ -143,17 +180,18 @@ func TestBuildSystemPromptMissingRequired(t *testing.T) {
 }
 
 func TestBuildSystemPromptScopeFiltering(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "AGENTS.md"), "# Rules")
-	writeFile(t, filepath.Join(root, "SOUL.md"), "# Soul")
-	writeFile(t, filepath.Join(root, "IDENTITY.md"), "# Identity")
-	writeFile(t, filepath.Join(root, "USER.md"), "# User")
-	writeFile(t, filepath.Join(root, "MEMORY.md"), "# Memory")
+	agent := newTestAgent(t, "t-owner", "agent-scope", "agent-scope", func(root string) {
+		writeFile(t, filepath.Join(root, "AGENTS.md"), "# Rules")
+		writeFile(t, filepath.Join(root, "SOUL.md"), "# Soul")
+		writeFile(t, filepath.Join(root, "IDENTITY.md"), "# Identity")
+		writeFile(t, filepath.Join(root, "USER.md"), "# User")
+		writeFile(t, filepath.Join(root, "MEMORY.md"), "# Memory")
+	})
 
 	promptService := GetPromptService()
 
 	// subagent: 仅 AGENTS.md,不继承父 agent 的人格/用户/记忆
-	sub, err := promptService.BuildSystemPromptEx("agent-sub", root, nil, dataobject.BootstrapScopeSubagent)
+	sub, err := promptService.BuildSystemPromptEx(agent, nil, dataobject.BootstrapScopeSubagent)
 	if err != nil {
 		t.Fatalf("subagent error:%s", err.Error())
 	}
@@ -167,7 +205,7 @@ func TestBuildSystemPromptScopeFiltering(t *testing.T) {
 	}
 
 	// cron: AGENTS/SOUL/IDENTITY/USER,不含 MEMORY.md(隐私)
-	cron, err := promptService.BuildSystemPromptEx("agent-cron", root, nil, dataobject.BootstrapScopeCron)
+	cron, err := promptService.BuildSystemPromptEx(agent, nil, dataobject.BootstrapScopeCron)
 	if err != nil {
 		t.Fatalf("cron error:%s", err.Error())
 	}
@@ -179,7 +217,7 @@ func TestBuildSystemPromptScopeFiltering(t *testing.T) {
 	}
 
 	// heartbeat: 不注入启动文件
-	hb, err := promptService.BuildSystemPromptEx("agent-hb", root, nil, dataobject.BootstrapScopeHeartbeat)
+	hb, err := promptService.BuildSystemPromptEx(agent, nil, dataobject.BootstrapScopeHeartbeat)
 	if err != nil {
 		t.Fatalf("heartbeat error:%s", err.Error())
 	}
@@ -189,11 +227,12 @@ func TestBuildSystemPromptScopeFiltering(t *testing.T) {
 }
 
 func TestBuildSystemPromptTruncatesOversizeDoc(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "AGENTS.md"), "# Big\n"+strings.Repeat("a", 25000))
+	agent := newTestAgent(t, "t-owner", "agent-5", "agent-5", func(root string) {
+		writeFile(t, filepath.Join(root, "AGENTS.md"), "# Big\n"+strings.Repeat("a", 25000))
+	})
 
 	promptService := GetPromptService()
-	prompt, err := promptService.BuildSystemPrompt("agent-5", root, nil)
+	prompt, err := promptService.BuildSystemPrompt(agent, nil)
 	if err != nil {
 		t.Fatalf("BuildSystemPrompt error:%s", err.Error())
 	}
@@ -209,16 +248,15 @@ func TestBuildSystemPromptTruncatesOversizeDoc(t *testing.T) {
 }
 
 func TestBuildSystemPromptSkillVersion(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "AGENTS.md"), "# Rules")
+	agent := newTestAgent(t, "t-owner", "agent-6", "agent-6", func(root string) {
+		writeFile(t, filepath.Join(root, "AGENTS.md"), "# Rules")
+	})
 
-	skillDir := t.TempDir()
-	skillFile := filepath.Join(skillDir, "SKILL.md")
-	writeFile(t, skillFile,
+	skillFile := writeSkillFile(t,
 		"---\nname: vskill\nversion: 1.2.0\ndescription: 'A versioned skill'\n---\n# SECRET BODY\n")
 
 	promptService := GetPromptService()
-	prompt, err := promptService.BuildSystemPrompt("agent-6", root, []string{skillFile})
+	prompt, err := promptService.BuildSystemPrompt(agent, []string{skillFile})
 	if err != nil {
 		t.Fatalf("BuildSystemPrompt error:%s", err.Error())
 	}
@@ -232,11 +270,12 @@ func TestBuildSystemPromptSkillVersion(t *testing.T) {
 }
 
 func TestBuildSystemPromptRejectsNonSkillFile(t *testing.T) {
-	root := t.TempDir()
+	// 空工作区(目录存在即可),先加载保证 agent 已缓存
+	agent := newTestAgent(t, "t-owner", "agent-3", "agent-3", nil)
 
 	// 先加载工作区,保证 skill 相对路径可解析
 	promptService := GetPromptService()
-	if _, err := promptService.BuildSystemPrompt("agent-3", root, nil); err != nil {
+	if _, err := promptService.BuildSystemPrompt(agent, nil); err != nil {
 		t.Fatalf("build workspace error:%s", err.Error())
 	}
 
@@ -248,10 +287,10 @@ func TestBuildSystemPromptRejectsNonSkillFile(t *testing.T) {
 }
 
 func TestBuildSystemPromptRejectsOversizeFile(t *testing.T) {
-	root := t.TempDir()
+	agent := newTestAgent(t, "t-owner", "agent-4", "agent-4", nil)
 
 	promptService := GetPromptService()
-	if _, err := promptService.BuildSystemPrompt("agent-4", root, nil); err != nil {
+	if _, err := promptService.BuildSystemPrompt(agent, nil); err != nil {
 		t.Fatalf("build workspace error:%s", err.Error())
 	}
 

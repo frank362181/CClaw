@@ -49,8 +49,14 @@ export const ChatPage = {
             this.updateSendButton();
         });
 
-        // 工具栏按钮
-        this.els.btnSend.addEventListener('click', () => handlers.onSend?.());
+        // 工具栏按钮：流式中发送按钮变为中断按钮，点击中断；平时点击发送
+        this.els.btnSend.addEventListener('click', () => {
+            if (State.isStreaming) {
+                handlers.onInterrupt?.();
+            } else {
+                handlers.onSend?.();
+            }
+        });
         this.els.btnHideChat.addEventListener('click', () => handlers.onHideChat?.());
         this.els.btnNewChat.addEventListener('click', () => handlers.onNewChat?.());
         this.els.btnClearChat.addEventListener('click', () => handlers.onClearChat?.());
@@ -132,6 +138,9 @@ export const ChatPage = {
                 bubble.appendChild(contentEl);
                 if (div.classList.contains('streaming')) {
                     bubble.appendChild(this._makeCursor());
+                }
+                if (msg.interrupted) {
+                    bubble.appendChild(this._makeInterruptedTag());
                 }
             }
 
@@ -294,17 +303,37 @@ export const ChatPage = {
         return c;
     },
 
+    // 创建“已中断”标记元素
+    _makeInterruptedTag() {
+        const tag = document.createElement('span');
+        tag.className = 'interrupted-tag';
+        tag.textContent = '\u23F9\uFE0E 已中断'; // ⏹ 文本呈现,避免 emoji 背景图样
+        return tag;
+    },
+
+    // 在流式消息上追加“已中断”标记（用户点击中断按钮后）。
+    markStreamingInterrupted(msgId) {
+        const container = this.els.messageList;
+        const msgEl = container.querySelector(`.message[data-msg-id="${msgId}"]`);
+        if (!msgEl) return;
+        const bubble = msgEl.querySelector('.bubble');
+        if (!bubble) return;
+        if (bubble.querySelector('.interrupted-tag')) return; // 防重复
+        bubble.appendChild(this._makeInterruptedTag());
+        this.scrollToBottom();
+    },
+
     // 输入框与发送按钮是否可用。
-    // 以 State.isStreaming 为最终约束:流式输出未结束前始终灰化,直到流式结束才恢复可用,
+    // 以 State.isStreaming 为最终约束:流式输出未结束前输入框始终灰化,直到流式结束才恢复可用,
     // 避免抽屉开关等其它调用方在流式期间误把输入区重新启用。
+    // 发送按钮在流式中由 updateSendButton 切换为中断按钮(始终可点)。
     setInputEnabled(enabled) {
         const input = this.els.chatInput;
-        const btn = this.els.btnSend;
         input.disabled = !enabled || State.isStreaming;
-        btn.disabled = !enabled || State.isStreaming;
         if (enabled && !State.isStreaming) {
             input.focus();
         }
+        this.updateSendButton();
     },
 
     clearInput() {
@@ -315,8 +344,23 @@ export const ChatPage = {
     },
 
     updateSendButton() {
+        const btn = this.els.btnSend;
+        const icon = btn.querySelector('.send-icon');
+        if (State.isStreaming) {
+            // 流式/思考中:发送按钮变为中断按钮,始终可点(点击即中断)。
+            // 图标统一附加文本呈现变体选择符(U+FE0E),强制以文本而非 emoji 渲染,
+            // 避免部分系统(Safari 等)为 ⏹/➤ 绘制带背景图样的 emoji 方块。
+            btn.disabled = false;
+            btn.classList.add('interrupt');
+            btn.title = '中断生成';
+            if (icon) icon.textContent = '\u23F9\uFE0E'; // ⏹ 文本呈现
+            return;
+        }
+        btn.classList.remove('interrupt');
+        btn.title = '发送';
+        if (icon) icon.textContent = '\u27A4\uFE0E'; // ➤ 文本呈现
         const val = this.els.chatInput.value.trim();
-        this.els.btnSend.disabled = !val || State.isStreaming || this.els.chatInput.disabled;
+        btn.disabled = !val || this.els.chatInput.disabled;
     },
 
     updateUserInfo(username) {

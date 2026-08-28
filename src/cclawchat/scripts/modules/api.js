@@ -127,6 +127,11 @@ async function runRealChatStream(convId, content, token, signal, onChunk, onComp
             onReasoning?.(payload.delta);
             return false;
         }
+        if (payload && payload.interrupt !== undefined) {
+            // 服务端主动中断（用户点击中断按钮，思考/推理阶段尚无正式回复）：结束流
+            onComplete?.(accumulated);
+            return true;
+        }
         if (payload && typeof payload.reply === 'string' && payload.reply) {
             accumulated += payload.reply;
             onChunk(accumulated);
@@ -176,6 +181,32 @@ export const API = {
             if (error.name !== 'AbortError' && !controller.signal.aborted) onError?.(error);
         });
         return controller;
+    },
+
+    /**
+     * 中断指定会话进行中的流式聊天：POST /api/chat/interrupt。
+     * - 携带 TIMESTAMP / NONCE / SIGNATURE（防重放）与 AUTHORIZATION 令牌，与聊天一致。
+     * - 仅在聊天已开始（流式进行中）时后端支持；会话未在聊天时返回业务错误。
+     * - 请求超时缩短（不受全局 120s 影响），保证中断操作尽快返回。
+     * @param {string} convId 会话标识（对应发起聊天时的 sessionId）
+     * @param {string} token 登录令牌（AUTHORIZATION 请求头）
+     */
+    async interruptChat(convId, token) {
+        if (!convId) throw new Error('缺少会话标识，无法中断');
+        const body = { sessionId: convId };
+        const TIMESTAMP = String(Math.floor(Date.now() / 1000));
+        const NONCE = getRandomNonce();
+        const SIGNATURE = await HmacSHA256Hex(CONFIG.SIGN_KEY, JSON.stringify(body) + TIMESTAMP + NONCE);
+        const json = await http.post('/chat/interrupt', body, {
+            params: { TIMESTAMP, NONCE, SIGNATURE },
+            headers: { AUTHORIZATION: token || '' },
+            timeout: 5000,
+        });
+        // 后端 CommonResponse 字段为 respCode/respMsg（camelCase）
+        if (json && typeof json.respCode === 'number' && json.respCode !== 0) {
+            throw new Error(json.respMsg || '中断请求失败');
+        }
+        return json;
     },
 
     async login(username, password) {

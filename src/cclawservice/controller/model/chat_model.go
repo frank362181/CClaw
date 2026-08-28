@@ -63,6 +63,12 @@ type ChatRequest struct {
 	GenAt       int64  `json:"genAt"`       // 消息的发送时间
 }
 
+// ChatInterruptRequest 中断进行中的流式聊天所需参数
+// 仅需会话标识(sessionId),对应发起聊天时 ChatRequest.sessionId;发送者由服务端认证决定。
+type ChatInterruptRequest struct {
+	SessionId string `json:"sessionId"` //会话标识,对应发起聊天时的 sessionId
+}
+
 type ChatResponse struct {
 	SenderId    string `json:"senderId"` //发送者,以服务端认证信息为准
 	SessionId   string `json:"sessionId"`
@@ -70,24 +76,4 @@ type ChatResponse struct {
 	ChatChannel int    `json:"chatChannel"` //聊天的频道,1=WEB,2,FEISHU 等
 	ChatId      int64  `json:"chatId"`      //本次聊天的消息ID,用于标识本次聊天的位置
 	Reply       string `json:"reply"`       //AI 回复内容(由 LLM 引擎返回的真实回复)
-}
-
-type ChatResponseEx struct {
-	basic.CommonResponse
-	Data ChatResponse `json:"data"`
-}
-
-// ChatsRequest =================== 消息管理命令========================
-type ChatsRequest struct {
-	SenderId string   `json:"senderId"`
-	Chats    []string `json:"chats"`
-}
-
-type ChatsResponse struct {
-	SenderId string         `json:"senderId"`
-	Chats    []ChatResponse `json:"chats"`
-}
-type ChatsResponseEx struct {
-	basic.CommonResponse
-	Data ChatsResponse `json:"data"`
 }

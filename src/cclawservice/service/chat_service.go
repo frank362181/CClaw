@@ -27,6 +27,7 @@ import (
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/cclawservice/service/llm"
+	"my.favorite/cclawservice/service/service_core"
 	myUtility "my.favorite/cclawservice/utility"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/database/core"
@@ -103,14 +104,33 @@ func (s *ChatService) ChatStream(ctx context.Context, req *model.ChatRequest, se
 		return "", err
 	}
 
+	// 注册为"进行中的流式聊天",供中断 API 按会话键取消(不同用户/会话相互隔离)。
+	// 派生可取消上下文:客户端断开或用户点击中断都会终止 LLM 流式读取。
+	streamCtx, cancel := context.WithCancel(ctx)
+	key := myUtility.BuildChatStreamKey(sender, req.SessionId)
+	service_core.GetChatStreamRegistry().Register(key, cancel)
+	defer service_core.GetChatStreamRegistry().Unregister(key)
+
 	if onStatus != nil {
 		onStatus(cCommon.ChatStatusThinking, "正在思考…")
 	}
-	reply, err := s.llmClient.ChatCompletionStream(ctx, llmProvider, systemPrompt, req, onChunk, onReasoning)
+	reply, err := s.llmClient.ChatCompletionStream(streamCtx, llmProvider, systemPrompt, req, onChunk, onReasoning)
 	if err != nil {
 		return "", myException.LlmError(err, "chat service: llm stream error")
 	}
 	return reply, nil
+}
+
+// InterruptChat 中断指定会话进行中的流式聊天(用户点击中断按钮)。
+// 仅在聊天已开始(流式进行中)时支持;会话不存在或已结束时返回"未在聊天"错误。
+// key 以发送者(服务端认证)为前缀,保证不同用户、不同会话的聊天相互隔离、互不影响。
+func (s *ChatService) InterruptChat(sender, sessionId string) error {
+	key := myUtility.BuildChatStreamKey(sender, sessionId)
+	if !service_core.GetChatStreamRegistry().Cancel(key) {
+		return myException.ChatNotActiveErrEx2("chat stream not active: %s", sessionId)
+	}
+	logging.LogDebugF("chat service: interrupt chat key:%s", key)
+	return nil
 }
 
 // =============================== private functions & methods========================

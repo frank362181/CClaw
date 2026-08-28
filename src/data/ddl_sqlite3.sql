@@ -22,7 +22,6 @@ CREATE TABLE t_llm (
                                 reasoning_ex INTEGER DEFAULT 0,                  -- 是否支持推理力度参数 (0/1)
                                 input INTEGER NOT NULL DEFAULT 0,                -- 支持的输入模态 (0:text/1:image/2:audio)
                                 context_window INTEGER NOT NULL,                 -- 上下文窗口大小 (token数量)
-                                max_tokens INTEGER NOT NULL,                     -- 单次最大输出token数量
                                 max_tokens_field VARCHAR(64) DEFAULT NULL,       -- max_tokens的字段名
                                 usage_in_streaming INTEGER NOT NULL DEFAULT 0,   -- 流式响应是否带用量 (0/1)
 

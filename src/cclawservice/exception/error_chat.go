@@ -118,3 +118,55 @@ func (te *ErrorChatCanceled) Is(target error) bool {
 	}
 	return false
 }
+
+// ErrorChatNotActive 中断请求时,目标会话没有进行中的聊天(HTTP 400)。
+// 即:聊天尚未开始或已结束,此时不应支持中断调用。
+// 模式与 error_agent.go / ErrorChatCanceled 保持一致。
+type ErrorChatNotActive struct {
+	exception.ErrorDescription
+}
+
+var ChatNotActiveErr = &ErrorChatNotActive{
+	exception.ErrorDescription{
+		ErrTxt:   "",
+		ErrId:    ErrorIdBizChatNotActive,
+		FileName: "",
+		LineNo:   -1,
+	},
+}
+
+func ChatNotActiveErrEx(errTxt string) *ErrorChatNotActive {
+	_, file, line, _ := runtime.Caller(1)
+	return &ErrorChatNotActive{
+		exception.ErrorDescription{
+			ErrTxt:   errTxt,
+			ErrId:    ErrorIdBizChatNotActive,
+			FileName: file,
+			LineNo:   line,
+		},
+	}
+}
+
+func ChatNotActiveErrEx2(errTxt string, a ...interface{}) *ErrorChatNotActive {
+	argsString := fmt.Sprintf(errTxt, a...)
+	_, file, line, _ := runtime.Caller(1)
+	return &ErrorChatNotActive{
+		exception.ErrorDescription{
+			ErrTxt:   argsString,
+			ErrId:    ErrorIdBizChatNotActive,
+			FileName: file,
+			LineNo:   line,
+		},
+	}
+}
+
+func (te *ErrorChatNotActive) Error() string {
+	return fmt.Sprintf("ERROR: [%s:%d]:%d: %s", te.FileName, te.LineNo, te.ErrId, te.ErrTxt)
+}
+
+func (te *ErrorChatNotActive) Is(target error) bool {
+	if ed, ok := errors.AsType[*ErrorChatNotActive](target); ok {
+		return ed.ErrId == te.ErrId
+	}
+	return false
+}

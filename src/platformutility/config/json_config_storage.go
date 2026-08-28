@@ -57,7 +57,7 @@ func (j *JsonConfigStore) GetWithDefault(section string, key string, defaultValu
 		return defaultValue, err
 	}
 
-	value, ok := j.lookup(common.SplitPath(key))
+	value, ok := j.lookup(common.SplitString(key))
 	if !ok {
 		return defaultValue, nil
 	}
@@ -85,7 +85,7 @@ func (j *JsonConfigStore) Set(section string, key string, value string) error {
 		return err
 	}
 
-	segments := common.SplitPath(key)
+	segments := common.SplitString(key)
 	if len(segments) == 0 {
 		return exception.ParameterEmptyErrorEx("key must not be empty")
 	}
@@ -108,7 +108,7 @@ func (j *JsonConfigStore) DeleteKey(section string, key string) {
 		return
 	}
 
-	segments := common.SplitPath(key)
+	segments := common.SplitString(key)
 	if len(segments) == 0 {
 		return
 	}

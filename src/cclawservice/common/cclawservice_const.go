@@ -100,6 +100,7 @@ const (
 	ConstErrorChatAgentNotFound
 	ConstErrorChatLLM
 	ConstErrorChatCanceled
+	ConstErrorChatNotActive
 )
 
 const (
@@ -122,6 +123,7 @@ const (
 	ConstErrorChatAgentNotFoundMsg = "聊天目标Agent不存在或已禁用"
 	ConstErrorChatLLMMsg           = "智能体引擎暂时不可用,请稍后再试"
 	ConstErrorChatCanceledMsg      = "请求已被取消"
+	ConstErrorChatNotActiveMsg     = "当前会话没有进行中的聊天"
 )
 
 // ContextAuthenticatedUser is the gin.Context key for the server-verified user.
@@ -152,8 +154,9 @@ const (
 	RelativeUpdateSkill = "/skill/update"
 	RelativeRemoveSkill = "/skill/remove"
 
-	RelativeChatUrl       = "/chat"
-	RelativeChatStreamUrl = "/chat/stream"
+	RelativeChatUrl          = "/chat"
+	RelativeChatStreamUrl    = "/chat/stream"
+	RelativeChatInterruptUrl = "/chat/interrupt"
 )
 
 // ================ chat type ================
@@ -165,7 +168,7 @@ const (
 // ==================== channel type ====================
 const (
 	ChatChannelWeb      = 1 //WEB端
-	ChatChannelFeishu   = 2 //飞书端
+	ChatChannelFeiShu   = 2 //飞书端
 	ChatChannelWechat   = 3 //微信端
 	ChatChannelDingTalk = 4 //钉钉端
 )

@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	cclawcommon "my.favorite/cclawservice/common"
@@ -200,8 +201,22 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 		})
 
 	if err != nil {
-		if errors.Is(err, exception2.ChatCanceledErr) || c.Request.Context().Err() != nil {
-			return // 客户端已断开/取消:响应写不出去,静默结束
+		if errors.Is(err, exception2.ChatCanceledErr) {
+			// 区分"客户端断开"与"服务端主动中断(用户点击中断按钮)":
+			//   - 客户端断开:请求上下文已取消,响应写不出去,静默结束;
+			//   - 服务端中断:浏览器仍保持 SSE 连接,发送结束标记让前端正常收尾,
+			//     避免前端误判为"引擎不可用"或一直等待。
+			if c.Request.Context().Err() != nil {
+				return
+			}
+			if streamed {
+				c.SSEvent("message", "[DONE]")
+			} else {
+				// 思考/推理阶段被中断(尚无正式回复):发 interrupt 事件告知前端
+				c.SSEvent("interrupt", gin.H{"msg": cclawcommon.ConstErrorChatCanceledMsg})
+			}
+			flusher.Flush()
+			return
 		}
 		if streamed {
 			// 已向浏览器输出过内容:保留已送达部分,以 [DONE] 正常收尾,
@@ -241,6 +256,48 @@ func (cc *ChatController) DeleteChat(c *gin.Context) {
 
 }
 
+// InterruptChat 中断进行中的流式聊天
+//
+//	@Summary		中断流式聊天
+//	@Description	用户点击中断按钮后,立即停止指定会话正在进行的思考/推理/流式输出,并通知大模型停止。仅在聊天已开始(流式进行中)时支持,否则返回"未在聊天"错误。
+//	@Tags			聊天管理
+//	@Accept			json
+//	@Produce		json
+//	@Param			AUTHORIZATION	header		string	true	"Login成功返回后得到的token"
+//	@Param			NONCE			query		string	true	"盐"
+//	@Param			TIMESTAMP		query		string	true	"数值,表示请求端请求的时间(秒数)"
+//	@Param			SIGNATURE		query		string	true	"对请求内容的签名秒数"
+//	@Param			body		body		model.ChatInterruptRequest	true	"中断参数"
+//	@Success		200			{object}	basic.CommonResponse
+//	@Failure		400			{object}	basic.CommonResponse
+//	@Router			/api/chat/interrupt [post]
+func (cc *ChatController) InterruptChat(c *gin.Context) {
+	chatService, ok := cc.getChatService(c)
+	if !ok {
+		return
+	}
+
+	loginSession, ok := utility.GetAuthentication(c)
+	if !ok {
+		return
+	}
+
+	var req model2.ChatInterruptRequest
+	if err := c.ShouldBindBodyWithJSON(&req); err != nil || strings.TrimSpace(req.SessionId) == "" {
+		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorChatParameter, cclawcommon.ConstErrorChatParameterMsg, nil)
+		return
+	}
+
+	// 发送者以服务端认证信息为准(认证 interceptor 已写入上下文),确保只能中断自己的聊天
+	sender := loginSession.LoginName
+	if err := chatService.InterruptChat(sender, req.SessionId); err != nil {
+		cc.respondChatError(c, err)
+		return
+	}
+
+	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, nil)
+}
+
 // ======================== private functions & methods =======================
 
 // getChatService 获取当前注入的 ChatService
@@ -266,6 +323,9 @@ func (cc *ChatController) respondChatError(c *gin.Context, err error) {
 	case errors.Is(err, exception2.ChatCanceledErr):
 		// 客户端已断开/取消请求:响应写不出去,静默结束即可
 		return
+	case errors.Is(err, exception2.ChatNotActiveErr):
+		// 中断请求时目标会话没有进行中的聊天(聊天未开始或已结束)
+		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorChatNotActive, cclawcommon.ConstErrorChatNotActiveMsg, nil)
 	default:
 		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
 	}
