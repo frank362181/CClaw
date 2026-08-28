@@ -5,12 +5,12 @@ import (
 )
 
 func GetDBPool(config *config.ConfigurationHelper) IBaseDBPool {
-	dbType, _ := config.GetIntValueDefault("database", "dbtype", ConstDbTypeUnknown)
+	dbType, _ := config.GetIntValueDefault("database", "dbType", ConstDbTypeUnknown)
 	dbHost, _ := config.GetStringValueDefault("database", "server", "")
 	dbPort, _ := config.GetIntValueDefault("database", "port", 5432)
 	dbName, _ := config.GetStringValueDefault("database", "dbname", "")
-	dataDir, _ := config.GetStringValueDefault("database", "datadir", "")
-	sslMode, _ := config.GetBoolValueDefault("database", "sslmode", false)
+	dataDir, _ := config.GetStringValueDefault("database", "dataDir", "")
+	sslMode, _ := config.GetBoolValueDefault("database", "sslMode", false)
 	dbUser, _ := config.GetStringValueDefault("database", "username", "")
 	dbPassword, _ := config.GetStringValueDefault("database", "password", "")
 	minCons, _ := config.GetIntValueDefault("database", "min_connections", 5)
