@@ -110,6 +110,36 @@
 AGENTS.md,SOUL.md等启动文件的真正读取的点是PromptRepository.LoadWorkspace() -> 内部循环 -> readAgentDocumentLocked()。读取启动
 文件有两个触发时机，且因为指纹缓存，绝大多数情况下并不会真的读盘。即进程启动时，应该将default agent给读取进来
 
+- AGENTS.md: 
+  - 职能：作业手册
+  - 业务类比：岗位职责 + 作业制度
+  - 内容定位：绘画启动流程、任务处理SOP、工具/记忆规则、安全与合规红线、输出规范；
+- SOUL.md:
+  - 职能：人格/价值观
+  - 业务类比：职业准则
+  - 内容定位：不良资产专家人设、职业道德（客观/审慎/保密）、沟通风格
+- IDENTITY.md
+  - 职能：身份名片
+  - 业务类比：工牌
+  - 内容定位：名称、emoj、头像、对外简介、版本
+- USER.md
+  - 职能：用户画像
+  - 业务类比：客户档案
+  - 内容定位：服务对象岗位/机构、术语表、项目经验、决策记录
+- MEMORY.md
+  - 职能：长期记忆
+  - 业务类比：知识库/工作日志
+  - 内容定位：各自技能用法 + 业务场景示例 + 合规提示
+- TOOLS.md：
+  - 职能：记录在“在哪里/用什么、模版放哪里”
+  - 业务类比：工具清单、本地资源地图
+  - 内容定位：记录目录、模版、命名习惯、工具清单、本地资源地图等；但并不定义具体的工具，实际的工具定义还是在SKILL.md中,在TOOLS.md中对这些TOOL进行引用
+
+建议原则：
+  流程规则 进 AGENT.md；价值观 进 SOUL.md；事实与记忆 进 MEMORY.md；两者不重复；当前 AGENTS.md 里 “人格/语气”类内容应下方或删除。就是说能力在SKILLS.md，
+  TOOLS.md只是记住“有哪些能力、资源在哪里”的备忘。
+
+
 ### 2. 每次组装时
 这里才是读取agent启动文件的主路径，且按需读取。PromptService.BuildSystemPromptEx()第一步：
   if err := service.promptRepo.LoadWorkspace(workspaceRoot)
