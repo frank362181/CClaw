@@ -129,6 +129,26 @@ func NewClient() *Client {
 // 错误语义:网络/HTTP/协议错误均包装后返回,由上层映射为业务错误。
 func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *model.ChatRequest) (string, error) {
 	req := BuildChatCompletionRequest(llmProvider, systemPrompt, chatReq, false)
+	return c.doCompletion(ctx, llmProvider, req)
+}
+
+// Complete 轻量同步调用:以 system/user 文本调用 chat/completions 并返回回复文本。
+// 用于"Agent 路由分类"等短输出场景;maxTokens 限制输出上限(<=0 时由供应商默认,仍受 context_window 约束)。
+func (c *Client) Complete(ctx context.Context, llmProvider dataobject.TLlm, system, user string, maxTokens int) (string, error) {
+	req := ChatCompletionRequest{
+		Model:     llmProvider.GetModelName(),
+		Messages:  []ChatMessage{{Role: "system", Content: system}, {Role: "user", Content: user}},
+		Stream:    false,
+		MaxTokens: nil,
+	}
+	if maxTokens > 0 {
+		req.MaxTokens = &maxTokens
+	}
+	return c.doCompletion(ctx, llmProvider, req)
+}
+
+// doCompletion 执行一次同步 chat/completions 请求并解析回复文本(同步/轻量调用共用)。
+func (c *Client) doCompletion(ctx context.Context, llmProvider dataobject.TLlm, req ChatCompletionRequest) (string, error) {
 	httpReq, err := c.prepareRequest(ctx, llmProvider, req)
 	if err != nil {
 		return "", err

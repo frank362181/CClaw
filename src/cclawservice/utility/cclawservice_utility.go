@@ -11,6 +11,7 @@
 package utility
 
 import (
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -157,6 +158,16 @@ func BuildAgentBootstrapRoot(agent dataobject.TAgent) (string, bool) {
 	return "", false
 }
 
+func BuildAgentExtensionRoot(agent dataobject.TAgent) (string, bool) {
+	agentBootstrapRoot, ok := BuildAgentBootstrapRoot(agent)
+	if !ok {
+		return "", false
+	}
+
+	skillRoot := filepath.Join(agentBootstrapRoot, common.AgentExtensionDirName)
+	return skillRoot, true
+}
+
 // ResolveStartupPath 校验并解析启动文档路径:仅允许纯文件名,禁止目录穿越与符号链接逃逸。
 // 供 prompt 组装(LoadWorkspace)与启动文件管理(StartupFileRepository)共用,
 // 保证同一套安全路径规则。文件名非法/越界时返回平台 FilePathError。
@@ -183,4 +194,23 @@ func FindStartupDocFile(fileName string) (common.StartupDocSpec, bool) {
 // 以发送者(服务端认证,防伪造)为前缀,隔离不同用户;会话号隔离同一用户的不同会话。
 func BuildChatStreamKey(sender, sessionId string) string {
 	return strings.TrimSpace(sender) + ":" + strings.TrimSpace(sessionId)
+}
+
+func BuildSessionKey(comCode, sessionId string) string {
+	return comCode + ":" + sessionId
+}
+
+func BuildClassifySystemPrompt(agents []dataobject.TAgent) string {
+	var sb strings.Builder
+	sb.WriteString("你是一个智能体路由器。请根据用户的问题,从下面的智能体列表中选择最合适的一个。\n")
+	sb.WriteString("智能体列表(格式: 编号|名称|简介):\n")
+	for _, a := range agents {
+		desc := strings.TrimSpace(a.Description)
+		if desc == "" {
+			desc = strings.TrimSpace(a.AgentName)
+		}
+		_, _ = fmt.Fprintf(&sb, "- %s|%s|%s\n", a.AgentId, a.AgentName, desc)
+	}
+	sb.WriteString("只回答最合适的智能体编号(如 agent_001),不要输出任何其他内容;如果不确定,回答 default。")
+	return sb.String()
 }

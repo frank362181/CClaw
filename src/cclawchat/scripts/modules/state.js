@@ -26,6 +26,8 @@ export const State = {
     conversations: [],
     currentConvId: null,
     isStreaming: false,
+    // 当前 Agent 展示用表情(思考过程等 UI 图标的来源);由 HomePage 加载智能体列表后按默认 Agent 同步
+    agentEmoji: '🤖',
 
     _storageKey(username = this.user?.username) {
         if (!username) return null;

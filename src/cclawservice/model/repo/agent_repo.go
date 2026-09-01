@@ -30,6 +30,7 @@ type AgentRepository struct {
 	llmProviders *common.SafeList[dataobject.TLlm]
 	agents       *common.SafeList[dataobject.TAgent]
 	skills       *common.SafeList[dataobject.TSkill]
+	routeRules   *common.SafeList[dataobject.TAgentRouteRule]
 
 	// 配置缓存 TTL 刷新
 	configTTL  int64 // 缓存过期时间;<=0 表示禁用 TTL 刷新(仅启动时加载一次)
@@ -55,6 +56,8 @@ type IAgentRepository interface {
 	UpdateSkill(skill dataobject.TSkill) error
 	RemoveSkill(ownerId, skillId string) error
 
+	GetAgentRouteRules(comCode string) []dataobject.TAgentRouteRule
+
 	Destroy()
 }
 
@@ -66,6 +69,7 @@ var agentRepository = common.GetSingleton(func() *AgentRepository {
 		llmProviders: common.NewSafeList[dataobject.TLlm](),
 		agents:       common.NewSafeList[dataobject.TAgent](),
 		skills:       common.NewSafeList[dataobject.TSkill](),
+		routeRules:   common.NewSafeList[dataobject.TAgentRouteRule](),
 	}
 }).Instance()
 
@@ -261,6 +265,21 @@ func (repo *AgentRepository) GetSkills(comCode string) []dataobject.TSkill {
 	return out
 }
 
+// GetAgentRouteRules 返回该 comCode 下的内容路由关键词规则(仅未删除、未禁用的在 matchKeyword 中生效)。
+func (repo *AgentRepository) GetAgentRouteRules(comCode string) []dataobject.TAgentRouteRule {
+	repo.refreshIfExpired()
+
+	out := make([]dataobject.TAgentRouteRule, 0, repo.routeRules.Len())
+	repo.routeRules.Range(func(_ int, item dataobject.TAgentRouteRule) bool {
+		if strings.EqualFold(comCode, item.OwnerId) {
+			out = append(out, item)
+		}
+		return true
+	})
+
+	return out
+}
+
 func (repo *AgentRepository) AddSkill(skill dataobject.TSkill) error {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
@@ -328,6 +347,10 @@ func (repo *AgentRepository) Destroy() {
 	if repo.skills != nil {
 		repo.skills.Clear()
 	}
+
+	if repo.routeRules != nil {
+		repo.routeRules.Clear()
+	}
 }
 
 // ============================== private functions & methods =========================
@@ -337,6 +360,7 @@ func (repo *AgentRepository) loadAllAgents() {
 	repo.llmProviders.Clear()
 	repo.agents.Clear()
 	repo.skills.Clear()
+	repo.routeRules.Clear()
 
 	if err := repo.requireAccessor(); err != nil {
 		return
@@ -367,6 +391,15 @@ func (repo *AgentRepository) loadAllAgents() {
 	}
 	for _, s := range skills {
 		repo.skills.Append(s)
+	}
+
+	// load route rules
+	rules, err := repo.dataAccessor.GetAllAgentRouteRules()
+	if err != nil {
+		return
+	}
+	for _, rule := range rules {
+		repo.routeRules.Append(rule)
 	}
 
 	// 记录本次加载时间(供 TTL 判断使用;调用方需持有 mu)

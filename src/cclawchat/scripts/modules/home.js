@@ -683,8 +683,23 @@ export const HomePage = {
             }
         } finally {
             this.agentsLoading = false;
+            this._syncAgentEmoji(); // 加载完成后同步默认 Agent 表情到 State
         }
         this._refreshAgentsSection();
+    },
+
+    /**
+     * 依据当前智能体列表,将"默认 Agent 的表情"同步到 State.agentEmoji,
+     * 供聊天 UI(如思考过程图标)展示与 Agent 对应的表情。
+     * 优先取"默认且运行中"的 Agent;无默认时取第一个运行中;列表为空时保持原值。
+     */
+    _syncAgentEmoji() {
+        const list = Array.isArray(this.agents) ? this.agents : [];
+        const running = list.filter(a => a.status !== '已暂停');
+        const def = running.find(a => a.default) || running[0] || list[0];
+        if (def && def.icon) {
+            State.agentEmoji = def.icon;
+        }
     },
 
     /* 智能体加载完成后，原地刷新已渲染的设置页区块（未在设置页则跳过） */

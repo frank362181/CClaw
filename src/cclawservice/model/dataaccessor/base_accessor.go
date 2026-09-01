@@ -18,6 +18,7 @@ type IAccessor interface {
 	GetAllLLMProviders() ([]dataobject.TLlm, error)
 	GetAllAgents() ([]dataobject.TAgent, error)
 	GetAllSkills() ([]dataobject.TSkill, error)
+	GetAllAgentRouteRules() ([]dataobject.TAgentRouteRule, error)
 
 	// 写操作(新增/更新/软删除)
 	CreateLLMProvider(provider *dataobject.TLlm) error

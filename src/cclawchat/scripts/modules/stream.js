@@ -47,29 +47,36 @@ export const StreamEngine = {
             content => {
                 if (!isCurrent()) return;
                 request.content = content || request.content;
-                State.updateMessageStatus(convId, msgId, '');
-                State.updateMessageContent(convId, msgId, request.content);
-                ChatPage.updateStreamingMessage(msgId, request.content, true);
-                if (!finish()) return;
-                onComplete?.(request.content);
-            },
-            error => {
-                if (!isCurrent()) return;
-                // 内容已送达过:保留已输出内容,不再用错误提示整体覆盖(内容对用户仍有价值)
-                if (request.content) {
+                try {
                     State.updateMessageStatus(convId, msgId, '');
                     State.updateMessageContent(convId, msgId, request.content);
                     ChatPage.updateStreamingMessage(msgId, request.content, true);
-                    if (!finish()) return;
-                    onComplete?.(request.content);
-                    return;
+                } finally {
+                    // 无论 UI 更新是否抛错,都必须复位流式状态与发送按钮
+                    if (finish()) onComplete?.(request.content);
                 }
-                const message = `⚠️ ${error?.message || '网络错误，请稍后重试'}`;
-                State.updateMessageStatus(convId, msgId, '');
-                State.updateMessageContent(convId, msgId, message);
-                ChatPage.updateStreamingMessage(msgId, message, true);
-                if (!finish()) return;
-                onError?.(error);
+            },
+            error => {
+                if (!isCurrent()) return;
+                try {
+                    // 内容已送达过:保留已输出内容,不再用错误提示整体覆盖(内容对用户仍有价值)
+                    if (request.content) {
+                        State.updateMessageStatus(convId, msgId, '');
+                        State.updateMessageContent(convId, msgId, request.content);
+                        ChatPage.updateStreamingMessage(msgId, request.content, true);
+                    } else {
+                        const message = `⚠️ ${error?.message || '网络错误，请稍后重试'}`;
+                        State.updateMessageStatus(convId, msgId, '');
+                        State.updateMessageContent(convId, msgId, message);
+                        ChatPage.updateStreamingMessage(msgId, message, true);
+                    }
+                } finally {
+                    // 无论 UI 更新是否抛错,都必须复位流式状态与发送按钮
+                    if (finish()) {
+                        if (request.content) onComplete?.(request.content);
+                        else onError?.(error);
+                    }
+                }
             },
             status => {
                 // 内容开始前,展示 Agent 当前阶段(拆解任务/思考/推理等)

@@ -10,6 +10,11 @@
 import { State } from './state.js';
 import { getInitials, formatTime } from '../utils/helper.js';
 
+// 发送/中断按钮图标:使用内联 SVG 而非文本字形(➤/⏹ + 变体选择符),
+// 避免 Safari 等系统把字形按 emoji 绘制(带背景的彩色方块/箭头),出现"覆盖一层图标"的观感。
+const ICON_SEND = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>';
+const ICON_INTERRUPT = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M6 6h12v12H6z"/></svg>';
+
 export const ChatPage = {
     comp: null,
     els: {},
@@ -116,7 +121,7 @@ export const ChatPage = {
                     const rw = document.createElement('details');
                     rw.className = 'reasoning-wrap';
                     const summary = document.createElement('summary');
-                    summary.textContent = '🧠 思考过程';
+                    summary.textContent = `${State.agentEmoji || '🤖'} 思考过程`;
                     const textEl = document.createElement('div');
                     textEl.className = 'reasoning-text';
                     textEl.innerHTML = this._escapeHtml(msg.reasoningText).replace(/\n/g, '<br/>');
@@ -268,7 +273,7 @@ export const ChatPage = {
             rw.className = 'reasoning-wrap';
             rw.open = true; // 实时思考过程默认展开
             const summary = document.createElement('summary');
-            summary.textContent = '🧠 思考过程';
+            summary.textContent = `${State.agentEmoji || '🤖'} 思考过程`;
             const textEl = document.createElement('div');
             textEl.className = 'reasoning-text';
             rw.appendChild(summary);
@@ -348,17 +353,15 @@ export const ChatPage = {
         const icon = btn.querySelector('.send-icon');
         if (State.isStreaming) {
             // 流式/思考中:发送按钮变为中断按钮,始终可点(点击即中断)。
-            // 图标统一附加文本呈现变体选择符(U+FE0E),强制以文本而非 emoji 渲染,
-            // 避免部分系统(Safari 等)为 ⏹/➤ 绘制带背景图样的 emoji 方块。
             btn.disabled = false;
             btn.classList.add('interrupt');
             btn.title = '中断生成';
-            if (icon) icon.textContent = '\u23F9\uFE0E'; // ⏹ 文本呈现
+            if (icon) icon.innerHTML = ICON_INTERRUPT;
             return;
         }
         btn.classList.remove('interrupt');
         btn.title = '发送';
-        if (icon) icon.textContent = '\u27A4\uFE0E'; // ➤ 文本呈现
+        if (icon) icon.innerHTML = ICON_SEND;
         const val = this.els.chatInput.value.trim();
         btn.disabled = !val || this.els.chatInput.disabled;
     },

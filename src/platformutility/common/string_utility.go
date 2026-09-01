@@ -35,6 +35,12 @@ func SplitString(dottedKey string) []string {
 	return segments
 }
 
+func SplitKeyWords(keywords string) []string {
+	return strings.FieldsFunc(keywords, func(r rune) bool {
+		return r == ',' || r == '，'
+	})
+}
+
 // ValueToString 把配置树节点转换为字符串。
 // 对象/数组返回其 JSON 文本；nil 视为不存在（返回 false）;其余类型转换为字符串表示。
 func ValueToString(v interface{}) (string, bool) {

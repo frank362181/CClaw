@@ -130,3 +130,26 @@ CREATE TABLE t_skill (
 
 CREATE INDEX idx_t_skill_owner_id ON t_skill(owner_id);
 CREATE INDEX idx_t_skill_skill_name ON t_skill(skill_name);
+
+
+-- 创建 Agent 内容路由关键词规则表(方案C:关键词路由层)
+CREATE TABLE t_agent_route_rule (
+    id INTEGER NOT NULL primary key AUTOINCREMENT,
+    owner_id VARCHAR(16) NOT NULL DEFAULT '000000',   -- 归属(与登录用户的 comCode 对齐)
+    agent_id VARCHAR(8) NOT NULL,                     -- 目标 Agent(关联 t_agent.agent_id)
+    keywords VARCHAR(512) NOT NULL,                   -- 逗号分隔的关键词,命中任一即路由
+    priority INTEGER NOT NULL DEFAULT 0,              -- 命中优先级(数值大者优先)
+    disabled INTEGER NOT NULL DEFAULT 0,              -- 是否禁用(0/1)
+    deleted INTEGER NOT NULL DEFAULT 0                -- 是否删除(0/1)
+);
+
+CREATE INDEX idx_t_agent_route_rule_owner_id ON t_agent_route_rule(owner_id);
+CREATE INDEX idx_t_agent_route_rule_agent_id ON t_agent_route_rule(agent_id);
+
+-- 不良资产智能助手(agent_001)的关键词路由规则示例(按需调整)
+INSERT INTO t_agent_route_rule (owner_id, agent_id, keywords, priority) VALUES (
+    '100001',
+    'agent_001',
+    '不良资产,尽调,尽职调查,估值,评估,处置,清收,回收,债权,债务,抵押,质押,AMC,资产包,组包,诉讼,法拍,司法拍卖,核销,债转股,重组,资产保全',
+    10
+);

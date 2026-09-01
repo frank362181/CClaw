@@ -113,6 +113,15 @@ func (g *GormAccessor) GetAllSkills() ([]dataobject.TSkill, error) {
 	return list, nil
 }
 
+func (g *GormAccessor) GetAllAgentRouteRules() ([]dataobject.TAgentRouteRule, error) {
+	var list []dataobject.TAgentRouteRule
+	err := g.gormDb.Where("deleted = 0").Find(&list).Error
+	if err != nil {
+		return nil, exception2.DatabaseQueryErrEx2("load agent route rules error:%s", err.Error())
+	}
+	return list, nil
+}
+
 // ============================== LLM Provider 写操作 =============================
 
 // CreateLLMProvider 新增 LLM Provider:

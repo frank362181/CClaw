@@ -79,7 +79,9 @@ func TestChatCompletion_Success(t *testing.T) {
 	srv := newMockServer(t, http.StatusOK, okResponse, &cap)
 
 	client := NewClient()
-	reply, err := client.ChatCompletion(context.Background(), providerModel(srv.URL, "sk-test", "deep_seek_v4_pro", 8192), systemPrompt("你是助手"), chatReq("你好"))
+	p := providerModel(srv.URL, "sk-test", "deep_seek_v4_pro", 8192)
+	p.MaxTokens = 4096 // 供应商单次输出上限(DB 配置)
+	reply, err := client.ChatCompletion(context.Background(), p, systemPrompt("你是助手"), chatReq("你好"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -103,8 +105,8 @@ func TestChatCompletion_Success(t *testing.T) {
 	if cap.Payload.Stream {
 		t.Error("stream should be false")
 	}
-	// max_tokens 由 context_window 动态推导,并受供应商输出上限约束:
-	// 应为 min(窗口 - 估算输入, DefaultMaxOutputTokens),且小于窗口
+	// max_tokens 由 context_window 动态推导,并受供应商输出上限(provider.MaxTokens)约束:
+	// 应为 min(窗口 - 估算输入, provider.MaxTokens),且小于窗口
 	if cap.Payload.MaxTokens == nil {
 		t.Fatal("max_tokens should be set when ContextWindow > 0")
 	}
@@ -112,11 +114,11 @@ func TestChatCompletion_Success(t *testing.T) {
 		t.Errorf("max_tokens = %d, want < context_window 8192", *cap.Payload.MaxTokens)
 	}
 	want := 8192 - estimateInputTokens(cap.Payload.Messages)
-	if want > DefaultMaxOutputTokens {
-		want = DefaultMaxOutputTokens
+	if want > 4096 {
+		want = 4096
 	}
 	if *cap.Payload.MaxTokens != want {
-		t.Errorf("max_tokens = %d, want %d (min(window - input, DefaultMaxOutputTokens))", *cap.Payload.MaxTokens, want)
+		t.Errorf("max_tokens = %d, want %d (min(window - input, provider.MaxTokens))", *cap.Payload.MaxTokens, want)
 	}
 	if len(cap.Payload.Messages) != 2 {
 		t.Fatalf("messages len = %d, want 2", len(cap.Payload.Messages))
@@ -388,6 +390,7 @@ func TestBuildChatCompletionRequest_DynamicMaxTokens(t *testing.T) {
 		Model:         "m",
 		BaseUrl:       "http://x",
 		ContextWindow: 4096,
+		MaxTokens:     4096, // 供应商单次输出上限(未配置时当前生产逻辑不发 max_tokens)
 	}
 	longInput := strings.Repeat("中", 3000)
 	req := BuildChatCompletionRequest(p, systemPrompt(longInput), chatReq("hi"), false)
@@ -406,7 +409,7 @@ func TestBuildChatCompletionRequest_DynamicMaxTokens(t *testing.T) {
 }
 
 // TestBuildChatCompletionRequest_DynamicMaxTokens_Room 验证窗口充足时,
-// max_tokens 仍受供应商输出上限约束:取 DefaultMaxOutputTokens,而非整个窗口。
+// max_tokens 仍受供应商输出上限(provider.MaxTokens)约束,而非整个窗口。
 // (回归:早期按窗口推导,1M 窗口 + 小输入 → max_tokens ≈ 1M,会被供应商以
 //
 //	"max tokens is too long" 拒绝。)
@@ -416,19 +419,19 @@ func TestBuildChatCompletionRequest_DynamicMaxTokens_Room(t *testing.T) {
 		Model:         "m",
 		BaseUrl:       "http://x",
 		ContextWindow: 1_000_000,
+		MaxTokens:     4096, // 供应商单次输出上限(DB 配置)
 	}
 	req := BuildChatCompletionRequest(p, systemPrompt("你是助手"), chatReq("你好"), false)
 	if req.MaxTokens == nil {
 		t.Fatal("max_tokens should be set when ContextWindow > 0")
 	}
-	// 窗口剩余空间远大于默认上限 → 被钳制到 DefaultMaxOutputTokens
-	if *req.MaxTokens != DefaultMaxOutputTokens {
-		t.Errorf("max_tokens = %d, want DefaultMaxOutputTokens %d (ceiling caps huge window)",
-			*req.MaxTokens, DefaultMaxOutputTokens)
+	// 窗口剩余空间远大于供应商输出上限 → 被钳制到 provider.MaxTokens
+	if *req.MaxTokens != 4096 {
+		t.Errorf("max_tokens = %d, want %d (ceiling caps huge window)", *req.MaxTokens, 4096)
 	}
-	// 且不得超过默认上限(供应商侧安全兜底)
-	if *req.MaxTokens > DefaultMaxOutputTokens {
-		t.Errorf("max_tokens = %d, should not exceed %d", *req.MaxTokens, DefaultMaxOutputTokens)
+	// 且不得超过供应商输出上限(供应商侧安全兜底)
+	if *req.MaxTokens > 4096 {
+		t.Errorf("max_tokens = %d, should not exceed %d", *req.MaxTokens, 4096)
 	}
 }
 

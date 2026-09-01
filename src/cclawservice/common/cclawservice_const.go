@@ -20,6 +20,19 @@ const (
 	AgentExtensionDirName = "extension"
 )
 
+// ==================== agent 根据内容意图识别确定agent ====================
+
+const (
+	// AgentRoutingLLMEnabled 是否启用 LLM 智能分类路由(关键词未命中时的兜底路由方式)。
+	AgentRoutingLLMEnabled = true
+	// AgentRoutingLLMTimeoutSeconds LLM 分类调用超时(秒),避免拖慢主聊天流程。
+	AgentRoutingLLMTimeoutSeconds = 5
+	// AgentRoutingLLMMaxTokens LLM 分类输出 token 上限(分类只需返回一个短 AgentId)。
+	AgentRoutingLLMMaxTokens = 1024
+	// SessionAgentBindingTTLSeconds 会话→Agent 内存绑定的有效期(秒),过期后重新路由。
+	SessionAgentBindingTTLSeconds = 3600
+)
+
 // ==================== agent 启动文档与 skill 文档 ====================
 
 // MissingFileMarker 缺失文件标记(OpenClaw context-file: [MISSING] Expected at: <path>)

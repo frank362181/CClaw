@@ -6,7 +6,7 @@
 * 处理流程:
 *   1. 校验消息内容并做长度限制,解析/生成会话标识
 *   2. 发送者以服务端认证信息为准(不信任客户端传入的 senderId,防伪造)
-*   3. 解析目标 Agent(请求体 agentId 优先,缺省取默认 Agent)
+*   3. 解析目标 Agent(方案C 混合路由:显式→会话绑定→关键词→LLM分类→默认)
 *   4. 解析 LLM Provider(Agent.PrimaryModel 优先,失败回退 Fallbacks)
 *   5. 基于 Agent 工作区启动文档组装 system prompt
 *   6. 调用 LLM chat/completions 取回真实回复
@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -46,19 +47,22 @@ type ChatService struct {
 	agentRepo     repo.IAgentRepository
 	promptService *PromptService
 	llmClient     *llm.Client
+	agentRouter   *service_core.AgentRouter
 }
 
 // GetChatService 构建聊天服务。
 //   - db:  用于读取 Agent / LLM Provider / Skill 配置(与 AgentService 共用同一仓库单例)
 func GetChatService(db core.IBaseDatabase) *ChatService {
+	agentRepo := repo.GetAgentRepository(db)
 	return &ChatService{
 		BaseService: baseService.BaseService{
 			Name:        "chatService",
 			Description: "receive chat messages and reply via the LLM engine",
 		},
-		agentRepo:     repo.GetAgentRepository(db),
+		agentRepo:     agentRepo,
 		promptService: GetPromptService(),
 		llmClient:     llm.NewClient(),
+		agentRouter:   service_core.GetAgentRouter(agentRepo),
 	}
 }
 
@@ -66,7 +70,7 @@ func GetChatService(db core.IBaseDatabase) *ChatService {
 //   - sender: 服务端认证得到的登录名(由认证 interceptor 写入请求上下文),覆盖请求体 senderId 防伪造
 //   - comCode: 服务端认证得到的单位编码,用于 Agent/Provider 的归属隔离(owner_id)
 func (s *ChatService) SendMessage(ctx context.Context, req *model.ChatRequest, sender, comCode string) (*model.ChatResponse, error) {
-	req, systemPrompt, llmProvider, err := s.prepareChat(req, sender, comCode)
+	req, systemPrompt, llmProvider, err := s.prepareChat(ctx, req, sender, comCode)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +103,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *model.ChatRequest, se
 	if onStatus != nil {
 		onStatus(cCommon.ChatStatusPreparing, "正在解析任务…")
 	}
-	req, systemPrompt, llmProvider, err := s.prepareChat(req, sender, comCode)
+	req, systemPrompt, llmProvider, err := s.prepareChat(ctx, req, sender, comCode)
 	if err != nil {
 		return "", err
 	}
@@ -114,6 +118,8 @@ func (s *ChatService) ChatStream(ctx context.Context, req *model.ChatRequest, se
 	if onStatus != nil {
 		onStatus(cCommon.ChatStatusThinking, "正在思考…")
 	}
+	fmt.Printf("%s %s", pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().DatetimeStr, systemPrompt.Prompt)
+
 	reply, err := s.llmClient.ChatCompletionStream(streamCtx, llmProvider, systemPrompt, req, onChunk, onReasoning)
 	if err != nil {
 		return "", myException.LlmError(err, "chat service: llm stream error")
@@ -137,7 +143,7 @@ func (s *ChatService) InterruptChat(sender, sessionId string) error {
 // prepareChat 执行同步/流式两条聊天路径的公共前置步骤:
 // 校验/规整入参 → 覆盖 sender → 生成 sessionId → 缺省类型 → 解析 Agent/Provider → 组装 system prompt。
 // 返回规范化后的请求、系统提示词与解析出的 Provider,供 SendMessage/ChatStream 复用,避免逻辑重复。
-func (s *ChatService) prepareChat(req *model.ChatRequest, sender, comCode string) (*model.ChatRequest, *dataobject.SystemPrompt, dataobject.TLlm, error) {
+func (s *ChatService) prepareChat(ctx context.Context, req *model.ChatRequest, sender, comCode string) (*model.ChatRequest, *dataobject.SystemPrompt, dataobject.TLlm, error) {
 	if req == nil {
 		return nil, nil, dataobject.TLlm{}, pException.ParameterEmptyErrorEx("chat request is nil")
 	}
@@ -169,8 +175,8 @@ func (s *ChatService) prepareChat(req *model.ChatRequest, sender, comCode string
 		req.ChatChannel = cCommon.ChatChannelWeb
 	}
 
-	// 5. 解析目标 Agent(请求体 agentId 优先,缺省取默认 Agent)
-	agent, err := s.resolveAgent(comCode, req.AgentId)
+	// 5. 解析目标 Agent(混合路由:显式 → 会话绑定 → 关键词 → LLM 分类 → 默认)
+	agent, err := s.resolveAgent(ctx, comCode, req.SessionId, req.ReqMsg, req.AgentId)
 	if err != nil {
 		return nil, nil, dataobject.TLlm{}, err
 	}
@@ -194,36 +200,15 @@ func (s *ChatService) prepareChat(req *model.ChatRequest, sender, comCode string
 
 // ==================== private functions & methods ==========================
 
-// resolveAgent 解析本次会话的目标 Agent。
-//   - agentId 非空:按 (comCode, agentId) 精确查找,未命中/被禁用返回 ChatAgentNotFoundErr
-//   - agentId 为空:取 comCode 下默认 Agent(IsDefault),没有则取第一个可用 Agent
-func (s *ChatService) resolveAgent(comCode, agentId string) (dataobject.TAgent, error) {
-	if s.agentRepo == nil {
-		return dataobject.TAgent{}, myException.ChatLLMErrEx("chat service: agent repository not initialized")
+// resolveAgent 解析本次会话的目标 Agent(混合路由)。
+//   - 显式 agentId 优先:非空时精确查找,未命中/被禁用返回错误;
+//   - 未显式指定时由 AgentRouter 按 会话绑定 → 关键词规则 → LLM 分类 → 默认 Agent 逐级回落;
+//   - 会话绑定保证同一会话内上下文一致,并避免重复路由计算。
+func (s *ChatService) resolveAgent(ctx context.Context, comCode, sessionId, reqMsg, agentId string) (dataobject.TAgent, error) {
+	if s.agentRouter == nil {
+		return dataobject.TAgent{}, myException.ChatLLMErrEx("chat service: agent router not initialized")
 	}
-	comCode = strings.TrimSpace(comCode)
-	agentId = strings.TrimSpace(agentId)
-
-	if agentId != "" {
-		agent, ok := s.agentRepo.GetAgent(comCode, agentId)
-		if !ok || agent.Deleted || agent.Disabled {
-			return dataobject.TAgent{}, pException.UnMatchErrorEx2("chat agent not found: %s", agentId)
-		}
-		return agent, nil
-	}
-
-	agents := s.agentRepo.GetAgents(comCode)
-	for i := range agents {
-		if !agents[i].Deleted && !agents[i].Disabled && agents[i].IsDefault {
-			return agents[i], nil
-		}
-	}
-	for i := range agents {
-		if !agents[i].Deleted && !agents[i].Disabled {
-			return agents[i], nil
-		}
-	}
-	return dataobject.TAgent{}, pException.UnMatchErrorEx2("no available chat agent for comCode:%s", comCode)
+	return s.agentRouter.Resolve(ctx, comCode, sessionId, reqMsg, agentId)
 }
 
 // resolveProvider 解析 Agent 使用的 LLM Provider:优先 PrimaryModel,再按 Fallbacks 逐个回退。
@@ -268,15 +253,15 @@ func (s *ChatService) collectSkillFiles(comCode string, agent dataobject.TAgent)
 		return nil
 	}
 
-	workspaceRoot, _ := myUtility.BuildAgentBootstrapRoot(agent)
+	agentExtensionRoot, _ := myUtility.BuildAgentExtensionRoot(agent)
 	files := make([]string, 0, len(skills))
 	for i := range skills {
 		dir := strings.TrimSpace(skills[i].SkillDir)
 		if dir == "" {
 			continue
 		}
-		if !filepath.IsAbs(dir) && workspaceRoot != "" {
-			dir = filepath.Join(workspaceRoot, dir)
+		if !filepath.IsAbs(dir) && agentExtensionRoot != "" {
+			dir = filepath.Join(agentExtensionRoot, dir)
 		}
 		files = append(files, dir)
 	}
