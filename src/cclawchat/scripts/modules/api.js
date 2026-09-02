@@ -72,7 +72,7 @@ async function runRealChat(convId, content, token, signal, onChunk, onComplete) 
  * - 携带 TIMESTAMP/NONCE/SIGNATURE（防重放）与 AUTHORIZATION 令牌，与登录一致。
  * - 支持 signal 取消（AbortController），取消时静默结束不触发完成回调。
  */
-async function runRealChatStream(convId, content, token, signal, onChunk, onComplete, onStatus, onReasoning) {
+async function runRealChatStream(convId, content, token, signal, onChunk, onComplete, onStatus, onReasoning, onTool) {
     const body = {
         sessionId: convId,
         requestMsg: content,
@@ -132,6 +132,11 @@ async function runRealChatStream(convId, content, token, signal, onChunk, onComp
             onComplete?.(accumulated);
             return true;
         }
+        if (payload && payload.phase && typeof payload.name === 'string') {
+            // 工具调用进度事件（intent/running/done/error），供工具卡片渲染
+            onTool?.(payload);
+            return false;
+        }
         if (payload && typeof payload.reply === 'string' && payload.reply) {
             accumulated += payload.reply;
             onChunk(accumulated);
@@ -168,14 +173,14 @@ async function runRealChatStream(convId, content, token, signal, onChunk, onComp
 }
 
 export const API = {
-    sendMessageStream(convId, content, token, onChunk, onComplete, onError, onStatus, onReasoning) {
+    sendMessageStream(convId, content, token, onChunk, onComplete, onError, onStatus, onReasoning, onTool) {
         const controller = new AbortController();
         // SSE 为默认真实路径；ENABLE_MOCK 时走模拟流；CHAT_STREAM_FORMAT 非 'sse' 时回退同步 JSON
         const useStream = CONFIG.CHAT_STREAM_FORMAT === 'sse';
         const task = CONFIG.ENABLE_MOCK
             ? runMockStream(content, controller.signal, onChunk, onComplete, onStatus)
             : useStream
-                ? runRealChatStream(convId, content, token, controller.signal, onChunk, onComplete, onStatus, onReasoning)
+                ? runRealChatStream(convId, content, token, controller.signal, onChunk, onComplete, onStatus, onReasoning, onTool)
                 : runRealChat(convId, content, token, controller.signal, onChunk, onComplete);
         task.catch(error => {
             if (error.name !== 'AbortError' && !controller.signal.aborted) onError?.(error);

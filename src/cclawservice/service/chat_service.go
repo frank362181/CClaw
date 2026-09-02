@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/controller/model"
@@ -75,6 +76,19 @@ func GetChatService(db core.IBaseDatabase, functionCalling bool) baseService.ISe
 	return chatService
 }
 
+// ToolEvent 流式路径下工具调用的事件,由 streamToolLoop 实时推送给控制器/前端:
+//   - Phase: intent(模型声明调用)/running(开始执行)/done(成功)/error(失败)
+//   - Seq:   本回合工具调用序号(自增)
+//   - Detail: done=结果摘要; error=错误信息; intent/running 为空
+//
+// 底层仍为多次上游请求(OpenAI 兼容协议不支持服务端工具循环),此处把多轮编排为一条连续事件流。
+type ToolEvent struct {
+	Phase  string
+	Seq    int
+	Name   string
+	Detail string
+}
+
 // SendMessage 接收并应答一条聊天消息(同步模式:等待完整回复后一次性返回)。
 //   - sender: 服务端认证得到的登录名(由认证 interceptor 写入请求上下文),覆盖请求体 senderId 防伪造
 //   - comCode: 服务端认证得到的单位编码,用于 Agent/Provider 的归属隔离(owner_id)
@@ -106,9 +120,10 @@ func (s *ChatService) SendMessage(ctx context.Context, req *model.ChatRequest, s
 // ChatStream 以流式(SSE)方式应答聊天消息。
 //   - onChunk:  每个增量文本到达时被调用(参数为该次增量 delta,由控制器转发给浏览器)
 //   - onStatus: 内容开始前报告 Agent 所处阶段(如解析任务/思考),由控制器以 status 事件转发
+//   - onTool:   工具调用进度事件(intent/running/done/error),由控制器以 tool 事件转发
 //   - 返回值:   完整回复文本
 //   - 与 SendMessage 共用 prepareChat,保证同步/流式两条路径的校验与解析完全一致
-func (s *ChatService) ChatStream(ctx context.Context, req *model.ChatRequest, sender, comCode string, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string)) (string, error) {
+func (s *ChatService) ChatStream(ctx context.Context, req *model.ChatRequest, sender, comCode string, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent)) (string, error) {
 	if onStatus != nil {
 		onStatus(cCommon.ChatStatusPreparing, "正在解析任务…")
 	}
@@ -132,7 +147,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *model.ChatRequest, se
 	// 否则保持原有的纯流式转发。
 	var reply string
 	if s.functionCalling && toolSet != nil && len(toolSet.LLMTools()) > 0 {
-		reply, err = s.streamToolLoop(streamCtx, llmProvider, runtime.BuildChatMessage(systemPrompt, req), toolSet, onChunk, onStatus, onReasoning)
+		reply, err = s.streamToolLoop(streamCtx, llmProvider, runtime.BuildChatMessage(systemPrompt, req), toolSet, onChunk, onStatus, onReasoning, onTool)
 	} else {
 		reply, err = s.llmClient.ChatCompletionStream(streamCtx, llmProvider, systemPrompt, req, onChunk, onReasoning)
 	}
@@ -302,7 +317,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 		if len(calls) == 0 {
 			return content, nil
 		}
-		messages = append(messages, runtime.BuildToolCallMessage(calls))
+		messages = append(messages, runtime.BuildToolCallWithContentMessage(content, calls)) // 缺口1:工具轮文本一并回填
 		for _, call := range calls {
 			result, err := toolSet.Exec(ctx, call.Function.Name, call.Function.Arguments)
 			if err != nil {
@@ -315,26 +330,105 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 }
 
 // streamToolLoop 流式路径的工具调用循环:
-// 工具调用阶段以状态提示(onStatus)告知用户,最终内容增量通过 onChunk 流式转发。
-func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []runtime.ChatMessage, toolSet *runtime.ToolSet, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string)) (string, error) {
+// 工具调用阶段实时推送给用户:模型声明调用(intent)→开始执行(running)→结果(done/error),
+// 最终内容增量通过 onChunk 流式转发。底层仍为多次上游请求(OpenAI 兼容协议不支持服务端工具循环),
+// 此处把多轮编排为一条面向客户端的事件流。
+func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []runtime.ChatMessage, toolSet *runtime.ToolSet, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent)) (string, error) {
+	seq := 0 // 本回合工具调用序号(跨轮自增,前端按 seq 追踪同一工具调用)
 	for i := 0; i < cCommon.AgentToolLoopMax; i++ {
 		if i > 0 && onStatus != nil {
 			onStatus(cCommon.ChatStatusThinking, "正在思考…")
 		}
-		content, calls, err := s.llmClient.StreamWithTools(ctx, llmProvider, messages, toolSet.LLMTools(), onChunk, onReasoning)
+		var roundIntents []int // 本轮模型声明的工具调用序号(与返回的 calls 一一对应)
+		content, calls, err := s.llmClient.StreamWithTools(ctx, llmProvider, messages, toolSet.LLMTools(), onChunk, onReasoning,
+			func(name string) { // onToolIntent:模型流式声明将调用某工具,立即告知前端
+				if onTool != nil {
+					seq++
+					roundIntents = append(roundIntents, seq)
+					onTool(ToolEvent{Phase: cCommon.ChatToolEventIntent, Seq: seq, Name: name})
+				}
+			})
 		if err != nil {
 			return "", myException.LlmError(err, "chat service: runtime tool stream error")
 		}
 		if len(calls) == 0 {
+			// 本轮无工具调用:流式内容(早已通过 onChunk 转发)即为最终结果
 			return content, nil
 		}
-		messages = append(messages, runtime.BuildToolCallMessage(calls))
-		for _, call := range calls {
-			result, err := toolSet.Exec(ctx, call.Function.Name, call.Function.Arguments)
-			if err != nil {
-				result = fmt.Sprintf(`{"error":%q}`, err.Error())
+		messages = append(messages, runtime.BuildToolCallWithContentMessage(content, calls)) // 工具调用+文本一并回填
+
+		// 同轮多个工具调用并行执行(goroutine 各自跑脚本);
+		// 脚本 stdout 经 lineCh 逐行汇集,由唯一转发 goroutine 串行推送 progress 事件(保证 SSE 无并发写)。
+		type toolRunItem struct {
+			seq    int
+			name   string
+			callID string
+			arg    string
+		}
+		runs := make([]toolRunItem, len(calls))
+		for k, call := range calls {
+			callSeq := seq
+			if k < len(roundIntents) {
+				callSeq = roundIntents[k]
 			}
-			messages = append(messages, runtime.BuildToolResultMessage(call.ID, result))
+			runs[k] = toolRunItem{seq: callSeq, name: call.Function.Name, callID: call.ID, arg: call.Function.Arguments}
+			if onTool != nil {
+				onTool(ToolEvent{Phase: cCommon.ChatToolEventRunning, Seq: callSeq, Name: call.Function.Name})
+			}
+		}
+
+		type toolResultItem struct {
+			item   toolRunItem
+			result string
+			err    error
+		}
+		results := make([]toolResultItem, len(runs))
+
+		lineCh := make(chan ToolEvent, 16)
+		var wg sync.WaitGroup
+		for k, run := range runs {
+			wg.Add(1)
+			go func(k int, run toolRunItem) {
+				defer wg.Done()
+				res, err := toolSet.ExecStream(ctx, run.name, run.arg, func(line string) {
+					// 脚本 stdout 行:仅投递到通道,由唯一转发 goroutine 推送(不在此处直接写 SSE)
+					lineCh <- ToolEvent{Phase: cCommon.ChatToolEventProgress, Seq: run.seq, Name: run.name, Detail: line}
+				})
+				results[k] = toolResultItem{item: run, result: res, err: err}
+			}(k, run)
+		}
+
+		// 唯一转发 goroutine:串行消费工具输出行,避免多 goroutine 并发写 SSE
+		fwdDone := make(chan struct{})
+		go func() {
+			defer close(fwdDone)
+			for evt := range lineCh {
+				if onTool != nil {
+					onTool(evt)
+				}
+			}
+		}()
+		wg.Wait()
+		close(lineCh)
+		<-fwdDone
+
+		if err := ctx.Err(); err != nil { // 中断加速:工具执行中用户取消,不再继续后续轮次
+			return "", myException.ErrRequestCanceled
+		}
+
+		// 全部执行完成:按原始顺序回填 tool 消息并派发 done/error 事件
+		for _, r := range results {
+			if r.err != nil {
+				if onTool != nil {
+					onTool(ToolEvent{Phase: cCommon.ChatToolEventError, Seq: r.item.seq, Name: r.item.name, Detail: r.err.Error()})
+				}
+				messages = append(messages, runtime.BuildToolResultMessage(r.item.callID, fmt.Sprintf(`{"error":%q}`, r.err.Error())))
+				continue
+			}
+			if onTool != nil {
+				onTool(ToolEvent{Phase: cCommon.ChatToolEventDone, Seq: r.item.seq, Name: r.item.name, Detail: pCommon.TruncateRunes(r.result, 600)})
+			}
+			messages = append(messages, runtime.BuildToolResultMessage(r.item.callID, r.result))
 		}
 	}
 	return "", myException.ChatLLMErrEx2("chat service: tool stream loop exceeded max iterations(%d)", cCommon.AgentToolLoopMax)

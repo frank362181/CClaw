@@ -130,6 +130,30 @@ export const ChatPage = {
                     bubble.appendChild(rw);
                 }
 
+                // 工具调用记录(会话内存中存在时渲染;重渲染为终态展示)
+                if (Array.isArray(msg.toolLog) && msg.toolLog.length) {
+                    const tl = document.createElement('div');
+                    tl.className = 'tool-list';
+                    msg.toolLog.forEach(t => {
+                        const phaseClass = t.phase === 'done' ? 'done' : (t.phase === 'error' ? 'error' : 'pending');
+                        const statusText = { intent: '⏳ 等待执行', running: '⟳ 执行中…', done: '✓ 完成', error: '✗ 失败' }[t.phase] || '';
+                        const it = document.createElement('div');
+                        it.className = `tool-item ${phaseClass}`;
+                        const header = document.createElement('div');
+                        header.className = 'tool-header';
+                        header.innerHTML = `<span class="tool-icon">⚙️</span><span class="tool-name">${this._escapeHtml(t.name)}</span><span class="tool-status">${this._escapeHtml(statusText)}</span>`;
+                        it.appendChild(header);
+                        if (t.detail) {
+                            const detail = document.createElement('div');
+                            detail.className = 'tool-detail';
+                            detail.textContent = t.detail;
+                            it.appendChild(detail);
+                        }
+                        tl.appendChild(it);
+                    });
+                    bubble.appendChild(tl);
+                }
+
                 const contentEl = document.createElement('span');
                 contentEl.className = 'stream-content';
                 if (!msg.content && msg.statusText && State.isStreaming) {
@@ -286,6 +310,71 @@ export const ChatPage = {
 
         const textEl = rw.querySelector('.reasoning-text');
         textEl.innerHTML = this._escapeHtml(reasoningText).replace(/\n/g, '<br/>');
+        this.scrollToBottom();
+    },
+
+    // 流式工具调用进度:渲染/更新工具卡片(intent 创建行,progress 执行日志追加,running/done/error 更新状态)
+    updateStreamingTool(msgId, tool) {
+        const container = this.els.messageList;
+        const msgEl = container.querySelector(`.message[data-msg-id="${msgId}"]`);
+        if (!msgEl) return;
+        const bubble = msgEl.querySelector('.bubble');
+        if (!bubble) return;
+
+        // 惰性创建工具区(reasoning 之后、正式内容之前)
+        let list = bubble.querySelector('.tool-list');
+        if (!list) {
+            list = document.createElement('div');
+            list.className = 'tool-list';
+            const contentEl = bubble.querySelector('.stream-content');
+            bubble.insertBefore(list, contentEl || null);
+        }
+
+        let item = list.querySelector(`.tool-item[data-seq="${tool.seq}"]`);
+        if (!item) {
+            item = document.createElement('div');
+            item.className = 'tool-item pending';
+            item.dataset.seq = tool.seq;
+            const header = document.createElement('div');
+            header.className = 'tool-header';
+            header.innerHTML = '<span class="tool-icon">⚙️</span><span class="tool-name"></span><span class="tool-status"></span>';
+            item.appendChild(header);
+            const detail = document.createElement('div');
+            detail.className = 'tool-detail';
+            item.appendChild(detail);
+            list.appendChild(item);
+        }
+
+        const nameEl = item.querySelector('.tool-name');
+        const statusEl = item.querySelector('.tool-status');
+        const detailEl = item.querySelector('.tool-detail');
+        if (tool.name) nameEl.textContent = tool.name;
+
+        if (tool.phase === 'progress') {
+            // 工具执行过程输出:逐行追加到 detail(作为执行日志),状态保持"执行中"
+            item.classList.remove('pending', 'done', 'error');
+            item.classList.add('running');
+            statusEl.textContent = '⟳ 执行中…';
+            if (tool.detail) {
+                detailEl.textContent = detailEl.textContent
+                    ? detailEl.textContent + '\n' + tool.detail
+                    : tool.detail;
+            }
+            this.scrollToBottom();
+            return;
+        }
+
+        const phases = {
+            intent: { cls: 'pending', text: '⏳ 等待执行' },
+            running: { cls: 'running', text: '⟳ 执行中…' },
+            done: { cls: 'done', text: '✓ 完成' },
+            error: { cls: 'error', text: '✗ 失败' },
+        };
+        const p = phases[tool.phase] || phases.intent;
+        item.className = `tool-item ${p.cls}`;
+        statusEl.textContent = p.text;
+        // done/error:仅在无执行日志累积(detail 为空)时写入结果,避免覆盖 progress 已展示的过程输出
+        if (tool.detail && !detailEl.textContent.trim()) detailEl.textContent = tool.detail;
         this.scrollToBottom();
     },
 

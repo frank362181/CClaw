@@ -765,6 +765,55 @@ body {
     word-break: break-word;
 }
 
+/* 工具调用卡片(流式工具进度:意图/执行中/完成/失败) */
+.message.assistant .bubble .tool-list {
+    margin: 2px 0 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.message.assistant .bubble .tool-item {
+    border: 1px solid rgba(142, 142, 160, 0.25);
+    border-radius: var(--radius-sm);
+    padding: 4px 8px;
+    font-size: var(--font-size-xs);
+    background: rgba(142, 142, 160, 0.06);
+}
+
+.message.assistant .bubble .tool-item .tool-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    line-height: 1.5;
+}
+
+.message.assistant .bubble .tool-item .tool-name {
+    font-weight: 500;
+    color: var(--color-text-assistant);
+}
+
+.message.assistant .bubble .tool-item .tool-status {
+    margin-left: auto;
+    color: var(--color-text-secondary);
+    flex-shrink: 0;
+}
+
+.message.assistant .bubble .tool-item .tool-detail {
+    margin-top: 4px;
+    color: var(--color-text-muted);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.message.assistant .bubble .tool-item.pending .tool-status { color: var(--color-text-secondary); }
+.message.assistant .bubble .tool-item.running .tool-status { color: var(--color-primary); }
+.message.assistant .bubble .tool-item.done .tool-status { color: #2e9e5b; }
+.message.assistant .bubble .tool-item.error .tool-status { color: #e5484d; }
+.message.assistant .bubble .tool-item.error { border-color: rgba(229, 72, 77, 0.4); }
+
 .message .timestamp {
     font-size: var(--font-size-xs);
     color: var(--color-text-muted);

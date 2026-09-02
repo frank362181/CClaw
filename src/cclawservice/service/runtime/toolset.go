@@ -74,6 +74,19 @@ func (ts *ToolSet) Exec(ctx context.Context, name, argsJSON string) (string, err
 	return RunScript(ctx, scriptPath, argsJSON)
 }
 
+// ExecStream 流式执行指定工具:脚本 stdout 逐行回调 onLine(供全流式工具进度),
+// 返回完整输出与错误。onLine 为空时退化为普通 Exec(一次性取结果)。
+func (ts *ToolSet) ExecStream(ctx context.Context, name, argsJSON string, onLine func(string)) (string, error) {
+	scriptPath, ok := ts.exec[name]
+	if !ok {
+		return "", fmt.Errorf("unknown tool: %s", name)
+	}
+	if onLine == nil {
+		return RunScript(ctx, scriptPath, argsJSON)
+	}
+	return RunScriptStream(ctx, scriptPath, argsJSON, onLine)
+}
+
 // parsedTool 是单个 SKILL.md 解析出的一个工具(内部缓存单元)。
 type parsedTool struct {
 	name   string
@@ -180,9 +193,7 @@ func loadSkillDoc(skillFile string) (*dataobject.SkillDocument, bool) {
 	return doc, true
 }
 
-// resolveScriptPath 把 SKILL.md 声明的脚本相对路径解析为绝对路径。
-// 复用 pCommon.SafeJoin 的真实路径白名单(防目录穿越 + 符号链接逃逸),
-// 再经 SafeJoinExisting 叠加"必须存在且为普通文件"约束(脚本须真实可执行)。
+// resolveScriptPath 把 SKILL.md 声明的脚本相对路径解析为绝对路径,确保一定在extension目录内
 func resolveScriptPath(rootClean, skillBaseDir, script string) (string, bool) {
 	script = strings.TrimSpace(script)
 	if script == "" || filepath.IsAbs(script) {

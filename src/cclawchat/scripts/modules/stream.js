@@ -92,6 +92,12 @@ export const StreamEngine = {
                 State.updateMessageReasoning(convId, msgId, request.reasoning);
                 ChatPage.updateStreamingReasoning(msgId, request.reasoning);
             },
+            tool => {
+                // 工具调用进度(intent/running/done/error):实时渲染工具卡片 + 记录到消息
+                if (!isCurrent()) return;
+                State.updateMessageTool(convId, msgId, tool);
+                ChatPage.updateStreamingTool(msgId, tool);
+            },
         );
         return { msgId, cancel: () => this.cancel(requestId) };
     },

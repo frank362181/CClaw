@@ -121,9 +121,16 @@ func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []
 	return req
 }
 
-// BuildToolCallMessage 构造携带工具调用的 assistant 消息(工具循环回填历史用)。
+// BuildToolCallWithContentMessage 构造携带文本与工具调用的 assistant 消息(工具循环回填历史用)。
+// 模型可能在一轮里既输出文本又请求工具(OpenAI 规范允许 content 与 tool_calls 并存),
+// 文本须一并回填,否则下一轮 LLM 看不到自己刚说的话(上下文缺失)。
+func BuildToolCallWithContentMessage(content string, calls []ToolCall) ChatMessage {
+	return ChatMessage{Role: "assistant", Content: content, ToolCalls: calls}
+}
+
+// BuildToolCallMessage 构造纯工具调用(无文本)的 assistant 消息(向后兼容入口)。
 func BuildToolCallMessage(calls []ToolCall) ChatMessage {
-	return ChatMessage{Role: "assistant", Content: "", ToolCalls: calls}
+	return BuildToolCallWithContentMessage("", calls)
 }
 
 // BuildToolResultMessage 构造工具执行结果消息(role=tool,按 tool_call_id 关联)。

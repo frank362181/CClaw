@@ -147,6 +147,26 @@ export const State = {
         return true;
     },
 
+    // 记录工具调用进度到消息(仅内存,不持久化到 localStorage)。
+    // 同一 seq 的事件更新同一条目;供抽屉重渲染/消息重渲染时恢复工具调用卡片。
+    updateMessageTool(convId, msgId, tool, { persist = false } = {}) {
+        const conv = this.conversations.find(c => c.id === convId);
+        const msg = conv?.messages.find(item => item.id === msgId);
+        if (!msg || !tool || tool.seq == null) return false;
+        if (!Array.isArray(msg.toolLog)) msg.toolLog = [];
+        const idx = msg.toolLog.findIndex(t => t.seq === tool.seq);
+        const entry = {
+            phase: tool.phase,
+            seq: tool.seq,
+            name: String(tool.name || ''),
+            detail: String(tool.detail || ''),
+        };
+        if (idx >= 0) msg.toolLog[idx] = entry;
+        else msg.toolLog.push(entry);
+        if (persist) this.save();
+        return true;
+    },
+
     // 标记消息为“已中断”（用户点击中断按钮停止流式聊天）。
     // 持久化，便于重渲染/刷新后仍展示中断标记。
     markMessageInterrupted(convId, msgId) {

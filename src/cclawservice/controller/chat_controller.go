@@ -198,6 +198,11 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 			// 思考过程增量:独立事件转发,供前端实时展示思考过程(不并入正式回复)
 			c.SSEvent("thinking", gin.H{"delta": delta})
 			flusher.Flush()
+		},
+		func(evt service.ToolEvent) {
+			// 工具调用进度(intent/running/done/error):实时转发,供前端渲染工具调用卡片
+			c.SSEvent("tool", gin.H{"phase": evt.Phase, "seq": evt.Seq, "name": evt.Name, "detail": evt.Detail})
+			flusher.Flush()
 		})
 
 	if err != nil {

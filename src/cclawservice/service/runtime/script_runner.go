@@ -13,6 +13,7 @@
 package runtime
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -75,6 +76,91 @@ var DefaultScriptPolicy = ScriptPolicy{
 // RunScript 以默认策略执行外部脚本工具(向后兼容入口)。
 func RunScript(ctx context.Context, scriptPath, argsJSON string) (string, error) {
 	return runScriptWithPolicy(ctx, DefaultScriptPolicy, scriptPath, argsJSON)
+}
+
+// RunScriptStream 流式执行脚本(stdout 逐行回调 onLine,去行尾换行、空行跳过),
+// 返回完整输出(去尾部空白)与错误(退出码非 0/超限/超时)。
+// 适用于需要把工具执行过程实时回传的调用方(如全流式工具进度)。
+// 安全护栏与 runScriptWithPolicy 一致;超限即终止进程并报错;ctx 取消即终止。
+func RunScriptStream(ctx context.Context, scriptPath, argsJSON string, onLine func(string)) (string, error) {
+	policy := DefaultScriptPolicy
+	if policy.Bin == "" {
+		policy.Bin = scriptBin
+	}
+	if policy.Timeout <= 0 {
+		policy.Timeout = scriptRunTimeout
+	}
+	if policy.MaxOutput <= 0 {
+		policy.MaxOutput = scriptMaxOutput
+	}
+	if policy.MaxInputJSON <= 0 {
+		policy.MaxInputJSON = scriptMaxInputJSON
+	}
+
+	info, err := os.Stat(scriptPath)
+	if err != nil || info.IsDir() {
+		return "", fmt.Errorf("script tool: script not found: %s", scriptPath)
+	}
+	if len(argsJSON) > policy.MaxInputJSON {
+		return "", fmt.Errorf("script tool: args too large (%d bytes)", len(argsJSON))
+	}
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, policy.Timeout)
+		defer cancel()
+	}
+
+	cmd := exec.CommandContext(ctx, policy.Bin, scriptPath)
+	cmd.Stdin = strings.NewReader(argsJSON)
+
+	stderrBuf := limitedBuffer{limit: policy.MaxOutput}
+	cmd.Stderr = &stderrBuf
+
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("script tool: stdout pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("script tool: start failed: %w", err)
+	}
+
+	var sb strings.Builder
+	exceeded := false
+	scanner := bufio.NewScanner(stdoutPipe)
+	scanner.Buffer(make([]byte, 0, 64*1024), policy.MaxOutput) // 单行上限 = 输出上限
+	for scanner.Scan() {
+		line := scanner.Text()
+		if sb.Len()+len(line)+1 > policy.MaxOutput {
+			exceeded = true
+			_ = cmd.Process.Kill()
+			break
+		}
+		sb.WriteString(line)
+		sb.WriteString("\n")
+		if onLine != nil && strings.TrimSpace(line) != "" {
+			onLine(line)
+		}
+	}
+	waitErr := cmd.Wait()
+
+	if exceeded || scanner.Err() != nil {
+		return "", fmt.Errorf("script tool: %s output exceeds %d bytes", filepath.Base(scriptPath), policy.MaxOutput)
+	}
+	if waitErr != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return "", fmt.Errorf("script tool: %s timed out after %s", filepath.Base(scriptPath), policy.Timeout)
+		}
+		detail := strings.TrimSpace(stderrBuf.String())
+		if detail == "" {
+			detail = waitErr.Error()
+		}
+		return "", fmt.Errorf("script tool: %s failed: %s", filepath.Base(scriptPath), detail)
+	}
+	return strings.TrimSpace(sb.String()), nil
 }
 
 // runScriptWithPolicy 按指定策略执行外部脚本工具:

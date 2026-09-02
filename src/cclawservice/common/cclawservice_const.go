@@ -193,6 +193,13 @@ const (
 const (
 	ChatStatusPreparing = "preparing" //解析任务/准备上下文
 	ChatStatusThinking  = "thinking"  //思考/推理中(等待首个 token)
+
+	// ChatToolEventIntent 工具调用过程中的阶段 */
+	ChatToolEventIntent   = "intent"
+	ChatToolEventRunning  = "running"
+	ChatToolEventProgress = "progress"
+	ChatToolEventDone     = "done"
+	ChatToolEventError    = "error"
 )
 
 // LLM 调用关联的constants

@@ -274,10 +274,12 @@ func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobjec
 }
 
 // StreamWithTools 流式执行一次 chat/completions(带工具):
-//   - onChunk:    正式内容增量
-//   - onReasoning:思考增量(reasoning_content)
-//   - 返回值:     累计正式文本 + 模型请求的工具调用(若有;arguments 已按 index 拼接完整)
-func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []ChatMessage, tools []Tool, onChunk func(string), onReasoning func(string)) (string, []ToolCall, error) {
+//   - onChunk:      正式内容增量
+//   - onReasoning:  思考增量(reasoning_content)
+//   - onToolIntent: 模型流式声明将调用某工具时立即回调(仅首次辨识到工具名触发一次),
+//     供调用方把工具意图实时推给前端(真正执行仍需等流结束拿到完整 arguments)。
+//   - 返回值:       累计正式文本 + 模型请求的工具调用(若有;arguments 已按 index 拼接完整)
+func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []ChatMessage, tools []Tool, onChunk func(string), onReasoning func(string), onToolIntent func(name string)) (string, []ToolCall, error) {
 	httpReq, err := c.prepareRequest(ctx, llmProvider, BuildChatCompletionRequestWithTool(llmProvider, messages, tools, true))
 	if err != nil {
 		return "", nil, err
@@ -300,6 +302,7 @@ func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLl
 
 	var sb strings.Builder
 	acc := newToolCallAccumulator()
+	reportedIntent := make(map[int]bool) // 已上报过工具意图的 index,避免同 index 分片重复上报
 	scanner := bufio.NewScanner(httpResp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), myCommon.MaxResponseBytes)
 	for scanner.Scan() {
@@ -339,6 +342,10 @@ func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLl
 		}
 		for _, tc := range delta.ToolCalls {
 			acc.add(tc)
+			if onToolIntent != nil && tc.Function.Name != "" && !reportedIntent[tc.Index] {
+				reportedIntent[tc.Index] = true
+				onToolIntent(tc.Function.Name)
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {

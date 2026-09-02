@@ -6,6 +6,20 @@ import (
 	"strings"
 )
 
+// TruncateRunes 按 rune 安全截断,避免截断多字节字符;fast-path 直接按字节比较。
+func TruncateRunes(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+
+	return string(runes[:max])
+}
+
 // IsCJK 判断字符是否属于中日韩(CJK)文字区。
 // 这些字符在多数 tokenizer 中每字符约 0.5~1 token,与拉丁字符(约 4 字符/token)差异明显,
 // 分开统计可让估算更贴近真实用量。
@@ -89,18 +103,4 @@ func ToJson(value string) interface{} {
 		return num
 	}
 	return value
-}
-
-// TruncateRunes 按 rune 安全截断,避免截断多字节字符;fast-path 直接按字节比较。
-func TruncateRunes(s string, max int) string {
-	if max <= 0 || len(s) <= max {
-		return s
-	}
-
-	runes := []rune(s)
-	if len(runes) <= max {
-		return s
-	}
-
-	return string(runes[:max])
 }
