@@ -26,6 +26,7 @@ import (
 	"gopkg.in/yaml.v2"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataobject"
+	"my.favorite/cclawservice/service/runtime/scriptrunner"
 
 	myUtility "my.favorite/cclawservice/utility"
 	pCommon "my.favorite/platformutility/common"
@@ -71,7 +72,7 @@ func (ts *ToolSet) Exec(ctx context.Context, name, argsJSON string) (string, err
 	if !ok {
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
-	return RunScript(ctx, scriptPath, argsJSON)
+	return scriptrunner.RunScript(ctx, scriptPath, argsJSON)
 }
 
 // ExecStream 流式执行指定工具:脚本 stdout 逐行回调 onLine(供全流式工具进度),
@@ -82,9 +83,9 @@ func (ts *ToolSet) ExecStream(ctx context.Context, name, argsJSON string, onLine
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
 	if onLine == nil {
-		return RunScript(ctx, scriptPath, argsJSON)
+		return scriptrunner.RunScript(ctx, scriptPath, argsJSON)
 	}
-	return RunScriptStream(ctx, scriptPath, argsJSON, onLine)
+	return scriptrunner.RunScriptStream(ctx, scriptPath, argsJSON, onLine)
 }
 
 // parsedTool 是单个 SKILL.md 解析出的一个工具(内部缓存单元)。

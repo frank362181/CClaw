@@ -22,6 +22,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/controller/model"
@@ -39,6 +41,10 @@ import (
 
 // MaxChatMessageLen 单条聊天消息的字符上限(防超大请求体滥用)
 const MaxChatMessageLen = 4096
+
+// ToolCallingHeartbeatInterval 工具执行静默心跳间隔:脚本超过该时长无新输出时,对于长执行的tool
+// 向用户推送心跳 progress 行,用于区分"仍在运行"与"挂起"(对长任务工具体验友好)。
+const ToolCallingHeartbeatInterval = 3 * time.Second
 
 // ChatService 处理聊天消息:校验 → 解析 Agent/Provider → 组装 prompt → 调用 LLM。
 type ChatService struct {
@@ -390,10 +396,39 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 			wg.Add(1)
 			go func(k int, run toolRunItem) {
 				defer wg.Done()
+				// 静默心跳:脚本超过 toolHeartbeatInterval 无新输出时推送心跳 progress 行,
+				// 让 UI 区分"仍在运行"与"挂起";close(stopHeart) 后 <-heartDone 保证心跳协程先退出再收尾。
+				startTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime() //time.Now()
+				stopHeart := make(chan struct{})
+				heartDone := make(chan struct{})
+				var lastOut atomic.Int64
+				lastOut.Store(startTime.NanoTimestamp)
+				go func() {
+					defer close(heartDone)
+					ticker := time.NewTicker(ToolCallingHeartbeatInterval)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-stopHeart:
+							return
+						case now := <-ticker.C: //此时返回的当前的时间（超时）
+							if time.Duration(now.UnixNano()-lastOut.Load()) < ToolCallingHeartbeatInterval {
+								continue // 期间有新输出(未静默),不打扰用户
+							}
+							lastOut.Store(now.UnixNano())
+							lineCh <- ToolEvent{Phase: cCommon.ChatToolEventProgress, Seq: run.seq, Name: run.name,
+								Detail: fmt.Sprintf("… 工具运行中(%d 秒,无新输出) …", int(now.Unix()-startTime.Timestamp))}
+						}
+					}
+				}()
+
 				res, err := toolSet.ExecStream(ctx, run.name, run.arg, func(line string) {
+					lastOut.Store(pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().NanoTimestamp)
 					// 脚本 stdout 行:仅投递到通道,由唯一转发 goroutine 推送(不在此处直接写 SSE)
 					lineCh <- ToolEvent{Phase: cCommon.ChatToolEventProgress, Seq: run.seq, Name: run.name, Detail: line}
 				})
+				close(stopHeart)
+				<-heartDone
 				results[k] = toolResultItem{item: run, result: res, err: err}
 			}(k, run)
 		}
