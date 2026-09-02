@@ -123,6 +123,17 @@ type SkillRequires struct {
 	Config  []string `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
+// SkillTool 是 SKILL.md front matter 中声明的一个可调用工具(供 function-calling 注册)。
+//   - Name/Description/Parameters:用于生成给 LLM 的函数 schema;
+//   - Script:相对 SKILL.md 所在目录的脚本路径(如 scripts/weather.py),执行时以参数 JSON 写入 stdin,
+//     脚本把结果(JSON/文本)写到 stdout,退出码非 0 表示失败(stderr 为错误信息)。
+type SkillTool struct {
+	Name        string         `json:"name,omitempty" yaml:"name,omitempty"`
+	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
+	Script      string         `json:"script,omitempty" yaml:"script,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+}
+
 // SkillFrontMatter 是 SKILL.md 的 YAML 元数据部分
 type SkillFrontMatter struct {
 	Name                  string        `json:"name,omitempty" yaml:"name,omitempty"`
@@ -134,6 +145,7 @@ type SkillFrontMatter struct {
 	OS                    []string      `json:"os,omitempty" yaml:"os,omitempty"`
 	Version               string        `json:"version,omitempty" yaml:"version,omitempty"`
 	Requires              SkillRequires `json:"requires,omitempty" yaml:"requires,omitempty"`
+	Tools                 []SkillTool   `json:"tools,omitempty" yaml:"tools,omitempty"`
 }
 
 // SkillDocument 表示一个已解析的 SKILL.md 文档

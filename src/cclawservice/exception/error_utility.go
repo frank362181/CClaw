@@ -48,8 +48,8 @@ func ParseLlmResponseError(resp *http.Response, readBytes int64) error {
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, readBytes))
 	var apiErr LlmAPIError
 	if json.Unmarshal(respBody, &apiErr) == nil && apiErr.Message != "" {
-		return fmt.Errorf("llm client: http %d:%s", resp.StatusCode, apiErr.Message)
+		return fmt.Errorf("runtime client: http %d:%s", resp.StatusCode, apiErr.Message)
 	}
 
-	return fmt.Errorf("llm client: http %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	return fmt.Errorf("runtime client: http %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 }

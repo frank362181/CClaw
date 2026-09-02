@@ -14,7 +14,7 @@
 *   - 超时由调用方注入的 http.Client 控制(与 server writeTimeout 解耦)。
 **/
 
-package llm
+package runtime
 
 import (
 	"bufio"
@@ -50,18 +50,11 @@ type ChatCompletionUsage struct {
 
 // ChatCompletionResponse chat/completions 应答体
 type ChatCompletionResponse struct {
-	ID      string                 `json:"id"`
-	Model   string                 `json:"model"`
-	Choices []ChatCompletionChoice `json:"choices"`
-	Usage   *ChatCompletionUsage   `json:"usage,omitempty"`
-	Error   *APIError              `json:"error,omitempty"`
-}
-
-// APIError 供应商返回的错误结构(OpenAI 风格)
-type APIError struct {
-	Message string `json:"message"`
-	Type    string `json:"type"`
-	Code    string `json:"code"`
+	ID      string                   `json:"id"`
+	Model   string                   `json:"model"`
+	Choices []ChatCompletionChoice   `json:"choices"`
+	Usage   *ChatCompletionUsage     `json:"usage,omitempty"`
+	Error   *myException.LlmAPIError `json:"error,omitempty"`
 }
 
 // ChatCompletionChunk 流式应答的单个数据块(stream=true 时上游逐块返回,OpenAI 兼容)
@@ -69,16 +62,17 @@ type ChatCompletionChunk struct {
 	ID      string                      `json:"id"`
 	Model   string                      `json:"model"`
 	Choices []ChatCompletionChunkChoice `json:"choices"`
-	Error   *APIError                   `json:"error,omitempty"`
+	Error   *myException.LlmAPIError    `json:"error,omitempty"`
 }
 
 // ChatCompletionChunkDelta 流式块中的增量(delta)。
 // reasoning_content 是推理模型的思考过程增量(如 DeepSeek reasoner),仅在流式响应中出现、
 // 不参与请求体;这里把它实时转发给浏览器展示,不并入正式回复。
 type ChatCompletionChunkDelta struct {
-	Role             string `json:"role"`
-	Content          string `json:"content"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Role             string          `json:"role"`
+	Content          string          `json:"content"`
+	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCallDelta `json:"tool_calls,omitempty"`
 }
 
 // ChatCompletionChunkChoice 流式块中的单个候选(增量文本在 delta.content / delta.reasoning_content)
@@ -122,6 +116,22 @@ func NewClient() *Client {
 	return newClient(myCommon.DefaultTimeout)
 }
 
+// Complete 轻量同步调用:以 system/user 文本调用 chat/completions 并返回回复文本。
+// 用来根据用户问题的意图匹配最适合的agent的函数
+// 用于"Agent 路由分类"等短输出场景;maxTokens 限制输出上限(<=0 时由供应商默认,仍受 context_window 约束)。
+func (c *Client) Complete(ctx context.Context, llmProvider dataobject.TLlm, system, user string, maxTokens int) (string, error) {
+	req := ChatCompletionRequest{
+		Model:     llmProvider.GetModelName(),
+		Messages:  BuildSimpleChatMessage(system, user), //[]ChatMessage{{Role: "system", Content: system}, {Role: "user", Content: user}},
+		Stream:    false,
+		MaxTokens: nil,
+	}
+	if maxTokens > 0 {
+		req.MaxTokens = &maxTokens
+	}
+	return c.doCompletion(ctx, llmProvider, req)
+}
+
 // ChatCompletion 调用指定 baseURL 的 chat/completions 端点,返回回复文本(已去首尾空白)。
 // 同步模式:等待上游完整返回后再解析。
 //   - req: 模型与消息;max_tokens 已按 context_window 动态推导(BuildChatCompletionRequest)
@@ -132,68 +142,50 @@ func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm
 	return c.doCompletion(ctx, llmProvider, req)
 }
 
-// Complete 轻量同步调用:以 system/user 文本调用 chat/completions 并返回回复文本。
-// 用于"Agent 路由分类"等短输出场景;maxTokens 限制输出上限(<=0 时由供应商默认,仍受 context_window 约束)。
-func (c *Client) Complete(ctx context.Context, llmProvider dataobject.TLlm, system, user string, maxTokens int) (string, error) {
-	req := ChatCompletionRequest{
-		Model:     llmProvider.GetModelName(),
-		Messages:  []ChatMessage{{Role: "system", Content: system}, {Role: "user", Content: user}},
-		Stream:    false,
-		MaxTokens: nil,
-	}
-	if maxTokens > 0 {
-		req.MaxTokens = &maxTokens
-	}
-	return c.doCompletion(ctx, llmProvider, req)
-}
-
-// doCompletion 执行一次同步 chat/completions 请求并解析回复文本(同步/轻量调用共用)。
-func (c *Client) doCompletion(ctx context.Context, llmProvider dataobject.TLlm, req ChatCompletionRequest) (string, error) {
-	httpReq, err := c.prepareRequest(ctx, llmProvider, req)
+// CompleteWithTools 执行一次同步 chat/completions(带工具),返回正式文本与工具调用(可能为空)。
+// 不执行工具:由调用方(工具循环)解析并执行返回的工具调用。
+func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []ChatMessage, tools []Tool) (string, []ToolCall, error) {
+	httpReq, err := c.prepareRequest(ctx, llmProvider, BuildChatCompletionRequestWithTool(llmProvider, messages, tools, false))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	httpResp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
-			return "", myException.ErrRequestCanceled
+			return "", nil, myException.ErrRequestCanceled
 		}
-		return "", fmt.Errorf("llm client: request failed: %w", err)
+		return "", nil, fmt.Errorf("runtime client: request failed: %w", err)
 	}
 	defer func(Body io.ReadCloser) {
 		_ = Body.Close()
 	}(httpResp.Body)
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return "", myException.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
+		return "", nil, myException.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
 	}
 
 	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, myCommon.MaxResponseBytes))
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
-			return "", myException.ErrRequestCanceled
+			return "", nil, myException.ErrRequestCanceled
 		}
-		return "", fmt.Errorf("llm client: read response: %w", err)
+		return "", nil, fmt.Errorf("runtime client: read response: %w", err)
 	}
 
 	var resp ChatCompletionResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return "", fmt.Errorf("llm client: unmarshal response: %w", err)
+		return "", nil, fmt.Errorf("runtime client: unmarshal response: %w", err)
 	}
 	if resp.Error != nil && resp.Error.Message != "" {
-		return "", fmt.Errorf("llm client: upstream error: %s", resp.Error.Message)
+		return "", nil, fmt.Errorf("runtime client: upstream error: %s", resp.Error.Message)
 	}
 	if len(resp.Choices) == 0 {
-		return "", errors.New("llm client: empty completion choices")
+		return "", nil, errors.New("runtime client: empty completion choices")
 	}
 
-	content := strings.TrimSpace(resp.Choices[0].Message.Content)
-	if content == "" {
-		return "", errors.New("llm client: empty completion content")
-	}
-
-	return content, nil
+	msg := resp.Choices[0].Message
+	return strings.TrimSpace(msg.Content), msg.ToolCalls, nil
 }
 
 // ChatCompletionStream 以流式(SSE)方式调用 chat/completions。
@@ -213,7 +205,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobjec
 		if pException.IsContextCanceled(ctx, err) {
 			return "", myException.ErrRequestCanceled
 		}
-		return "", fmt.Errorf("llm client: request failed: %w", err)
+		return "", fmt.Errorf("runtime client: request failed: %w", err)
 	}
 	defer func(Body io.ReadCloser) {
 		_ = Body.Close()
@@ -248,7 +240,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobjec
 			continue // 跳过无法解析的行
 		}
 		if chunk.Error != nil && chunk.Error.Message != "" {
-			return "", fmt.Errorf("llm client: upstream stream error: %s", chunk.Error.Message)
+			return "", fmt.Errorf("runtime client: upstream stream error: %s", chunk.Error.Message)
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -271,13 +263,142 @@ func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobjec
 		if pException.IsContextCanceled(ctx, err) {
 			return "", myException.ErrRequestCanceled
 		}
-		return "", fmt.Errorf("llm client: read stream: %w", err)
+		return "", fmt.Errorf("runtime client: read stream: %w", err)
 	}
 
 	content := strings.TrimSpace(sb.String())
 	if content == "" {
-		return "", errors.New("llm client: empty stream content")
+		return "", errors.New("runtime client: empty stream content")
 	}
+	return content, nil
+}
+
+// StreamWithTools 流式执行一次 chat/completions(带工具):
+//   - onChunk:    正式内容增量
+//   - onReasoning:思考增量(reasoning_content)
+//   - 返回值:     累计正式文本 + 模型请求的工具调用(若有;arguments 已按 index 拼接完整)
+func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []ChatMessage, tools []Tool, onChunk func(string), onReasoning func(string)) (string, []ToolCall, error) {
+	httpReq, err := c.prepareRequest(ctx, llmProvider, BuildChatCompletionRequestWithTool(llmProvider, messages, tools, true))
+	if err != nil {
+		return "", nil, err
+	}
+
+	httpResp, err := c.streamClient.Do(httpReq)
+	if err != nil {
+		if pException.IsContextCanceled(ctx, err) {
+			return "", nil, myException.ErrRequestCanceled
+		}
+		return "", nil, fmt.Errorf("runtime client: request failed: %w", err)
+	}
+	defer func(Body io.ReadCloser) {
+		_ = Body.Close()
+	}(httpResp.Body)
+
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		return "", nil, myException.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
+	}
+
+	var sb strings.Builder
+	acc := newToolCallAccumulator()
+	scanner := bufio.NewScanner(httpResp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), myCommon.MaxResponseBytes)
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			return "", nil, myException.ErrRequestCanceled
+		}
+
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			break
+		}
+
+		var chunk ChatCompletionChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue // 跳过无法解析的行
+		}
+		if chunk.Error != nil && chunk.Error.Message != "" {
+			return "", nil, fmt.Errorf("runtime client: upstream stream error: %s", chunk.Error.Message)
+		}
+		if len(chunk.Choices) == 0 {
+			continue
+		}
+
+		delta := chunk.Choices[0].Delta
+		if delta.ReasoningContent != "" && onReasoning != nil {
+			onReasoning(delta.ReasoningContent)
+		}
+		if delta.Content != "" {
+			sb.WriteString(delta.Content)
+			if onChunk != nil {
+				onChunk(delta.Content)
+			}
+		}
+		for _, tc := range delta.ToolCalls {
+			acc.add(tc)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		if pException.IsContextCanceled(ctx, err) {
+			return "", nil, myException.ErrRequestCanceled
+		}
+		return "", nil, fmt.Errorf("runtime client: read stream: %w", err)
+	}
+
+	return strings.TrimSpace(sb.String()), acc.result(), nil
+}
+
+// ======================== private function & methods ==========================
+
+// doCompletion 执行一次同步 chat/completions 请求并解析回复文本(同步/轻量调用共用)。
+func (c *Client) doCompletion(ctx context.Context, llmProvider dataobject.TLlm, req ChatCompletionRequest) (string, error) {
+	httpReq, err := c.prepareRequest(ctx, llmProvider, req)
+	if err != nil {
+		return "", err
+	}
+
+	httpResp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		if pException.IsContextCanceled(ctx, err) {
+			return "", myException.ErrRequestCanceled
+		}
+		return "", fmt.Errorf("runtime client: request failed: %w", err)
+	}
+	defer func(Body io.ReadCloser) {
+		_ = Body.Close()
+	}(httpResp.Body)
+
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		return "", myException.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
+	}
+
+	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, myCommon.MaxResponseBytes))
+	if err != nil {
+		if pException.IsContextCanceled(ctx, err) {
+			return "", myException.ErrRequestCanceled
+		}
+		return "", fmt.Errorf("runtime client: read response: %w", err)
+	}
+
+	var resp ChatCompletionResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return "", fmt.Errorf("runtime client: unmarshal response: %w", err)
+	}
+	if resp.Error != nil && resp.Error.Message != "" {
+		return "", fmt.Errorf("runtime client: upstream error: %s", resp.Error.Message)
+	}
+	if len(resp.Choices) == 0 {
+		return "", errors.New("runtime client: empty completion choices")
+	}
+
+	content := strings.TrimSpace(resp.Choices[0].Message.Content)
+	if content == "" {
+		return "", errors.New("runtime client: empty completion content")
+	}
+
 	return content, nil
 }
 
@@ -285,25 +406,25 @@ func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobjec
 // 同步(ChatCompletion)与流式(ChatCompletionStream)两条路径共用,保证请求构造一致。
 func (c *Client) prepareRequest(ctx context.Context, llmProvider dataobject.TLlm, req ChatCompletionRequest) (*http.Request, error) {
 	if strings.TrimSpace(req.Model) == "" {
-		return nil, errors.New("llm client: model is empty")
+		return nil, errors.New("runtime client: model is empty")
 	}
 	if len(req.Messages) == 0 {
-		return nil, errors.New("llm client: messages is empty")
+		return nil, errors.New("runtime client: messages is empty")
 	}
 	baseURL := strings.TrimSpace(llmProvider.BaseUrl)
 	if baseURL == "" {
-		return nil, errors.New("llm client: base url is empty")
+		return nil, errors.New("runtime client: base url is empty")
 	}
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		return nil, fmt.Errorf("llm client: marshal request: %w", err)
+		return nil, fmt.Errorf("runtime client: marshal request: %w", err)
 	}
 
 	endpoint := strings.TrimRight(baseURL, "/") + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("llm client: new request: %w", err)
+		return nil, fmt.Errorf("runtime client: new request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if key := strings.TrimSpace(llmProvider.ApiKey); key != "" {

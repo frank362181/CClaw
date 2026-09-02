@@ -29,8 +29,9 @@ export async function mountComponent({ tag, url }) {
     }
 
     const promise = (async () => {
-        // 1. 拉取组件视图模板
-        const res = await fetch(url);
+        // 1. 拉取组件视图模板(no-store:强制绕过浏览器缓存,避免模板(如 chat.html)命中旧缓存
+        //    导致视图/按钮结构与新 JS 不一致——Safari 曾因此显示旧的 emoji 字形按钮/方块)
+        const res = await fetch(url, { cache: 'no-store' });
         if (!res.ok) {
             throw new Error(`组件加载失败 (${res.status}): ${url}`);
         }

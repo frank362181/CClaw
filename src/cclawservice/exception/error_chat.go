@@ -106,7 +106,7 @@ func ChatCanceledErrEx2(errTxt string, a ...interface{}) *ErrorChatCanceled {
 
 // ErrRequestCanceled 表示请求上下文被取消(客户端断开/超时),而非上游故障。
 // 上层可用 errors.Is(err, ErrRequestCanceled) 区分"客户端主动取消"与"引擎异常"。
-var ErrRequestCanceled = errors.New("llm client: request context canceled")
+var ErrRequestCanceled = errors.New("runtime client: request context canceled")
 
 func (te *ErrorChatCanceled) Error() string {
 	return fmt.Sprintf("ERROR: [%s:%d]:%d: %s", te.FileName, te.LineNo, te.ErrId, te.ErrTxt)

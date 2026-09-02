@@ -90,7 +90,7 @@ func (repo *PromptRepository) LoadAgentBootstrap(agent dataobject.TAgent) error 
 	if prompt != nil {
 		// 判断是否修改过 *.md 文件
 		if prompt.agentBootstrapRoot == agentBootstrapRoot &&
-			prompt.loadedFingerprint == pCommon.ComputeFileFingerprint(agentBootstrapRoot, fileNames) {
+			prompt.loadedFingerprint == pCommon.ComputeFilesFingerprint(agentBootstrapRoot, fileNames) {
 			return nil // 未变化,直接复用缓存
 		}
 
@@ -120,7 +120,7 @@ func (repo *PromptRepository) LoadAgentBootstrap(agent dataobject.TAgent) error 
 		}
 	}
 
-	prompt.loadedFingerprint = pCommon.ComputeFileFingerprint(agentBootstrapRoot, fileNames)
+	prompt.loadedFingerprint = pCommon.ComputeFilesFingerprint(agentBootstrapRoot, fileNames)
 	repo.promptMap[agent.AgentId] = prompt
 	return nil
 }

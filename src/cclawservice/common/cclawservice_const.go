@@ -31,6 +31,8 @@ const (
 	AgentRoutingLLMMaxTokens = 1024
 	// SessionAgentBindingTTLSeconds 会话→Agent 内存绑定的有效期(秒),过期后重新路由。
 	SessionAgentBindingTTLSeconds = 3600
+	// AgentToolLoopMax function-calling 工具循环的最大迭代次数(防止模型反复请求工具导致死循环/超时)。
+	AgentToolLoopMax = 5
 )
 
 // ==================== agent 启动文档与 skill 文档 ====================

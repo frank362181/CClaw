@@ -36,7 +36,7 @@ var agentService = common.GetSingleton(func() *AgentService {
 	return &AgentService{
 		BaseService: baseService.BaseService{
 			Name:        "agentService",
-			Description: "manage llm providers, agents and skills",
+			Description: "manage runtime providers, agents and skills",
 		},
 		agentRepo:       nil,
 		startupFileRepo: nil,

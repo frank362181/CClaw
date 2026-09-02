@@ -5,7 +5,7 @@
 *   单 agent 短路 → 显式指定 → 会话绑定 → 关键词规则 → LLM 分类 → 默认兜底。
 **/
 
-package service_core
+package runtime
 
 import (
 	"context"
@@ -190,7 +190,7 @@ func TestAgentRouter_LLMClassify(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got.AgentId != "agent_001" {
-		t.Fatalf("llm classified agentId = %s, want agent_001", got.AgentId)
+		t.Fatalf("runtime classified agentId = %s, want agent_001", got.AgentId)
 	}
 }
 
@@ -231,7 +231,7 @@ func TestAgentRouter_LLMClassify_FallbackProvider(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got.AgentId != "agent_001" {
-		t.Fatalf("llm classified agentId = %s, want agent_001 (fallback provider used)", got.AgentId)
+		t.Fatalf("runtime classified agentId = %s, want agent_001 (fallback provider used)", got.AgentId)
 	}
 }
 

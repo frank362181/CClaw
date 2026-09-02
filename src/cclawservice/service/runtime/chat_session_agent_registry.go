@@ -12,7 +12,7 @@
 *     后续可平滑替换为 Redis/DB 实现,对外接口保持不变。
 **/
 
-package service_core
+package runtime
 
 import (
 	"sync"

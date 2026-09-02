@@ -356,14 +356,22 @@ export const ChatPage = {
             btn.disabled = false;
             btn.classList.add('interrupt');
             btn.title = '中断生成';
-            if (icon) icon.innerHTML = ICON_INTERRUPT;
+            this._setSendIcon(icon, ICON_INTERRUPT);
             return;
         }
         btn.classList.remove('interrupt');
         btn.title = '发送';
-        if (icon) icon.innerHTML = ICON_SEND;
+        this._setSendIcon(icon, ICON_SEND);
         const val = this.els.chatInput.value.trim();
         btn.disabled = !val || this.els.chatInput.disabled;
+    },
+
+    // 原子替换发送按钮图标:先清空再插入,避免部分浏览器(Safari)对 SVG 的
+    // innerHTML 替换不彻底,导致旧的发送/中断图标残留叠加(表现为按钮上覆盖一层方块)。
+    _setSendIcon(icon, svgHtml) {
+        if (!icon) return;
+        icon.textContent = '';
+        icon.insertAdjacentHTML('beforeend', svgHtml);
     },
 
     updateUserInfo(username) {

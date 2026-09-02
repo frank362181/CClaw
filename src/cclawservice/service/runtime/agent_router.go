@@ -18,7 +18,7 @@
 *   - 仅一个可用 Agent 时直接短路返回,不做无谓的路由计算。
 **/
 
-package service_core
+package runtime
 
 import (
 	"context"
@@ -29,7 +29,6 @@ import (
 	myCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
-	"my.favorite/cclawservice/service/llm"
 	myUtility "my.favorite/cclawservice/utility"
 	"my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
@@ -39,7 +38,7 @@ import (
 // AgentRouter 负责将一条用户消息解析到目标 Agent。
 type AgentRouter struct {
 	agentRepo     repo.IAgentRepository
-	llmClient     *llm.Client
+	llmClient     *Client
 	sessionAgents *ChatSessionAgentRegistry
 
 	llmRoutingOn bool          // 是否启用 LLM 智能分类路由
@@ -50,7 +49,7 @@ type AgentRouter struct {
 var agentRouter = common.GetSingleton(func() *AgentRouter {
 	return &AgentRouter{
 		agentRepo:     nil,
-		llmClient:     llm.NewClient(),
+		llmClient:     NewClient(),
 		sessionAgents: GetChatSessionAgentRegistry(),
 		llmRoutingOn:  myCommon.AgentRoutingLLMEnabled,
 		llmTimeout:    time.Duration(myCommon.AgentRoutingLLMTimeoutSeconds) * time.Second,
@@ -205,7 +204,7 @@ func (r *AgentRouter) classifyByLLM(ctx context.Context, comCode string, agents 
 
 	content, err := r.llmClient.Complete(classifyCtx, provider, myUtility.BuildClassifySystemPrompt(agents), reqMsg, r.llmMaxTokens)
 	if err != nil {
-		logging.LogDebugF("agent router: llm classify skipped, err:%s", err.Error())
+		logging.LogDebugF("agent router: runtime classify skipped, err:%s", err.Error())
 		return dataobject.TAgent{}, false
 	}
 
@@ -215,7 +214,7 @@ func (r *AgentRouter) classifyByLLM(ctx context.Context, comCode string, agents 
 			return a, true
 		}
 	}
-	logging.LogDebugF("agent router: llm classify not matched, raw:%s", content)
+	logging.LogDebugF("agent router: runtime classify not matched, raw:%s", content)
 	return dataobject.TAgent{}, false
 }
 

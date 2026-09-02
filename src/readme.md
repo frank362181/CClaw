@@ -98,10 +98,11 @@
   - 每个message有方向，即用户的问题，与AI的回复
 
 ## 2 本系统agent设计机制
+- 确定 RootDir = filepath.Join(GetExecutableDir(),"/bin")
 - 确定系统的工作目录，skill目录，session目录，memory目录等
 - skill的目录应该有系统的skill目录，个人的skill目录，项目的skill目录三种；
-  - 个人的skill目录应该是：workspace/{person_}/{agent}/skill
-  - 项目的skill：workspace/{project_name}/{agent}/skill
+  - 个人的skill目录应该是：{RootDir}/{person_}/{agent}/skill
+  - 项目的skill：{rootDir}/{project_name}/{agent}/skill
 - session 目录依赖于skill目录，即/workspace/skill/{session_name}/***
 - memory目录依赖于session:workspace/skill/{session_name}/{memory_date}
 
@@ -143,9 +144,12 @@ AGENTS.md,SOUL.md等启动文件的真正读取的点是PromptRepository.LoadWor
 ### 2. 每次组装时
 这里才是读取agent启动文件的主路径，且按需读取。PromptService.BuildSystemPromptEx()第一步：
   if err := service.promptRepo.LoadWorkspace(workspaceRoot)
-这才是业务的主入 -- 当一次会话需要构建system prompt时，才会走到这里。其函数LoadWorkspace()函数有一道短路行为，基本上直接读取缓存即可实现
+这才是业务的主入口 -- 当一次会话需要构建system prompt时，才会走到这里。其函数LoadWorkspace()函数有一道短路行为，基本上直接读取缓存即可实现
 
-这里的短路行为是通过对agent的启动文件的进行修改指纹计算（即size+mtime）对7个启动文件进行计算，只要有一个修改了以及换了工作区，就重新读取
+所有的Agent是在系统启动时就会全部加载；
+Agent的配置信息是放在数据库中的
+
+这里的短路行为是通过对agent的启动文件的进行修改指纹计算（即filename+size+mtime）对7个启动文件进行计算，只要有一个修改了以及换了工作区，就重新读取
 
 ### 3.读取SKILL.md
 读取SKILL.md的时机与agent启动文件是不同的，SKILL.md只是在每次BuildSystemPromptEx()都会ClearSkills后重新读取；由于skill文件路径由调用方
@@ -178,22 +182,8 @@ AGENTS.md,SOUL.md等启动文件的真正读取的点是PromptRepository.LoadWor
   - 按会话范围过滤
   - 最后以阅读指引的Project Context节注入
 
-### 5. 注入到system prompt后不是干放着，还带语义指引
-  buildProjectContextSection渲染为：
-  ines.push("Loaded project context:");
-  if (hasSoulFile) lines.push("SOUL.md: persona/tone. Follow it unless higher-priority instructions override.");
-  if (hasMemoryFile) lines.push("MEMORY.md: durable non-profile facts and decisions; use when relevant...");
-  if (hasUserFile) lines.push("USER.md: durable user preferences and profile directives; follow unless higher-priority instructions override.");
-  for (const file of params.files) lines.push(`## ${file.path}`, "", sanitizeContextFileContentForPrompt(file.content), "");
-
-即每个文件配一句“怎么用”的引导，且截断时注入：
-  [Bootstrap truncation warning]
-  Some workspace bootstrap files were truncated before Project Context injection.
-  Treat Project Context as partial and read the relevant files directly if details seem missing.
-明确告诉模型“这是部分快照，细节缺失要用read工具读取原文件“。
-
-### 6. 总结
-  AGENTS.md/SOUL.md等并不是挣分md原文进入到system prompt，而是经过“剥离front matter -> 每文件 20K/USER 4K -> 总量 60K预算截断 -> 缺失/空白处理
+### 5. 总结
+  AGENTS.md/SOUL.md等并不是整个md原文进入到system prompt，而是经过“剥离front matter -> 每文件 20K/USER 4K -> 总量 60K预算截断 -> 缺失/空白处理
   -> 按会话处理范围过滤”后的受控快照；切在OpenClaw/Codex里还会进一步按文件语义分流（规则->Project Context、人格->指令通道、记忆->工具、技能->目录）,
   并附上截断警告与“怎么用这份文件”的阅读指引。
 
@@ -324,6 +314,82 @@ sequenceDiagram
 - **等做「工具调用循环」时**，再按上面的生产者/消费者结构演进，并把「上游读取」抽成可注入的组件，其它逻辑（写端、错误、取消）保持不变。
 
 需要的话，将来落地工具调用时我可以按这个结构来设计，届时再把这段分析沉淀到 repo memory。
+
+## 8 function calling
+### 1 机制和原理
+  从代码上来看，function calling实际上只是将tools的信息构建成请求并发送给大模型，这些tools信息来自于toolset.go中的LoadToolSet函数中，将SKILL.md文件中的内容
+  给加载进来，
+  LLM之所以能做的到function calling，本质上是因为：
+- 本质：模型只是“声明意图”，并不执行
+  function calling 在底层不是一种让模型链接到外部的系统机制，而是：模型把“工具定义”当作可用的动作清单，在需要外部信息或执行动作时，以概率生成一段特殊结构的文本 ---
+  内容是“我要调用***函数，参数是***”。然后你的运行时(本项目是：ChatService.go的ToolSet.Exec)解析这段文本、真正执行、把结果回填。
+  模型 -> 意图文本 -> 运行时 -> 真实结果，中间隔着的是 业务代码。
+- 为何“只发schema”就够？ --- 推理与训练
+  训练侧：模型在预训练/后训练时，喂入了大量形如（对话历史 + 工具定义  -> tool_use输出 -> 工具结果 -> 最终回答）的样本。模型学习到的是：当对话里出现 tools 清单、
+  且任务需要外部信息时，应该输出tool_use格式的token序列，而不是继续应答。
+  
+  推理侧：LLM本质上是next-token预测器。请求里的tools会被当作普通上下文token注入；当模型“觉得”该调用工具时，它在此表中选出一个特殊的控制token（如tool_use起始token）,
+  然后按约束继续生成函数名和参数。整个过程和写一段回答没区别 -- 只是格式被约束定成了结构化的JSON。
+  - 协议层：三个关键段
+    - 请求段（生成请求）BuildChatCompletionRequestWithTool函数的作用
+  
+          {
+            "model": "qwen3-8b",
+            "messages": [ {"role":"system","content":"..."}, {"role":"user","content":"请查询杭州市天气"} ],
+            "tools": [{
+              "type": "function",
+              "function": {
+                "name": "get_weather",
+                "description": "查询指定城市实时天气与未来三天预报…",
+                "parameters": {            // ← JSON Schema
+                  "type": "object",
+                  "properties": { "city": { "type": "string", "description": "城市名称…" } },
+                  "required": ["city"]
+                }
+              }
+            }]
+          }
+      这个正是toolset.go从SKILL.md解析出来的Tool -> llm_message.go的Tools
+    - 响应段：模型返回的tool_calls
+
+          {
+            "choices": [{
+              "message": {
+                "role": "assistant",
+                "content": null,                        // ← 没有正文
+                "tool_calls": [{
+                  "id": "call_abc123",
+                  "type": "function",
+                  "function": {
+                    "name": "get_weather",
+                    "arguments": "{\"city\": \"杭州市\"}"   // ← 注意:这是字符串,需要你 json.Unmarshal
+                  }
+                }]
+              }
+            }]
+          }
+      两个关键点：1.arguments是字符串形式的JSON，非对象，需要应用层自己解析；2.content为null说明模型这一轮“只是调用工具不回答”
+    - 回填段：tool角色消息
+      执行完脚本后，把结果原样拼回对话历史，用tool_call_id关联到刚才那次调用：
+      { "role": "tool", "tool_call_id": "call_abc123", "content": "{\"city\":\"杭州市\",\"current\":{...}}" } -> 本项目的示例
+      对应到llm_message.go的ToolResultMessage(callId,content)。注意：messages必须严格交替为带上执行结果，否则模型会困惑。
+### 2 为什么必须“工具循环”（agent loop）
+  因为模型一次只能表达一步意图，而是“看到结果再决定下一步”是多轮推理：
+  streamToolLoop/runToolLoop里的 for i = 0 ; i < AgentToolLoopMax; i++就是干这个的：
+  - 模型要工具 -> 你的系统执行 -> 回填 -> 再问一次；
+  - 模型不再要工具、给出正文 -> 跳出循环，把正文挡最终回答
+
+### 3 流式下的tool_calls分片（代码中的toolCallAccumulator的原因）
+  流式时模型按token增量输出，tool_calls会被index拆成多片
+  
+    // 第 1 片
+    {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","function":{"name":"get_weather","arguments":"{\"city\":"}}]}}]}
+    // 第 2 片
+    {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"杭州市\""}}]}}]}
+    // 第 3 片
+    {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"}"}}]}}]}
+  所以要按index归并、把arguments拼成完整的JSON --这正是llm_tools.go里toolCallAccumulator(map[int]*ToolCall + strings.Builder)做的。
+  它和普通content的流式转发走完全不同的拼接逻辑。
 
 # 2 todo 需要压缩或流式输出很慢的原因
 B. 压缩 system prompt（调低 60K 预算 / 精简大文件正文）	中等，降低 prefill	cclawservice_const.go 预算常量 + 文档内容

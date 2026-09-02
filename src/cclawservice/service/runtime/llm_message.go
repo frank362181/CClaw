@@ -1,4 +1,4 @@
-package llm
+package runtime
 
 import (
 	"my.favorite/cclawservice/controller/model"
@@ -6,10 +6,54 @@ import (
 	pCommon "my.favorite/platformutility/common"
 )
 
-// ChatMessage 一条对话消息
+// ChatMessage 一条对话消息(OpenAI 兼容;工具调用场景支持 tool_calls / tool_call_id)
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+}
+
+// ToolFunction 一个可调用的函数定义(OpenAI tools.function)
+type ToolFunction struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
+}
+
+// Tool 一个工具定义(OpenAI tools)
+type Tool struct {
+	Type     string       `json:"type"`
+	Function ToolFunction `json:"function"`
+}
+
+// ToolCallFunction 模型请求调用的函数(参数为 JSON 字符串)
+type ToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+// ToolCall 模型发出的一次工具调用
+// 工具循环中会把它(以 assistant 消息携带)与执行结果(tool 消息)一起回填到对话历史。
+type ToolCall struct {
+	ID       string           `json:"id"`
+	Type     string           `json:"type"`
+	Function ToolCallFunction `json:"function"`
+}
+
+// ToolCallDelta 流式工具调用的增量片段(按 index 累积拼接 id/name/arguments)
+type ToolCallDelta struct {
+	Index    int                   `json:"index"`
+	ID       string                `json:"id"`
+	Type     string                `json:"type"`
+	Function ToolCallFunctionDelta `json:"function"`
+}
+
+// ToolCallFunctionDelta 流式函数增量
+// 模型流式返回工具调用时,arguments 会分片下发,需逐片拼接成完整 JSON。
+type ToolCallFunctionDelta struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 // ChatCompletionRequest chat/completions 请求体(OpenAI 兼容)
@@ -18,6 +62,15 @@ type ChatCompletionRequest struct {
 	Messages  []ChatMessage `json:"messages"`
 	MaxTokens *int          `json:"max_tokens,omitempty"`
 	Stream    bool          `json:"stream"`
+	Tools     []Tool        `json:"tools,omitempty"`
+}
+
+// BuildSimpleChatMessage 以system/user 文本构建简单的prompt
+func BuildSimpleChatMessage(sysMsg, userMsg string) []ChatMessage {
+	return []ChatMessage{
+		{Role: "system", Content: sysMsg},
+		{Role: "user", Content: userMsg},
+	}
 }
 
 func BuildChatMessage(systemPrompt *dataobject.SystemPrompt, req *model.ChatRequest) []ChatMessage {
@@ -48,6 +101,34 @@ func BuildChatCompletionRequest(llmProvider dataobject.TLlm, systemPrompt *datao
 	}
 
 	return req
+}
+
+// BuildChatCompletionRequestWithTool 构造带工具的 chat/completions 请求体。
+// max_tokens 沿用与普通请求一致的动态推导(dynamicMaxTokens)。
+func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []ChatMessage, tools []Tool, stream bool) ChatCompletionRequest {
+	req := ChatCompletionRequest{
+		Model:    llmProvider.GetModelName(),
+		Messages: messages,
+		Stream:   stream,
+		Tools:    tools,
+	}
+	mt := dynamicMaxTokens(llmProvider, messages)
+	if mt == 0 {
+		req.MaxTokens = nil // 应用供应商默认
+	} else {
+		req.MaxTokens = &mt
+	}
+	return req
+}
+
+// BuildToolCallMessage 构造携带工具调用的 assistant 消息(工具循环回填历史用)。
+func BuildToolCallMessage(calls []ToolCall) ChatMessage {
+	return ChatMessage{Role: "assistant", Content: "", ToolCalls: calls}
+}
+
+// BuildToolResultMessage 构造工具执行结果消息(role=tool,按 tool_call_id 关联)。
+func BuildToolResultMessage(toolCallID, content string) ChatMessage {
+	return ChatMessage{Role: "tool", ToolCallID: toolCallID, Content: content}
 }
 
 // dynamicMaxTokens 计算应发送的 max_tokens。由 context_window 与供应商输出上限共同约束:

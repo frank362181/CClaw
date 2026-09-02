@@ -132,10 +132,10 @@ func (g *GormAccessor) CreateLLMProvider(p *dataobject.TLlm) error {
 	var count int64
 	if err := g.gormDb.Model(&dataobject.TLlm{}).
 		Where("provider_id = ? AND deleted = 0", p.ProviderId).Count(&count).Error; err != nil {
-		return exception2.DatabaseQueryErrEx2("check llm provider error:%s", err.Error())
+		return exception2.DatabaseQueryErrEx2("check runtime provider error:%s", err.Error())
 	}
 	if count > 0 {
-		return exception2.AgentConflictErrEx2("llm provider already exists:%s", p.ProviderId)
+		return exception2.AgentConflictErrEx2("runtime provider already exists:%s", p.ProviderId)
 	}
 
 	// 软删除记录占用唯一键时复活
@@ -146,7 +146,7 @@ func (g *GormAccessor) CreateLLMProvider(p *dataobject.TLlm) error {
 		Where("provider_id = ? AND deleted = 1", p.ProviderId).
 		Updates(values)
 	if res.Error != nil {
-		return exception2.DatabaseQueryErrEx2("revive llm provider error:%s", res.Error.Error())
+		return exception2.DatabaseQueryErrEx2("revive runtime provider error:%s", res.Error.Error())
 	}
 	if res.RowsAffected > 0 {
 		// 复活成功:回读最新 d_version 写回内存结构,避免仓库缓存携带旧版本导致后续 Update 误报 409
@@ -157,7 +157,7 @@ func (g *GormAccessor) CreateLLMProvider(p *dataobject.TLlm) error {
 	// 全新插入。乐观锁插件 clause 会把 d_version 自动置为 1 并写回内存结构,
 	// 因此这里无需预置 DVersion。
 	if err := g.gormDb.Create(p).Error; err != nil {
-		return exception2.DatabaseQueryErrEx2("create llm provider error:%s", err.Error())
+		return exception2.DatabaseQueryErrEx2("create runtime provider error:%s", err.Error())
 	}
 	return nil
 }
@@ -167,13 +167,13 @@ func (g *GormAccessor) UpdateLLMProvider(p *dataobject.TLlm) error {
 	var cur dataobject.TLlm
 	err := g.gormDb.Where("provider_id = ? AND owner_id = ? AND deleted = 0", p.ProviderId, p.OwnerId).First(&cur).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return exception2.AgentNotFoundErrEx("llm provider not found:" + p.ProviderId)
+		return exception2.AgentNotFoundErrEx("runtime provider not found:" + p.ProviderId)
 	}
 	if err != nil {
-		return exception2.DatabaseQueryErrEx2("load llm provider error:%s", err.Error())
+		return exception2.DatabaseQueryErrEx2("load runtime provider error:%s", err.Error())
 	}
 	if cur.DVersion != p.DVersion {
-		return exception2.AgentConflictErrEx2("llm provider version conflict:%s", p.ProviderId)
+		return exception2.AgentConflictErrEx2("runtime provider version conflict:%s", p.ProviderId)
 	}
 
 	values := dataobject.LlmValues(p)
@@ -182,10 +182,10 @@ func (g *GormAccessor) UpdateLLMProvider(p *dataobject.TLlm) error {
 		Where("provider_id = ? AND owner_id = ? AND deleted = 0 AND d_version = ?", p.ProviderId, p.OwnerId, p.DVersion.Int64).
 		Updates(values)
 	if res.Error != nil {
-		return exception2.DatabaseQueryErrEx2("update llm provider error:%s", res.Error.Error())
+		return exception2.DatabaseQueryErrEx2("update runtime provider error:%s", res.Error.Error())
 	}
 	if res.RowsAffected == 0 {
-		return exception2.AgentConflictErrEx2("llm provider version conflict:%s", p.ProviderId)
+		return exception2.AgentConflictErrEx2("runtime provider version conflict:%s", p.ProviderId)
 	}
 
 	p.DVersion.Int64++ // 同步内存版本,供仓库缓存更新
@@ -198,10 +198,10 @@ func (g *GormAccessor) DeleteLLMProvider(ownerId, providerId string) error {
 		Where("provider_id = ? AND owner_id = ? AND deleted = 0", providerId, ownerId).
 		Update("deleted", 1)
 	if res.Error != nil {
-		return exception2.DatabaseQueryErrEx2("delete llm provider error:%s", res.Error.Error())
+		return exception2.DatabaseQueryErrEx2("delete runtime provider error:%s", res.Error.Error())
 	}
 	if res.RowsAffected == 0 {
-		return exception2.AgentNotFoundErrEx("llm provider not found:" + providerId)
+		return exception2.AgentNotFoundErrEx("runtime provider not found:" + providerId)
 	}
 	return nil
 }

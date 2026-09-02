@@ -414,8 +414,31 @@ func SafeJoinWithRoot(realRoot, target string) (string, error) {
 	return targetAbs, nil
 }
 
-// ComputeFileFingerprint 计算启动文档的指纹（文件名+大小+修改时间），用于是否从磁盘重新读取文件的判断
-func ComputeFileFingerprint(path string, fileNames []string) string {
+// SafeJoinExisting 是 SafeJoin 的"必须存在且为普通文件"变体:
+// 用于脚本等可执行资源路径的解析——SafeJoin 本身容忍目标缺失(用于可缺失的启动文档)。
+// 校验通过返回解析后的绝对路径与 true;越界/缺失/目录返回 false。
+func SafeJoinExisting(root, target string) (string, bool) {
+	abs, err := SafeJoin(root, target)
+	if err != nil {
+		return "", false
+	}
+	info, err := os.Stat(abs)
+	if err != nil || info.IsDir() {
+		return "", false
+	}
+	return abs, true
+}
+
+func ComputeFileFingerprint(path string) string {
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
+}
+
+// ComputeFilesFingerprint 计算启动文档的指纹（文件名+大小+修改时间），用于是否从磁盘重新读取文件的判断
+func ComputeFilesFingerprint(path string, fileNames []string) string {
 	var sb strings.Builder
 
 	for _, fileName := range fileNames {

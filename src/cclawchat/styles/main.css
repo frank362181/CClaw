@@ -717,6 +717,12 @@ body {
     }
 }
 
+/* 思考过程(reasoning)展示期间,正式内容尚未开始时隐藏流式光标 */
+/* .stream-content 为空(:empty)时,其后的 .cursor-blink 不显示,避免"悬空光标"误导 */
+.message.assistant .bubble .stream-content:empty ~ .cursor-blink {
+    display: none;
+}
+
 /* 内容开始前的 Agent 状态提示(拆解任务/思考/推理等) */
 .message.assistant .bubble .thinking-indicator {
     display: inline-block;
@@ -870,9 +876,20 @@ body {
 }
 
 .btn-send .send-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    overflow: hidden;
     line-height: 1;
     /* 强制以文本(非 emoji)呈现字形,避免部分系统为 ⏹/➤ 绘制带背景图样的 emoji */
     font-variant-emoji: text;
+}
+
+.btn-send .send-icon svg {
+    display: block;
+    flex-shrink: 0;
 }
 
 /* 流式/思考中:发送按钮变为中断按钮(红色,始终可点) */

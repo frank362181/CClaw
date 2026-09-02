@@ -84,7 +84,7 @@ func StripFrontMatter(data []byte) string {
 	return content
 }
 
-// ========================== 以下函数是对agent,llm provider,skills进行规整和校验 ============================
+// ========================== 以下函数是对agent,runtime provider,skills进行规整和校验 ============================
 
 func NormalizeOwner(ownerId *string) {
 	if strings.TrimSpace(*ownerId) == "" {

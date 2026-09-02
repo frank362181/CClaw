@@ -218,7 +218,9 @@ func (m *ServiceMain) SetupAgentController() error {
 }
 
 func (m *ServiceMain) SetupChatController() error {
-	chatService := service.GetChatService(m.database)
+	// function-calling 开关来自 ini [sandBox] functionCalling(默认关闭,安全兜底)
+	functionCalling, _ := m.configHelper.GetBoolValueDefault("sandBox", "functionCalling", false)
+	chatService := service.GetChatService(m.database, functionCalling)
 	chatController := selfController.GetChatController(chatService)
 
 	urlFunMap := make(map[string]gin.HandlerFunc)

@@ -366,7 +366,7 @@ func (repo *AgentRepository) loadAllAgents() {
 		return
 	}
 
-	// load llm
+	// load runtime
 	providers, err := repo.dataAccessor.GetAllLLMProviders()
 	if err != nil {
 		return
