@@ -36,6 +36,16 @@ const (
 	SessionAgentBindingTTLSeconds = 3600
 	// AgentToolLoopMax function-calling 工具循环的最大迭代次数(防止模型反复请求工具导致死循环/超时)。
 	AgentToolLoopMax = 5
+
+	// DefaultAgentConcurrency 每 Agent 并发闸默认上限:t_agent.max_concurrent<=0 时采用。
+	DefaultAgentConcurrency = 8
+	// AgentGateWaitTimeout 获取每 Agent 并发许可的最长等待;超时返回 "Agent 忙"。
+	AgentGateWaitTimeout = 30
+
+	// DefaultMaxConcurrentStreams SSE 流并发闸默认上限:每实例的流式连接数。
+	DefaultMaxConcurrentStreams = 640
+	// DefaultMaxChatConcurrency 全局聊天并发闸默认上限:每实例同时在聊天请求数(同步+流式)。
+	DefaultMaxChatConcurrency = 1000
 )
 
 // ==================== agent 启动文档与 skill 文档 ====================
@@ -124,6 +134,8 @@ const (
 	ConstErrorChatLLM
 	ConstErrorChatCanceled
 	ConstErrorChatNotActive
+	ConstErrorChatBusy
+	ConstErrorChatServerBusy
 )
 
 const (
@@ -147,6 +159,8 @@ const (
 	ConstErrorChatLLMMsg           = "智能体引擎暂时不可用,请稍后再试"
 	ConstErrorChatCanceledMsg      = "请求已被取消"
 	ConstErrorChatNotActiveMsg     = "当前会话没有进行中的聊天"
+	ConstErrorChatBusyMsg          = "该智能体当前繁忙,请稍后再试"
+	ConstErrorChatServerBusyMsg    = "服务繁忙,请稍后再试"
 )
 
 const (

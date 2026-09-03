@@ -10,6 +10,7 @@ import (
 	exception2 "my.favorite/cclawservice/exception"
 	model "my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service"
+	"my.favorite/cclawservice/service/ccc"
 	"my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
 	"my.favorite/platformutility/webbase/middleware/basic"
@@ -19,6 +20,9 @@ import (
 
 type ChatController struct {
 	baseController.BaseController
+
+	streamGate *ccc.ConcurrencyGate // SSE 流式在飞连接闸
+	chatGate   *ccc.ConcurrencyGate // 全局聊天在飞请求闸
 }
 
 var chatController = common.GetSingleton(func() *ChatController {
@@ -28,11 +32,15 @@ var chatController = common.GetSingleton(func() *ChatController {
 			Name:    "chatController",
 			Service: nil,
 		},
+		streamGate: nil,
+		chatGate:   nil,
 	}
 }).Instance()
 
-func GetChatController(svc pService.IService) *ChatController {
+func GetChatController(svc pService.IService, sGate, cGate *ccc.ConcurrencyGate) *ChatController {
 	chatController.Service = svc
+	chatController.streamGate = sGate
+	chatController.chatGate = cGate
 	return chatController
 }
 
@@ -67,6 +75,13 @@ func (cc *ChatController) Chat(c *gin.Context) {
 		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorChatParameter, cclawcommon.ConstErrorChatParameterMsg, nil)
 		return
 	}
+
+	// 全局聊天并发闸:同步/流式共用总预算,满则 503(快速拒绝,不排队)
+	if !cc.chatGate.TryAcquire() {
+		basic.GetBaseResponser().Failure(c, http.StatusServiceUnavailable, cclawcommon.ConstErrorChatServerBusy, cclawcommon.ConstErrorChatServerBusyMsg, nil)
+		return
+	}
+	defer cc.chatGate.Release()
 
 	// 发送者与单位编码以服务端认证信息为准(认证 interceptor 已写入上下文,防止客户端伪造身份)
 	sender := loginSession.LoginName
@@ -110,6 +125,20 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorChatParameter, cclawcommon.ConstErrorChatParameterMsg, nil)
 		return
 	}
+
+	// 全局聊天并发闸:同步/流式共用总预算,满则 503(此时尚未写 SSE 头,可回普通 JSON)
+	if !cc.chatGate.TryAcquire() {
+		basic.GetBaseResponser().Failure(c, http.StatusServiceUnavailable, cclawcommon.ConstErrorChatServerBusy, cclawcommon.ConstErrorChatServerBusyMsg, nil)
+		return
+	}
+	defer cc.chatGate.Release()
+
+	// SSE 流并发闸:达到每实例在飞流式上限直接 503(此时尚未写 SSE 头,可回普通 JSON)
+	if !cc.streamGate.TryAcquire() {
+		basic.GetBaseResponser().Failure(c, http.StatusServiceUnavailable, cclawcommon.ConstErrorChatServerBusy, cclawcommon.ConstErrorChatServerBusyMsg, nil)
+		return
+	}
+	defer cc.streamGate.Release()
 
 	// 先确认支持 flush,再设置 SSE 头(头一旦按 SSE 发送,后续错误只能走事件通道)
 	flusher, ok := c.Writer.(http.Flusher)
@@ -274,6 +303,9 @@ func (cc *ChatController) respondChatError(c *gin.Context, err error) {
 	case errors.Is(err, exception2.ChatNotActiveErr):
 		// 中断请求时目标会话没有进行中的聊天(聊天未开始或已结束)
 		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorChatNotActive, cclawcommon.ConstErrorChatNotActiveMsg, nil)
+	case errors.Is(err, exception2.ChatBusyErr):
+		// 目标 Agent 已达并发上限(每 Agent 闸)
+		basic.GetBaseResponser().Failure(c, http.StatusServiceUnavailable, cclawcommon.ConstErrorChatBusy, cclawcommon.ConstErrorChatBusyMsg, nil)
 	default:
 		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
 	}

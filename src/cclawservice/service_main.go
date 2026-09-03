@@ -18,6 +18,7 @@ import (
 	selfInterceptor "my.favorite/cclawservice/interceptor"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/cclawservice/service"
+	"my.favorite/cclawservice/service/ccc"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/database"
@@ -52,6 +53,10 @@ type ServiceMain struct {
 	agentRepo                repo.IAgentRepository
 	promptRepo               repo.IPromptRepository
 	startupFileRepo          repo.IAgentFileRepository
+
+	// 并发闸:流式(SSE)在飞连接数、全局聊天在飞请求数(各自上限在 Init 按 ini 配置)
+	streamGate *ccc.ConcurrencyGate
+	chatGate   *ccc.ConcurrencyGate
 }
 
 // NewMainApp 相当于构造函数
@@ -122,6 +127,14 @@ func (m *ServiceMain) Init() error {
 	}
 
 	m.setupSwaggerController()
+
+	// 并发闸上限(ini [server],<=0 用默认):
+	//   - maxConcurrentStreams:SSE 流式连接数
+	//   - maxChatConcurrency:全局聊天(同步+流式)请求数
+	maxStreams, _ := m.configHelper.GetIntValueDefault("server", "maxConcurrentStreams", cCommon.DefaultMaxConcurrentStreams)
+	maxChats, _ := m.configHelper.GetIntValueDefault("server", "maxChatConcurrency", cCommon.DefaultMaxChatConcurrency)
+	m.streamGate = ccc.GetStreamConcurrencyGate(maxStreams)
+	m.chatGate = ccc.GetChatConcurrencyGate(maxChats)
 
 	return nil
 }
@@ -220,8 +233,9 @@ func (m *ServiceMain) SetupAgentController() error {
 func (m *ServiceMain) SetupChatController() error {
 	// function-calling 开关来自 ini [sandBox] functionCalling(默认关闭,安全兜底)
 	functionCalling, _ := m.configHelper.GetBoolValueDefault("sandBox", "functionCalling", false)
+
 	chatService := service.GetChatService(m.database, functionCalling)
-	chatController := selfController.GetChatController(chatService)
+	chatController := selfController.GetChatController(chatService, m.streamGate, m.chatGate)
 
 	urlFunMap := make(map[string]gin.HandlerFunc)
 	urlFunMap[cCommon.RelativeChatUrl] = chatController.Chat
@@ -293,6 +307,8 @@ func (m *ServiceMain) Destroy() {
 	if m.memoryDB != nil {
 		_ = m.memoryDB.CloseMemoryDb()
 	}
+
+	ccc.GetAgentGateRegistry().Destroy() //释放agent gate
 
 	if m.defaultAgentConfigHelper != nil {
 		m.defaultAgentConfigHelper.Destroy()

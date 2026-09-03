@@ -30,6 +30,7 @@ import (
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/cclawservice/request"
+	"my.favorite/cclawservice/service/ccc"
 	"my.favorite/cclawservice/service/common"
 	"my.favorite/cclawservice/service/runtime"
 	pCommon "my.favorite/platformutility/common"
@@ -99,10 +100,17 @@ type ToolEvent struct {
 //   - sender: 服务端认证得到的登录名(由认证 interceptor 写入请求上下文),覆盖请求体 senderId 防伪造
 //   - comCode: 服务端认证得到的单位编码,用于 Agent/Provider 的归属隔离(owner_id)
 func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest, sender, comCode string) (*request.ChatResponse, error) {
-	req, _, systemPrompt, llmProvider, toolSet, err := s.prepareChat(ctx, req, sender, comCode)
+	req, agent, systemPrompt, llmProvider, toolSet, err := s.prepareChat(ctx, req, sender, comCode)
 	if err != nil {
 		return nil, err
 	}
+
+	// 每 Agent 并发闸:同一 agent 同时生成数不超过 max_concurrent,覆盖整段生成(含工具循环)
+	release, err := s.acquireAgentGate(ctx, agent)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 
 	// 调用 LLM 引擎取回完整回复(function-calling 开启且该 Agent 有工具时可能经过工具循环)
 	reply, err := s.completeChat(ctx, llmProvider, systemPrompt, req, toolSet)
@@ -133,10 +141,17 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	if onStatus != nil {
 		onStatus(cCommon.ChatStatusPreparing, "正在解析任务…")
 	}
-	req, _, systemPrompt, llmProvider, toolSet, err := s.prepareChat(ctx, req, sender, comCode)
+	req, agent, systemPrompt, llmProvider, toolSet, err := s.prepareChat(ctx, req, sender, comCode)
 	if err != nil {
 		return "", err
 	}
+
+	// 每 Agent 并发闸:同一 agent 同时生成数不超过 max_concurrent,覆盖整段流式生成(含工具循环)
+	release, err := s.acquireAgentGate(ctx, agent)
+	if err != nil {
+		return "", err
+	}
+	defer release()
 
 	// 注册为"进行中的流式聊天",供中断 API 按会话键取消(不同用户/会话相互隔离)。
 	// 派生可取消上下文:客户端断开或用户点击中断都会终止 LLM 流式读取。
@@ -176,6 +191,32 @@ func (s *ChatService) InterruptChat(sender, sessionId string) error {
 }
 
 // =============================== private functions & methods========================
+
+// acquireAgentGate 获取目标 Agent 的并发许可(每 Agent 闸)。
+//   - 上限取 t_agent.max_concurrent;未配置(<=0)用 DefaultAgentConcurrency;
+//   - 等待超过 AgentGateWaitTimeout 或请求 ctx 取消则失败:取消→按取消语义,超时→"Agent 忙"。
+func (s *ChatService) acquireAgentGate(ctx context.Context, agent dataobject.TAgent) (func(), error) {
+	limit := agent.MaxConcurrents
+	if limit <= 0 {
+		limit = cCommon.DefaultAgentConcurrency
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, time.Duration(cCommon.AgentGateWaitTimeout)*time.Second)
+	defer cancel()
+
+	release, err := ccc.GetAgentGateRegistry().Acquire(waitCtx, agent.AgentId, limit)
+	if err != nil {
+		if ctx.Err() != nil {
+			// 客户端已断开/超时:按取消语义静默处理
+			return nil, myException.ChatCanceledErrEx2("chat service: acquire agent gate canceled for agent %s", agent.AgentId)
+		}
+		return nil, myException.ChatBusyErrEx2("chat service: agent %s busy, max concurrent %d", agent.AgentId, limit)
+	}
+	return release, nil
+}
+
 // prepareChat 执行同步/流式两条聊天路径的公共前置步骤:
 // 校验/规整入参 → 覆盖 sender → 生成 sessionId → 缺省类型 → 解析 Agent/Provider → 组装 system prompt。
 // 返回规范化后的请求、目标 Agent、系统提示词与解析出的 Provider,供 SendMessage/ChatStream 复用。

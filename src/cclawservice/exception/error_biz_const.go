@@ -21,4 +21,5 @@ const (
 	ErrorIdBizChatLLM
 	ErrorIdBizChatCanceled
 	ErrorIdBizChatNotActive
+	ErrorIdBizChatBusy
 )

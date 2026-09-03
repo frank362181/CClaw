@@ -170,3 +170,54 @@ func (te *ErrorChatNotActive) Is(target error) bool {
 	}
 	return false
 }
+
+// ErrorChatBusy 目标 Agent 已达并发上限(HTTP 503:该智能体当前繁忙,请稍后再试)。
+// 模式与 ErrorChatNotActive 保持一致。
+type ErrorChatBusy struct {
+	exception.ErrorDescription
+}
+
+var ChatBusyErr = &ErrorChatBusy{
+	exception.ErrorDescription{
+		ErrTxt:   "",
+		ErrId:    ErrorIdBizChatBusy,
+		FileName: "",
+		LineNo:   -1,
+	},
+}
+
+func ChatBusyErrEx(errTxt string) *ErrorChatBusy {
+	_, file, line, _ := runtime.Caller(1)
+	return &ErrorChatBusy{
+		exception.ErrorDescription{
+			ErrTxt:   errTxt,
+			ErrId:    ErrorIdBizChatBusy,
+			FileName: file,
+			LineNo:   line,
+		},
+	}
+}
+
+func ChatBusyErrEx2(errTxt string, a ...interface{}) *ErrorChatBusy {
+	argsString := fmt.Sprintf(errTxt, a...)
+	_, file, line, _ := runtime.Caller(1)
+	return &ErrorChatBusy{
+		exception.ErrorDescription{
+			ErrTxt:   argsString,
+			ErrId:    ErrorIdBizChatBusy,
+			FileName: file,
+			LineNo:   line,
+		},
+	}
+}
+
+func (te *ErrorChatBusy) Error() string {
+	return fmt.Sprintf("ERROR: [%s:%d]:%d: %s", te.FileName, te.LineNo, te.ErrId, te.ErrTxt)
+}
+
+func (te *ErrorChatBusy) Is(target error) bool {
+	if ed, ok := errors.AsType[*ErrorChatBusy](target); ok {
+		return ed.ErrId == te.ErrId
+	}
+	return false
+}
