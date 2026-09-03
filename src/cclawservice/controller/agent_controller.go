@@ -17,7 +17,6 @@ import (
 	exception2 "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/service"
-	"my.favorite/cclawservice/utility"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/webbase/middleware/basic"
 	"my.favorite/platformutility/webbase/middleware/controller"
@@ -66,7 +65,7 @@ func (ac *AgentController) GetLLMProviders(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c)
 	if !ok {
 		return
 	}
@@ -101,7 +100,7 @@ func (ac *AgentController) AddLLMProvider(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -141,7 +140,7 @@ func (ac *AgentController) UpdateLLMProvider(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -182,7 +181,7 @@ func (ac *AgentController) RemoveLLMProvider(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -223,7 +222,7 @@ func (ac *AgentController) GetAgents(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -258,7 +257,7 @@ func (ac *AgentController) AddAgent(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -299,7 +298,7 @@ func (ac *AgentController) UpdateAgent(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -340,7 +339,7 @@ func (ac *AgentController) RemoveAgent(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -381,7 +380,7 @@ func (ac *AgentController) GetStartupFiles(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -422,7 +421,7 @@ func (ac *AgentController) GetStartupFile(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -464,7 +463,7 @@ func (ac *AgentController) GetSkills(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -499,7 +498,7 @@ func (ac *AgentController) AddSkill(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -540,7 +539,7 @@ func (ac *AgentController) UpdateSkill(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -581,7 +580,7 @@ func (ac *AgentController) RemoveSkill(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}

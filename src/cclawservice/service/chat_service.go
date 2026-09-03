@@ -30,8 +30,8 @@ import (
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
+	"my.favorite/cclawservice/service/common"
 	"my.favorite/cclawservice/service/runtime"
-	myUtility "my.favorite/cclawservice/utility"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/database/core"
 	pException "my.favorite/platformutility/exception"
@@ -141,7 +141,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *model.ChatRequest, se
 	// 注册为"进行中的流式聊天",供中断 API 按会话键取消(不同用户/会话相互隔离)。
 	// 派生可取消上下文:客户端断开或用户点击中断都会终止 LLM 流式读取。
 	streamCtx, cancel := context.WithCancel(ctx)
-	key := myUtility.BuildChatStreamKey(sender, req.SessionId)
+	key := cCommon.BuildChatStreamKey(sender, req.SessionId)
 	runtime.GetChatStreamRegistry().Register(key, cancel)
 	defer runtime.GetChatStreamRegistry().Unregister(key)
 
@@ -167,7 +167,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *model.ChatRequest, se
 // 仅在聊天已开始(流式进行中)时支持;会话不存在或已结束时返回"未在聊天"错误。
 // key 以发送者(服务端认证)为前缀,保证不同用户、不同会话的聊天相互隔离、互不影响。
 func (s *ChatService) InterruptChat(sender, sessionId string) error {
-	key := myUtility.BuildChatStreamKey(sender, sessionId)
+	key := cCommon.BuildChatStreamKey(sender, sessionId)
 	if !runtime.GetChatStreamRegistry().Cancel(key) {
 		return myException.ChatNotActiveErrEx2("chat stream not active: %s", sessionId)
 	}
@@ -283,7 +283,7 @@ func (s *ChatService) collectSkillFiles(comCode string, agent dataobject.TAgent)
 		return nil, ""
 	}
 
-	agentExtensionRoot, _ := myUtility.BuildAgentExtensionRoot(agent)
+	agentExtensionRoot, _ := cCommon.BuildAgentExtensionRoot(agent)
 
 	skills := s.agentRepo.GetSkills(comCode)
 	if len(skills) == 0 {
@@ -314,7 +314,7 @@ func (s *ChatService) completeChat(ctx context.Context, llmProvider dataobject.T
 }
 
 // runToolLoop 同步路径的工具调用循环:调用LLM → 执行工具 → 结果回填 → 再次调用,直到模型给出最终文本。
-func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []runtime.ChatMessage, toolSet *runtime.ToolSet) (string, error) {
+func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []common.ChatMessage, toolSet *runtime.ToolSet) (string, error) {
 	for i := 0; i < cCommon.AgentToolLoopMax; i++ {
 		content, calls, err := s.llmClient.CompleteWithTools(ctx, llmProvider, messages, toolSet.LLMTools())
 		if err != nil {
@@ -339,7 +339,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 // 工具调用阶段实时推送给用户:模型声明调用(intent)→开始执行(running)→结果(done/error),
 // 最终内容增量通过 onChunk 流式转发。底层仍为多次上游请求(OpenAI 兼容协议不支持服务端工具循环),
 // 此处把多轮编排为一条面向客户端的事件流。
-func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []runtime.ChatMessage, toolSet *runtime.ToolSet, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent)) (string, error) {
+func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []common.ChatMessage, toolSet *runtime.ToolSet, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent)) (string, error) {
 	seq := 0 // 本回合工具调用序号(跨轮自增,前端按 seq 追踪同一工具调用)
 	for i := 0; i < cCommon.AgentToolLoopMax; i++ {
 		if i > 0 && onStatus != nil {

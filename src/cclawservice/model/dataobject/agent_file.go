@@ -51,6 +51,7 @@ func (kind AgentDocumentKind) String() string {
 // 并据此控制 MEMORY.md 等隐私敏感文件的可见性。
 type BootstrapScope int
 
+// 定义启动范围，决定哪些信息进入到system prompt
 const (
 	BootstrapScopeNormal    BootstrapScope = iota // 正常会话:注入全部(含 MEMORY.md)
 	BootstrapScopeSubagent                        // 子代理会话:仅 AGENTS.md,不含人格/用户/记忆
@@ -106,6 +107,15 @@ func (doc *AgentDocument) ToJsonString() (string, error) {
 // FromJsonString 从 JSON 字符串反序列化
 func (doc *AgentDocument) FromJsonString(jsonStr string) error {
 	return json.Unmarshal([]byte(jsonStr), doc)
+}
+
+// ClassifyAgent 是路由分类 prompt 中的单个 Agent 候选。
+// Label 为用于意图判断的"简介",由调用方按优先级解析:
+// AGENTS.md 的 front matter summary > 数据库 description;两者皆空回退到Agent名称。
+type ClassifyAgent struct {
+	AgentId   string
+	AgentName string
+	Label     string
 }
 
 /**

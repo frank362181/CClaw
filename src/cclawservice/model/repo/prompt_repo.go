@@ -20,7 +20,6 @@ import (
 	"gopkg.in/yaml.v2"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataobject"
-	myUtility "my.favorite/cclawservice/utility"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
@@ -73,7 +72,7 @@ func GetPromptRepository() IPromptRepository {
 // 当工作区未变化(指纹相同)时直接复用缓存,避免重复读盘。
 // 单个文档缺失/失败不阻断整个工作区的加载。
 func (repo *PromptRepository) LoadAgentBootstrap(agent dataobject.TAgent) error {
-	agentBootstrapRoot, ok := myUtility.BuildAgentBootstrapRoot(agent)
+	agentBootstrapRoot, ok := cCommon.BuildAgentBootstrapRoot(agent)
 	if !ok {
 		return exception.ParameterEmptyErrorEx("prompt repo: workspace root is unavailable")
 	}
@@ -157,7 +156,7 @@ func (repo *PromptRepository) AddSkill(agentId, skillId, skillFile string) error
 		return err
 	}
 
-	frontMatter, content := myUtility.SplitFrontMatter(data)
+	frontMatter, content := cCommon.SplitFrontMatter(data)
 
 	doc := &dataobject.SkillDocument{
 		SkillId:   skillId,
@@ -259,7 +258,7 @@ func (repo *PromptRepository) Destroy() {
 //   - ok=true 且 doc.Missing=true:必需文件缺失,content 为空,由组装层注入 [MISSING] 标记
 //   - ok=false:可选文件缺失,直接省略
 func (repo *PromptRepository) readAgentDocumentLocked(kind dataobject.AgentDocumentKind, workspaceRoot, fileName string, required bool) (*dataobject.AgentDocument, bool, error) {
-	filePath, err := myUtility.ResolveStartupPath(workspaceRoot, fileName)
+	filePath, err := cCommon.ResolveStartupPath(workspaceRoot, fileName)
 	if err != nil {
 		return nil, false, err
 	}
@@ -283,7 +282,7 @@ func (repo *PromptRepository) readAgentDocumentLocked(kind dataobject.AgentDocum
 		return nil, false, err
 	}
 
-	frontMatter, content := myUtility.SplitFrontMatter(data)
+	frontMatter, content := cCommon.SplitFrontMatter(data)
 
 	base.Content = content
 	base.ByteSize = size

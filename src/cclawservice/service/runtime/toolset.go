@@ -26,15 +26,15 @@ import (
 	"gopkg.in/yaml.v2"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataobject"
+	"my.favorite/cclawservice/service/common"
 	"my.favorite/cclawservice/service/runtime/scriptrunner"
 
-	myUtility "my.favorite/cclawservice/utility"
 	pCommon "my.favorite/platformutility/common"
 )
 
 // ToolSet 是某 Agent 本次会话可用的工具集合。
 type ToolSet struct {
-	tools []Tool            // 提供给 LLM 的函数声明
+	tools []common.Tool     // 提供给 LLM 的函数声明
 	exec  map[string]string // 工具名 → 脚本绝对路径
 }
 
@@ -64,7 +64,7 @@ func LoadToolSet(extensionRoot string, skillFiles []string) *ToolSet {
 }
 
 // LLMTools 返回全部工具声明(供 LLM function-calling schema)。
-func (ts *ToolSet) LLMTools() []Tool { return ts.tools }
+func (ts *ToolSet) LLMTools() []common.Tool { return ts.tools }
 
 // Exec 执行指定工具:校验注册 → 运行脚本 → 返回结果文本。
 func (ts *ToolSet) Exec(ctx context.Context, name, argsJSON string) (string, error) {
@@ -92,7 +92,7 @@ func (ts *ToolSet) ExecStream(ctx context.Context, name, argsJSON string, onLine
 type parsedTool struct {
 	name   string
 	script string
-	tool   Tool
+	tool   common.Tool
 }
 
 // skillToolsCacheEntry 缓存条目:SKILL.md 的 (size,mtime) 指纹 + 解析出的工具。
@@ -141,14 +141,14 @@ func getSkillToolsCached(rootClean, skillFile string) []parsedTool {
 // runtime.Tool 是"协议层"(OpenAI tools 项,不含执行细节)。
 // 依赖方向为 runtime→dataobject,故转换器放在消费方(runtime)而非 model 层。
 // 空工具名返回 ok=false(调用方跳过);脚本路径由调用方另行解析(resolveScriptPath)。
-func skillToolToLLMTool(t dataobject.SkillTool) (Tool, bool) {
+func skillToolToLLMTool(t dataobject.SkillTool) (common.Tool, bool) {
 	name := strings.TrimSpace(t.Name)
 	if name == "" {
-		return Tool{}, false
+		return common.Tool{}, false
 	}
-	return Tool{
+	return common.Tool{
 		Type: "function",
-		Function: ToolFunction{
+		Function: common.ToolFunction{
 			Name:        name,
 			Description: strings.TrimSpace(t.Description),
 			Parameters:  pCommon.YamlToJsonMap(t.Parameters), // yaml.v2 嵌套 map → 可 JSON 化的 map[string]any
@@ -184,7 +184,7 @@ func loadSkillDoc(skillFile string) (*dataobject.SkillDocument, bool) {
 	if err != nil {
 		return nil, false
 	}
-	frontMatter, _ := myUtility.SplitFrontMatter(data)
+	frontMatter, _ := cCommon.SplitFrontMatter(data)
 	doc := &dataobject.SkillDocument{SkillFile: skillFile}
 	if len(frontMatter) > 0 {
 		if err := yaml.Unmarshal([]byte(frontMatter), &doc.FrontMatter); err != nil {

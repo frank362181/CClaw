@@ -8,16 +8,14 @@
 * 正文必须被完整保留 —— 没有 front matter 的文档,整个原文即正文。
 **/
 
-package utility
+package common
 
 import (
-	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/controller/model"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
@@ -27,9 +25,9 @@ import (
 )
 
 func GetAuthentication(c *gin.Context) (*model.LoginSession, bool) {
-	tempValue, exists := c.Get(common.ContextAuthenticatedUser)
+	tempValue, exists := c.Get(ContextAuthenticatedUser)
 	if !exists {
-		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusUnauthorized, common.ConstErrorUserUnAuthorized, common.ConstErrorUserUnAuthorizedMsg, nil)
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusUnauthorized, ConstErrorUserUnAuthorized, ConstErrorUserUnAuthorizedMsg, nil)
 		return nil, false
 	}
 	loginSession, ok := tempValue.(*model.LoginSession)
@@ -88,7 +86,7 @@ func StripFrontMatter(data []byte) string {
 
 func NormalizeOwner(ownerId *string) {
 	if strings.TrimSpace(*ownerId) == "" {
-		*ownerId = common.OwnerIdPlatform // 平台默认归属,与 DDL 默认值一致
+		*ownerId = OwnerIdPlatform // 平台默认归属,与 DDL 默认值一致
 	}
 }
 
@@ -150,7 +148,7 @@ func BuildAgentBootstrapRoot(agent dataobject.TAgent) (string, bool) {
 		return "", false
 	}
 
-	agentBootstrapRoot := filepath.Join(pCommon.GetExecutableDir(), common.AgentBootstrapDir, agent.OwnerId, agent.AgentDir)
+	agentBootstrapRoot := filepath.Join(pCommon.GetExecutableDir(), AgentBootstrapDir, agent.OwnerId, agent.AgentDir)
 	if pCommon.IsDir(agentBootstrapRoot) {
 		return agentBootstrapRoot, true
 	}
@@ -164,7 +162,7 @@ func BuildAgentExtensionRoot(agent dataobject.TAgent) (string, bool) {
 		return "", false
 	}
 
-	skillRoot := filepath.Join(agentBootstrapRoot, common.AgentExtensionDirName)
+	skillRoot := filepath.Join(agentBootstrapRoot, AgentExtensionDirName)
 	return skillRoot, true
 }
 
@@ -181,13 +179,13 @@ func ResolveStartupPath(workspaceRoot, fileName string) (string, error) {
 }
 
 // FindStartupDocFile 按文件名(精确匹配)在启动文件清单中查找,未命中返回 ok=false。
-func FindStartupDocFile(fileName string) (common.StartupDocSpec, bool) {
-	for _, f := range common.StartupDocFiles {
+func FindStartupDocFile(fileName string) (StartupDocSpec, bool) {
+	for _, f := range StartupDocFiles {
 		if f.Name == fileName {
 			return f, true
 		}
 	}
-	return common.StartupDocSpec{}, false
+	return StartupDocSpec{}, false
 }
 
 // BuildChatStreamKey 构造进行中流式聊天的注册键:发送者 + 会话号。
@@ -198,19 +196,4 @@ func BuildChatStreamKey(sender, sessionId string) string {
 
 func BuildSessionKey(comCode, sessionId string) string {
 	return comCode + ":" + sessionId
-}
-
-func BuildClassifySystemPrompt(agents []dataobject.TAgent) string {
-	var sb strings.Builder
-	sb.WriteString("你是一个智能体路由器。请根据用户的问题,从下面的智能体列表中选择最合适的一个。\n")
-	sb.WriteString("智能体列表(格式: 编号|名称|简介):\n")
-	for _, a := range agents {
-		desc := strings.TrimSpace(a.Description)
-		if desc == "" {
-			desc = strings.TrimSpace(a.AgentName)
-		}
-		_, _ = fmt.Fprintf(&sb, "- %s|%s|%s\n", a.AgentId, a.AgentName, desc)
-	}
-	sb.WriteString("只回答最合适的智能体编号(如 agent_001),不要输出任何其他内容;如果不确定,回答 default。")
-	return sb.String()
 }

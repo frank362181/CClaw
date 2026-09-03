@@ -14,10 +14,10 @@ package service
 import (
 	"strings"
 
+	myUtility "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
-	myUtility "my.favorite/cclawservice/utility"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/database/core"
 	"my.favorite/platformutility/exception"

@@ -23,7 +23,6 @@ import (
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
-	"my.favorite/cclawservice/utility"
 	common2 "my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging"
 	baseService "my.favorite/platformutility/webbase/middleware/service"
@@ -58,7 +57,7 @@ func (service *PromptService) BuildSystemPrompt(agent dataobject.TAgent, skillFi
 // 使用时机与 OpenClaw 一致:新会话首轮注入完整启动文档,后续每轮按指纹复用缓存
 // (文件未变零读盘),从而让长会话能看到工作区文件的编辑。
 func (service *PromptService) BuildSystemPromptEx(agent dataobject.TAgent, skillFiles []string, scope dataobject.BootstrapScope) (*dataobject.SystemPrompt, error) {
-	workspaceRoot, _ := utility.BuildAgentBootstrapRoot(agent)
+	workspaceRoot, _ := cCommon.BuildAgentBootstrapRoot(agent)
 
 	// 1. 加载并缓存 agent 启动文档(指纹未变化时直接命中缓存)
 	if err := service.promptRepo.LoadAgentBootstrap(agent); err != nil {

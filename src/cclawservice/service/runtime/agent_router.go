@@ -29,7 +29,6 @@ import (
 	myCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
-	myUtility "my.favorite/cclawservice/utility"
 	"my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
@@ -67,7 +66,7 @@ func GetAgentRouter(agentRepo repo.IAgentRepository) *AgentRouter {
 //   - 返回 error 仅发生在:显式指定但 Agent 不存在/禁用,或该 comCode 下无任何可用 Agent;
 //   - 命中(含默认兜底)后会把结果绑定到会话,保证会话内上下文一致。
 func (r *AgentRouter) Resolve(ctx context.Context, comCode, sessionId, reqMsg, explicitAgentId string) (dataobject.TAgent, error) {
-	agents := r.availableAgents(comCode)
+	agents := r.availableAgents(comCode) //获取当前comCode的agent
 	if len(agents) == 0 {
 		return dataobject.TAgent{}, pException.UnMatchErrorEx2("no available chat agent for comCode:%s", comCode)
 	}
@@ -202,7 +201,19 @@ func (r *AgentRouter) classifyByLLM(ctx context.Context, comCode string, agents 
 	classifyCtx, cancel := context.WithTimeout(ctx, r.llmTimeout)
 	defer cancel()
 
-	content, err := r.llmClient.Complete(classifyCtx, provider, myUtility.BuildClassifySystemPrompt(agents), reqMsg, r.llmMaxTokens)
+	// 每个候选 Agent 的"简介"优先取工作区 AGENTS.md 的 front matter summary,
+	// 无摘要时回退数据库 description
+	candidates := make([]dataobject.ClassifyAgent, 0, len(agents))
+	for i := range agents {
+		agent := &agents[i]
+		candidates = append(candidates, dataobject.ClassifyAgent{
+			AgentId:   agent.AgentId,
+			AgentName: agent.AgentName,
+			Label:     r.classifyLabel(*agent),
+		})
+	}
+
+	content, err := r.llmClient.Complete(classifyCtx, provider, BuildClassifySystemPrompt(candidates), reqMsg, r.llmMaxTokens)
 	if err != nil {
 		logging.LogDebugF("agent router: runtime classify skipped, err:%s", err.Error())
 		return dataobject.TAgent{}, false
@@ -248,6 +259,34 @@ func (r *AgentRouter) resolveRoutingProvider(comCode string) (dataobject.TLlm, b
 
 	// 兜底:默认 Agent 无可用 Provider 时,用任意一个可用 Provider 完成分类
 	return firstAvailableProvider(providers)
+}
+
+// classifyLabel 解析某 Agent 在路由意图判断中使用的"简介"。
+// 优先级:工作区 AGENTS.md 的 front matter summary > 数据库 description > Agent 名称。
+// AGENTS.md 缺失/无摘要/读取失败时静默降级,不影响路由可用性。
+func (r *AgentRouter) classifyLabel(agent dataobject.TAgent) string {
+	if label := r.agentDocSummary(agent); label != "" {
+		return label
+	}
+	if desc := strings.TrimSpace(agent.Description); desc != "" {
+		return desc
+	}
+	return strings.TrimSpace(agent.AgentName)
+}
+
+// agentDocSummary 读取 agent 工作区 AGENTS.md 的 front matter summary。
+// 复用 PromptRepository 的指纹缓存(文件未变零读盘);读取失败或缺少摘要返回空串。
+func (r *AgentRouter) agentDocSummary(agent dataobject.TAgent) string {
+	promptRepo := repo.GetPromptRepository()
+	if err := promptRepo.LoadAgentBootstrap(agent); err != nil {
+		return ""
+	}
+	for _, doc := range promptRepo.GetAllDocuments(agent.AgentId) {
+		if doc.Kind == dataobject.AgentDocAgent {
+			return strings.TrimSpace(doc.FrontMatter.Summary)
+		}
+	}
+	return ""
 }
 
 // findAvailableProvider 按 providerId 查找可用(未删除、未禁用)的 Provider。

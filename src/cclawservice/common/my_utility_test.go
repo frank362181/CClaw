@@ -4,7 +4,7 @@
 * 覆盖:合法相对路径、空/点/双点、绝对路径、越界与冗余路径段。
 **/
 
-package utility
+package common
 
 import (
 	"testing"

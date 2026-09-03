@@ -10,12 +10,18 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
+	pCommon "my.favorite/platformutility/common"
 )
 
 // fakeAgentRepo 内存版 Agent 仓库:仅实现路由器依赖的方法。
@@ -247,5 +253,76 @@ func TestAgentRouter_LLMClassify_NoProvider(t *testing.T) {
 	}
 	if got.AgentId != "agent_002" {
 		t.Fatalf("fallback agentId = %s, want default agent_002", got.AgentId)
+	}
+}
+
+// TestAgentRouter_LLMClassify_UsesAgentsSummary 验证:LLM 意图分类的 system prompt 中,
+// Agent 的"简介"取自其工作区 AGENTS.md 的 front matter summary,而不是数据库 description。
+func TestAgentRouter_LLMClassify_UsesAgentsSummary(t *testing.T) {
+	owner := "t-sum-owner"
+	target := dataobject.TAgent{
+		OwnerId:      owner,
+		AgentId:      "agent_sum",
+		AgentName:    "天气专用助手",
+		Description:  "DB 旧简介(不应出现在 prompt)",
+		PrimaryModel: "mock_model",
+		AgentDir:     "agent-sum",
+		IsDefault:    true,
+	}
+	other := dataobject.TAgent{
+		OwnerId:      owner,
+		AgentId:      "agent_general",
+		AgentName:    "通用助手",
+		Description:  "通用助手",
+		PrimaryModel: "mock_model",
+	}
+
+	// 构造 target 的真实工作区:AGENTS.md 带 front matter summary(路径与 BuildAgentBootstrapRoot 一致)
+	root := filepath.Join(pCommon.GetExecutableDir(), cCommon.AgentBootstrapDir, owner, target.AgentDir)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir workspace error:%s", err.Error())
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"),
+		[]byte("---\nsummary: \"路由摘要:专注实时天气与未来三天预报\"\n---\n# Rules\n- 天气\n"), 0o644); err != nil {
+		t.Fatalf("write AGENTS.md error:%s", err.Error())
+	}
+
+	var captured string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		captured = string(body)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []interface{}{map[string]interface{}{
+				"index": 0,
+				"message": map[string]interface{}{
+					"role":    "assistant",
+					"content": target.AgentId,
+				},
+			}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	rep := &fakeAgentRepo{
+		agents: []dataobject.TAgent{target, other},
+		providers: []dataobject.TLlm{
+			{ProviderId: "mock_model", BaseUrl: srv.URL, Model: "m"},
+		},
+	}
+	router := newAgentRouterForTest(rep)
+
+	got, err := router.Resolve(context.Background(), owner, "sess-sum-1", "今天杭州天气如何", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.AgentId != target.AgentId {
+		t.Fatalf("classified agentId = %s, want %s", got.AgentId, target.AgentId)
+	}
+	if !strings.Contains(captured, "路由摘要:专注实时天气与未来三天预报") {
+		t.Fatalf("classify prompt should use AGENTS.md summary, got:\n%s", captured)
+	}
+	if strings.Contains(captured, "DB 旧简介") {
+		t.Fatalf("classify prompt should NOT use DB description, got:\n%s", captured)
 	}
 }

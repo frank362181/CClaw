@@ -14,6 +14,8 @@ import (
 	"my.favorite/cclawservice/controller/model"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
+	"my.favorite/cclawservice/service/ccc"
+	"my.favorite/cclawservice/service/common"
 )
 
 // capturedRequest 记录 mock 服务收到的请求,用于断言请求构造是否正确。
@@ -21,7 +23,7 @@ type capturedRequest struct {
 	Method  string
 	Path    string
 	Auth    string
-	Payload ChatCompletionRequest
+	Payload common.ChatCompletionRequest
 }
 
 // newMockServer 构造一个 chat/completions mock 服务。
@@ -72,6 +74,55 @@ func chatReq(msg string) *model.ChatRequest {
 	return &model.ChatRequest{ReqMsg: msg}
 }
 
+// TestComplete_ThinkingFlagForQwen 验证:Qwen3 等思考型模型在非流式(Complete)调用中会显式携带
+// enable_thinking=false(避免网关 400);其他厂商不附加该参数;流式请求不附加。
+func TestComplete_ThinkingFlagForQwen(t *testing.T) {
+	t.Run("qwen non-stream disables thinking", func(t *testing.T) {
+		var cap capturedRequest
+		srv := newMockServer(t, http.StatusOK, okResponse, &cap)
+		// 镜像生产配置:t_llm 中 qwen3-8b 的 vendor = alibaba, model = qwen3-8b
+		p := dataobject.TLlm{ProviderId: "qwen3-8b", Model: "qwen3-8b", Vendor: "alibaba", BaseUrl: srv.URL}
+		if _, err := NewClient().Complete(context.Background(), p, "sys", "hi", 128); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cap.Payload.EnableThinking == nil || *cap.Payload.EnableThinking {
+			t.Errorf("qwen non-stream should send enable_thinking=false, got %v", cap.Payload.EnableThinking)
+		}
+	})
+
+	t.Run("aliyun vendor disables even without qwen in model name", func(t *testing.T) {
+		var cap capturedRequest
+		srv := newMockServer(t, http.StatusOK, okResponse, &cap)
+		p := dataobject.TLlm{ProviderId: "px", Model: "custom-alias", Vendor: "aliyun", BaseUrl: srv.URL}
+		if _, err := NewClient().Complete(context.Background(), p, "sys", "hi", 128); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cap.Payload.EnableThinking == nil || *cap.Payload.EnableThinking {
+			t.Errorf("aliyun vendor non-stream should send enable_thinking=false, got %v", cap.Payload.EnableThinking)
+		}
+	})
+
+	t.Run("non-qwen non-stream keeps nil", func(t *testing.T) {
+		var cap capturedRequest
+		srv := newMockServer(t, http.StatusOK, okResponse, &cap)
+		p := dataobject.TLlm{ProviderId: "deepseek-v4-pro", Model: "deepseek-v4-pro", Vendor: "deepseek", BaseUrl: srv.URL}
+		if _, err := NewClient().Complete(context.Background(), p, "sys", "hi", 128); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cap.Payload.EnableThinking != nil {
+			t.Errorf("non-qwen non-stream should NOT send enable_thinking, got %v", *cap.Payload.EnableThinking)
+		}
+	})
+
+	t.Run("qwen streaming keeps nil", func(t *testing.T) {
+		p := dataobject.TLlm{ProviderId: "qwen3-8b", Model: "qwen3-8b", Vendor: "alibaba", BaseUrl: "http://x", ContextWindow: 8192, MaxTokens: 4096}
+		req := BuildChatCompletionRequest(p, systemPrompt("s"), chatReq("hi"), true)
+		if req.EnableThinking != nil {
+			t.Errorf("qwen streaming should NOT send enable_thinking, got %v", *req.EnableThinking)
+		}
+	})
+}
+
 const okResponse = `{"id":"chatcmpl-test","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"你好,我是智能助手。"}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`
 
 func TestChatCompletion_Success(t *testing.T) {
@@ -113,7 +164,7 @@ func TestChatCompletion_Success(t *testing.T) {
 	if *cap.Payload.MaxTokens >= 8192 {
 		t.Errorf("max_tokens = %d, want < context_window 8192", *cap.Payload.MaxTokens)
 	}
-	want := 8192 - estimateInputTokens(cap.Payload.Messages)
+	want := 8192 - ccc.EstimateInputTokens(cap.Payload.Messages)
 	if want > 4096 {
 		want = 4096
 	}
@@ -402,7 +453,7 @@ func TestBuildChatCompletionRequest_DynamicMaxTokens(t *testing.T) {
 	}
 
 	// 不变量:估算输入 + max_tokens = context_window(推导自窗口剩余空间)
-	if est := estimateInputTokens(req.Messages); est+*req.MaxTokens != int(p.ContextWindow) {
+	if est := ccc.EstimateInputTokens(req.Messages); est+*req.MaxTokens != int(p.ContextWindow) {
 		t.Errorf("invariant violated: estimateInput(%d) + max_tokens(%d) = %d, want context_window(%d)",
 			est, *req.MaxTokens, est+*req.MaxTokens, p.ContextWindow)
 	}
@@ -447,8 +498,8 @@ func TestBuildChatCompletionRequest_DynamicMaxTokens_NoWindow(t *testing.T) {
 
 // TestEstimateInputTokens 验证估算函数的基本行为:CJK 密集文本比 ASCII 估算出更多 token。
 func TestEstimateInputTokens(t *testing.T) {
-	cjk := estimateInputTokens([]ChatMessage{{Role: "user", Content: strings.Repeat("中", 1000)}})
-	ascii := estimateInputTokens([]ChatMessage{{Role: "user", Content: strings.Repeat("a", 1000)}})
+	cjk := ccc.EstimateInputTokens([]common.ChatMessage{{Role: "user", Content: strings.Repeat("中", 1000)}})
+	ascii := ccc.EstimateInputTokens([]common.ChatMessage{{Role: "user", Content: strings.Repeat("a", 1000)}})
 	if cjk <= ascii {
 		t.Errorf("CJK estimate (%d) should exceed ASCII estimate (%d)", cjk, ascii)
 	}
@@ -483,11 +534,11 @@ func TestPrepareRequest_Validation(t *testing.T) {
 
 	cases := []struct {
 		name string
-		req  ChatCompletionRequest
+		req  common.ChatCompletionRequest
 	}{
-		{"empty model", ChatCompletionRequest{Messages: []ChatMessage{{Role: "user", Content: "hi"}}}},
-		{"empty messages", ChatCompletionRequest{Model: "m"}},
-		{"empty base url", ChatCompletionRequest{Model: "m", Messages: []ChatMessage{{Role: "user", Content: "hi"}}}},
+		{"empty model", common.ChatCompletionRequest{Messages: []common.ChatMessage{{Role: "user", Content: "hi"}}}},
+		{"empty messages", common.ChatCompletionRequest{Model: "m"}},
+		{"empty base url", common.ChatCompletionRequest{Model: "m", Messages: []common.ChatMessage{{Role: "user", Content: "hi"}}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -27,7 +27,6 @@ import (
 
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataobject"
-	myUtility "my.favorite/cclawservice/utility"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/exception"
 )
@@ -124,12 +123,12 @@ func (repo *AgentFileRepository) GetStartupFile(agentBootstrapRoot, fileName str
 	}
 
 	// 白名单校验:仅允许 StartupDocFiles 清单中的启动文件
-	item, allowed := myUtility.FindStartupDocFile(fileName)
+	item, allowed := cCommon.FindStartupDocFile(fileName)
 	if !allowed {
 		return nil, exception.FilePathErrorEx("startup file repo: not a startup file: " + fileName)
 	}
 
-	filePath, err := myUtility.ResolveStartupPath(agentBootstrapRoot, fileName)
+	filePath, err := cCommon.ResolveStartupPath(agentBootstrapRoot, fileName)
 	if err != nil {
 		return nil, err
 	}

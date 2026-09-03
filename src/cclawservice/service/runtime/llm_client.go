@@ -32,13 +32,14 @@ import (
 	"my.favorite/cclawservice/controller/model"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
+	"my.favorite/cclawservice/service/common"
 	pException "my.favorite/platformutility/exception"
 )
 
 // ChatCompletionChoice 一条候选回复
 type ChatCompletionChoice struct {
-	Index   int         `json:"index"`
-	Message ChatMessage `json:"message"`
+	Index   int                `json:"index"`
+	Message common.ChatMessage `json:"message"`
 }
 
 // ChatCompletionUsage token 用量(可选,部分供应商流式返回时可能为空)
@@ -69,10 +70,10 @@ type ChatCompletionChunk struct {
 // reasoning_content 是推理模型的思考过程增量(如 DeepSeek reasoner),仅在流式响应中出现、
 // 不参与请求体;这里把它实时转发给浏览器展示,不并入正式回复。
 type ChatCompletionChunkDelta struct {
-	Role             string          `json:"role"`
-	Content          string          `json:"content"`
-	ReasoningContent string          `json:"reasoning_content,omitempty"`
-	ToolCalls        []ToolCallDelta `json:"tool_calls,omitempty"`
+	Role             string                 `json:"role"`
+	Content          string                 `json:"content"`
+	ReasoningContent string                 `json:"reasoning_content,omitempty"`
+	ToolCalls        []common.ToolCallDelta `json:"tool_calls,omitempty"`
 }
 
 // ChatCompletionChunkChoice 流式块中的单个候选(增量文本在 delta.content / delta.reasoning_content)
@@ -110,8 +111,7 @@ func newClient(timeout time.Duration) *Client {
 }
 
 // NewClient 构造 LLM 客户端。
-// 鉴权密钥来自每次调用传入的 TLlm(数据库配置);max_tokens 由
-// BuildChatCompletionRequest 按 context_window 动态推导,客户端本身不持有任何供应商特定配置。
+// 鉴权密钥来自每次调用传入的 TLlm(数据库配置)
 func NewClient() *Client {
 	return newClient(myCommon.DefaultTimeout)
 }
@@ -120,15 +120,7 @@ func NewClient() *Client {
 // 用来根据用户问题的意图匹配最适合的agent的函数
 // 用于"Agent 路由分类"等短输出场景;maxTokens 限制输出上限(<=0 时由供应商默认,仍受 context_window 约束)。
 func (c *Client) Complete(ctx context.Context, llmProvider dataobject.TLlm, system, user string, maxTokens int) (string, error) {
-	req := ChatCompletionRequest{
-		Model:     llmProvider.GetModelName(),
-		Messages:  BuildSimpleChatMessage(system, user), //[]ChatMessage{{Role: "system", Content: system}, {Role: "user", Content: user}},
-		Stream:    false,
-		MaxTokens: nil,
-	}
-	if maxTokens > 0 {
-		req.MaxTokens = &maxTokens
-	}
+	req := BuildChatCompletionRequestWithString(llmProvider, system, user, maxTokens, false)
 	return c.doCompletion(ctx, llmProvider, req)
 }
 
@@ -144,7 +136,7 @@ func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm
 
 // CompleteWithTools 执行一次同步 chat/completions(带工具),返回正式文本与工具调用(可能为空)。
 // 不执行工具:由调用方(工具循环)解析并执行返回的工具调用。
-func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []ChatMessage, tools []Tool) (string, []ToolCall, error) {
+func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []common.ChatMessage, tools []common.Tool) (string, []common.ToolCall, error) {
 	httpReq, err := c.prepareRequest(ctx, llmProvider, BuildChatCompletionRequestWithTool(llmProvider, messages, tools, false))
 	if err != nil {
 		return "", nil, err
@@ -279,7 +271,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobjec
 //   - onToolIntent: 模型流式声明将调用某工具时立即回调(仅首次辨识到工具名触发一次),
 //     供调用方把工具意图实时推给前端(真正执行仍需等流结束拿到完整 arguments)。
 //   - 返回值:       累计正式文本 + 模型请求的工具调用(若有;arguments 已按 index 拼接完整)
-func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []ChatMessage, tools []Tool, onChunk func(string), onReasoning func(string), onToolIntent func(name string)) (string, []ToolCall, error) {
+func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []common.ChatMessage, tools []common.Tool, onChunk func(string), onReasoning func(string), onToolIntent func(name string)) (string, []common.ToolCall, error) {
 	httpReq, err := c.prepareRequest(ctx, llmProvider, BuildChatCompletionRequestWithTool(llmProvider, messages, tools, true))
 	if err != nil {
 		return "", nil, err
@@ -361,7 +353,7 @@ func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLl
 // ======================== private function & methods ==========================
 
 // doCompletion 执行一次同步 chat/completions 请求并解析回复文本(同步/轻量调用共用)。
-func (c *Client) doCompletion(ctx context.Context, llmProvider dataobject.TLlm, req ChatCompletionRequest) (string, error) {
+func (c *Client) doCompletion(ctx context.Context, llmProvider dataobject.TLlm, req common.ChatCompletionRequest) (string, error) {
 	httpReq, err := c.prepareRequest(ctx, llmProvider, req)
 	if err != nil {
 		return "", err
@@ -411,7 +403,7 @@ func (c *Client) doCompletion(ctx context.Context, llmProvider dataobject.TLlm, 
 
 // prepareRequest 校验入参并构造请求(不发起网络调用)。
 // 同步(ChatCompletion)与流式(ChatCompletionStream)两条路径共用,保证请求构造一致。
-func (c *Client) prepareRequest(ctx context.Context, llmProvider dataobject.TLlm, req ChatCompletionRequest) (*http.Request, error) {
+func (c *Client) prepareRequest(ctx context.Context, llmProvider dataobject.TLlm, req common.ChatCompletionRequest) (*http.Request, error) {
 	if strings.TrimSpace(req.Model) == "" {
 		return nil, errors.New("runtime client: model is empty")
 	}

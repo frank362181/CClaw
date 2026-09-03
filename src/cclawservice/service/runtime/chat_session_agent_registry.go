@@ -18,7 +18,6 @@ import (
 	"sync"
 
 	myCommon "my.favorite/cclawservice/common"
-	myUtility "my.favorite/cclawservice/utility"
 	"my.favorite/platformutility/common"
 )
 
@@ -57,7 +56,7 @@ func (r *ChatSessionAgentRegistry) Get(comCode, sessionId string) (string, bool)
 	if sessionId == "" {
 		return "", false
 	}
-	key := myUtility.BuildSessionKey(comCode, sessionId)
+	key := myCommon.BuildSessionKey(comCode, sessionId)
 
 	r.mu.RLock()
 	b, ok := r.bindings[key]
@@ -82,7 +81,7 @@ func (r *ChatSessionAgentRegistry) Set(comCode, sessionId, agentId string) {
 	if sessionId == "" || agentId == "" {
 		return
 	}
-	key := myUtility.BuildSessionKey(comCode, sessionId)
+	key := myCommon.BuildSessionKey(comCode, sessionId)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -101,7 +100,7 @@ func (r *ChatSessionAgentRegistry) ClearKey(comCode, sessionId string) {
 	if sessionId == "" {
 		return
 	}
-	key := myUtility.BuildSessionKey(comCode, sessionId)
+	key := myCommon.BuildSessionKey(comCode, sessionId)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.bindings, key)

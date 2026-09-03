@@ -10,7 +10,6 @@ import (
 	model2 "my.favorite/cclawservice/controller/model"
 	exception2 "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/service"
-	"my.favorite/cclawservice/utility"
 	"my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
 	"my.favorite/platformutility/webbase/middleware/basic"
@@ -111,7 +110,7 @@ func (cc *ChatController) Chat(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c)
 	if !ok {
 		return
 	}
@@ -154,7 +153,7 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c)
 	if !ok {
 		return
 	}
@@ -282,7 +281,7 @@ func (cc *ChatController) InterruptChat(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := utility.GetAuthentication(c)
+	loginSession, ok := cclawcommon.GetAuthentication(c)
 	if !ok {
 		return
 	}
