@@ -1,4 +1,4 @@
-package model
+package request
 
 // ChatRequest =================聊天所需的信令==================
 type ChatRequest struct {

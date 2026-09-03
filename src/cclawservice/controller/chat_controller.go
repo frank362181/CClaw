@@ -7,8 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	cclawcommon "my.favorite/cclawservice/common"
-	model2 "my.favorite/cclawservice/controller/model"
 	exception2 "my.favorite/cclawservice/exception"
+	model "my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service"
 	"my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
@@ -36,59 +36,6 @@ func GetChatController(svc pService.IService) *ChatController {
 	return chatController
 }
 
-// CreateSession
-//
-//	@Summary		创建新的会话
-//	@Description	创建全新的聊天会话
-//	@Tags			聊天管理
-//	@Accept			json
-//	@Produce		json
-//	@Param			AUTHORIZATION	header		string	true	"Login成功返回后得到的token"
-//	@Param			NONCE			query		string	true	"盐"
-//	@Param			TIMESTAMP		query		string	true	"数值,表示请求端请求的时间(秒数)"
-//	@Param			SIGNATURE		query		string	true	"对请求内容的签名秒数"
-//	@Param			body		body		model.SessionRequest	true	"聊天内容"
-//	@Success		200			{object}	model.SessionResponseEx
-//	@Failure		400			{object}	basic.CommonResponse
-//	@Router			/api/createSession [post]
-func (cc *ChatController) CreateSession(c *gin.Context) {
-
-}
-
-// GetSessions
-//
-//	@Summary		获取会话历史列表
-//	@Description	获取会话历史列表
-//	@Tags			聊天管理
-//	@Accept			json
-//	@Produce		json
-//	@Param			AUTHORIZATION	header		string	true	"Login成功返回后得到的token"
-//	@Param			NONCE			query		string	true	"盐"
-//	@Param			TIMESTAMP		query		string	true	"数值,表示请求端请求的时间(秒数)"
-//	@Param			SIGNATURE		query		string	true	"对请求内容的签名秒数"
-//	@Param			body		body		model.SessionsRequest	true	"聊天内容"
-//	@Success		200			{object}	model.SessionsResponseEx
-//	@Failure		400			{object}	basic.CommonResponse
-//	@Router			/api/getSessions [post]
-func (cc *ChatController) GetSessions(c *gin.Context) {}
-
-// DeleteSession
-//
-//	@Summary		获取会话历史
-//	@Description	获取会话历史
-//	@Tags			聊天管理
-//	@Accept			json
-//	@Produce		json
-//	@Param			AUTHORIZATION	header		string	true	"Login成功返回后得到的token"
-//	@Param			NONCE			query		string	true	"盐"
-//	@Param			TIMESTAMP		query		string	true	"数值,表示请求端请求的时间(秒数)"
-//	@Param			SIGNATURE		query		string	true	"对请求内容的签名秒数"
-//	@Param			body		body		model.SessionsRequest	true	"聊天内容"
-//	@Success		200			{object}	model.SessionsResponseEx
-//	@Failure		400			{object}	basic.CommonResponse
-//	@Router			/api/deleteSession [post]
-func (cc *ChatController) DeleteSession(c *gin.Context) {}
-
 // Chat 接收一条聊天消息并返回应答
 //
 //	@Summary		发送聊天消息
@@ -110,12 +57,12 @@ func (cc *ChatController) Chat(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c)
+	loginSession, ok := GetAuthentication(c)
 	if !ok {
 		return
 	}
 
-	var req model2.ChatRequest
+	var req model.ChatRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
 		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorChatParameter, cclawcommon.ConstErrorChatParameterMsg, nil)
 		return
@@ -153,12 +100,12 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c)
+	loginSession, ok := GetAuthentication(c)
 	if !ok {
 		return
 	}
 
-	var req model2.ChatRequest
+	var req model.ChatRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
 		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorChatParameter, cclawcommon.ConstErrorChatParameterMsg, nil)
 		return
@@ -180,39 +127,53 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 	sender := loginSession.LoginName
 	comCode := loginSession.ComCode
 
-	// 逐块转发上游增量给浏览器(仅在 LLM 流式读取循环内同步调用,无并发写竞争);
-	// 内容开始前先以 status 事件报告 Agent 阶段(解析任务/思考等)
+	// SSE 写端安全(单 goroutine 泵内同步调用,无并发写竞争):
+	// 每次写入前检查请求上下文;一旦客户端断开(ctx 取消),立即停止继续向死连接
+	// 写/Flush,并主动取消上游流式读取(与中断同源),避免"写错误被忽略后仍空转转发"。
+	disconnected := false
+	emit := func(name string, payload gin.H) {
+		if disconnected {
+			return
+		}
+		if c.Request.Context().Err() != nil {
+			disconnected = true
+			// 提前取消上游:命中断开立即退流(会话号在 ChatStream 内已生成/规整)
+			if strings.TrimSpace(req.SessionId) != "" {
+				_ = chatService.InterruptChat(sender, req.SessionId)
+			}
+			return
+		}
+		c.SSEvent(name, payload)
+		flusher.Flush()
+	}
+
+	// 逐块转发上游增量给浏览器;内容开始前先以 status 事件报告 Agent 阶段(解析任务/思考等)
 	streamed := false
 	_, err := chatService.ChatStream(c.Request.Context(), &req, sender, comCode,
 		func(delta string) {
 			streamed = true
-			c.SSEvent("message", gin.H{"reply": delta})
-			flusher.Flush()
+			emit("message", gin.H{"reply": delta})
 		},
 		func(status, text string) {
-			c.SSEvent("status", gin.H{"status": status, "text": text})
-			flusher.Flush()
+			emit("status", gin.H{"status": status, "text": text})
 		},
 		func(delta string) {
 			// 思考过程增量:独立事件转发,供前端实时展示思考过程(不并入正式回复)
-			c.SSEvent("thinking", gin.H{"delta": delta})
-			flusher.Flush()
+			emit("thinking", gin.H{"delta": delta})
 		},
 		func(evt service.ToolEvent) {
 			// 工具调用进度(intent/running/done/error):实时转发,供前端渲染工具调用卡片
-			c.SSEvent("tool", gin.H{"phase": evt.Phase, "seq": evt.Seq, "name": evt.Name, "detail": evt.Detail})
-			flusher.Flush()
+			emit("tool", gin.H{"phase": evt.Phase, "seq": evt.Seq, "name": evt.Name, "detail": evt.Detail})
 		})
 
 	if err != nil {
+		// 客户端已断开:响应写不出去,静默结束(不再尝试向死连接写任何事件)
+		if c.Request.Context().Err() != nil {
+			return
+		}
 		if errors.Is(err, exception2.ChatCanceledErr) {
-			// 区分"客户端断开"与"服务端主动中断(用户点击中断按钮)":
-			//   - 客户端断开:请求上下文已取消,响应写不出去,静默结束;
-			//   - 服务端中断:浏览器仍保持 SSE 连接,发送结束标记让前端正常收尾,
-			//     避免前端误判为"引擎不可用"或一直等待。
-			if c.Request.Context().Err() != nil {
-				return
-			}
+			// 服务端主动中断(用户点击中断按钮):浏览器仍保持 SSE 连接,
+			// 发送结束标记让前端正常收尾,避免误判为"引擎不可用"。
 			if streamed {
 				c.SSEvent("message", "[DONE]")
 			} else {
@@ -236,28 +197,11 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 		return
 	}
 
-	// 正常结束标记
-	c.SSEvent("message", "[DONE]")
-	flusher.Flush()
-}
-
-// DeleteChat
-//
-//	@Summary		删除聊天
-//	@Description	删除聊天
-//	@Tags			聊天管理
-//	@Accept			json
-//	@Produce		json
-//	@Param			AUTHORIZATION	header		string	true	"Login成功返回后得到的token"
-//	@Param			NONCE			query		string	true	"盐"
-//	@Param			TIMESTAMP		query		string	true	"数值,表示请求端请求的时间(秒数)"
-//	@Param			SIGNATURE		query		string	true	"对请求内容的签名秒数"
-//	@Param			body		body		model.ChatsRequest	true	"聊天内容"
-//	@Success		200			{object}	model.ChatsResponseEx
-//	@Failure		400			{object}	basic.CommonResponse
-//	@Router			/api/deleteChat [post]
-func (cc *ChatController) DeleteChat(c *gin.Context) {
-
+	// 正常结束标记(客户端已断开则跳过)
+	if c.Request.Context().Err() == nil {
+		c.SSEvent("message", "[DONE]")
+		flusher.Flush()
+	}
 }
 
 // InterruptChat 中断进行中的流式聊天
@@ -281,12 +225,12 @@ func (cc *ChatController) InterruptChat(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c)
+	loginSession, ok := GetAuthentication(c)
 	if !ok {
 		return
 	}
 
-	var req model2.ChatInterruptRequest
+	var req model.ChatInterruptRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil || strings.TrimSpace(req.SessionId) == "" {
 		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorChatParameter, cclawcommon.ConstErrorChatParameterMsg, nil)
 		return

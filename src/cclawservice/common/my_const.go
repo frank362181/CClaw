@@ -7,6 +7,9 @@ import (
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
+// ContextAuthenticatedUser is the gin.Context key for the server-verified user.
+const ContextAuthenticatedUser = "cclaw.authenticatedUser"
+
 const (
 	OwnerIdPlatform = "000000" //属于平台资产定义
 
@@ -80,7 +83,6 @@ const (
 	MaxBootstrapFileChars  = 20000      //单个启动文档注入上限(OpenClaw bootstrapMaxChars 默认值)
 	MaxBootstrapTotalChars = 60000      //启动文档注入总上限(OpenClaw bootstrapTotalMaxChars 默认值)
 	MaxUserDocChars        = 4000       //USER.md 单独的字符上限
-	MaxPromptSectionLen    = 32 * 1024  //system prompt 单个 section 的最大 rune 数
 )
 
 // skill 元数据目录预算
@@ -89,6 +91,12 @@ const (
 	SkillDocFileName     = "SKILL.md" //skill.md:技能定义
 	MaxSkillsInPrompt    = 150        //注入 prompt 的 skill 数量上限
 	MaxSkillsPromptChars = 18000      //skill 元数据目录的字符上限
+)
+
+// system prompt的大小限制
+
+const (
+	MaxPromptSectionLen = 32 * 1024 //system prompt 单个 section 的最大 rune 数
 )
 
 // 定义业务级的错误常量和错误信息
@@ -140,9 +148,6 @@ const (
 	ConstErrorChatCanceledMsg      = "请求已被取消"
 	ConstErrorChatNotActiveMsg     = "当前会话没有进行中的聊天"
 )
-
-// ContextAuthenticatedUser is the gin.Context key for the server-verified user.
-const ContextAuthenticatedUser = "cclaw.authenticatedUser"
 
 const (
 	BasePath = "/api"

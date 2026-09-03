@@ -141,7 +141,7 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 	}
 
 	// ---- 总预算控制:优先保留高优先级文件,超限从尾部压缩 ----
-	sections, truncated = enforceTotalBudget(sections, cCommon.MaxBootstrapTotalChars, truncated)
+	sections, truncated = enforceTotalBudget(sections, agent.BootstrapTotalChars, truncated)
 
 	// ---- 截断提示(OpenClaw: "## Bootstrap Context Notice") ----
 	if len(truncated) > 0 {

@@ -7,8 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	cclawcommon "my.favorite/cclawservice/common"
-	model2 "my.favorite/cclawservice/controller/model"
 	exception2 "my.favorite/cclawservice/exception"
+	model "my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/webbase/middleware/basic"
@@ -56,7 +56,7 @@ func (lc *LoginController) Login(c *gin.Context) {
 		return
 	}
 
-	var lq model2.LoginRequest
+	var lq model.LoginRequest
 	err := c.ShouldBindBodyWithJSON(&lq) //这里将body读取之后,后面如果想要再次读取将会失败
 	if err != nil {
 		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorLoginParameter, cclawcommon.ConstErrorLoginParameterMsg, nil)

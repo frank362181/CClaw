@@ -1,9 +1,9 @@
 /**
 * prompt 计算器剩余
 *
-* context_window预算，在service/runtime/llm_message.go中构建请求时实现：
-*	BuildChatCompletionRequest 每次请求时调用dynamicMaxTokens
-*	estimateInputTokens:CJK 约为1.5 Bytes/token、其他约为 4 Bytes/token、每条消息 + 4 token开销、乘以 1.2的余量
+* context_window预算，在service/runtime/message_builder.go中构建请求时实现：
+*	BuildChatCompletionRequest/BuildChatCompletionRequestWithTool 每次请求时调用 DynamicMaxTokens
+*	EstimateInputTokens:CJK 约为1.5 字符/token、其他约为 4 字符/token、每条消息 + 4 token开销、乘以 1.2的余量
 *	dynamicMaxTokens：max_tokens = min(ContextWindow - 估算输入，provider单次输出上限)，保证[估算输入+ max_tokens <= ContextWindow]，避免长输入超窗口被供应商拒绝
 *	ContextWindow = 0(未配置)时不发送max_tokens，由供应商用默认值
 *

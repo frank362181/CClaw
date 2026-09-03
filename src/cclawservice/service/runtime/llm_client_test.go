@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"my.favorite/cclawservice/controller/model"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
+	"my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service/ccc"
 	"my.favorite/cclawservice/service/common"
 )
@@ -70,8 +70,8 @@ func systemPrompt(content string) *dataobject.SystemPrompt {
 }
 
 // chatReq 构造测试用的聊天请求。
-func chatReq(msg string) *model.ChatRequest {
-	return &model.ChatRequest{ReqMsg: msg}
+func chatReq(msg string) *request.ChatRequest {
+	return &request.ChatRequest{ReqMsg: msg}
 }
 
 // TestComplete_ThinkingFlagForQwen 验证:Qwen3 等思考型模型在非流式(Complete)调用中会显式携带
@@ -102,23 +102,23 @@ func TestComplete_ThinkingFlagForQwen(t *testing.T) {
 		}
 	})
 
-	t.Run("non-qwen non-stream keeps nil", func(t *testing.T) {
+	t.Run("non-qwen non-stream follows thkNonStreaming(false)", func(t *testing.T) {
 		var cap capturedRequest
 		srv := newMockServer(t, http.StatusOK, okResponse, &cap)
-		p := dataobject.TLlm{ProviderId: "deepseek-v4-pro", Model: "deepseek-v4-pro", Vendor: "deepseek", BaseUrl: srv.URL}
+		p := dataobject.TLlm{ProviderId: "deepseek-v4-pro", Model: "deepseek-v4-pro", Vendor: "deepseek", ThkNonStreaming: false, BaseUrl: srv.URL}
 		if _, err := NewClient().Complete(context.Background(), p, "sys", "hi", 128); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if cap.Payload.EnableThinking != nil {
-			t.Errorf("non-qwen non-stream should NOT send enable_thinking, got %v", *cap.Payload.EnableThinking)
+		if cap.Payload.EnableThinking == nil || *cap.Payload.EnableThinking {
+			t.Errorf("non-qwen non-stream should send enable_thinking=thkNonStreaming(false), got %v", cap.Payload.EnableThinking)
 		}
 	})
 
-	t.Run("qwen streaming keeps nil", func(t *testing.T) {
-		p := dataobject.TLlm{ProviderId: "qwen3-8b", Model: "qwen3-8b", Vendor: "alibaba", BaseUrl: "http://x", ContextWindow: 8192, MaxTokens: 4096}
+	t.Run("streaming keeps nil even if thkNonStreaming=true", func(t *testing.T) {
+		p := dataobject.TLlm{ProviderId: "qwen3-8b", Model: "qwen3-8b", Vendor: "alibaba", ThkNonStreaming: true, BaseUrl: "http://x", ContextWindow: 8192, MaxTokens: 4096}
 		req := BuildChatCompletionRequest(p, systemPrompt("s"), chatReq("hi"), true)
 		if req.EnableThinking != nil {
-			t.Errorf("qwen streaming should NOT send enable_thinking, got %v", *req.EnableThinking)
+			t.Errorf("streaming should NOT send enable_thinking, got %v", *req.EnableThinking)
 		}
 	})
 }

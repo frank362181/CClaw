@@ -11,9 +11,9 @@ import (
 	"errors"
 	"strings"
 
-	"my.favorite/cclawservice/controller/model"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataaccessor"
+	"my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service/service_core"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/common/hash"
@@ -72,7 +72,7 @@ func GetLoginService(memoryDB memoryDbCommon.IMemoryDB, db core.IBaseDatabase) (
 	return loginService, nil
 }
 
-func (service *LoginService) Login(username, password string) (*model.LoginSession, error) {
+func (service *LoginService) Login(username, password string) (*request.LoginSession, error) {
 	username = strings.ToLower(strings.TrimSpace(username))
 	if username == "" || password == "" {
 		return nil, exception.ParameterEmptyErrorEx("user or password is empty")
@@ -105,7 +105,7 @@ func (service *LoginService) Login(username, password string) (*model.LoginSessi
 		return nil, err
 	}
 
-	loginSession := model.NewLoginSession(user.ComCode, user.LoginName, user.DisplayName)
+	loginSession := request.NewLoginSession(user.ComCode, user.LoginName, user.DisplayName)
 	if err := service.sessionService.CreateOrReplace(token, loginSession); err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func (service *LoginService) Login(username, password string) (*model.LoginSessi
 	return loginSession, nil
 }
 
-func (service *LoginService) GetUserByToken(token string) (*model.LoginSession, error) {
+func (service *LoginService) GetUserByToken(token string) (*request.LoginSession, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return nil, myException.TokenInvalidErrEx("token empty")

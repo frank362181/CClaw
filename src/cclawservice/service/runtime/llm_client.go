@@ -29,9 +29,9 @@ import (
 	"time"
 
 	myCommon "my.favorite/cclawservice/common"
-	"my.favorite/cclawservice/controller/model"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
+	"my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service/common"
 	pException "my.favorite/platformutility/exception"
 )
@@ -129,7 +129,7 @@ func (c *Client) Complete(ctx context.Context, llmProvider dataobject.TLlm, syst
 //   - req: 模型与消息;max_tokens 已按 context_window 动态推导(BuildChatCompletionRequest)
 //
 // 错误语义:网络/HTTP/协议错误均包装后返回,由上层映射为业务错误。
-func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *model.ChatRequest) (string, error) {
+func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *request.ChatRequest) (string, error) {
 	req := BuildChatCompletionRequest(llmProvider, systemPrompt, chatReq, false)
 	return c.doCompletion(ctx, llmProvider, req)
 }
@@ -184,7 +184,7 @@ func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.T
 //   - onChunk:    每个正式回复增量到达时被调用,参数为该次增量 delta
 //   - onReasoning: 思考过程增量(reasoning_content)到达时被调用(如推理模型);不并入返回的正式回复
 //   - 返回值:     正式回复文本(累计,不含思考过程)
-func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *model.ChatRequest, onChunk func(delta string), onReasoning func(delta string)) (string, error) {
+func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *request.ChatRequest, onChunk func(delta string), onReasoning func(delta string)) (string, error) {
 	req := BuildChatCompletionRequest(llmProvider, systemPrompt, chatReq, true) // 已强制 stream=true
 	httpReq, err := c.prepareRequest(ctx, llmProvider, req)
 	if err != nil {

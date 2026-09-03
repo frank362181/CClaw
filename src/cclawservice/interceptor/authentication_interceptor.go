@@ -10,7 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"my.favorite/cclawservice/common"
-	"my.favorite/cclawservice/controller/model"
+	"my.favorite/cclawservice/request"
 	common2 "my.favorite/platformutility/common"
 	"my.favorite/platformutility/webbase/middleware/basic"
 	"my.favorite/platformutility/webbase/middleware/service"
@@ -67,7 +67,7 @@ func (i *AuthenticationInterceptor) PreHandle(c *gin.Context) bool {
 
 	// 此时要从数据库中获取指定的token，此时是i必须要经过登录的API
 	userService, ok := i.loginService.(interface {
-		GetUserByToken(string) (*model.LoginSession, error)
+		GetUserByToken(string) (*request.LoginSession, error)
 	})
 	if !ok {
 		//服务器内部出错

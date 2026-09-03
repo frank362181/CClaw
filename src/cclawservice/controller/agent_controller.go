@@ -13,9 +13,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	cclawcommon "my.favorite/cclawservice/common"
-	model2 "my.favorite/cclawservice/controller/model"
 	exception2 "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
+	model "my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/webbase/middleware/basic"
@@ -65,7 +65,7 @@ func (ac *AgentController) GetLLMProviders(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c)
+	loginSession, ok := GetAuthentication(c)
 	if !ok {
 		return
 	}
@@ -100,7 +100,7 @@ func (ac *AgentController) AddLLMProvider(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -140,7 +140,7 @@ func (ac *AgentController) UpdateLLMProvider(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -181,12 +181,12 @@ func (ac *AgentController) RemoveLLMProvider(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
 
-	var req model2.LLMProviderIDRequest
+	var req model.LLMProviderIDRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
 		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
 		return
@@ -222,7 +222,7 @@ func (ac *AgentController) GetAgents(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -257,7 +257,7 @@ func (ac *AgentController) AddAgent(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -298,7 +298,7 @@ func (ac *AgentController) UpdateAgent(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -339,11 +339,11 @@ func (ac *AgentController) RemoveAgent(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
-	var req model2.AgentIDRequest
+	var req model.AgentIDRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
 		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
 		return
@@ -380,12 +380,12 @@ func (ac *AgentController) GetStartupFiles(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
 
-	var req model2.AgentIDRequest
+	var req model.AgentIDRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
 		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
 		return
@@ -421,12 +421,12 @@ func (ac *AgentController) GetStartupFile(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
 
-	var req model2.AgentStartupFileRequest
+	var req model.AgentStartupFileRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
 		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
 		return
@@ -463,7 +463,7 @@ func (ac *AgentController) GetSkills(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -498,7 +498,7 @@ func (ac *AgentController) AddSkill(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -539,7 +539,7 @@ func (ac *AgentController) UpdateSkill(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -580,11 +580,11 @@ func (ac *AgentController) RemoveSkill(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := cclawcommon.GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
-	var req model2.SkillIDRequest
+	var req model.SkillIDRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
 		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
 		return

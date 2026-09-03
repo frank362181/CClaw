@@ -26,10 +26,10 @@ import (
 	"time"
 
 	cCommon "my.favorite/cclawservice/common"
-	"my.favorite/cclawservice/controller/model"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
+	"my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service/common"
 	"my.favorite/cclawservice/service/runtime"
 	pCommon "my.favorite/platformutility/common"
@@ -98,7 +98,7 @@ type ToolEvent struct {
 // SendMessage 接收并应答一条聊天消息(同步模式:等待完整回复后一次性返回)。
 //   - sender: 服务端认证得到的登录名(由认证 interceptor 写入请求上下文),覆盖请求体 senderId 防伪造
 //   - comCode: 服务端认证得到的单位编码,用于 Agent/Provider 的归属隔离(owner_id)
-func (s *ChatService) SendMessage(ctx context.Context, req *model.ChatRequest, sender, comCode string) (*model.ChatResponse, error) {
+func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest, sender, comCode string) (*request.ChatResponse, error) {
 	req, _, systemPrompt, llmProvider, toolSet, err := s.prepareChat(ctx, req, sender, comCode)
 	if err != nil {
 		return nil, err
@@ -112,7 +112,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *model.ChatRequest, s
 
 	// 组装应答
 	now := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
-	resp := &model.ChatResponse{
+	resp := &request.ChatResponse{
 		SenderId:    req.SenderId,
 		SessionId:   req.SessionId,
 		ChatType:    req.ChatType,
@@ -129,7 +129,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *model.ChatRequest, s
 //   - onTool:   工具调用进度事件(intent/running/done/error),由控制器以 tool 事件转发
 //   - 返回值:   完整回复文本
 //   - 与 SendMessage 共用 prepareChat,保证同步/流式两条路径的校验与解析完全一致
-func (s *ChatService) ChatStream(ctx context.Context, req *model.ChatRequest, sender, comCode string, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent)) (string, error) {
+func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, sender, comCode string, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent)) (string, error) {
 	if onStatus != nil {
 		onStatus(cCommon.ChatStatusPreparing, "正在解析任务…")
 	}
@@ -179,7 +179,7 @@ func (s *ChatService) InterruptChat(sender, sessionId string) error {
 // prepareChat 执行同步/流式两条聊天路径的公共前置步骤:
 // 校验/规整入参 → 覆盖 sender → 生成 sessionId → 缺省类型 → 解析 Agent/Provider → 组装 system prompt。
 // 返回规范化后的请求、目标 Agent、系统提示词与解析出的 Provider,供 SendMessage/ChatStream 复用。
-func (s *ChatService) prepareChat(ctx context.Context, req *model.ChatRequest, sender, comCode string) (*model.ChatRequest, dataobject.TAgent, *dataobject.SystemPrompt, dataobject.TLlm, *runtime.ToolSet, error) {
+func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest, sender, comCode string) (*request.ChatRequest, dataobject.TAgent, *dataobject.SystemPrompt, dataobject.TLlm, *runtime.ToolSet, error) {
 	if req == nil {
 		return nil, dataobject.TAgent{}, nil, dataobject.TLlm{}, nil, pException.ParameterEmptyErrorEx("chat request is nil")
 	}
@@ -306,7 +306,7 @@ func (s *ChatService) collectSkillFiles(comCode string, agent dataobject.TAgent)
 }
 
 // completeChat 取回完整回复:function-calling 开启且该 Agent 有可用工具时走工具循环,否则走普通同步调用。
-func (s *ChatService) completeChat(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, req *model.ChatRequest, toolSet *runtime.ToolSet) (string, error) {
+func (s *ChatService) completeChat(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest, toolSet *runtime.ToolSet) (string, error) {
 	if s.functionCalling && toolSet != nil && len(toolSet.LLMTools()) > 0 {
 		return s.runToolLoop(ctx, llmProvider, runtime.BuildChatMessage(systemPrompt, req), toolSet)
 	}

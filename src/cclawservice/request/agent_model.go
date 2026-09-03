@@ -1,4 +1,4 @@
-package model
+package request
 
 // ================ agent 管理请求模型 ================
 

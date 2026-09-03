@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"my.favorite/cclawservice/controller/model"
 	myException "my.favorite/cclawservice/exception"
+	"my.favorite/cclawservice/request"
 	"my.favorite/platformutility/exception"
 	memoryDbCommon "my.favorite/platformutility/memory_db/common"
 	"my.favorite/platformutility/memory_db/m_redis"
@@ -28,9 +28,9 @@ const DefaultAbsoluteSessionLifetime = 8 * 60 * 60 // 8个小时
 // ISessionService owns the bidirectional session indexes and their consistency rules.
 // A username has exactly one current token; an older token must never become current again.
 type ISessionService interface {
-	CreateOrReplace(token string, loginSession *model.LoginSession) error
-	Get(token string) (*model.LoginSession, error)
-	Refresh(token string, loginSession *model.LoginSession) error
+	CreateOrReplace(token string, loginSession *request.LoginSession) error
+	Get(token string) (*request.LoginSession, error)
+	Refresh(token string, loginSession *request.LoginSession) error
 	Revoke(token string) error
 }
 
@@ -65,7 +65,7 @@ func GetSessionService(memoryDB memoryDbCommon.IMemoryDB) (*SessionService, erro
 	return sessionService, nil
 }
 
-func (store *SessionService) CreateOrReplace(token string, loginSession *model.LoginSession) error {
+func (store *SessionService) CreateOrReplace(token string, loginSession *request.LoginSession) error {
 	if err := store.validateSessionInput(token, loginSession); err != nil {
 		return err
 	}
@@ -122,7 +122,7 @@ func (store *SessionService) CreateOrReplace(token string, loginSession *model.L
 	return nil
 }
 
-func (store *SessionService) Get(token string) (*model.LoginSession, error) {
+func (store *SessionService) Get(token string) (*request.LoginSession, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return nil, myException.TokenInvalidErrEx("token empty")
@@ -146,7 +146,7 @@ func (store *SessionService) Get(token string) (*model.LoginSession, error) {
 	return store.getLocked(token)
 }
 
-func (store *SessionService) Refresh(token string, loginSession *model.LoginSession) error {
+func (store *SessionService) Refresh(token string, loginSession *request.LoginSession) error {
 	if err := store.validateSessionInput(token, loginSession); err != nil {
 		return err
 	}
@@ -236,7 +236,7 @@ func (store *SessionService) Revoke(token string) error {
 }
 
 // ================================ private functions & methods ===================================
-func (store *SessionService) getLocked(token string) (*model.LoginSession, error) {
+func (store *SessionService) getLocked(token string) (*request.LoginSession, error) {
 	value, err := store.memoryDB.Get(store.sessionTokenKey(token))
 	if err != nil {
 		if m_redis.IsKeyNotFound(err) {
@@ -245,7 +245,7 @@ func (store *SessionService) getLocked(token string) (*model.LoginSession, error
 		return nil, myException.TokenInvalidErrEx2("session store: read session: %s", err.Error())
 	}
 
-	var loginSession model.LoginSession
+	var loginSession request.LoginSession
 	if err := loginSession.FromJsonString(value); err != nil {
 		return nil, myException.TokenInvalidErrEx2("session store: decode session: %s", err.Error())
 	}
@@ -282,7 +282,7 @@ func (store *SessionService) revokeLocked(token string) error {
 		return myException.TokenInvalidErrEx2("session store: read session for revoke: %s", err.Error())
 	}
 
-	var loginSession model.LoginSession
+	var loginSession request.LoginSession
 	if err := loginSession.FromJsonString(value); err != nil {
 		return myException.TokenInvalidErrEx2("session store: decode session for revoke: %s", err.Error())
 	}
@@ -307,7 +307,7 @@ func (store *SessionService) revokeLocked(token string) error {
 	return nil
 }
 
-func (store *SessionService) sessionTTL(loginSession *model.LoginSession) time.Duration {
+func (store *SessionService) sessionTTL(loginSession *request.LoginSession) time.Duration {
 	//remaining := time.Until(time.Unix(loginSession.AbsoluteExpireAt, 0))
 	remaining := common.GetDatetimeUtilityInstance().GetCurrentDatetime().Until(loginSession.AbsoluteExpireAt)
 	if remaining < store.idleTTL {
@@ -317,7 +317,7 @@ func (store *SessionService) sessionTTL(loginSession *model.LoginSession) time.D
 	return store.idleTTL
 }
 
-func (store *SessionService) parseLuaSessionResult(res interface{}) (*model.LoginSession, error) {
+func (store *SessionService) parseLuaSessionResult(res interface{}) (*request.LoginSession, error) {
 	items, ok := res.([]interface{})
 	if !ok || len(items) < 2 {
 		return nil, myException.TokenInvalidErrEx("session store: unexpected script result")
@@ -335,14 +335,14 @@ func (store *SessionService) parseLuaSessionResult(res interface{}) (*model.Logi
 	case 3:
 		return nil, myException.TokenInvalidErrEx("session expired")
 	}
-	var loginSession model.LoginSession
+	var loginSession request.LoginSession
 	if err := loginSession.FromJsonString(value); err != nil {
 		return nil, myException.TokenInvalidErrEx2("session store: decode session: %s", err.Error())
 	}
 	return &loginSession, nil
 }
 
-func (store *SessionService) validateSessionInput(token string, loginSession *model.LoginSession) error {
+func (store *SessionService) validateSessionInput(token string, loginSession *request.LoginSession) error {
 	if strings.TrimSpace(token) == "" {
 		return exception.ParameterEmptyErrorEx("token empty")
 	}

@@ -24,6 +24,8 @@ type TLlm struct {
 	Vendor  string `json:"vendor"`  //LLM厂家名称,如deepseek,anthropic,OpenAI等
 	Api     string `json:"api"`     //供应商的API协议类型
 
+	ThkNonStreaming bool `json:"thinkingNonStreaming"` //非流模式下是否支持思考,false/true=否/是
+
 	Reasoning   bool `json:"reasoning"`   //是否支持推理
 	ReasoningEx bool `json:"reasoningEx"` //是否支持推理力度参数
 
@@ -34,9 +36,10 @@ type TLlm struct {
 	CachedReadCost  float32 `json:"CachedReadCost"`  //每百万命中缓存读的单价
 	CachedWriteCost float32 `json:"CachedWriteCost"` //每百万命中缓存写的单价
 
-	ContextWindow    uint32 `json:"ContextWindow"`
-	MaxTokens        int    `json:"MaxTokens"` // 单词聊天返回的最大的token数量大小
-	UsageInStreaming bool   `json:"UsageInStreaming"`
+	ContextWindow uint32 `json:"ContextWindow"`
+
+	MaxTokens        int  `json:"MaxTokens"` // 单词聊天返回的最大的token数量大小
+	UsageInStreaming bool `json:"UsageInStreaming"`
 
 	AuthMode uint8 `json:"AuthMode"`
 
@@ -55,6 +58,7 @@ func LlmValues(p *TLlm) map[string]interface{} {
 		"model":              p.Model,
 		"vendor":             p.Vendor,
 		"api":                p.Api,
+		"thk_non_streaming":  p.ThkNonStreaming,
 		"reasoning":          p.Reasoning,
 		"reasoning_ex":       p.ReasoningEx,
 		"input":              p.Input,
@@ -112,8 +116,9 @@ type TAgent struct {
 	ImageEmoji string `json:"ImageEmoji"`
 	ImageTheme string `json:"ImageTheme"`
 
-	CompactionMode    int `json:"CompactionMode"`    //压缩模式
-	ReverseTokenFloor int `json:"ReverseTokenFloor"` //压缩时保留的最小token数量
+	CompactionMode      int `json:"CompactionMode"`      //压缩模式
+	BootstrapTotalChars int `json:"BootstrapTotalChars"` //启动文件最大的大小
+	ReverseTokenFloor   int `json:"ReverseTokenFloor"`   //压缩时保留的最小token数量
 
 	MaxConcurrents int `gorm:"column:max_concurrent" json:"MaxConcurrents"` // DDL 列为 max_concurrent
 	SubAgents      int `json:"SubAgents"`
@@ -127,24 +132,25 @@ type TAgent struct {
 
 func AgentValues(a *TAgent) map[string]interface{} {
 	return map[string]interface{}{
-		"owner_id":            a.OwnerId,
-		"agent_name":          a.AgentName,
-		"description":         a.Description,
-		"primary_model":       a.PrimaryModel,
-		"fallbacks":           a.Fallbacks,
-		"agent_dir":           a.AgentDir,
-		"workspace":           a.Workspace,
-		"is_default":          a.IsDefault,
-		"image_name":          a.ImageName,
-		"image_emoji":         a.ImageEmoji,
-		"image_theme":         a.ImageTheme,
-		"compaction_mode":     a.CompactionMode,
-		"reverse_token_floor": a.ReverseTokenFloor,
-		"max_concurrent":      a.MaxConcurrents,
-		"subagents":           a.SubAgents,
-		"reasoning_mode":      a.ReasoningMode,
-		"tool_progress":       a.ToolProgress,
-		"disabled":            a.Disabled,
+		"owner_id":              a.OwnerId,
+		"agent_name":            a.AgentName,
+		"description":           a.Description,
+		"primary_model":         a.PrimaryModel,
+		"fallbacks":             a.Fallbacks,
+		"agent_dir":             a.AgentDir,
+		"workspace":             a.Workspace,
+		"is_default":            a.IsDefault,
+		"image_name":            a.ImageName,
+		"image_emoji":           a.ImageEmoji,
+		"image_theme":           a.ImageTheme,
+		"compaction_mode":       a.CompactionMode,
+		"bootstrap_total_chars": a.BootstrapTotalChars,
+		"reverse_token_floor":   a.ReverseTokenFloor,
+		"max_concurrent":        a.MaxConcurrents,
+		"subagents":             a.SubAgents,
+		"reasoning_mode":        a.ReasoningMode,
+		"tool_progress":         a.ToolProgress,
+		"disabled":              a.Disabled,
 	}
 }
 

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"my.favorite/cclawservice/controller/model"
 	"my.favorite/cclawservice/model/dataobject"
+	"my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service/ccc"
 	"my.favorite/cclawservice/service/common"
 )
@@ -18,7 +18,7 @@ func BuildSimpleChatMessage(sysMsg, userMsg string) []common.ChatMessage {
 	}
 }
 
-func BuildChatMessage(systemPrompt *dataobject.SystemPrompt, req *model.ChatRequest) []common.ChatMessage {
+func BuildChatMessage(systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest) []common.ChatMessage {
 	return []common.ChatMessage{
 		{Role: "system", Content: systemPrompt.Prompt},
 		{Role: "user", Content: req.ReqMsg},
@@ -55,43 +55,29 @@ func BuildChatCompletionRequestWithString(llmProvider dataobject.TLlm, sysMsg st
 		req.MaxTokens = &maxTokens
 	}
 
-	req.EnableThinking = nonStreamThinkingFlag(llmProvider, stream)
+	// 仅非流式请求按 provider 配置发送 enable_thinking(非流模式下是否思考);
+	// 流式请求保持 nil:thinking 由流式默认开启并经 reasoning_content 返回,不在此关闭。
+	if !stream {
+		req.EnableThinking = new(llmProvider.ThkNonStreaming)
+	}
 	return req
-}
-
-// nonStreamThinkingFlag 判定非流式请求是否需要显式关闭 thinking(enable_thinking=false)。
-//
-// Qwen3 等思考型模型在 OpenAI 兼容网关上的约束:非流式调用不允许 thinking 模式(未显式关闭会返回
-// "parameter.enable_thinking must be set to false for non-streaming calls");thinking 只在流式调用
-// 中经 reasoning_content 增量返回。因此:仅当 stream=false 且目标为 Qwen 系(厂商为 qwen/dashscope/
-// alibaba/aliyun 等通义系,或模型名含 qwen)时附加 enable_thinking=false;流式请求与其他厂商不附加,
-// 避免未知参数被部分网关拒绝。
-func nonStreamThinkingFlag(llmProvider dataobject.TLlm, stream bool) *bool {
-	if stream {
-		return nil
-	}
-	name := strings.ToLower(llmProvider.GetModelName())
-	vendor := strings.ToLower(strings.TrimSpace(llmProvider.Vendor))
-	if strings.Contains(name, "qwen") || strings.Contains(vendor, "qwen") ||
-		strings.Contains(vendor, "dashscope") || strings.Contains(vendor, "alibaba") || strings.Contains(vendor, "aliyun") {
-		flag := false
-		return &flag
-	}
-	return nil
 }
 
 // BuildChatCompletionRequest 构造 chat/completions 请求体。
 // max_tokens 按输入 token 估算做动态计算,保证"估算输入 + max_tokens ≤ context_window",
 // 避免长输入时因超出供应商上下文窗口而报错(同步/流式两条路径共用)。
 // 未配置 ContextWindow(0)时不发送 max_tokens,由供应商使用其默认输出上限。
-func BuildChatCompletionRequest(llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *model.ChatRequest, stream bool) common.ChatCompletionRequest {
+func BuildChatCompletionRequest(llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *request.ChatRequest, stream bool) common.ChatCompletionRequest {
 	messages := BuildChatMessage(systemPrompt, chatReq)
 	req := common.ChatCompletionRequest{
 		Model:    llmProvider.GetModelName(),
 		Messages: messages,
 		Stream:   stream,
 	}
-	req.EnableThinking = nonStreamThinkingFlag(llmProvider, stream)
+	// 仅非流式请求按 provider 配置发送 enable_thinking;流式保持 nil(不关闭 thinking)
+	if !stream {
+		req.EnableThinking = new(llmProvider.ThkNonStreaming)
+	}
 
 	// 动态裁剪 max_tokens:仅当 ContextWindow 已配置时才计算,否则返回 nil
 	maxTokens := ccc.DynamicMaxTokens(llmProvider, messages)
@@ -113,7 +99,10 @@ func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []
 		Stream:   stream,
 		Tools:    tools,
 	}
-	req.EnableThinking = nonStreamThinkingFlag(llmProvider, stream)
+	// 仅非流式请求按 provider 配置发送 enable_thinking;流式保持 nil(不关闭 thinking)
+	if !stream {
+		req.EnableThinking = new(llmProvider.ThkNonStreaming)
+	}
 	mt := ccc.DynamicMaxTokens(llmProvider, messages)
 	if mt == 0 {
 		req.MaxTokens = nil // 应用供应商默认
