@@ -31,7 +31,7 @@ type ConcurrencyGate struct {
 
 var (
 	streamConcurrencyGate = common.GetSingleton(func() *ConcurrencyGate {
-		return &ConcurrencyGate{max: cCommon.DefaultMaxConcurrentStreams}
+		return &ConcurrencyGate{max: cCommon.DefaultMaxStreamConcurrency}
 	}).Instance()
 	chatConcurrencyGate = common.GetSingleton(func() *ConcurrencyGate {
 		return &ConcurrencyGate{max: cCommon.DefaultMaxChatConcurrency}

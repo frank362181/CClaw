@@ -95,6 +95,14 @@ func (m *ServiceMain) Init() error {
 		return exception.ConfigErrorEx2("[Init] failed to load %s error: %s,confuse to startup", m.configFileName, err.Error())
 	}
 
+	// 并发闸上限(ini [server],<=0 用默认):
+	//   - maxConcurrentStreams:SSE 流式连接数
+	//   - maxChatConcurrency:全局聊天(同步+流式)请求数
+	maxStreams, _ := m.configHelper.GetIntValueDefault("server", "maxStreamConcurrency", cCommon.DefaultMaxStreamConcurrency)
+	maxChats, _ := m.configHelper.GetIntValueDefault("server", "maxChatConcurrency", cCommon.DefaultMaxChatConcurrency)
+	m.streamGate = ccc.GetStreamConcurrencyGate(maxStreams)
+	m.chatGate = ccc.GetChatConcurrencyGate(maxChats)
+
 	// 3. initialize the app
 	m.memoryDB = memory_db.CreateMemoryDb(m.configHelper)
 	if m.memoryDB == nil {
@@ -127,14 +135,6 @@ func (m *ServiceMain) Init() error {
 	}
 
 	m.setupSwaggerController()
-
-	// 并发闸上限(ini [server],<=0 用默认):
-	//   - maxConcurrentStreams:SSE 流式连接数
-	//   - maxChatConcurrency:全局聊天(同步+流式)请求数
-	maxStreams, _ := m.configHelper.GetIntValueDefault("server", "maxConcurrentStreams", cCommon.DefaultMaxConcurrentStreams)
-	maxChats, _ := m.configHelper.GetIntValueDefault("server", "maxChatConcurrency", cCommon.DefaultMaxChatConcurrency)
-	m.streamGate = ccc.GetStreamConcurrencyGate(maxStreams)
-	m.chatGate = ccc.GetChatConcurrencyGate(maxChats)
 
 	return nil
 }

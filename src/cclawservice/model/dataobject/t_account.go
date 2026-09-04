@@ -49,3 +49,30 @@ func (account *TAccount) FromJsonString(jsonStr string) error {
 	}
 	return nil
 }
+
+// CachedAccount 账号状态快照(仅身份/状态字段,绝不缓存 LoginKey/LoginPass 等敏感字段)。
+type CachedAccount struct {
+	ComCode     string
+	LoginName   string
+	DisplayName string
+	Disabled    bool
+	Deleted     bool
+	Expired     bool
+	Version     int64 // 来自乐观锁 DVersion,用于版本感知
+}
+
+func (account *CachedAccount) ToJsonString() (string, error) {
+	jsonString, err := json.Marshal(account)
+	if err != nil {
+		return "", err
+	}
+	return string(jsonString), nil
+}
+
+func (account *CachedAccount) FromJsonString(jsonStr string) error {
+	err := json.Unmarshal([]byte(jsonStr), account)
+	if err != nil {
+		return err
+	}
+	return nil
+}

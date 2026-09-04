@@ -37,15 +37,16 @@ const (
 	// AgentToolLoopMax function-calling 工具循环的最大迭代次数(防止模型反复请求工具导致死循环/超时)。
 	AgentToolLoopMax = 5
 
+	// DefaultMaxChatConcurrency 全局聊天并发闸默认上限:每实例同时在聊天请求数(同步+流式)。
+	DefaultMaxChatConcurrency = 1000
+
+	// DefaultMaxStreamConcurrency SSE 流并发闸默认上限:每实例的流式连接数。
+	DefaultMaxStreamConcurrency = 800 // DefaultAgentConcurrency
+
 	// DefaultAgentConcurrency 每 Agent 并发闸默认上限:t_agent.max_concurrent<=0 时采用。
 	DefaultAgentConcurrency = 8
 	// AgentGateWaitTimeout 获取每 Agent 并发许可的最长等待;超时返回 "Agent 忙"。
 	AgentGateWaitTimeout = 30
-
-	// DefaultMaxConcurrentStreams SSE 流并发闸默认上限:每实例的流式连接数。
-	DefaultMaxConcurrentStreams = 640
-	// DefaultMaxChatConcurrency 全局聊天并发闸默认上限:每实例同时在聊天请求数(同步+流式)。
-	DefaultMaxChatConcurrency = 1000
 )
 
 // ==================== agent 启动文档与 skill 文档 ====================
