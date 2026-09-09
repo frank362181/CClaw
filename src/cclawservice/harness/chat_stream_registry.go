@@ -9,7 +9,7 @@
 *   - 中断:中断 API 按 key 查找并调用取消函数,使 LLM 流式读取停止。
 **/
 
-package runtime
+package harness
 
 import (
 	"context"

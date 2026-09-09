@@ -7,7 +7,7 @@
 *
 **/
 
-package service_core
+package core
 
 const (
 	// LuaCreateOrReplace KEYS[1]=userKey(loginName已知) KEYS[2]=tokenKey

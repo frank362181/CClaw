@@ -2,7 +2,7 @@
 * ConcurrencyGate(流式/全局聊天闸)单元测试:上限拒绝、释放后放行、SetMax 生效。
 **/
 
-package ccc
+package core
 
 import "testing"
 

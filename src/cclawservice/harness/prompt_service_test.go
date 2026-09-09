@@ -2,7 +2,7 @@
 * PromptService 与 PromptRepository 的集成测试
 **/
 
-package service
+package harness
 
 import (
 	"os"

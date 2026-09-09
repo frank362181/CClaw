@@ -12,7 +12,7 @@
 *   - 进程内实现(single-instance 部署,与会话绑定/流注册一致);接口可平滑换 Redis 分布式实现。
 **/
 
-package ccc
+package core
 
 import (
 	"context"

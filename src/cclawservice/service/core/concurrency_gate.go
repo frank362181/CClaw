@@ -13,7 +13,7 @@
 *   - 进程内实现(single-instance),与会话绑定/流注册一致。
 **/
 
-package ccc
+package core
 
 import (
 	"sync"

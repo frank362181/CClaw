@@ -18,8 +18,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,12 +29,12 @@ import (
 
 	cCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
+	"my.favorite/cclawservice/harness"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/cclawservice/request"
-	"my.favorite/cclawservice/service/ccc"
 	"my.favorite/cclawservice/service/common"
-	"my.favorite/cclawservice/service/runtime"
+	core2 "my.favorite/cclawservice/service/core"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/database/core"
 	pException "my.favorite/platformutility/exception"
@@ -47,14 +49,31 @@ const MaxChatMessageLen = 4096
 // 向用户推送心跳 progress 行,用于区分"仍在运行"与"挂起"(对长任务工具体验友好)。
 const ToolCallingHeartbeatInterval = 3 * time.Second
 
+// AgentRunTimeoutSecs 单次聊天任务(工具循环 + LLM 生成整段)的应用级最长时长(秒)。
+// 它与传输层 writeTimeout 解耦:任务能跑多久由这里(而非 http.Server 的写超时)界定,
+// 超时返回可读的"任务执行超时",不会再把长任务误报成"request canceled by client"。
+// 可用环境变量 CCLAW_CHAT_RUN_TIMEOUT_SEC(秒)覆盖。
+const AgentRunTimeoutSecs = 600
+
+// chatRunTimeout 返回应用级运行超时:优先取环境变量 CCLAW_CHAT_RUN_TIMEOUT_SEC,
+// 否则用 AgentRunTimeoutSecs 默认值。
+func chatRunTimeout() time.Duration {
+	if v := strings.TrimSpace(pCommon.GetEnvString("CCLAW_CHAT_RUN_TIMEOUT_SEC")); v != "" {
+		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
+			return time.Duration(sec) * time.Second
+		}
+	}
+	return AgentRunTimeoutSecs * time.Second
+}
+
 // ChatService 处理聊天消息:校验 → 解析 Agent/Provider → 组装 prompt → 调用 LLM。
 type ChatService struct {
 	baseService.BaseService
 
 	agentRepo     repo.IAgentRepository
-	promptService *PromptService
-	llmClient     *runtime.Client
-	agentRouter   *runtime.AgentRouter
+	promptService *harness.PromptService
+	llmClient     *harness.Client
+	agentRouter   *harness.AgentRouter
 
 	functionCalling bool // 是否启用 function-calling(由 ini [sandBox] functionCalling 控制)
 }
@@ -66,8 +85,8 @@ var chatService = pCommon.GetSingleton(func() *ChatService {
 			Description: "receive chat messages and reply via the LLM engine",
 		},
 		agentRepo:     nil,
-		promptService: GetPromptService(),
-		llmClient:     runtime.NewClient(),
+		promptService: harness.GetPromptService(),
+		llmClient:     harness.NewClient(),
 		agentRouter:   nil,
 	}
 }).Instance()
@@ -77,7 +96,7 @@ var chatService = pCommon.GetSingleton(func() *ChatService {
 //   - functionCalling:是否启用 function-calling(工具调用),来源于 [sandBox] functionCalling 配置
 func GetChatService(db core.IBaseDatabase, functionCalling bool) baseService.IService {
 	chatService.agentRepo = repo.GetAgentRepository(db)
-	chatService.agentRouter = runtime.GetAgentRouter(chatService.agentRepo)
+	chatService.agentRouter = harness.GetAgentRouter(chatService.agentRepo)
 	chatService.functionCalling = functionCalling
 
 	return chatService
@@ -157,8 +176,14 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	// 派生可取消上下文:客户端断开或用户点击中断都会终止 LLM 流式读取。
 	streamCtx, cancel := context.WithCancel(ctx)
 	key := cCommon.BuildChatStreamKey(sender, req.SessionId)
-	runtime.GetChatStreamRegistry().Register(key, cancel)
-	defer runtime.GetChatStreamRegistry().Unregister(key)
+	harness.GetChatStreamRegistry().Register(key, cancel)
+	defer harness.GetChatStreamRegistry().Unregister(key)
+
+	// 应用级运行超时:界定"这一轮任务最多跑多久"(工具循环 + LLM 生成整段)。
+	// 与传输层 writeTimeout 解耦——任务时长由 chatRunTimeout()(可 env 覆盖)决定,
+	// 超时返回可读的"任务超时"错误,而非依赖 http.Server 写超时去掐断 SSE。
+	runCtx, runCancel := context.WithTimeout(streamCtx, chatRunTimeout())
+	defer runCancel()
 
 	if onStatus != nil {
 		onStatus(cCommon.ChatStatusThinking, "正在思考…")
@@ -168,11 +193,15 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	// 否则保持原有的纯流式转发。
 	var reply string
 	if s.functionCalling && toolSet != nil && len(toolSet.LLMTools()) > 0 {
-		reply, err = s.streamToolLoop(streamCtx, llmProvider, runtime.BuildChatMessage(systemPrompt, req), toolSet, onChunk, onStatus, onReasoning, onTool)
+		reply, err = s.streamToolLoop(runCtx, llmProvider, harness.BuildChatMessage(systemPrompt, req), toolSet, onChunk, onStatus, onReasoning, onTool)
 	} else {
-		reply, err = s.llmClient.ChatCompletionStream(streamCtx, llmProvider, systemPrompt, req, onChunk, onReasoning)
+		reply, err = s.llmClient.ChatCompletionStream(runCtx, llmProvider, systemPrompt, req, onChunk, onReasoning)
 	}
 	if err != nil {
+		// 应用级运行超时:给可读错误,而不是笼统的 "request canceled by client"
+		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			return "", myException.ChatRunTimeoutErrEx2("chat service: run timeout after %s", chatRunTimeout())
+		}
 		return "", myException.LlmError(err, "chat service: runtime stream error")
 	}
 	return reply, nil
@@ -183,7 +212,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 // key 以发送者(服务端认证)为前缀,保证不同用户、不同会话的聊天相互隔离、互不影响。
 func (s *ChatService) InterruptChat(sender, sessionId string) error {
 	key := cCommon.BuildChatStreamKey(sender, sessionId)
-	if !runtime.GetChatStreamRegistry().Cancel(key) {
+	if !harness.GetChatStreamRegistry().Cancel(key) {
 		return myException.ChatNotActiveErrEx2("chat stream not active: %s", sessionId)
 	}
 	logging.LogDebugF("chat service: interrupt chat key:%s", key)
@@ -206,7 +235,7 @@ func (s *ChatService) acquireAgentGate(ctx context.Context, agent dataobject.TAg
 	waitCtx, cancel := context.WithTimeout(ctx, time.Duration(cCommon.AgentGateWaitTimeout)*time.Second)
 	defer cancel()
 
-	release, err := ccc.GetAgentGateRegistry().Acquire(waitCtx, agent.AgentId, limit)
+	release, err := core2.GetAgentGateRegistry().Acquire(waitCtx, agent.AgentId, limit)
 	if err != nil {
 		if ctx.Err() != nil {
 			// 客户端已断开/超时:按取消语义静默处理
@@ -220,7 +249,7 @@ func (s *ChatService) acquireAgentGate(ctx context.Context, agent dataobject.TAg
 // prepareChat 执行同步/流式两条聊天路径的公共前置步骤:
 // 校验/规整入参 → 覆盖 sender → 生成 sessionId → 缺省类型 → 解析 Agent/Provider → 组装 system prompt。
 // 返回规范化后的请求、目标 Agent、系统提示词与解析出的 Provider,供 SendMessage/ChatStream 复用。
-func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest, sender, comCode string) (*request.ChatRequest, dataobject.TAgent, *dataobject.SystemPrompt, dataobject.TLlm, *runtime.ToolSet, error) {
+func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest, sender, comCode string) (*request.ChatRequest, dataobject.TAgent, *dataobject.SystemPrompt, dataobject.TLlm, *harness.ToolSet, error) {
 	if req == nil {
 		return nil, dataobject.TAgent{}, nil, dataobject.TLlm{}, nil, pException.ParameterEmptyErrorEx("chat request is nil")
 	}
@@ -272,7 +301,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 		return nil, dataobject.TAgent{}, nil, dataobject.TLlm{}, nil, myException.ChatLLMErrEx2("chat service: build system prompt error:%s", err.Error())
 	}
 
-	return req, agent, systemPrompt, llmProvider, runtime.LoadToolSet(agentExtensionRoot, skillFiles), nil
+	return req, agent, systemPrompt, llmProvider, harness.LoadToolSet(agentExtensionRoot, skillFiles), nil
 }
 
 // resolveAgent 解析本次会话的目标 Agent(混合路由)。
@@ -347,15 +376,15 @@ func (s *ChatService) collectSkillFiles(comCode string, agent dataobject.TAgent)
 }
 
 // completeChat 取回完整回复:function-calling 开启且该 Agent 有可用工具时走工具循环,否则走普通同步调用。
-func (s *ChatService) completeChat(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest, toolSet *runtime.ToolSet) (string, error) {
+func (s *ChatService) completeChat(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest, toolSet *harness.ToolSet) (string, error) {
 	if s.functionCalling && toolSet != nil && len(toolSet.LLMTools()) > 0 {
-		return s.runToolLoop(ctx, llmProvider, runtime.BuildChatMessage(systemPrompt, req), toolSet)
+		return s.runToolLoop(ctx, llmProvider, harness.BuildChatMessage(systemPrompt, req), toolSet)
 	}
 	return s.llmClient.ChatCompletion(ctx, llmProvider, systemPrompt, req)
 }
 
 // runToolLoop 同步路径的工具调用循环:调用LLM → 执行工具 → 结果回填 → 再次调用,直到模型给出最终文本。
-func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []common.ChatMessage, toolSet *runtime.ToolSet) (string, error) {
+func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []common.ChatMessage, toolSet *harness.ToolSet) (string, error) {
 	for i := 0; i < cCommon.AgentToolLoopMax; i++ {
 		content, calls, err := s.llmClient.CompleteWithTools(ctx, llmProvider, messages, toolSet.LLMTools())
 		if err != nil {
@@ -364,23 +393,23 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 		if len(calls) == 0 {
 			return content, nil
 		}
-		messages = append(messages, runtime.BuildToolCallWithContentMessage(content, calls)) // 缺口1:工具轮文本一并回填
+		messages = append(messages, harness.BuildToolCallWithContentMessage(content, calls)) // 缺口1:工具轮文本一并回填
 		for _, call := range calls {
 			result, err := toolSet.Exec(ctx, call.Function.Name, call.Function.Arguments)
 			if err != nil {
 				result = fmt.Sprintf(`{"error":%q}`, err.Error())
 			}
-			messages = append(messages, runtime.BuildToolResultMessage(call.ID, result))
+			messages = append(messages, harness.BuildToolResultMessage(call.ID, result))
 		}
 	}
-	return "", myException.ChatLLMErrEx2("chat service: tool loop exceeded max iterations(%d)", cCommon.AgentToolLoopMax)
+	return "", myException.ChatToolLoopErrEx2("chat service: tool loop exceeded max iterations(%d)", cCommon.AgentToolLoopMax)
 }
 
 // streamToolLoop 流式路径的工具调用循环:
 // 工具调用阶段实时推送给用户:模型声明调用(intent)→开始执行(running)→结果(done/error),
 // 最终内容增量通过 onChunk 流式转发。底层仍为多次上游请求(OpenAI 兼容协议不支持服务端工具循环),
 // 此处把多轮编排为一条面向客户端的事件流。
-func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []common.ChatMessage, toolSet *runtime.ToolSet, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent)) (string, error) {
+func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []common.ChatMessage, toolSet *harness.ToolSet, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent)) (string, error) {
 	seq := 0 // 本回合工具调用序号(跨轮自增,前端按 seq 追踪同一工具调用)
 	for i := 0; i < cCommon.AgentToolLoopMax; i++ {
 		if i > 0 && onStatus != nil {
@@ -402,7 +431,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 			// 本轮无工具调用:流式内容(早已通过 onChunk 转发)即为最终结果
 			return content, nil
 		}
-		messages = append(messages, runtime.BuildToolCallWithContentMessage(content, calls)) // 工具调用+文本一并回填
+		messages = append(messages, harness.BuildToolCallWithContentMessage(content, calls)) // 工具调用+文本一并回填
 
 		// 同轮多个工具调用并行执行(goroutine 各自跑脚本);
 		// 脚本 stdout 经 lineCh 逐行汇集,由唯一转发 goroutine 串行推送 progress 事件(保证 SSE 无并发写)。
@@ -498,14 +527,14 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 				if onTool != nil {
 					onTool(ToolEvent{Phase: cCommon.ChatToolEventError, Seq: r.item.seq, Name: r.item.name, Detail: r.err.Error()})
 				}
-				messages = append(messages, runtime.BuildToolResultMessage(r.item.callID, fmt.Sprintf(`{"error":%q}`, r.err.Error())))
+				messages = append(messages, harness.BuildToolResultMessage(r.item.callID, fmt.Sprintf(`{"error":%q}`, r.err.Error())))
 				continue
 			}
 			if onTool != nil {
 				onTool(ToolEvent{Phase: cCommon.ChatToolEventDone, Seq: r.item.seq, Name: r.item.name, Detail: pCommon.TruncateRunes(r.result, 600)})
 			}
-			messages = append(messages, runtime.BuildToolResultMessage(r.item.callID, r.result))
+			messages = append(messages, harness.BuildToolResultMessage(r.item.callID, r.result))
 		}
 	}
-	return "", myException.ChatLLMErrEx2("chat service: tool stream loop exceeded max iterations(%d)", cCommon.AgentToolLoopMax)
+	return "", myException.ChatToolLoopErrEx2("chat service: tool stream loop exceeded max iterations(%d)", cCommon.AgentToolLoopMax)
 }

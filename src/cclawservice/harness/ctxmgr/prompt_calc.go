@@ -10,7 +10,7 @@
 *	这属于输出预算侧压缩，只裁剪max_tokens，不裁剪输入本身。
 **/
 
-package ccc
+package ctxmgr
 
 import (
 	"my.favorite/cclawservice/model/dataobject"

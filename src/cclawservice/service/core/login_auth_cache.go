@@ -11,7 +11,7 @@
 *	  - 缓存过期瞬间用 single flight 合并回源,避免打爆 Redis/SQLite。
  */
 
-package service_core
+package core
 
 import (
 	"strings"

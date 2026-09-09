@@ -27,8 +27,9 @@ export const ENV = {
     // 使用一个受保护的只读接口验证恢复的会话
     SESSION_CHECK_PATH: '/getsessionlist',
 
-    // 请求超时时间 (毫秒) — LLM 真实推理较慢,放宽到 120s 以免浏览器提前断开
-    REQUEST_TIMEOUT: 120000,
+    // 请求超时时间 (毫秒) — LLM 真实推理/工具循环较慢,放宽到 30 分钟以免浏览器提前断开
+    // 注意:须不小于服务端 [server] writeTimeout(现为 1800s),否则客户端会比服务端先断
+    REQUEST_TIMEOUT: 1800000,
 
     // 是否开启调试日志
     DEBUG: true,

@@ -14,7 +14,7 @@
 *   - 超时由调用方注入的 http.Client 控制(与 server writeTimeout 解耦)。
 **/
 
-package runtime
+package harness
 
 import (
 	"bufio"

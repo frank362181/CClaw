@@ -1,13 +1,13 @@
 /*
 * file:login_auth_cache_test.go
 * description:
-*	对认证链进程内缓存(AuthCache)的白盒单测(service_core 包内):
+*	对认证链进程内缓存(AuthCache)的白盒单测(core 包内):
 *	  命中/未命中、TTL 过期清理、登出逐出、登录替换逐出、账号缓存失效、singleflight 唤醒。
 *	注:Refresh 滑动窗口(needRefresh)属 service.LoginService 私有方法,
-*	  该用例见 service/login_service_test.go(避免 service_core→service import cycle)。
+*	  该用例见 service/login_service_test.go(避免 core→service import cycle)。
  */
 
-package service_core
+package core
 
 import (
 	"sync"

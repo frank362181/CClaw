@@ -2,7 +2,7 @@
 * AgentGateRegistry 单元测试:并发上限、释放后放行、ctx 取消不泄漏许可。
 **/
 
-package ccc
+package core
 
 import (
 	"context"

@@ -1,12 +1,12 @@
-package runtime
+package harness
 
 import (
 	"fmt"
 	"strings"
 
+	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
-	"my.favorite/cclawservice/service/ccc"
 	"my.favorite/cclawservice/service/common"
 )
 
@@ -80,7 +80,7 @@ func BuildChatCompletionRequest(llmProvider dataobject.TLlm, systemPrompt *datao
 	}
 
 	// 动态裁剪 max_tokens:仅当 ContextWindow 已配置时才计算,否则返回 nil
-	maxTokens := ccc.DynamicMaxTokens(llmProvider, messages)
+	maxTokens := ctxmgr.DynamicMaxTokens(llmProvider, messages)
 	if maxTokens == 0 {
 		req.MaxTokens = nil //应用供应商的默认配置
 	} else {
@@ -103,7 +103,7 @@ func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []
 	if !stream {
 		req.EnableThinking = new(llmProvider.ThkNonStreaming)
 	}
-	mt := ccc.DynamicMaxTokens(llmProvider, messages)
+	mt := ctxmgr.DynamicMaxTokens(llmProvider, messages)
 	if mt == 0 {
 		req.MaxTokens = nil // 应用供应商默认
 	} else {

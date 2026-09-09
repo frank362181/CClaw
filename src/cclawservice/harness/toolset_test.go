@@ -2,7 +2,7 @@
 * ToolSet 单元测试:SKILL.md 解析 + 脚本执行(本地临时目录,无网络依赖)
 **/
 
-package runtime
+package harness
 
 import (
 	"context"

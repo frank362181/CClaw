@@ -15,10 +15,10 @@ import (
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
-	"my.favorite/cclawservice/service/service_core"
+	"my.favorite/cclawservice/service/core"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/common/hash"
-	"my.favorite/platformutility/database/core"
+	databaseCore "my.favorite/platformutility/database/core"
 	"my.favorite/platformutility/exception"
 	memoryDbCommon "my.favorite/platformutility/memory_db/common"
 	"my.favorite/platformutility/webbase/middleware/basic"
@@ -30,12 +30,12 @@ type LoginService struct {
 	baseService.BaseService
 
 	dbAccessor     dataaccessor.IAccessor
-	sessionService service_core.ISessionService
+	sessionService core.ISessionService
 
-	throttleService *service_core.ThrottleService
+	throttleService *core.ThrottleService
 
 	// authCache 进程内短TTL缓存:token→session 与 账号状态,削减认证链对 Redis/SQLite 的每请求访问。
-	authCache *service_core.AuthCache
+	authCache *core.AuthCache
 }
 
 var loginService = common.GetSingleton(func() *LoginService {
@@ -51,7 +51,7 @@ var loginService = common.GetSingleton(func() *LoginService {
 }).Instance()
 
 // GetLoginService builds a fresh service graph instead of mutating a package singleton.
-func GetLoginService(memoryDB memoryDbCommon.IMemoryDB, db core.IBaseDatabase) (*LoginService, error) {
+func GetLoginService(memoryDB memoryDbCommon.IMemoryDB, db databaseCore.IBaseDatabase) (*LoginService, error) {
 	if memoryDB == nil || db == nil {
 		return nil, exception.ParameterEmptyErrorEx("login service: parameters are nil")
 	}
@@ -62,17 +62,17 @@ func GetLoginService(memoryDB memoryDbCommon.IMemoryDB, db core.IBaseDatabase) (
 		return nil, err
 	}
 
-	ss, err := service_core.GetSessionService(memoryDB)
+	ss, err := core.GetSessionService(memoryDB)
 	if err != nil {
 		return nil, myException.TokenInvalidErrEx2("login service: token storage invalid")
 	}
 
-	ts := service_core.NewThrottleService(memoryDB)
+	ts := core.NewThrottleService(memoryDB)
 
 	loginService.dbAccessor = accessor
 	loginService.sessionService = ss
 	loginService.throttleService = ts
-	loginService.authCache = service_core.GetAuthCache() // 重置进程内认证缓存
+	loginService.authCache = core.GetAuthCache() // 重置进程内认证缓存
 
 	return loginService, nil
 }

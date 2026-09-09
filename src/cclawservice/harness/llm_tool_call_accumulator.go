@@ -8,7 +8,7 @@
 * 工具执行不在本包:调用方拿到 ToolCall 后调用执行器,再把结果以 tool 消息回填后继续循环。
 **/
 
-package runtime
+package harness
 
 import (
 	"strings"

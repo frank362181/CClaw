@@ -18,7 +18,7 @@ import (
 	selfInterceptor "my.favorite/cclawservice/interceptor"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/cclawservice/service"
-	"my.favorite/cclawservice/service/ccc"
+	serviceCore "my.favorite/cclawservice/service/core"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/database"
@@ -55,8 +55,8 @@ type ServiceMain struct {
 	startupFileRepo          repo.IAgentFileRepository
 
 	// 并发闸:流式(SSE)在飞连接数、全局聊天在飞请求数(各自上限在 Init 按 ini 配置)
-	streamGate *ccc.ConcurrencyGate
-	chatGate   *ccc.ConcurrencyGate
+	streamGate *serviceCore.ConcurrencyGate
+	chatGate   *serviceCore.ConcurrencyGate
 }
 
 // NewMainApp 相当于构造函数
@@ -100,8 +100,8 @@ func (m *ServiceMain) Init() error {
 	//   - maxChatConcurrency:全局聊天(同步+流式)请求数
 	maxStreams, _ := m.configHelper.GetIntValueDefault("server", "maxStreamConcurrency", cCommon.DefaultMaxStreamConcurrency)
 	maxChats, _ := m.configHelper.GetIntValueDefault("server", "maxChatConcurrency", cCommon.DefaultMaxChatConcurrency)
-	m.streamGate = ccc.GetStreamConcurrencyGate(maxStreams)
-	m.chatGate = ccc.GetChatConcurrencyGate(maxChats)
+	m.streamGate = serviceCore.GetStreamConcurrencyGate(maxStreams)
+	m.chatGate = serviceCore.GetChatConcurrencyGate(maxChats)
 
 	// 3. initialize the app
 	m.memoryDB = memory_db.CreateMemoryDb(m.configHelper)
@@ -308,7 +308,7 @@ func (m *ServiceMain) Destroy() {
 		_ = m.memoryDB.CloseMemoryDb()
 	}
 
-	ccc.GetAgentGateRegistry().Destroy() //释放agent gate
+	serviceCore.GetAgentGateRegistry().Destroy() //释放agent gate
 
 	if m.defaultAgentConfigHelper != nil {
 		m.defaultAgentConfigHelper.Destroy()

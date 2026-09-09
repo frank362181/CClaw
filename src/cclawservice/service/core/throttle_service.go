@@ -2,7 +2,7 @@
 * 用来对用户在登录时做防爆破登录
 **/
 
-package service_core
+package core
 
 import (
 	"strings"

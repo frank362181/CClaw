@@ -18,7 +18,7 @@
 *   - 仅一个可用 Agent 时直接短路返回,不做无谓的路由计算。
 **/
 
-package runtime
+package harness
 
 import (
 	"context"

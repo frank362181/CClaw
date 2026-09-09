@@ -35,7 +35,7 @@ const (
 	// SessionAgentBindingTTLSeconds 会话→Agent 内存绑定的有效期(秒),过期后重新路由。
 	SessionAgentBindingTTLSeconds = 3600
 	// AgentToolLoopMax function-calling 工具循环的最大迭代次数(防止模型反复请求工具导致死循环/超时)。
-	AgentToolLoopMax = 5
+	AgentToolLoopMax = 30
 
 	// DefaultMaxChatConcurrency 全局聊天并发闸默认上限:每实例同时在聊天请求数(同步+流式)。
 	DefaultMaxChatConcurrency = 1000
@@ -137,6 +137,9 @@ const (
 	ConstErrorChatNotActive
 	ConstErrorChatBusy
 	ConstErrorChatServerBusy
+	ConstErrorChatToolLoop
+	ConstErrorChatLLMQuota
+	ConstErrorChatRunTimeout
 )
 
 const (
@@ -162,6 +165,9 @@ const (
 	ConstErrorChatNotActiveMsg     = "当前会话没有进行中的聊天"
 	ConstErrorChatBusyMsg          = "该智能体当前繁忙,请稍后再试"
 	ConstErrorChatServerBusyMsg    = "服务繁忙,请稍后再试"
+	ConstErrorChatToolLoopMsg      = "任务步骤过多未能完成,请缩小范围或分批执行后重试"
+	ConstErrorChatLLMQuotaMsg      = "模型服务额度不足或已耗尽(可能欠费或套餐用尽),请充值/提升配额后重试"
+	ConstErrorChatRunTimeoutMsg    = "任务执行超时,请缩小范围或分批执行后重试"
 )
 
 const (

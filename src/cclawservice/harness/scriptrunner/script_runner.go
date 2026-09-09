@@ -21,16 +21,30 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+
+	"my.favorite/platformutility/common"
 )
 
 const (
-	scriptBin          = "python3"        // 脚本解释器(与 SKILL.md requires.bins 对齐)
-	scriptRunTimeout   = 15 * time.Second // 单次脚本执行超时
-	scriptMaxOutput    = 256 * 1024       // stdout/stderr 各 256KB 上限
-	scriptMaxInputJSON = 64 * 1024        // 传入参数 JSON 上限
+	scriptBin          = "python3"         // 脚本解释器(与 SKILL.md requires.bins 对齐)
+	scriptRunTimeout   = 120 * time.Second // 单次脚本执行默认超时(OCR/大目录耗时,可用 CCLAW_SCRIPT_TIMEOUT_SEC 覆盖)
+	scriptMaxOutput    = 256 * 1024        // stdout/stderr 各 256KB 上限
+	scriptMaxInputJSON = 64 * 1024         // 传入参数 JSON 上限
 )
+
+// resolveScriptTimeout 返回脚本执行超时:优先取环境变量 CCLAW_SCRIPT_TIMEOUT_SEC(秒,>=1),
+// 未设置/非法时回退默认 scriptRunTimeout。用于给 OCR 等长耗时脚本扩容,避免 15s 硬超时。
+func resolveScriptTimeout() time.Duration {
+	if v := common.GetEnvString("CCLAW_SCRIPT_TIMEOUT_SEC"); v != "" {
+		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
+			return time.Duration(sec) * time.Second
+		}
+	}
+	return scriptRunTimeout
+}
 
 // limitedBuffer 限量捕获子进程输出,防止脚本输出洪泛。
 type limitedBuffer struct {
@@ -65,10 +79,10 @@ type ScriptPolicy struct {
 	MaxInputJSON int           // 传入参数 JSON 上限(字节)
 }
 
-// DefaultScriptPolicy 默认安全护栏:python3 / 15s / 256KB / 64KB。
+// DefaultScriptPolicy 默认安全护栏:python3 / 120s(可用 CCLAW_SCRIPT_TIMEOUT_SEC 覆盖) / 256KB / 64KB。
 var DefaultScriptPolicy = ScriptPolicy{
 	Bin:          scriptBin,
-	Timeout:      scriptRunTimeout,
+	Timeout:      resolveScriptTimeout(),
 	MaxOutput:    scriptMaxOutput,
 	MaxInputJSON: scriptMaxInputJSON,
 }

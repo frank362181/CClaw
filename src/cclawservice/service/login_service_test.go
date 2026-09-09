@@ -2,8 +2,8 @@
 * file:login_service_test.go
 * description:
 *	service 包内白盒用例:验证认证链 Refresh 滑动窗口判定(needRefresh)。
-*	放置于此而非 service_core:needRefresh 是 LoginService 私有方法,
-*	放在 service_core 会引入 service_core→service 的 import cycle。
+*	放置于此而非 core:needRefresh 是 LoginService 私有方法,
+*	放在 core 会引入 core→service 的 import cycle。
  */
 
 package service

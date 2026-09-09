@@ -5,7 +5,7 @@
 *   单 agent 短路 → 显式指定 → 会话绑定 → 关键词规则 → LLM 分类 → 默认兜底。
 **/
 
-package runtime
+package harness
 
 import (
 	"context"

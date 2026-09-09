@@ -22,4 +22,7 @@ const (
 	ErrorIdBizChatCanceled
 	ErrorIdBizChatNotActive
 	ErrorIdBizChatBusy
+	ErrorIdBizChatToolLoop
+	ErrorIdBizChatLLMQuota
+	ErrorIdBizChatRunTimeout
 )

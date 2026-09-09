@@ -14,7 +14,7 @@
 * 单个 SKILL.md 解析失败或脚本缺失时跳过该工具,不影响其余工具(与"缺失技能不影响主流程"语义一致)。
 **/
 
-package runtime
+package harness
 
 import (
 	"context"
@@ -25,10 +25,9 @@ import (
 
 	"gopkg.in/yaml.v2"
 	cCommon "my.favorite/cclawservice/common"
+	"my.favorite/cclawservice/harness/scriptrunner"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/service/common"
-	"my.favorite/cclawservice/service/runtime/scriptrunner"
-
 	pCommon "my.favorite/platformutility/common"
 )
 

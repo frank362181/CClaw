@@ -10,7 +10,7 @@ import (
 	exception2 "my.favorite/cclawservice/exception"
 	model "my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service"
-	"my.favorite/cclawservice/service/ccc"
+	"my.favorite/cclawservice/service/core"
 	"my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
 	"my.favorite/platformutility/webbase/middleware/basic"
@@ -21,8 +21,8 @@ import (
 type ChatController struct {
 	baseController.BaseController
 
-	streamGate *ccc.ConcurrencyGate // SSE 流式在飞连接闸
-	chatGate   *ccc.ConcurrencyGate // 全局聊天在飞请求闸
+	streamGate *core.ConcurrencyGate // SSE 流式在飞连接闸
+	chatGate   *core.ConcurrencyGate // 全局聊天在飞请求闸
 }
 
 var chatController = common.GetSingleton(func() *ChatController {
@@ -37,7 +37,7 @@ var chatController = common.GetSingleton(func() *ChatController {
 	}
 }).Instance()
 
-func GetChatController(svc pService.IService, sGate, cGate *ccc.ConcurrencyGate) *ChatController {
+func GetChatController(svc pService.IService, sGate, cGate *core.ConcurrencyGate) *ChatController {
 	chatController.Service = svc
 	chatController.streamGate = sGate
 	chatController.chatGate = cGate
@@ -220,8 +220,8 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 			flusher.Flush()
 			return
 		}
-		// 头部已作为 SSE 发送,无法再返回普通 JSON,改以 error 事件告知前端
-		c.SSEvent("error", gin.H{"msg": cclawcommon.ConstErrorChatLLMMsg})
+		// 头部已作为 SSE 发送,无法再返回普通 JSON,改以 error 事件告知前端(按错误语义给对应文案)
+		c.SSEvent("error", gin.H{"msg": cc.chatErrorMessage(err)})
 		flusher.Flush()
 		return
 	}
@@ -288,6 +288,23 @@ func (cc *ChatController) getChatService(c *gin.Context) (*service.ChatService, 
 	return svc, true
 }
 
+// chatErrorMessage 把聊天业务错误映射为展示给前端的错误文案(SSE error 事件用)。
+// 让"工具循环超限"等可引导的任务错误给出真实原因,而不是笼统的"引擎不可用"。
+func (cc *ChatController) chatErrorMessage(err error) string {
+	switch {
+	case errors.Is(err, exception2.ChatRunTimeoutErr):
+		return cclawcommon.ConstErrorChatRunTimeoutMsg
+	case errors.Is(err, exception2.ChatLLMQuotaErr):
+		return cclawcommon.ConstErrorChatLLMQuotaMsg
+	case errors.Is(err, exception2.ChatToolLoopErr):
+		return cclawcommon.ConstErrorChatToolLoopMsg
+	case errors.Is(err, exception2.ChatLLMErr):
+		return cclawcommon.ConstErrorChatLLMMsg
+	default:
+		return cclawcommon.ConstErrorChatLLMMsg
+	}
+}
+
 // respondChatError 将聊天业务错误映射为 HTTP 状态码
 func (cc *ChatController) respondChatError(c *gin.Context, err error) {
 	switch {
@@ -297,6 +314,15 @@ func (cc *ChatController) respondChatError(c *gin.Context, err error) {
 		basic.GetBaseResponser().Failure(c, http.StatusNotFound, cclawcommon.ConstErrorChatAgentNotFound, cclawcommon.ConstErrorChatAgentNotFoundMsg, nil)
 	case errors.Is(err, exception2.ChatLLMErr):
 		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatLLM, cclawcommon.ConstErrorChatLLMMsg, nil)
+	case errors.Is(err, exception2.ChatLLMQuotaErr):
+		// LLM 额度耗尽/欠费:给出可读的充值/提升配额提示
+		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatLLMQuota, cclawcommon.ConstErrorChatLLMQuotaMsg, nil)
+	case errors.Is(err, exception2.ChatRunTimeoutErr):
+		// 应用级任务超时:给可读的"任务执行超时"提示
+		basic.GetBaseResponser().Failure(c, http.StatusGatewayTimeout, cclawcommon.ConstErrorChatRunTimeout, cclawcommon.ConstErrorChatRunTimeoutMsg, nil)
+	case errors.Is(err, exception2.ChatToolLoopErr):
+		// 工具循环超限:任务步骤过多未能完成,给出可执行提示而非"引擎不可用"
+		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatToolLoop, cclawcommon.ConstErrorChatToolLoopMsg, nil)
 	case errors.Is(err, exception2.ChatCanceledErr):
 		// 客户端已断开/取消请求:响应写不出去,静默结束即可
 		return

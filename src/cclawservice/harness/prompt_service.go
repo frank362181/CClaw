@@ -13,7 +13,7 @@
 * 与 LoginService 保持一致:组合 baseService.BaseService + 工厂方法 GetPromptService()。
 **/
 
-package service
+package harness
 
 import (
 	"path/filepath"
@@ -166,6 +166,11 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 		}
 		sb.WriteString(sections[i].Content)
 	}
+
+	// ---- 输出语言要求(面向中文用户的统一约定;追加在提示词最末,始终生效、不受预算截断) ----
+	sb.WriteString("\n\n## 输出语言\n\n")
+	sb.WriteString("你面向中文用户。所有呈现给用户的输出一律使用简体中文:包括正式回复、思考/推理过程、" +
+		"进度说明与工具调用说明;除非用户明确要求使用其他语言。")
 
 	return &dataobject.SystemPrompt{
 		AgentId:   agent.AgentId,
