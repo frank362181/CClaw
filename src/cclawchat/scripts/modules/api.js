@@ -66,13 +66,17 @@ async function runRealChat(convId, content, token, signal, onChunk, onComplete) 
  * 真实流式聊天请求：POST /api/chat/stream（SSE）。
  * - 通过原生 fetch 读取 response.body 流并解析 SSE 事件：
  *     data: {"status":"...","text":"..."} → Agent 阶段状态，回调 onStatus(内容开始前)
- *     data: {"reply":"..."} → 增量文本，累加后回调 onChunk(累计内容)
+ *     data: {"reply":"..."}   → 增量文本，累加后回调 onChunk(累计内容)
+ *     data: {"delta":"..."}   → 思考过程增量，回调 onReasoning
+ *     data: {phase,seq,name}  → 工具调用进度，回调 onTool
+ *     data: {code,msg}        → 收尾提示(truncated/content_filter/incomplete)，回调 onNotice
+ *     data: {ts}              → 心跳保活，忽略
  *     data: [DONE]            → 结束标记，触发 onComplete
  *     data: {"msg":"..."}     → 后端错误事件，抛出 Error
  * - 携带 TIMESTAMP/NONCE/SIGNATURE（防重放）与 AUTHORIZATION 令牌，与登录一致。
  * - 支持 signal 取消（AbortController），取消时静默结束不触发完成回调。
  */
-async function runRealChatStream(convId, content, token, signal, onChunk, onComplete, onStatus, onReasoning, onTool) {
+async function runRealChatStream(convId, content, token, signal, onChunk, onComplete, onStatus, onReasoning, onTool, onNotice) {
     const body = {
         sessionId: convId,
         requestMsg: content,
@@ -128,13 +132,17 @@ async function runRealChatStream(convId, content, token, signal, onChunk, onComp
             return false;
         }
         if (payload && payload.interrupt !== undefined) {
-            // 服务端主动中断（用户点击中断按钮，思考/推理阶段尚无正式回复）：结束流
-            onComplete?.(accumulated);
+            // 服务端主动中断（用户点击中断按钮，思考/推理阶段尚无正式回复）：由读取循环统一收尾
             return true;
         }
         if (payload && payload.phase && typeof payload.name === 'string') {
             // 工具调用进度事件（intent/running/done/error），供工具卡片渲染
             onTool?.(payload);
+            return false;
+        }
+        if (payload && typeof payload.code === 'string' && typeof payload.msg === 'string') {
+            // 收尾提示（truncated/content_filter/incomplete）：独立事件，不覆盖已输出内容
+            onNotice?.(payload);
             return false;
         }
         if (payload && typeof payload.reply === 'string' && payload.reply) {
@@ -173,14 +181,14 @@ async function runRealChatStream(convId, content, token, signal, onChunk, onComp
 }
 
 export const API = {
-    sendMessageStream(convId, content, token, onChunk, onComplete, onError, onStatus, onReasoning, onTool) {
+    sendMessageStream(convId, content, token, onChunk, onComplete, onError, onStatus, onReasoning, onTool, onNotice) {
         const controller = new AbortController();
         // SSE 为默认真实路径；ENABLE_MOCK 时走模拟流；CHAT_STREAM_FORMAT 非 'sse' 时回退同步 JSON
         const useStream = CONFIG.CHAT_STREAM_FORMAT === 'sse';
         const task = CONFIG.ENABLE_MOCK
             ? runMockStream(content, controller.signal, onChunk, onComplete, onStatus)
             : useStream
-                ? runRealChatStream(convId, content, token, controller.signal, onChunk, onComplete, onStatus, onReasoning, onTool)
+                ? runRealChatStream(convId, content, token, controller.signal, onChunk, onComplete, onStatus, onReasoning, onTool, onNotice)
                 : runRealChat(convId, content, token, controller.signal, onChunk, onComplete);
         task.catch(error => {
             if (error.name !== 'AbortError' && !controller.signal.aborted) onError?.(error);

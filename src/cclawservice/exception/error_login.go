@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime"
 
+	"my.favorite/cclawservice/common"
 	"my.favorite/platformutility/exception"
 )
 
@@ -15,6 +16,7 @@ type ErrorUserPasswordUnmatch struct {
 var UserPasswordUnmatchErr = &ErrorUserPasswordUnmatch{
 	exception.ErrorDescription{
 		ErrTxt:   "",
+		ErrDesc:  common.ConstErrorUserNamePasswordUnmatchMsg,
 		ErrId:    ErrorIdBizUserNamePasswordUnmatched,
 		FileName: "",
 		LineNo:   -1,
@@ -26,6 +28,7 @@ func UserPasswordUnmatchEx(errTxt string) *ErrorUserPasswordUnmatch {
 	return &ErrorUserPasswordUnmatch{
 		exception.ErrorDescription{
 			ErrTxt:   errTxt,
+			ErrDesc:  common.ConstErrorUserNamePasswordUnmatchMsg,
 			ErrId:    ErrorIdBizUserNamePasswordUnmatched,
 			FileName: file,
 			LineNo:   line,
@@ -39,6 +42,7 @@ func UserPasswordUnmatchEx2(errTxt string, a ...interface{}) *ErrorUserPasswordU
 	return &ErrorUserPasswordUnmatch{
 		exception.ErrorDescription{
 			ErrTxt:   argsString,
+			ErrDesc:  common.ConstErrorUserNamePasswordUnmatchMsg,
 			ErrId:    ErrorIdBizUserNamePasswordUnmatched,
 			FileName: file,
 			LineNo:   line,
@@ -66,6 +70,7 @@ type ErrorInvalidToken struct {
 var TokenInvalidErr = &ErrorInvalidToken{
 	exception.ErrorDescription{
 		ErrTxt:   "",
+		ErrDesc:  common.ConstErrorUserUnAuthorizedMsg,
 		ErrId:    ErrorIdBizInvalidToken,
 		FileName: "",
 		LineNo:   -1,
@@ -77,6 +82,7 @@ func TokenInvalidErrEx(errTxt string) *ErrorInvalidToken {
 	return &ErrorInvalidToken{
 		exception.ErrorDescription{
 			ErrTxt:   errTxt,
+			ErrDesc:  common.ConstErrorUserUnAuthorizedMsg,
 			ErrId:    ErrorIdBizInvalidToken,
 			FileName: file,
 			LineNo:   line,
@@ -90,6 +96,7 @@ func TokenInvalidErrEx2(errTxt string, a ...interface{}) *ErrorInvalidToken {
 	return &ErrorInvalidToken{
 		exception.ErrorDescription{
 			ErrTxt:   argsString,
+			ErrDesc:  common.ConstErrorUserUnAuthorizedMsg,
 			ErrId:    ErrorIdBizInvalidToken,
 			FileName: file,
 			LineNo:   line,

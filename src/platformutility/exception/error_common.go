@@ -2,6 +2,7 @@
 *
 * @Summary:
 *	定义全局使用的 异常和错误类型
+*   所有面向全局的异常公共使用的异常基类、函数等
 * @Date:
 *	Jun 20, 2026
 * @Author:
@@ -24,9 +25,14 @@ func IsContextCanceled(ctx context.Context, err error) bool {
 
 type ErrorDescription struct {
 	ErrTxt   string
+	ErrDesc  string // 面向用户的错误描述
 	ErrId    int
 	FileName string //错误发生的文件
 	LineNo   int    //错误发生的行号
+}
+
+func (err *ErrorDescription) Description() string {
+	return err.ErrDesc
 }
 
 func (err *ErrorDescription) Error() string {
@@ -43,6 +49,7 @@ func (err *ErrorDescription) Is(target error) bool {
 
 var UnknownError = &ErrorDescription{
 	ErrTxt:   "",
+	ErrDesc:  "Unknown error",
 	ErrId:    ErrorIdUnknown,
 	FileName: "",
 	LineNo:   -1,
@@ -53,6 +60,7 @@ func UnknownErrorEx(errTxt string) *ErrorDescription {
 	return &ErrorDescription{
 		ErrTxt:   errTxt,
 		ErrId:    ErrorIdUnknown,
+		ErrDesc:  errTxt,
 		FileName: file,
 		LineNo:   line,
 	}

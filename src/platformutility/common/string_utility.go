@@ -6,6 +6,16 @@ import (
 	"strings"
 )
 
+func ContainsString(text string, substrings []string) bool {
+	for _, s := range substrings {
+		if s != "" && strings.Contains(text, s) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // TruncateRunes 按 rune 安全截断,避免截断多字节字符;fast-path 直接按字节比较。
 func TruncateRunes(s string, max int) string {
 	if max <= 0 || len(s) <= max {

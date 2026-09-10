@@ -11,13 +11,8 @@ const (
 	ErrorIdBizInvalidToken
 	ErrorIdBizDatabase
 	ErrorIdBizPrompt
-	ErrorIdBizAgentParameter
-	ErrorIdBizAgentNotFound
-	ErrorIdBizAgentConflict
 	ErrorIdBizAgentWorkspace
 	ErrorIdBizAgentInternal
-	ErrorIdBizChatParameter
-	ErrorIdBizChatAgentNotFound
 	ErrorIdBizChatLLM
 	ErrorIdBizChatCanceled
 	ErrorIdBizChatNotActive
@@ -25,4 +20,12 @@ const (
 	ErrorIdBizChatToolLoop
 	ErrorIdBizChatLLMQuota
 	ErrorIdBizChatRunTimeout
+	ErrorIdBizChatLLMAuth
+	ErrorIdBizChatLLMForbidden
+	ErrorIdBizChatLLMNotFound
+	ErrorIdBizChatLLMInvalidRequest
+	ErrorIdBizChatLLMRateLimit
+	ErrorIdBizChatLLMContentFilter
+	ErrorIdBizHarness
+	ErrorIdBizLlmStatus //流式聊天过程中LLM的状态异常
 )

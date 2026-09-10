@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	cclawcommon "my.favorite/cclawservice/common"
@@ -159,8 +161,13 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 	// SSE 写端安全(单 goroutine 泵内同步调用,无并发写竞争):
 	// 每次写入前检查请求上下文;一旦客户端断开(ctx 取消),立即停止继续向死连接
 	// 写/Flush,并主动取消上游流式读取(与中断同源),避免"写错误被忽略后仍空转转发"。
+	// SSE 写端并发安全:流式泵与心跳 goroutine 都会写 SSE,必须串行化(gin Writer 非并发安全)。
+	var emitMu sync.Mutex
+	lastEmitAt := time.Now()
 	disconnected := false
-	emit := func(name string, payload gin.H) {
+	emit := func(name string, payload any) {
+		emitMu.Lock()
+		defer emitMu.Unlock()
 		if disconnected {
 			return
 		}
@@ -174,7 +181,41 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 		}
 		c.SSEvent(name, payload)
 		flusher.Flush()
+		lastEmitAt = time.Now()
 	}
+
+	// 空闲心跳:长时间无任何事件时发送 heartbeat 保活(避免代理/浏览器因静默断开 SSE)。
+	heartbeatStop := make(chan struct{})
+	heartbeatDone := make(chan struct{})
+	defer func() {
+		close(heartbeatStop)
+		<-heartbeatDone // 等心跳协程退出,避免 handler 返回后仍写 SSE
+	}()
+	go func() {
+		defer close(heartbeatDone)
+		interval := time.Duration(cclawcommon.ChatStreamHeartbeatSecs) * time.Second
+		if interval <= 0 {
+			return
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatStop:
+				return
+			case <-c.Request.Context().Done():
+				return
+			case <-ticker.C:
+				emitMu.Lock()
+				idle := time.Since(lastEmitAt)
+				emitMu.Unlock()
+				if idle < interval {
+					continue // 期间有事件往来,无需心跳
+				}
+				emit("heartbeat", gin.H{"ts": time.Now().Unix()})
+			}
+		}
+	}()
 
 	// 逐块转发上游增量给浏览器;内容开始前先以 status 事件报告 Agent 阶段(解析任务/思考等)
 	streamed := false
@@ -193,6 +234,10 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 		func(evt service.ToolEvent) {
 			// 工具调用进度(intent/running/done/error):实时转发,供前端渲染工具调用卡片
 			emit("tool", gin.H{"phase": evt.Phase, "seq": evt.Seq, "name": evt.Name, "detail": evt.Detail})
+		},
+		func(code, msg string) {
+			// 收尾提示(长度截断/内容合规):独立事件,不覆盖已输出内容
+			emit("notice", gin.H{"code": code, "msg": msg})
 		})
 
 	if err != nil {
@@ -204,32 +249,30 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 			// 服务端主动中断(用户点击中断按钮):浏览器仍保持 SSE 连接,
 			// 发送结束标记让前端正常收尾,避免误判为"引擎不可用"。
 			if streamed {
-				c.SSEvent("message", "[DONE]")
+				emit("message", "[DONE]")
 			} else {
 				// 思考/推理阶段被中断(尚无正式回复):发 interrupt 事件告知前端
-				c.SSEvent("interrupt", gin.H{"msg": cclawcommon.ConstErrorChatCanceledMsg})
+				// (需带 interrupt 标记,前端据此识别为正常结束而非错误)
+				emit("interrupt", gin.H{"interrupt": true, "msg": cclawcommon.ConstErrorChatCanceledMsg})
 			}
-			flusher.Flush()
 			return
 		}
 		if streamed {
-			// 已向浏览器输出过内容:保留已送达部分,以 [DONE] 正常收尾,
+			// 已向浏览器输出过内容:先以 notice 告知"回答可能不完整",再以 [DONE] 正常收尾,
 			// 避免 error 事件把已输出的回复覆盖成"引擎不可用"
 			// (上游错误已在 chat_service.LlmError 记录日志,不影响诊断)。
-			c.SSEvent("message", "[DONE]")
-			flusher.Flush()
+			emit("notice", gin.H{"code": cclawcommon.ChatNoticeIncomplete, "msg": cclawcommon.ConstChatNoticeIncompleteMsg})
+			emit("message", "[DONE]")
 			return
 		}
 		// 头部已作为 SSE 发送,无法再返回普通 JSON,改以 error 事件告知前端(按错误语义给对应文案)
-		c.SSEvent("error", gin.H{"msg": cc.chatErrorMessage(err)})
-		flusher.Flush()
+		emit("error", gin.H{"msg": exception2.GetUserMsgFromError(err)})
 		return
 	}
 
-	// 正常结束标记(客户端已断开则跳过)
+	// 正常结束标记(客户端已断开则跳过;避免向死连接写、也不误触发中断)
 	if c.Request.Context().Err() == nil {
-		c.SSEvent("message", "[DONE]")
-		flusher.Flush()
+		emit("message", "[DONE]")
 	}
 }
 
@@ -288,23 +331,6 @@ func (cc *ChatController) getChatService(c *gin.Context) (*service.ChatService, 
 	return svc, true
 }
 
-// chatErrorMessage 把聊天业务错误映射为展示给前端的错误文案(SSE error 事件用)。
-// 让"工具循环超限"等可引导的任务错误给出真实原因,而不是笼统的"引擎不可用"。
-func (cc *ChatController) chatErrorMessage(err error) string {
-	switch {
-	case errors.Is(err, exception2.ChatRunTimeoutErr):
-		return cclawcommon.ConstErrorChatRunTimeoutMsg
-	case errors.Is(err, exception2.ChatLLMQuotaErr):
-		return cclawcommon.ConstErrorChatLLMQuotaMsg
-	case errors.Is(err, exception2.ChatToolLoopErr):
-		return cclawcommon.ConstErrorChatToolLoopMsg
-	case errors.Is(err, exception2.ChatLLMErr):
-		return cclawcommon.ConstErrorChatLLMMsg
-	default:
-		return cclawcommon.ConstErrorChatLLMMsg
-	}
-}
-
 // respondChatError 将聊天业务错误映射为 HTTP 状态码
 func (cc *ChatController) respondChatError(c *gin.Context, err error) {
 	switch {
@@ -323,6 +349,24 @@ func (cc *ChatController) respondChatError(c *gin.Context, err error) {
 	case errors.Is(err, exception2.ChatToolLoopErr):
 		// 工具循环超限:任务步骤过多未能完成,给出可执行提示而非"引擎不可用"
 		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatToolLoop, cclawcommon.ConstErrorChatToolLoopMsg, nil)
+	case errors.Is(err, exception2.ChatLLMAuthErr):
+		// 上游鉴权失败:属配置类错误(API Key 无效/未配置)
+		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatLLMAuth, cclawcommon.ConstErrorChatLLMAuthMsg, nil)
+	case errors.Is(err, exception2.ChatLLMForbiddenErr):
+		// 无权访问模型(未开通/未授权/已下线)
+		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatLLMForbidden, cclawcommon.ConstErrorChatLLMForbiddenMsg, nil)
+	case errors.Is(err, exception2.ChatLLMNotFoundErr):
+		// 模型不存在/名称配置错误
+		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatLLMNotFound, cclawcommon.ConstErrorChatLLMNotFoundMsg, nil)
+	case errors.Is(err, exception2.ChatLLMInvalidRequestErr):
+		// 请求被上游拒绝(参数/上下文不合法)
+		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatLLMInvalidRequest, cclawcommon.ConstErrorChatLLMInvalidRequestMsg, nil)
+	case errors.Is(err, exception2.ChatLLMRateLimitErr):
+		// 上游限流:HTTP 429,可稍后重试
+		basic.GetBaseResponser().Failure(c, http.StatusTooManyRequests, cclawcommon.ConstErrorChatLLMRateLimit, cclawcommon.ConstErrorChatLLMRateLimitMsg, nil)
+	case errors.Is(err, exception2.ChatLLMContentFilterErr):
+		// 内容安全拦截:引导用户修改输入
+		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatLLMContentFilter, cclawcommon.ConstErrorChatLLMContentFilterMsg, nil)
 	case errors.Is(err, exception2.ChatCanceledErr):
 		// 客户端已断开/取消请求:响应写不出去,静默结束即可
 		return

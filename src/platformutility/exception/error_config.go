@@ -13,6 +13,7 @@ type ConfigErrorDescription struct {
 var ConfigError = &ConfigErrorDescription{
 	ErrorDescription{
 		ErrTxt:   "",
+		ErrDesc:  ErrorIdSysConfigRWTxt,
 		ErrId:    ErrorIdSysConfigRW,
 		FileName: "",
 		LineNo:   -1,
@@ -24,6 +25,7 @@ func ConfigErrorEx(errTxt string) *ConfigErrorDescription {
 	return &ConfigErrorDescription{
 		ErrorDescription{
 			ErrTxt:   errTxt,
+			ErrDesc:  errTxt,
 			ErrId:    ErrorIdSysConfigRW,
 			FileName: file,
 			LineNo:   line,
@@ -37,6 +39,7 @@ func ConfigErrorEx2(errTxt string, a ...interface{}) *ConfigErrorDescription {
 	return &ConfigErrorDescription{
 		ErrorDescription{
 			ErrTxt:   argsString,
+			ErrDesc:  errTxt,
 			ErrId:    ErrorIdSysConfigRW,
 			FileName: file,
 			LineNo:   line,

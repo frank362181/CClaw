@@ -167,6 +167,21 @@ export const State = {
         return true;
     },
 
+    // 记录流式收尾提示(truncated/content_filter/incomplete;仅内存,不持久化)。
+    // 同一 code 去重;供抽屉重渲染/消息重渲染时恢复提示。
+    updateMessageNotice(convId, msgId, notice, { persist = false } = {}) {
+        const conv = this.conversations.find(c => c.id === convId);
+        const msg = conv?.messages.find(item => item.id === msgId);
+        if (!msg || !notice || !notice.code) return false;
+        if (!Array.isArray(msg.notices)) msg.notices = [];
+        const entry = { code: String(notice.code), msg: String(notice.msg || '') };
+        const idx = msg.notices.findIndex(n => n.code === entry.code);
+        if (idx >= 0) msg.notices[idx] = entry;
+        else msg.notices.push(entry);
+        if (persist) this.save();
+        return true;
+    },
+
     // 标记消息为“已中断”（用户点击中断按钮停止流式聊天）。
     // 持久化，便于重渲染/刷新后仍展示中断标记。
     markMessageInterrupted(convId, msgId) {

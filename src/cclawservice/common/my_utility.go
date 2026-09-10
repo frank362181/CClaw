@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
@@ -73,51 +72,51 @@ func NormalizeOwner(ownerId *string) {
 
 func ValidateLLMProvider(p dataobject.TLlm) error {
 	if strings.TrimSpace(p.ProviderId) == "" {
-		return myException.AgentParameterErrEx("provider id is empty")
+		return pException.ParameterEmptyErrorEx("provider id is empty")
 	}
 	if strings.TrimSpace(p.ProviderName) == "" {
-		return myException.AgentParameterErrEx("provider name is empty")
+		return pException.ParameterEmptyErrorEx("provider name is empty")
 	}
 	if strings.TrimSpace(p.BaseUrl) == "" {
-		return myException.AgentParameterErrEx("provider base url is empty")
+		return pException.ParameterEmptyErrorEx("provider base url is empty")
 	}
 	return nil
 }
 
 func ValidateAgent(a dataobject.TAgent) error {
 	if strings.TrimSpace(a.AgentId) == "" {
-		return myException.AgentParameterErrEx("agent id is empty")
+		return pException.ParameterEmptyErrorEx("agent id is empty")
 	}
 	if strings.TrimSpace(a.AgentName) == "" {
-		return myException.AgentParameterErrEx("agent name is empty")
+		return pException.ParameterEmptyErrorEx("agent name is empty")
 	}
 	if strings.TrimSpace(a.PrimaryModel) == "" {
-		return myException.AgentParameterErrEx("agent primary model is empty")
+		return pException.ParameterEmptyErrorEx("agent primary model is empty")
 	}
 	if strings.TrimSpace(a.AgentDir) == "" {
-		return myException.AgentParameterErrEx("agent dir is empty")
+		return pException.ParameterEmptyErrorEx("agent dir is empty")
 	}
 	if !pCommon.IsSafeDir(a.AgentDir) {
-		return myException.AgentParameterErrEx("agent dir is an illegal path")
+		return pException.ParameterEmptyErrorEx("agent dir is an illegal path")
 	}
 	if strings.TrimSpace(a.Workspace) == "" {
-		return myException.AgentParameterErrEx("agent workspace is empty")
+		return pException.ParameterEmptyErrorEx("agent workspace is empty")
 	}
 	return nil
 }
 
 func ValidateSkill(sk dataobject.TSkill) error {
 	if strings.TrimSpace(sk.SkillId) == "" {
-		return myException.AgentParameterErrEx("skill id is empty")
+		return pException.ParameterEmptyErrorEx("skill id is empty")
 	}
 	if strings.TrimSpace(sk.SkillName) == "" {
-		return myException.AgentParameterErrEx("skill name is empty")
+		return pException.ParameterEmptyErrorEx("skill name is empty")
 	}
 	if strings.TrimSpace(sk.SkillDir) == "" {
-		return myException.AgentParameterErrEx("skill dir is empty")
+		return pException.ParameterEmptyErrorEx("skill dir is empty")
 	}
 	if sk.SkillScope < dataobject.SkillScopeSystem || sk.SkillScope > dataobject.SkillScopePlugin {
-		return myException.AgentParameterErrEx("skill scope is invalid")
+		return pException.ParameterEmptyErrorEx("skill scope is invalid")
 	}
 	return nil
 }

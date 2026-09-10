@@ -18,6 +18,7 @@ import (
 	model "my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service"
 	"my.favorite/platformutility/common"
+	pException "my.favorite/platformutility/exception"
 	"my.favorite/platformutility/webbase/middleware/basic"
 	"my.favorite/platformutility/webbase/middleware/controller"
 	baseController "my.favorite/platformutility/webbase/middleware/controller"
@@ -613,15 +614,15 @@ func (ac *AgentController) getAgentService(c *gin.Context) (*service.AgentServic
 // respondAgentError 业务层的错误表现为http正常,但业务层异常
 func (ac *AgentController) respondAgentError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, exception2.AgentParameterErr):
+	case errors.Is(err, pException.ParameterEmptyError):
 		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
-	case errors.Is(err, exception2.AgentNotFoundErr):
+	case errors.Is(err, pException.UnMatchError):
 		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorAgentNotFound, cclawcommon.ConstErrorAgentNotFoundMsg, nil)
+	case errors.Is(err, pException.MatchError):
+		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorAgentConflict, cclawcommon.ConstErrorAgentConflictMsg, nil)
 	case errors.Is(err, exception2.AgentWorkspaceErr):
 		// 智能体工作区目录缺失/非法:与"记录不存在"区分,便于前端给准确提示
 		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorAgentWorkspace, cclawcommon.ConstErrorAgentWorkspaceMsg, nil)
-	case errors.Is(err, exception2.AgentConflictErr):
-		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorAgentConflict, cclawcommon.ConstErrorAgentConflictMsg, nil)
 	case errors.Is(err, exception2.AgentInternalErr):
 		// 服务/仓库未初始化等内部错误
 		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)

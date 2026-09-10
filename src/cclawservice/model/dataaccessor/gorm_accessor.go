@@ -135,7 +135,7 @@ func (g *GormAccessor) CreateLLMProvider(p *dataobject.TLlm) error {
 		return exception2.DatabaseQueryErrEx2("check runtime provider error:%s", err.Error())
 	}
 	if count > 0 {
-		return exception2.AgentConflictErrEx2("runtime provider already exists:%s", p.ProviderId)
+		return exception.MatchErrorEx2("runtime provider already exists:%s", p.ProviderId)
 	}
 
 	// 软删除记录占用唯一键时复活
@@ -167,13 +167,13 @@ func (g *GormAccessor) UpdateLLMProvider(p *dataobject.TLlm) error {
 	var cur dataobject.TLlm
 	err := g.gormDb.Where("provider_id = ? AND owner_id = ? AND deleted = 0", p.ProviderId, p.OwnerId).First(&cur).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return exception2.AgentNotFoundErrEx("runtime provider not found:" + p.ProviderId)
+		return exception.UnMatchErrorEx2("runtime provider not found: %s", p.ProviderId)
 	}
 	if err != nil {
 		return exception2.DatabaseQueryErrEx2("load runtime provider error:%s", err.Error())
 	}
 	if cur.DVersion != p.DVersion {
-		return exception2.AgentConflictErrEx2("runtime provider version conflict:%s", p.ProviderId)
+		return exception.UnMatchErrorEx2("runtime provider version conflict:%s", p.ProviderId)
 	}
 
 	values := dataobject.LlmValues(p)
@@ -185,7 +185,7 @@ func (g *GormAccessor) UpdateLLMProvider(p *dataobject.TLlm) error {
 		return exception2.DatabaseQueryErrEx2("update runtime provider error:%s", res.Error.Error())
 	}
 	if res.RowsAffected == 0 {
-		return exception2.AgentConflictErrEx2("runtime provider version conflict:%s", p.ProviderId)
+		return exception.MatchErrorEx2("runtime provider version conflict:%s", p.ProviderId)
 	}
 
 	p.DVersion.Int64++ // 同步内存版本,供仓库缓存更新
@@ -201,7 +201,7 @@ func (g *GormAccessor) DeleteLLMProvider(ownerId, providerId string) error {
 		return exception2.DatabaseQueryErrEx2("delete runtime provider error:%s", res.Error.Error())
 	}
 	if res.RowsAffected == 0 {
-		return exception2.AgentNotFoundErrEx("runtime provider not found:" + providerId)
+		return exception.UnMatchErrorEx2("runtime provider not found:%s", providerId)
 	}
 	return nil
 }
@@ -215,7 +215,7 @@ func (g *GormAccessor) CreateAgent(a *dataobject.TAgent) error {
 		return exception2.DatabaseQueryErrEx2("check agent error:%s", err.Error())
 	}
 	if count > 0 {
-		return exception2.AgentConflictErrEx2("agent already exists:%s", a.AgentId)
+		return exception.MatchErrorEx2("agent already exists:%s", a.AgentId)
 	}
 
 	values := dataobject.AgentValues(a)
@@ -243,13 +243,13 @@ func (g *GormAccessor) UpdateAgent(a *dataobject.TAgent) error {
 	var cur dataobject.TAgent
 	err := g.gormDb.Where("agent_id = ? AND owner_id = ? AND deleted = 0", a.AgentId, a.OwnerId).First(&cur).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return exception2.AgentNotFoundErrEx("agent not found:" + a.AgentId)
+		return exception.UnMatchErrorEx2("agent not found:%s", a.AgentId)
 	}
 	if err != nil {
 		return exception2.DatabaseQueryErrEx2("load agent error:%s", err.Error())
 	}
 	if cur.DVersion != a.DVersion {
-		return exception2.AgentConflictErrEx2("agent version conflict:%s", a.AgentId)
+		return exception.UnMatchErrorEx2("agent version conflict:%s", a.AgentId)
 	}
 
 	values := dataobject.AgentValues(a)
@@ -261,7 +261,7 @@ func (g *GormAccessor) UpdateAgent(a *dataobject.TAgent) error {
 		return exception2.DatabaseQueryErrEx2("update agent error:%s", res.Error.Error())
 	}
 	if res.RowsAffected == 0 {
-		return exception2.AgentConflictErrEx2("agent version conflict:%s", a.AgentId)
+		return exception.UnMatchErrorEx2("agent version conflict:%s", a.AgentId)
 	}
 
 	a.DVersion.Int64++
@@ -276,7 +276,7 @@ func (g *GormAccessor) DeleteAgent(ownerId, agentId string) error {
 		return exception2.DatabaseQueryErrEx2("delete agent error:%s", res.Error.Error())
 	}
 	if res.RowsAffected == 0 {
-		return exception2.AgentNotFoundErrEx("agent not found:" + agentId)
+		return exception.UnMatchErrorEx2("agent not found: %s", agentId)
 	}
 	return nil
 }
@@ -290,7 +290,7 @@ func (g *GormAccessor) CreateSkill(sk *dataobject.TSkill) error {
 		return exception2.DatabaseQueryErrEx2("check skill error:%s", err.Error())
 	}
 	if count > 0 {
-		return exception2.AgentConflictErrEx2("skill already exists:%s", sk.SkillId)
+		return exception.MatchErrorEx2("skill already exists:%s", sk.SkillId)
 	}
 
 	values := dataobject.SkillValues(sk)
@@ -319,13 +319,13 @@ func (g *GormAccessor) UpdateSkill(sk *dataobject.TSkill) error {
 	var cur dataobject.TSkill
 	err := g.gormDb.Where("skill_id = ? AND owner_id = ? AND deleted = 0", sk.SkillId, sk.OwnerId).First(&cur).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return exception2.AgentNotFoundErrEx("skill not found:" + sk.SkillId)
+		return exception.UnMatchErrorEx2("skill not found: %s", sk.SkillId)
 	}
 	if err != nil {
 		return exception2.DatabaseQueryErrEx2("load skill error:%s", err.Error())
 	}
 	if cur.DVersion != sk.DVersion {
-		return exception2.AgentConflictErrEx2("skill version conflict:%s", sk.SkillId)
+		return exception.UnMatchErrorEx2("skill version conflict:%s", sk.SkillId)
 	}
 
 	values := dataobject.SkillValues(sk)
@@ -337,7 +337,7 @@ func (g *GormAccessor) UpdateSkill(sk *dataobject.TSkill) error {
 		return exception2.DatabaseQueryErrEx2("update skill error:%s", res.Error.Error())
 	}
 	if res.RowsAffected == 0 {
-		return exception2.AgentConflictErrEx2("skill version conflict:%s", sk.SkillId)
+		return exception.UnMatchErrorEx2("skill version conflict:%s", sk.SkillId)
 	}
 
 	sk.DVersion.Int64++
@@ -352,7 +352,7 @@ func (g *GormAccessor) DeleteSkill(ownerId, skillId string) error {
 		return exception2.DatabaseQueryErrEx2("delete skill error:%s", res.Error.Error())
 	}
 	if res.RowsAffected == 0 {
-		return exception2.AgentNotFoundErrEx("skill not found:" + skillId)
+		return exception.UnMatchErrorEx2("skill not found: %s", skillId)
 	}
 	return nil
 }

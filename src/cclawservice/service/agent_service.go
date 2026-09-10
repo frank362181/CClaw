@@ -79,7 +79,7 @@ func (s *AgentService) RemoveLLMProvider(ownerId, providerId string) error {
 	ownerId = strings.TrimSpace(ownerId)
 	providerId = strings.TrimSpace(providerId)
 	if len(ownerId) == 0 || len(providerId) == 0 {
-		return myException.AgentParameterErrEx("provider id is empty")
+		return exception.ParameterEmptyErrorEx("provider id is empty")
 	}
 	return s.agentRepo.RemoveLLMProvider(ownerId, providerId)
 }
@@ -110,7 +110,7 @@ func (s *AgentService) RemoveAgent(ownerId, agentId string) error {
 	ownerId = strings.TrimSpace(ownerId)
 	agentId = strings.TrimSpace(agentId)
 	if len(ownerId) == 0 || len(agentId) == 0 {
-		return myException.AgentParameterErrEx("agent id is empty")
+		return exception.ParameterEmptyErrorEx("agent id is empty")
 	}
 	return s.agentRepo.RemoveAgent(ownerId, agentId)
 }
@@ -123,7 +123,7 @@ func (s *AgentService) GetAgentStartupFiles(ownerId, agentId string) ([]dataobje
 	ownerId = strings.TrimSpace(ownerId)
 	agentId = strings.TrimSpace(agentId)
 	if len(ownerId) == 0 || len(agentId) == 0 {
-		return nil, myException.AgentParameterErrEx("agent id is empty")
+		return nil, exception.ParameterEmptyErrorEx("agent id is empty")
 	}
 	if err := s.requireRepos(); err != nil {
 		return nil, err
@@ -144,10 +144,10 @@ func (s *AgentService) GetAgentStartupFile(ownerId, agentId, fileName string) (*
 	agentId = strings.TrimSpace(agentId)
 	fileName = strings.TrimSpace(fileName)
 	if len(ownerId) == 0 || len(agentId) == 0 {
-		return nil, myException.AgentParameterErrEx("agent id is empty")
+		return nil, exception.ParameterEmptyErrorEx("agent id is empty")
 	}
 	if len(fileName) == 0 {
-		return nil, myException.AgentParameterErrEx("startup file name is empty")
+		return nil, exception.ParameterEmptyErrorEx("startup file name is empty")
 	}
 	if err := s.requireRepos(); err != nil {
 		return nil, err
@@ -191,7 +191,7 @@ func (s *AgentService) RemoveSkill(ownerId, skillId string) error {
 	ownerId = strings.TrimSpace(ownerId)
 	skillId = strings.TrimSpace(skillId)
 	if len(ownerId) == 0 || len(skillId) == 0 {
-		return myException.AgentParameterErrEx("skill id is empty")
+		return exception.ParameterEmptyErrorEx("skill id is empty")
 	}
 	return s.agentRepo.RemoveSkill(ownerId, skillId)
 }
@@ -222,7 +222,7 @@ func (s *AgentService) getAgentByOwner(ownerId, agentId string) (*dataobject.TAg
 
 	agent, ok := s.agentRepo.GetAgent(ownerId, agentId)
 	if !ok {
-		return nil, myException.AgentNotFoundErrEx("agent not found: " + agentId)
+		return nil, exception.UnMatchErrorEx2("agent not found: %s", agentId)
 	}
 	return &agent, nil
 }

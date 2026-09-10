@@ -62,3 +62,11 @@ type ChatCompletionRequest struct {
 	// 约束:该类模型非流式调用必须显式 enable_thinking=false,否则网关返回 400。
 	EnableThinking *bool `json:"enable_thinking,omitempty"`
 }
+
+// 流式/同步应答的 finish_reason 取值(OpenAI 兼容):决定回答结束的原因。
+const (
+	FinishReasonStop          = "stop"           // 正常结束
+	FinishReasonLength        = "length"         // 达到 max_tokens/上下文上限,内容被截断
+	FinishReasonToolCalls     = "tool_calls"     // 模型请求调用工具(工具循环续跑)
+	FinishReasonContentFilter = "content_filter" // 输出被内容安全策略过滤
+)

@@ -1,4 +1,4 @@
-import { API } from './api.js?v=20260826';
+import { API } from './api.js';
 import { State } from './state.js';
 import { ChatPage } from './chat.js';
 import { genId } from '../utils/helper.js';
@@ -97,6 +97,12 @@ export const StreamEngine = {
                 if (!isCurrent()) return;
                 State.updateMessageTool(convId, msgId, tool);
                 ChatPage.updateStreamingTool(msgId, tool);
+            },
+            notice => {
+                // 收尾提示(truncated/content_filter/incomplete):独立展示,不覆盖回答内容
+                if (!isCurrent()) return;
+                State.updateMessageNotice(convId, msgId, notice);
+                ChatPage.updateStreamingNotice(msgId, notice);
             },
         );
         return { msgId, cancel: () => this.cancel(requestId) };

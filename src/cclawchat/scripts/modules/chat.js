@@ -168,6 +168,18 @@ export const ChatPage = {
                 if (div.classList.contains('streaming')) {
                     bubble.appendChild(this._makeCursor());
                 }
+                // 收尾提示(truncated/content_filter/incomplete):独立于回答内容的警示行
+                if (Array.isArray(msg.notices) && msg.notices.length) {
+                    const nl = document.createElement('div');
+                    nl.className = 'notice-list';
+                    msg.notices.forEach(n => {
+                        const it = document.createElement('div');
+                        it.className = 'stream-notice';
+                        it.textContent = `⚠️ ${n.msg || ''}`;
+                        nl.appendChild(it);
+                    });
+                    bubble.appendChild(nl);
+                }
                 if (msg.interrupted) {
                     bubble.appendChild(this._makeInterruptedTag());
                 }
@@ -375,6 +387,32 @@ export const ChatPage = {
         statusEl.textContent = p.text;
         // done/error:仅在无执行日志累积(detail 为空)时写入结果,避免覆盖 progress 已展示的过程输出
         if (tool.detail && !detailEl.textContent.trim()) detailEl.textContent = tool.detail;
+        this.scrollToBottom();
+    },
+
+    // 流式收尾提示(truncated/content_filter/incomplete):在气泡内独立渲染,不覆盖回答内容。
+    // 同一 code 只保留一条。
+    updateStreamingNotice(msgId, notice) {
+        const container = this.els.messageList;
+        const msgEl = container.querySelector(`.message[data-msg-id="${msgId}"]`);
+        if (!msgEl || !notice || !notice.code) return;
+        const bubble = msgEl.querySelector('.bubble');
+        if (!bubble) return;
+
+        let list = bubble.querySelector('.notice-list');
+        if (!list) {
+            list = document.createElement('div');
+            list.className = 'notice-list';
+            bubble.appendChild(list);
+        }
+        let item = list.querySelector(`.stream-notice[data-code="${notice.code}"]`);
+        if (!item) {
+            item = document.createElement('div');
+            item.className = 'stream-notice';
+            item.dataset.code = notice.code;
+            list.appendChild(item);
+        }
+        item.textContent = `⚠️ ${notice.msg || ''}`;
         this.scrollToBottom();
     },
 

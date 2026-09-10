@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -225,7 +226,7 @@ func TestChatCompletion_Non2xx(t *testing.T) {
 func TestChatCompletion_Non2xxPlainBody(t *testing.T) {
 	srv := newMockServer(t, http.StatusInternalServerError, "boom", nil)
 
-	client := NewClient()
+	client := testClientWithDelays(0)
 	_, err := client.ChatCompletion(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"))
 	if err == nil {
 		t.Fatal("expected error for 500, got nil")
@@ -294,7 +295,7 @@ func TestChatCompletionStream_Success(t *testing.T) {
 
 	client := NewClient()
 	var got []string
-	full, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), func(delta string) { got = append(got, delta) }, nil)
+	full, _, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), func(delta string) { got = append(got, delta) }, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -314,7 +315,7 @@ func TestChatCompletionStream_UpstreamErrorEvent(t *testing.T) {
 	srv := newMockServer(t, http.StatusOK, streamBody, nil)
 
 	client := NewClient()
-	_, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), nil, nil)
+	_, _, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "boom during stream") {
 		t.Fatalf("expected upstream stream error, got: %v", err)
 	}
@@ -324,7 +325,7 @@ func TestChatCompletionStream_EmptyContent(t *testing.T) {
 	srv := newMockServer(t, http.StatusOK, "data: [DONE]\n", nil)
 
 	client := NewClient()
-	_, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), nil, nil)
+	_, _, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), nil, nil)
 	if err == nil {
 		t.Fatal("expected empty stream content error, got nil")
 	}
@@ -343,7 +344,7 @@ func TestChatCompletionStream_ReasoningContent(t *testing.T) {
 	client := NewClient()
 	var content []string
 	var reasoning []string
-	full, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"),
+	full, _, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"),
 		func(delta string) { content = append(content, delta) },
 		func(delta string) { reasoning = append(reasoning, delta) })
 	if err != nil {
@@ -381,7 +382,7 @@ func TestChatCompletionStream_NoOverallTimeout(t *testing.T) {
 	defer srv.Close()
 
 	var got []string
-	full, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), func(delta string) { got = append(got, delta) }, nil)
+	full, _, err := client.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), func(delta string) { got = append(got, delta) }, nil)
 	if err != nil {
 		t.Fatalf("stream longer than sync timeout should succeed, got error: %v", err)
 	}
@@ -548,6 +549,260 @@ func TestPrepareRequest_Validation(t *testing.T) {
 			}
 			if _, err := client.prepareRequest(ctx, p, tc.req); err == nil {
 				t.Fatal("expected validation error, got nil")
+			}
+		})
+	}
+}
+
+// TestChatCompletionStream_FinishReason 验证 finish_reason 透传:
+//   - length:回答被截断,原样透出 length
+//   - content_filter 且无内容:不误报为"空流",而是透出 finish_reason 交由上层提示
+func TestChatCompletionStream_FinishReason(t *testing.T) {
+	t.Run("length passthrough", func(t *testing.T) {
+		streamBody := "" +
+			"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"部分\"}}]}\n" +
+			"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n" +
+			"data: [DONE]\n"
+		srv := newMockServer(t, http.StatusOK, streamBody, nil)
+		full, finishReason, err := NewClient().ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), nil, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if full != "部分" || finishReason != common.FinishReasonLength {
+			t.Errorf("full=%q finish=%q, want 部分/length", full, finishReason)
+		}
+	})
+
+	t.Run("content_filter without content is not empty-stream error", func(t *testing.T) {
+		streamBody := "" +
+			"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"content_filter\"}]}\n" +
+			"data: [DONE]\n"
+		srv := newMockServer(t, http.StatusOK, streamBody, nil)
+		full, finishReason, err := NewClient().ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), nil, nil)
+		if err != nil {
+			t.Fatalf("content_filter should pass through, got error: %v", err)
+		}
+		if full != "" || finishReason != common.FinishReasonContentFilter {
+			t.Errorf("full=%q finish=%q, want empty/content_filter", full, finishReason)
+		}
+	})
+}
+
+// TestChatCompletion_StructuredError 验证非 2xx 返回结构化错误:*LlmStatusError 携带
+// HTTP 状态码、request_id 与语义化类别(限流)。
+func TestChatCompletion_StructuredError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Request-Id", "req-abc-123")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"Requests rate limit exceeded","type":"rate_limit_error","code":"Throttling.RateQuota"}}`))
+	}))
+	defer srv.Close()
+
+	_, err := testClientWithDelays(0).ChatCompletion(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"))
+	statusErr, ok := errors.AsType[*myException.LlmStatusError](err)
+	if !ok {
+		t.Fatalf("expected *LlmStatusError, got %T: %v", err, err)
+	}
+	if statusErr.Category != myException.LlmCategoryRateLimit {
+		t.Errorf("category = %s, want rate_limit", statusErr.Category)
+	}
+	if statusErr.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want 429", statusErr.StatusCode)
+	}
+	if statusErr.RequestID != "req-abc-123" {
+		t.Errorf("request_id = %q, want req-abc-123", statusErr.RequestID)
+	}
+}
+
+// TestClassifyLlmError 覆盖各语义化类别的判定(含限额与限流的区分、内容安全优先)。
+func TestClassifyLlmError(t *testing.T) {
+	cases := []struct {
+		name       string
+		statusCode int
+		api        myException.LlmAPIError
+		want       myException.LlmErrorCategory
+	}{
+		{"auth", http.StatusUnauthorized, myException.LlmAPIError{Message: "Incorrect API key", Code: "invalid_api_key"}, myException.LlmCategoryAuth},
+		{"forbidden", http.StatusForbidden, myException.LlmAPIError{Message: "Access denied"}, myException.LlmCategoryForbidden},
+		{"not_found", http.StatusNotFound, myException.LlmAPIError{Message: "The model does not exist", Code: "model_not_found"}, myException.LlmCategoryNotFound},
+		{"invalid_request", http.StatusBadRequest, myException.LlmAPIError{Message: "bad request"}, myException.LlmCategoryInvalidRequest},
+		{"server", http.StatusServiceUnavailable, myException.LlmAPIError{Message: "overloaded"}, myException.LlmCategoryServer},
+		{"quota_402", http.StatusPaymentRequired, myException.LlmAPIError{Message: "Insufficient Balance"}, myException.LlmCategoryQuota},
+		{"quota_429", http.StatusTooManyRequests, myException.LlmAPIError{Message: "You exceeded your current quota", Code: "insufficient_quota"}, myException.LlmCategoryQuota},
+		{"rate_limit_429", http.StatusTooManyRequests, myException.LlmAPIError{Message: "Requests rate limit exceeded"}, myException.LlmCategoryRateLimit},
+		{"content_filter", http.StatusBadRequest, myException.LlmAPIError{Message: "Input or output data may contain inappropriate content."}, myException.LlmCategoryContentFilter},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := myException.ClassifyLlmError(tc.statusCode, tc.api); got != tc.want {
+				t.Errorf("ClassifyLlmError(%d,%+v) = %s, want %s", tc.statusCode, tc.api, got, tc.want)
+			}
+		})
+	}
+}
+
+// testClientWithDelays 构造一个重试/空闲超时都很快的客户端,便于确定性测试。
+func testClientWithDelays(idle time.Duration) *Client {
+	c := newClient(time.Second)
+	c.retryBaseDelay = time.Millisecond
+	c.retryMaxDelay = 5 * time.Millisecond
+	c.streamIdle = idle
+	return c
+}
+
+// TestChatCompletion_RetriesOnRetryableError 验证 5xx 会按指数退避重试,直到成功。
+func TestChatCompletion_RetriesOnRetryableError(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":{"message":"overloaded","type":"server_error"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(okResponse))
+	}))
+	defer srv.Close()
+
+	reply, err := testClientWithDelays(0).ChatCompletion(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"))
+	if err != nil {
+		t.Fatalf("should succeed after retries: %v", err)
+	}
+	if calls.Load() != 3 {
+		t.Errorf("calls = %d, want 3", calls.Load())
+	}
+	if strings.TrimSpace(reply) == "" {
+		t.Error("reply should not be empty")
+	}
+}
+
+// TestChatCompletion_NoRetryOnClientError 验证 401 等配置类错误不重试。
+func TestChatCompletion_NoRetryOnClientError(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"Invalid API key","code":"invalid_api_key"}}`))
+	}))
+	defer srv.Close()
+
+	if _, err := testClientWithDelays(0).ChatCompletion(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi")); err == nil {
+		t.Fatal("expected error")
+	}
+	if calls.Load() != 1 {
+		t.Errorf("calls = %d, want 1 (401 must not retry)", calls.Load())
+	}
+}
+
+// TestChatCompletionStream_RetriesBeforeOutput 验证"尚未输出任何增量"时流式可重试。
+func TestChatCompletionStream_RetriesBeforeOutput(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":{"message":"overloaded"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	full, _, err := testClientWithDelays(0).ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), nil, nil)
+	if err != nil {
+		t.Fatalf("should retry and succeed: %v", err)
+	}
+	if full != "ok" {
+		t.Errorf("full = %q, want ok", full)
+	}
+	if calls.Load() != 2 {
+		t.Errorf("calls = %d, want 2", calls.Load())
+	}
+}
+
+// TestChatCompletionStream_NoRetryAfterOutput 验证已输出增量后即使遇到上游错误也不再重试(避免重复内容)。
+func TestChatCompletionStream_NoRetryAfterOutput(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"部分\"}}]}\n\n")
+		fl.Flush()
+		_, _ = fmt.Fprint(w, "data: {\"error\":{\"message\":\"boom\",\"type\":\"server_error\"}}\n\n")
+		fl.Flush()
+	}))
+	defer srv.Close()
+
+	var got []string
+	_, _, err := testClientWithDelays(0).ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), func(d string) { got = append(got, d) }, nil)
+	if err == nil {
+		t.Fatal("expected error after partial output")
+	}
+	if calls.Load() != 1 {
+		t.Errorf("calls = %d, want 1 (already emitted -> no retry)", calls.Load())
+	}
+	if len(got) != 1 || got[0] != "部分" {
+		t.Errorf("chunks = %v, want [部分]", got)
+	}
+}
+
+// TestChatCompletionStream_IdleTimeout 验证流中长时间无数据会被空闲超时中止。
+func TestChatCompletionStream_IdleTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"a\"}}]}\n\n")
+		fl.Flush()
+		<-r.Context().Done() // 保持连接但不再发送数据,等待客户端空闲超时主动断开
+	}))
+	defer srv.Close()
+
+	c := testClientWithDelays(100 * time.Millisecond)
+	c.retryMaxAttempts = 1 // 不重试,直接断言超时错误
+	_, _, err := c.ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), nil, nil)
+	if err == nil {
+		t.Fatal("expected idle timeout error")
+	}
+	if !strings.Contains(err.Error(), "idle timeout") {
+		t.Errorf("error should mention idle timeout, got: %v", err)
+	}
+}
+
+// TestChatCompletionStream_EventErrorForms 验证 event: error 形态(Anthropic/扁平/纯文本)均能被识别为错误。
+func TestChatCompletionStream_EventErrorForms(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "anthropic error event",
+			body: "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n",
+			want: "Overloaded",
+		},
+		{
+			name: "flat code message on error event",
+			body: "event: error\ndata: {\"code\":\"Throttling.RateQuota\",\"message\":\"Requests rate limit exceeded\"}\n\n",
+			want: "Requests rate limit exceeded",
+		},
+		{
+			name: "plain text on error event",
+			body: "event: error\ndata: upstream exploded\n\n",
+			want: "upstream exploded",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newMockServer(t, http.StatusOK, tc.body, nil)
+			_, _, err := testClientWithDelays(0).ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), nil, nil)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected error containing %q, got: %v", tc.want, err)
 			}
 		})
 	}

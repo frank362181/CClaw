@@ -140,6 +140,12 @@ const (
 	ConstErrorChatToolLoop
 	ConstErrorChatLLMQuota
 	ConstErrorChatRunTimeout
+	ConstErrorChatLLMAuth
+	ConstErrorChatLLMForbidden
+	ConstErrorChatLLMNotFound
+	ConstErrorChatLLMInvalidRequest
+	ConstErrorChatLLMRateLimit
+	ConstErrorChatLLMContentFilter
 )
 
 const (
@@ -154,8 +160,8 @@ const (
 	ConstErrorUnAuthenticatedMsg = "用户未授权"
 
 	ConstErrorAgentParameterMsg = "参数错误"
-	ConstErrorAgentNotFoundMsg  = "记录不存在或已被删除"
-	ConstErrorAgentConflictMsg  = "记录已存在或版本冲突"
+	ConstErrorAgentNotFoundMsg  = "智能体不存在或已被删除"
+	ConstErrorAgentConflictMsg  = "智能体已存在或版本冲突"
 	ConstErrorAgentWorkspaceMsg = "智能体工作空间不可用"
 
 	ConstErrorChatParameterMsg     = "聊天参数错误"
@@ -168,6 +174,34 @@ const (
 	ConstErrorChatToolLoopMsg      = "任务步骤过多未能完成,请缩小范围或分批执行后重试"
 	ConstErrorChatLLMQuotaMsg      = "模型服务额度不足或已耗尽(可能欠费或套餐用尽),请充值/提升配额后重试"
 	ConstErrorChatRunTimeoutMsg    = "任务执行超时,请缩小范围或分批执行后重试"
+
+	// 结构化错误类别对应的可操作提示:把可自行修正的配置类错误与瞬时故障分开
+	ConstErrorChatLLMAuthMsg           = "模型服务鉴权失败(API Key 无效或未配置),请检查模型密钥配置后重试"
+	ConstErrorChatLLMForbiddenMsg      = "无权访问该模型(未开通或未授权),请在模型服务侧开通或授权后重试"
+	ConstErrorChatLLMNotFoundMsg       = "模型不存在或名称配置错误,请检查模型名(model)配置后重试"
+	ConstErrorChatLLMInvalidRequestMsg = "请求被模型服务拒绝(参数或上下文不合法),请检查模型与上下文配置后重试"
+	ConstErrorChatLLMRateLimitMsg      = "模型服务请求过于频繁,请稍后重试"
+	ConstErrorChatLLMContentFilterMsg  = "内容未通过模型安全审核,请修改输入后重试"
+)
+
+// 流式回答"收尾提示"事件(code + 展示文案):以独立 notice 事件下发,不污染回答正文。
+const (
+	ChatNoticeTruncated     = "truncated"      // finish_reason=length:回答达到输出长度上限
+	ChatNoticeContentFilter = "content_filter" // finish_reason=content_filter:回答被内容安全策略拦截
+	ChatNoticeIncomplete    = "incomplete"     // 流中途中断(已输出部分内容):回答可能不完整
+
+	ConstChatNoticeTruncatedMsg     = "回答已达长度上限,可能不完整"
+	ConstChatNoticeContentFilterMsg = "回答未通过模型内容安全审核,可能不完整"
+	ConstChatNoticeIncompleteMsg    = "回答生成中断,可能不完整"
+)
+
+// LLM 调用重试 / 流式空闲超时 / SSE 心跳相关配置(秒或毫秒;<=0 表示禁用)。
+const (
+	LlmRetryMaxAttempts      = 3    // 可重试错误(429/5xx/断流)的最大尝试次数(含首次)
+	LlmRetryBaseDelayMs      = 500  // 指数退避基准(毫秒):500 → 1000 → 2000 …
+	LlmRetryMaxDelayMs       = 4000 // 单次退避上限(毫秒)
+	LlmStreamIdleTimeoutSecs = 60   // 流式读取空闲上限(秒):超过无任何数据则判定断流并中止
+	ChatStreamHeartbeatSecs  = 15   // SSE 空闲心跳间隔(秒):静默超时向浏览器发送心跳保活
 )
 
 const (

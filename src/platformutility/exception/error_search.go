@@ -45,6 +45,19 @@ func MatchErrorEx(errTxt string) *MatchErrorDescription {
 	}
 }
 
+func MatchErrorEx2(errTxt string, a ...interface{}) *MatchErrorDescription {
+	argsString := fmt.Sprintf(errTxt, a...)
+	_, file, line, _ := runtime.Caller(1)
+	return &MatchErrorDescription{
+		ErrorDescription: ErrorDescription{
+			ErrTxt:   argsString,
+			ErrId:    ErrorIdSysMatch,
+			FileName: file,
+			LineNo:   line,
+		},
+	}
+}
+
 func (e *MatchErrorDescription) Error() string {
 	return fmt.Sprintf("ERROR: [%s:%d]:%d: %s", e.FileName, e.LineNo, e.ErrId, e.ErrTxt)
 }

@@ -814,6 +814,26 @@ body {
 .message.assistant .bubble .tool-item.error .tool-status { color: #e5484d; }
 .message.assistant .bubble .tool-item.error { border-color: rgba(229, 72, 77, 0.4); }
 
+/* 流式收尾提示(truncated/content_filter/incomplete):独立于回答内容的警示行 */
+.message.assistant .bubble .notice-list {
+    margin: 6px 0 2px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.message.assistant .bubble .stream-notice {
+    font-size: var(--font-size-xs);
+    line-height: 1.6;
+    color: #b26a00;
+    background: rgba(255, 176, 32, 0.12);
+    border: 1px solid rgba(255, 176, 32, 0.35);
+    border-radius: var(--radius-sm);
+    padding: 4px 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .message .timestamp {
     font-size: var(--font-size-xs);
     color: var(--color-text-muted);
