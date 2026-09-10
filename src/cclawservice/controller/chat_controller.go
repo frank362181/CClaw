@@ -9,12 +9,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	cclawcommon "my.favorite/cclawservice/common"
-	exception2 "my.favorite/cclawservice/exception"
+	myException "my.favorite/cclawservice/exception"
 	model "my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service"
 	"my.favorite/cclawservice/service/core"
 	"my.favorite/platformutility/common"
-	pException "my.favorite/platformutility/exception"
 	"my.favorite/platformutility/webbase/middleware/basic"
 	baseController "my.favorite/platformutility/webbase/middleware/controller"
 	pService "my.favorite/platformutility/webbase/middleware/service"
@@ -74,13 +73,13 @@ func (cc *ChatController) Chat(c *gin.Context) {
 
 	var req model.ChatRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorChatParameter, cclawcommon.ConstErrorChatParameterMsg, nil)
+		respondKind(c, myException.ChatParameterKind)
 		return
 	}
 
 	// 全局聊天并发闸:同步/流式共用总预算,满则 503(快速拒绝,不排队)
 	if !cc.chatGate.TryAcquire() {
-		basic.GetBaseResponser().Failure(c, http.StatusServiceUnavailable, cclawcommon.ConstErrorChatServerBusy, cclawcommon.ConstErrorChatServerBusyMsg, nil)
+		respondKind(c, myException.ChatServerBusyKind)
 		return
 	}
 	defer cc.chatGate.Release()
@@ -90,7 +89,7 @@ func (cc *ChatController) Chat(c *gin.Context) {
 	comCode := loginSession.ComCode
 	resp, err := chatService.SendMessage(c.Request.Context(), &req, sender, comCode)
 	if err != nil {
-		cc.respondChatError(c, err)
+		respondChatError(c, err)
 		return
 	}
 
@@ -124,20 +123,20 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 
 	var req model.ChatRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorChatParameter, cclawcommon.ConstErrorChatParameterMsg, nil)
+		respondKind(c, myException.ChatParameterKind)
 		return
 	}
 
 	// 全局聊天并发闸:同步/流式共用总预算,满则 503(此时尚未写 SSE 头,可回普通 JSON)
 	if !cc.chatGate.TryAcquire() {
-		basic.GetBaseResponser().Failure(c, http.StatusServiceUnavailable, cclawcommon.ConstErrorChatServerBusy, cclawcommon.ConstErrorChatServerBusyMsg, nil)
+		respondKind(c, myException.ChatServerBusyKind)
 		return
 	}
 	defer cc.chatGate.Release()
 
 	// SSE 流并发闸:达到每实例在飞流式上限直接 503(此时尚未写 SSE 头,可回普通 JSON)
 	if !cc.streamGate.TryAcquire() {
-		basic.GetBaseResponser().Failure(c, http.StatusServiceUnavailable, cclawcommon.ConstErrorChatServerBusy, cclawcommon.ConstErrorChatServerBusyMsg, nil)
+		respondKind(c, myException.ChatServerBusyKind)
 		return
 	}
 	defer cc.streamGate.Release()
@@ -245,7 +244,7 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 		if c.Request.Context().Err() != nil {
 			return
 		}
-		if errors.Is(err, exception2.ChatCanceledErr) {
+		if errors.Is(err, myException.ChatCanceledKind) {
 			// 服务端主动中断(用户点击中断按钮):浏览器仍保持 SSE 连接,
 			// 发送结束标记让前端正常收尾,避免误判为"引擎不可用"。
 			if streamed {
@@ -253,7 +252,7 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 			} else {
 				// 思考/推理阶段被中断(尚无正式回复):发 interrupt 事件告知前端
 				// (需带 interrupt 标记,前端据此识别为正常结束而非错误)
-				emit("interrupt", gin.H{"interrupt": true, "msg": cclawcommon.ConstErrorChatCanceledMsg})
+				emit("interrupt", gin.H{"interrupt": true, "msg": myException.ChatCanceledKind.Msg})
 			}
 			return
 		}
@@ -266,7 +265,7 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 			return
 		}
 		// 头部已作为 SSE 发送,无法再返回普通 JSON,改以 error 事件告知前端(按错误语义给对应文案)
-		emit("error", gin.H{"msg": exception2.GetUserMsgFromError(err)})
+		emit("error", gin.H{"msg": myException.GetChatErrorUserMsg(err)})
 		return
 	}
 
@@ -304,14 +303,14 @@ func (cc *ChatController) InterruptChat(c *gin.Context) {
 
 	var req model.ChatInterruptRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil || strings.TrimSpace(req.SessionId) == "" {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorChatParameter, cclawcommon.ConstErrorChatParameterMsg, nil)
+		respondKind(c, myException.ChatParameterKind)
 		return
 	}
 
 	// 发送者以服务端认证信息为准(认证 interceptor 已写入上下文),确保只能中断自己的聊天
 	sender := loginSession.LoginName
 	if err := chatService.InterruptChat(sender, req.SessionId); err != nil {
-		cc.respondChatError(c, err)
+		respondChatError(c, err)
 		return
 	}
 
@@ -329,54 +328,4 @@ func (cc *ChatController) getChatService(c *gin.Context) (*service.ChatService, 
 		return nil, false
 	}
 	return svc, true
-}
-
-// respondChatError 将聊天业务错误映射为 HTTP 状态码
-func (cc *ChatController) respondChatError(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, pException.ParameterEmptyError):
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorChatParameter, cclawcommon.ConstErrorChatParameterMsg, nil)
-	case errors.Is(err, pException.UnMatchError):
-		basic.GetBaseResponser().Failure(c, http.StatusNotFound, cclawcommon.ConstErrorChatAgentNotFound, cclawcommon.ConstErrorChatAgentNotFoundMsg, nil)
-	case errors.Is(err, exception2.ChatLLMErr):
-		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatLLM, cclawcommon.ConstErrorChatLLMMsg, nil)
-	case errors.Is(err, exception2.ChatLLMQuotaErr):
-		// LLM 额度耗尽/欠费:给出可读的充值/提升配额提示
-		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatLLMQuota, cclawcommon.ConstErrorChatLLMQuotaMsg, nil)
-	case errors.Is(err, exception2.ChatRunTimeoutErr):
-		// 应用级任务超时:给可读的"任务执行超时"提示
-		basic.GetBaseResponser().Failure(c, http.StatusGatewayTimeout, cclawcommon.ConstErrorChatRunTimeout, cclawcommon.ConstErrorChatRunTimeoutMsg, nil)
-	case errors.Is(err, exception2.ChatToolLoopErr):
-		// 工具循环超限:任务步骤过多未能完成,给出可执行提示而非"引擎不可用"
-		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatToolLoop, cclawcommon.ConstErrorChatToolLoopMsg, nil)
-	case errors.Is(err, exception2.ChatLLMAuthErr):
-		// 上游鉴权失败:属配置类错误(API Key 无效/未配置)
-		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatLLMAuth, cclawcommon.ConstErrorChatLLMAuthMsg, nil)
-	case errors.Is(err, exception2.ChatLLMForbiddenErr):
-		// 无权访问模型(未开通/未授权/已下线)
-		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatLLMForbidden, cclawcommon.ConstErrorChatLLMForbiddenMsg, nil)
-	case errors.Is(err, exception2.ChatLLMNotFoundErr):
-		// 模型不存在/名称配置错误
-		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatLLMNotFound, cclawcommon.ConstErrorChatLLMNotFoundMsg, nil)
-	case errors.Is(err, exception2.ChatLLMInvalidRequestErr):
-		// 请求被上游拒绝(参数/上下文不合法)
-		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatLLMInvalidRequest, cclawcommon.ConstErrorChatLLMInvalidRequestMsg, nil)
-	case errors.Is(err, exception2.ChatLLMRateLimitErr):
-		// 上游限流:HTTP 429,可稍后重试
-		basic.GetBaseResponser().Failure(c, http.StatusTooManyRequests, cclawcommon.ConstErrorChatLLMRateLimit, cclawcommon.ConstErrorChatLLMRateLimitMsg, nil)
-	case errors.Is(err, exception2.ChatLLMContentFilterErr):
-		// 内容安全拦截:引导用户修改输入
-		basic.GetBaseResponser().Failure(c, http.StatusBadGateway, cclawcommon.ConstErrorChatLLMContentFilter, cclawcommon.ConstErrorChatLLMContentFilterMsg, nil)
-	case errors.Is(err, exception2.ChatCanceledErr):
-		// 客户端已断开/取消请求:响应写不出去,静默结束即可
-		return
-	case errors.Is(err, exception2.ChatNotActiveErr):
-		// 中断请求时目标会话没有进行中的聊天(聊天未开始或已结束)
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorChatNotActive, cclawcommon.ConstErrorChatNotActiveMsg, nil)
-	case errors.Is(err, exception2.ChatBusyErr):
-		// 目标 Agent 已达并发上限(每 Agent 闸)
-		basic.GetBaseResponser().Failure(c, http.StatusServiceUnavailable, cclawcommon.ConstErrorChatBusy, cclawcommon.ConstErrorChatBusyMsg, nil)
-	default:
-		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
-	}
 }

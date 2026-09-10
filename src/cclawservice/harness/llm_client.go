@@ -535,7 +535,8 @@ func (c *Client) retryWait(ctx context.Context, nextAttempt int, lastErr error) 
 //   - 数据块含 error 字段(OpenAI 风格)→ 取该字段
 //   - 事件类型为 error(Anthropic / 网关自定义)→ 取整个数据块
 //
-// 无错误时返回 ok=false。载荷的解析与分类由 exception 包负责。
+// 注意:这里的 "error" 是**上游协议**的事件名/字段名,与我们对前端下发的事件名无关。
+// 无错误时返回 ok=false。载荷的解析与分类由本包(harness)负责。
 func streamErrorPayload(eventName string, chunk ChatCompletionChunk, data string) (json.RawMessage, bool) {
 	if myException.HasLlmError(chunk.Error) {
 		return chunk.Error, true

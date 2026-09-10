@@ -12,7 +12,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	cclawcommon "my.favorite/cclawservice/common"
+	"my.favorite/cclawservice/apperr"
 	exception2 "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
 	model "my.favorite/cclawservice/request"
@@ -108,7 +108,7 @@ func (ac *AgentController) AddLLMProvider(c *gin.Context) {
 
 	var p dataobject.TLlm
 	if err := c.ShouldBindBodyWithJSON(&p); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+		respondKindStatus(c, http.StatusBadRequest, exception2.AgentParameterKind)
 		return
 	}
 	p.OwnerId = loginSession.ComCode
@@ -148,7 +148,7 @@ func (ac *AgentController) UpdateLLMProvider(c *gin.Context) {
 
 	var p dataobject.TLlm
 	if err := c.ShouldBindBodyWithJSON(&p); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+		respondKindStatus(c, http.StatusBadRequest, exception2.AgentParameterKind)
 		return
 	}
 
@@ -189,7 +189,7 @@ func (ac *AgentController) RemoveLLMProvider(c *gin.Context) {
 
 	var req model.LLMProviderIDRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+		respondKindStatus(c, http.StatusBadRequest, exception2.AgentParameterKind)
 		return
 	}
 
@@ -265,7 +265,7 @@ func (ac *AgentController) AddAgent(c *gin.Context) {
 
 	var a dataobject.TAgent
 	if err := c.ShouldBindBodyWithJSON(&a); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+		respondKindStatus(c, http.StatusBadRequest, exception2.AgentParameterKind)
 		return
 	}
 
@@ -306,7 +306,7 @@ func (ac *AgentController) UpdateAgent(c *gin.Context) {
 
 	var a dataobject.TAgent
 	if err := c.ShouldBindBodyWithJSON(&a); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+		respondKindStatus(c, http.StatusBadRequest, exception2.AgentParameterKind)
 		return
 	}
 
@@ -346,7 +346,7 @@ func (ac *AgentController) RemoveAgent(c *gin.Context) {
 	}
 	var req model.AgentIDRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+		respondKindStatus(c, http.StatusBadRequest, exception2.AgentParameterKind)
 		return
 	}
 
@@ -388,7 +388,7 @@ func (ac *AgentController) GetStartupFiles(c *gin.Context) {
 
 	var req model.AgentIDRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+		respondKindStatus(c, http.StatusBadRequest, exception2.AgentParameterKind)
 		return
 	}
 
@@ -429,7 +429,7 @@ func (ac *AgentController) GetStartupFile(c *gin.Context) {
 
 	var req model.AgentStartupFileRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+		respondKindStatus(c, http.StatusBadRequest, exception2.AgentParameterKind)
 		return
 	}
 
@@ -506,7 +506,7 @@ func (ac *AgentController) AddSkill(c *gin.Context) {
 
 	var sk dataobject.TSkill
 	if err := c.ShouldBindBodyWithJSON(&sk); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+		respondKindStatus(c, http.StatusBadRequest, exception2.AgentParameterKind)
 		return
 	}
 
@@ -547,7 +547,7 @@ func (ac *AgentController) UpdateSkill(c *gin.Context) {
 
 	var sk dataobject.TSkill
 	if err := c.ShouldBindBodyWithJSON(&sk); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+		respondKindStatus(c, http.StatusBadRequest, exception2.AgentParameterKind)
 		return
 	}
 
@@ -587,7 +587,7 @@ func (ac *AgentController) RemoveSkill(c *gin.Context) {
 	}
 	var req model.SkillIDRequest
 	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+		respondKindStatus(c, http.StatusBadRequest, exception2.AgentParameterKind)
 		return
 	}
 
@@ -611,22 +611,22 @@ func (ac *AgentController) getAgentService(c *gin.Context) (*service.AgentServic
 	return svc, true
 }
 
-// respondAgentError 业务层的错误表现为http正常,但业务层异常
+// respondAgentError 业务层的错误表现为 http 正常,但业务层异常。
+// 具体呈现(HTTP 状态 / 业务码 / 文案)全部来自错误自带的 Kind;仅平台层错误在此归一为 agent 语义。
 func (ac *AgentController) respondAgentError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, pException.ParameterEmptyError):
-		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorAgentParameter, cclawcommon.ConstErrorAgentParameterMsg, nil)
+		respondKind(c, exception2.AgentParameterKind)
 	case errors.Is(err, pException.UnMatchError):
-		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorAgentNotFound, cclawcommon.ConstErrorAgentNotFoundMsg, nil)
+		respondKind(c, exception2.AgentNotFoundKind)
 	case errors.Is(err, pException.MatchError):
-		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorAgentConflict, cclawcommon.ConstErrorAgentConflictMsg, nil)
-	case errors.Is(err, exception2.AgentWorkspaceErr):
-		// 智能体工作区目录缺失/非法:与"记录不存在"区分,便于前端给准确提示
-		basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorAgentWorkspace, cclawcommon.ConstErrorAgentWorkspaceMsg, nil)
-	case errors.Is(err, exception2.AgentInternalErr):
-		// 服务/仓库未初始化等内部错误
-		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
+		respondKind(c, exception2.AgentConflictKind)
 	default:
+		// 带 Kind 的业务错误(工作空间不可用/内部错误等)统一按 Kind 渲染
+		if kind := apperr.Of(err); kind != nil {
+			respondKind(c, kind)
+			return
+		}
 		basic.GetBaseResponser().Failure(c, http.StatusOK, basic.ConstErrorUnknow, basic.ConstErrorUnknowMsg, nil)
 	}
 }

@@ -1,15 +1,9 @@
 package exception
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
-	"io"
-	"net/http"
-	"strings"
 
-	cclawcommon "my.favorite/cclawservice/common"
-	"my.favorite/platformutility/common"
+	"my.favorite/cclawservice/apperr"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
 )
@@ -28,308 +22,95 @@ func MapStartupFileError(err error) error {
 	}
 }
 
-// MapLlmStatusError 把结构化上游错误按语义化类别映射为聊天业务错误,
-// 供控制器选择用户文案与 HTTP 状态(配置类错误不再笼统提示为"引擎暂时不可用")。
+// chatKinds 聊天域 Kind 集合。
+//
+// 供 LlmError 判定"已是聊天业务错误"而直接透传:只有聊天域错误自带对前端的呈现语义;
+// 其它域(agent/login/database/harness)的应用错误进入聊天链路时仍应归一化为 ChatLLMKind,
+// 避免内部错误的业务码/文案泄漏到聊天响应里。
+var chatKinds = map[*apperr.Kind]struct{}{
+	ChatParameterKind:         {},
+	ChatAgentNotFoundKind:     {},
+	ChatServerBusyKind:        {},
+	ChatLLMKind:               {},
+	ChatLLMQuotaKind:          {},
+	ChatRunTimeoutKind:        {},
+	ChatToolLoopKind:          {},
+	ChatCanceledKind:          {},
+	ChatNotActiveKind:         {},
+	ChatBusyKind:              {},
+	ChatLLMAuthKind:           {},
+	ChatLLMForbiddenKind:      {},
+	ChatLLMNotFoundKind:       {},
+	ChatLLMInvalidRequestKind: {},
+	ChatLLMRateLimitKind:      {},
+	ChatLLMContentFilterKind:  {},
+}
+
+// IsChatKind 判定 Kind 是否属于聊天域(供 LlmError 与调用方判断是否可直接透传)。
+func IsChatKind(kind *apperr.Kind) bool {
+	if kind == nil {
+		return false
+	}
+	_, ok := chatKinds[kind]
+	return ok
+}
+
+// llmCategoryKinds 上游结构化错误类别 → 聊天错误 Kind 的唯一映射表。
+// 增删上游类别时只需改这里,文案与 HTTP 状态自动跟随 Kind 定义。
+var llmCategoryKinds = map[LlmErrorCategory]*apperr.Kind{
+	LlmCategoryAuth:           ChatLLMAuthKind,
+	LlmCategoryForbidden:      ChatLLMForbiddenKind,
+	LlmCategoryNotFound:       ChatLLMNotFoundKind,
+	LlmCategoryInvalidRequest: ChatLLMInvalidRequestKind,
+	LlmCategoryRateLimit:      ChatLLMRateLimitKind,
+	LlmCategoryContentFilter:  ChatLLMContentFilterKind,
+	LlmCategoryQuota:          ChatLLMQuotaKind,
+	// server/unknown:临时性故障,沿用"引擎暂时不可用"文案
+	LlmCategoryServer:  ChatLLMKind,
+	LlmCategoryUnknown: ChatLLMKind,
+}
+
+// KindOfLlmCategory 返回上游类别对应的聊天错误 Kind(未知类别回退到 ChatLLMKind)。
+func KindOfLlmCategory(category LlmErrorCategory) *apperr.Kind {
+	if kind, ok := llmCategoryKinds[category]; ok {
+		return kind
+	}
+	return ChatLLMKind
+}
+
+// MapLlmStatusError 把结构化上游错误按语义化类别映射为聊天业务错误。
+// 类别→Kind 的对应关系集中在 llmCategoryKinds 一张表里,
+// 用户文案与 HTTP 状态由 Kind 定义提供,调用方不再单独维护映射。
 func MapLlmStatusError(e *LlmStatusError, logPrefix string) error {
-	detail := e.Error()
-	switch e.Category {
-	case LlmCategoryAuth:
-		return ChatLLMAuthErrEx2("%s:%s", logPrefix, detail)
-	case LlmCategoryForbidden:
-		return ChatLLMForbiddenErrEx2("%s:%s", logPrefix, detail)
-	case LlmCategoryNotFound:
-		return ChatLLMNotFoundErrEx2("%s:%s", logPrefix, detail)
-	case LlmCategoryInvalidRequest:
-		return ChatLLMInvalidRequestErrEx2("%s:%s", logPrefix, detail)
-	case LlmCategoryRateLimit:
-		return ChatLLMRateLimitErrEx2("%s:%s", logPrefix, detail)
-	case LlmCategoryContentFilter:
-		return ChatLLMContentFilterErrEx2("%s:%s", logPrefix, detail)
-	case LlmCategoryQuota:
-		return ChatLLMQuotaErrEx2("%s:%s", logPrefix, detail)
-	default:
-		// server/unknown:临时性故障,沿用"引擎暂时不可用"文案
-		return ChatLLMErrEx2("%s:%s", logPrefix, detail)
-	}
+	// 挂上底层原因(cause),保留 request_id/状态码等排障信息可被 errors.Is/As 命中。
+	return KindOfLlmCategory(e.Category).WrapF(e, "%s:%s", logPrefix, e.Error())
 }
 
-// LLM 上游错误的特征词(统一转小写后做子串匹配)。
-// 说明:上游错误文案千差万别,这里只做"尽力而为"的粗分类;能拿到 HTTP 状态码时以状态码为准。
-var (
-	// contentFilterSignals 内容安全/合规拦截特征
-	contentFilterSignals = []string{
-		"data_inspection", "data inspection", "content_filter", "content filter",
-		"content policy", "inappropriate content", "safety system", "responsible ai",
-		"content management policy", "prohibited", "ip infringement",
-		"敏感", "违规", "内容安全", "绿网", "不合规", "侵权",
-	}
-	// quotaSignals 额度耗尽/欠费特征(可能出现在 400/402/429)
-	quotaSignals = []string{
-		"402",                  // HTTP 402 Payment Required(如 deepseek 余额不足)
-		"payment required",     // OpenAI 风格描述
-		"insufficient_quota",   // OpenAI 风格 error.code
-		"insufficient balance", // deepseek 余额不足
-		"insufficient funds",   // 通用余额不足
-		"out of quota",         // dashscope: Throttling.User.OutOfQuota
-		"quota exceeded",       // 通用配额用尽
-		"allocationquota",      // dashscope: Throttling.AllocationQuota
-		"arrearage",            // dashscope: 欠费
-		"out_of_service",       // dashscope: isv.OUT_OF_SERVICE(余额不足暂停)
-		"prepaidbilloverdue",   // dashscope: 预付账单逾期
-		"postpaidbilloverdue",  // dashscope: 后付账单逾期
-		"billing",              // 计费相关
-		"欠费", "余额不足", "额度不足", "额度耗尽", "无可用额度", "请充值",
-	}
-	// rateLimitSignals 限流特征(非额度型)
-	rateLimitSignals = []string{
-		"rate limit", "rate_limit", "ratelimit", "throttling", "too many requests",
-		"limit_requests", "resourceexhausted", "resource exhausted", "burst_rate",
-		"requests rate", "slow down", "limit reached", "限流", "请求过于频繁",
-	}
-	// authSignals 鉴权失败特征
-	authSignals = []string{
-		"invalid_api_key", "invalid api key", "incorrect api key", "unauthorized",
-		"authentication", "no api key", "api key not valid", "unauthenticated",
-		"invalid access token", "鉴权",
-	}
-	// forbiddenSignals 无权限特征
-	forbiddenSignals = []string{
-		"access_denied", "access denied", "permission", "not authorized",
-		"forbidden", "unpurchased", "not activated", "no permission", "无权",
-	}
-	// notFoundSignals 模型不存在特征
-	notFoundSignals = []string{
-		"model_not_found", "model not found", "model not exist", "no such model",
-		"does not exist", "not_found", "model_not_supported", "模型不存在",
-	}
-	// serverSignals 服务端故障特征
-	serverSignals = []string{
-		"internal error", "internal_error", "server error", "server_error",
-		"overloaded", "service unavailable", "bad gateway", "modelunavailable",
-		"system error", "inference internal",
-	}
-	// invalidRequestSignals 请求非法特征
-	invalidRequestSignals = []string{
-		"invalid_request", "invalid request", "invalid_parameter", "invalid parameter",
-		"bad request", "badrequest", "deserialize", "context_length", "context length",
-		"too long", "missing required", "invalid value",
-	}
-)
-
-// classifyLlmError 依据 HTTP 状态码与上游错误体判定语义化类别(包内使用)。
-// 优先级:内容安全 > 额度 > HTTP 状态码 > 文案兜底(流中错误无状态码时)。
-func classifyLlmError(statusCode int, api llmAPIError) LlmErrorCategory {
-	code := strings.ToLower(strings.TrimSpace(api.Code))
-	typ := strings.ToLower(strings.TrimSpace(api.Type))
-	msg := strings.ToLower(api.Message)
-	head := code + " " + typ
-	all := head + " " + msg
-
-	// 1. 内容安全/合规:与状态码无关(常见 400,或流中 finish_reason=content_filter)
-	if common.ContainsString(all, contentFilterSignals) {
-		return LlmCategoryContentFilter
-	}
-	// 2. 额度/欠费:可能以 400/402/429 返回,须先于通用限流判定
-	if common.ContainsString(head, quotaSignals) || common.ContainsString(msg, quotaSignals) {
-		return LlmCategoryQuota
-	}
-	// 3. HTTP 状态码(最可靠)
-	switch statusCode {
-	case http.StatusUnauthorized:
-		return LlmCategoryAuth
-	case http.StatusPaymentRequired:
-		return LlmCategoryQuota
-	case http.StatusForbidden:
-		return LlmCategoryForbidden
-	case http.StatusNotFound:
-		return LlmCategoryNotFound
-	case http.StatusTooManyRequests:
-		return LlmCategoryRateLimit
-	}
-	if statusCode >= 500 {
-		return LlmCategoryServer
-	}
-	if statusCode == http.StatusBadRequest || statusCode == http.StatusUnprocessableEntity {
-		return LlmCategoryInvalidRequest
-	}
-	// 4. 无可用状态码(如流中错误,statusCode=200)时按文案兜底
-	if common.ContainsString(all, rateLimitSignals) {
-		return LlmCategoryRateLimit
-	}
-	if common.ContainsString(all, authSignals) {
-		return LlmCategoryAuth
-	}
-	if common.ContainsString(all, forbiddenSignals) {
-		return LlmCategoryForbidden
-	}
-	if common.ContainsString(all, notFoundSignals) {
-		return LlmCategoryNotFound
-	}
-	if common.ContainsString(all, serverSignals) {
-		return LlmCategoryServer
-	}
-	if common.ContainsString(all, invalidRequestSignals) {
-		return LlmCategoryInvalidRequest
-	}
-	return LlmCategoryUnknown
-}
-
-// IsRetryableLlmError 判定错误是否可安全重试(瞬时故障)。
-//   - 传输层故障(连接失败/断流;StatusCode==0)可重试;
-//   - 真限流(429)与真服务端故障(5xx)可重试;
-//   - HTTP 200 携带 error 体的应用级错误、客户端取消、配置类错误(鉴权/模型名/参数/欠费/内容合规)不重试。
-func IsRetryableLlmError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, ErrRequestCanceled) ||
-		errors.Is(err, context.Canceled) ||
-		errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-	if statusErr, ok := errors.AsType[*LlmStatusError](err); ok {
-		switch statusErr.Category {
-		case LlmCategoryRateLimit:
-			return true
-		case LlmCategoryServer:
-			return statusErr.StatusCode == 0 || statusErr.StatusCode >= 500
-		}
-	}
-	return false
-}
-
-// isQuotaError 判定错误是否为"LLM 额度耗尽/欠费"(裸错误兜底;结构化错误请用 LlmStatusError.Category)。
-func isQuotaError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return common.ContainsString(strings.ToLower(err.Error()), quotaSignals)
-}
-
-// LlmError 统一转换 LLM 调用错误:客户端取消 → ChatCanceledErr(静默),其余按语义映射。
-// 已是带语义的聊天业务错误(工具循环/额度/运行超时)原样透传;
-// 结构化上游错误(*LlmStatusError)按类别映射,把配置类错误与瞬时故障分开;
-// 裸错误若命中额度特征则以 ChatLLMQuotaErr 兜底,否则统一 ChatLLMErr。
+// LlmError 统一转换 LLM 调用错误:客户端取消 → ChatCanceledKind(静默),其余按语义映射。
+//   - 已是应用错误(带语义的聊天业务错误,如工具循环/额度/运行超时)原样透传,
+//     避免二次包装丢失原始细节与类别;
+//   - 结构化上游错误(*harness.LlmStatusError)按 Category 映射到对应 Kind;
+//   - 裸错误若命中额度特征则以 ChatLLMQuotaKind 兜底,否则统一归入 ChatLLMKind。
 func LlmError(err error, logPrefix string) error {
+	if err == nil {
+		return nil
+	}
 	if errors.Is(err, ErrRequestCanceled) {
 		logging.LogDebugF("%s: request canceled by client", logPrefix)
-		return ChatCanceledErrEx("chat request canceled")
+		return ChatCanceledKind.New("chat request canceled")
 	}
 	logging.LogErrorF("%s:%s", logPrefix, err.Error())
-	if _, ok := errors.AsType[*ErrorChatToolLoop](err); ok {
-		return err
-	}
-	if _, ok := errors.AsType[*ErrorChatLLMQuota](err); ok {
-		return err
-	}
-	if _, ok := errors.AsType[*ErrorChatRunTimeout](err); ok {
+	// 已是聊天域应用错误 → 原样透传(保留类别与细节)。
+	// 其它域的应用错误(agent/login/database/harness)继续按上游故障归一化,
+	// 否则内部错误的业务码/文案会直接泄漏到聊天响应。
+	if kind := apperr.Of(err); IsChatKind(kind) {
 		return err
 	}
 	if statusErr, ok := errors.AsType[*LlmStatusError](err); ok {
 		return MapLlmStatusError(statusErr, logPrefix)
 	}
-
-	if isQuotaError(err) {
-		return ChatLLMQuotaErrEx2("%s:%s", logPrefix, err.Error())
+	if IsQuotaError(err) {
+		return ChatLLMQuotaKind.Newf("%s:%s", logPrefix, err.Error())
 	}
-	return ChatLLMErrEx2("%s:%s", logPrefix, err.Error())
-}
-
-// ParseLlmResponseError 解析上游非 2xx 响应,返回带 HTTP 状态码、request_id 与语义化类别的
-// 结构化错误(*LlmStatusError),供上层按类别映射用户文案。
-func ParseLlmResponseError(resp *http.Response, readBytes int64) error {
-	statusCode := 0
-	requestID := ""
-	if resp != nil {
-		statusCode = resp.StatusCode
-		requestID = LlmRequestID(resp.Header)
-	}
-
-	raw := ""
-	if resp != nil && resp.Body != nil {
-		if data, err := io.ReadAll(io.LimitReader(resp.Body, readBytes)); err == nil {
-			raw = strings.TrimSpace(string(data))
-		}
-	}
-
-	apiErr := parseLlmErrorBody(raw)
-	return &LlmStatusError{
-		StatusCode: statusCode,
-		RequestID:  requestID,
-		Stage:      llmStageResponse,
-		Category:   classifyLlmError(statusCode, apiErr),
-		api:        apiErr,
-		raw:        raw,
-	}
-}
-
-// parseLlmErrorBody 解析上游错误体(包内):优先 OpenAI 风格 {"error":{...}},回退扁平结构 {message,type,code,param}。
-func parseLlmErrorBody(raw string) llmAPIError {
-	if strings.TrimSpace(raw) == "" {
-		return llmAPIError{}
-	}
-	var wrapped struct {
-		Error *llmAPIError `json:"error"`
-	}
-	if json.Unmarshal([]byte(raw), &wrapped) == nil && wrapped.Error != nil &&
-		(wrapped.Error.Message != "" || wrapped.Error.Code != "" || wrapped.Error.Type != "") {
-		return *wrapped.Error
-	}
-	var flat llmAPIError
-	if json.Unmarshal([]byte(raw), &flat) == nil &&
-		(flat.Message != "" || flat.Code != "" || flat.Type != "") {
-		return flat
-	}
-	return llmAPIError{}
-}
-
-// requestIDHeaders 上游 request_id 可能出现的响应头(按优先级;http.Header.Get 大小写不敏感)。
-var requestIDHeaders = []string{
-	"X-Request-Id",
-	"X-Dashscope-Request-Id",
-	"Request-Id",
-	"X-Trace-Id",
-	"Trace-Id",
-}
-
-// LlmRequestID 从响应头读取上游 request_id(便于排障/提交工单);无则返回空串。
-func LlmRequestID(header http.Header) string {
-	if header == nil {
-		return ""
-	}
-	for _, h := range requestIDHeaders {
-		if v := strings.TrimSpace(header.Get(h)); v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-// GetUserMsgFromError 把聊天业务错误映射为展示给前端的错误文案(SSE error 事件用)。
-// 让"工具循环超限"等可引导的任务错误给出真实原因,而不是笼统的"引擎不可用"。
-func GetUserMsgFromError(err error) string {
-	switch {
-	case errors.Is(err, ChatRunTimeoutErr):
-		return cclawcommon.ConstErrorChatRunTimeoutMsg
-	case errors.Is(err, ChatLLMQuotaErr):
-		return cclawcommon.ConstErrorChatLLMQuotaMsg
-	case errors.Is(err, ChatToolLoopErr):
-		return cclawcommon.ConstErrorChatToolLoopMsg
-	case errors.Is(err, ChatLLMAuthErr):
-		return cclawcommon.ConstErrorChatLLMAuthMsg
-	case errors.Is(err, ChatLLMForbiddenErr):
-		return cclawcommon.ConstErrorChatLLMForbiddenMsg
-	case errors.Is(err, ChatLLMNotFoundErr):
-		return cclawcommon.ConstErrorChatLLMNotFoundMsg
-	case errors.Is(err, ChatLLMInvalidRequestErr):
-		return cclawcommon.ConstErrorChatLLMInvalidRequestMsg
-	case errors.Is(err, ChatLLMRateLimitErr):
-		return cclawcommon.ConstErrorChatLLMRateLimitMsg
-	case errors.Is(err, ChatLLMContentFilterErr):
-		return cclawcommon.ConstErrorChatLLMContentFilterMsg
-	case errors.Is(err, ChatLLMErr):
-		return cclawcommon.ConstErrorChatLLMMsg
-	default:
-		return cclawcommon.ConstErrorChatLLMMsg
-	}
+	return ChatLLMKind.Newf("%s:%s", logPrefix, err.Error())
 }

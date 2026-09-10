@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"my.favorite/cclawservice/common"
+	exception2 "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/request"
 	common2 "my.favorite/platformutility/common"
 	"my.favorite/platformutility/webbase/middleware/basic"
@@ -61,7 +62,7 @@ func (i *AuthenticationInterceptor) PreHandle(c *gin.Context) bool {
 	token := c.GetHeader(basic.ConstHeaderToken)
 	token = strings.TrimSpace(token)
 	if len(token) == 0 {
-		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusUnauthorized, common.ConstErrorNonToken, common.ConstErrorNonTokenMsg, nil)
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, exception2.NonTokenKind.HTTPStatus, exception2.NonTokenKind.Code, exception2.NonTokenKind.Msg, nil)
 		return false
 	}
 
@@ -76,7 +77,7 @@ func (i *AuthenticationInterceptor) PreHandle(c *gin.Context) bool {
 	}
 	loginSession, err1 := userService.GetUserByToken(token)
 	if loginSession == nil || err1 != nil {
-		basic.GetBaseResponser().WriteWithErrorAndAbort(c, http.StatusUnauthorized, common.ConstErrorInvalidToken, common.ConstErrorInvalidTokenMsg, nil)
+		basic.GetBaseResponser().WriteWithErrorAndAbort(c, exception2.InvalidTokenKind.HTTPStatus, exception2.InvalidTokenKind.Code, exception2.InvalidTokenKind.Msg, nil)
 		return false
 	}
 

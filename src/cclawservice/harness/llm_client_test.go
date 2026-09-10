@@ -748,26 +748,33 @@ func TestChatCompletionStream_IdleTimeout(t *testing.T) {
 }
 
 // TestChatCompletionStream_EventErrorForms 验证 event: error 形态(Anthropic/扁平/纯文本)均能被识别为错误。
+//
+// 注意:这里的 "error" 是**上游协议**的 SSE 事件名(Anthropic / 网关自定义),
+// 与我们对前端下发的事件名无关 —— 两者不可混为一谈。
 func TestChatCompletionStream_EventErrorForms(t *testing.T) {
 	cases := []struct {
-		name string
-		body string
-		want string
+		name         string
+		body         string
+		want         string
+		wantCategory myException.LlmErrorCategory
 	}{
 		{
-			name: "anthropic error event",
-			body: "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n",
-			want: "Overloaded",
+			name:         "anthropic error event",
+			body:         "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n",
+			want:         "Overloaded",
+			wantCategory: myException.LlmCategoryServer,
 		},
 		{
-			name: "flat code message on error event",
-			body: "event: error\ndata: {\"code\":\"Throttling.RateQuota\",\"message\":\"Requests rate limit exceeded\"}\n\n",
-			want: "Requests rate limit exceeded",
+			name:         "flat code message on error event",
+			body:         "event: error\ndata: {\"code\":\"Throttling.RateQuota\",\"message\":\"Requests rate limit exceeded\"}\n\n",
+			want:         "Requests rate limit exceeded",
+			wantCategory: myException.LlmCategoryRateLimit,
 		},
 		{
-			name: "plain text on error event",
-			body: "event: error\ndata: upstream exploded\n\n",
-			want: "upstream exploded",
+			name:         "plain text on error event",
+			body:         "event: error\ndata: upstream exploded\n\n",
+			want:         "upstream exploded",
+			wantCategory: myException.LlmCategoryUnknown,
 		},
 	}
 	for _, tc := range cases {
@@ -776,6 +783,13 @@ func TestChatCompletionStream_EventErrorForms(t *testing.T) {
 			_, _, err := testClientWithDelays(0).ChatCompletionStream(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"), nil, nil)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("expected error containing %q, got: %v", tc.want, err)
+			}
+			statusErr, ok := errors.AsType[*myException.LlmStatusError](err)
+			if !ok {
+				t.Fatalf("应为结构化上游错误,实际 %T: %v", err, err)
+			}
+			if statusErr.Category != tc.wantCategory {
+				t.Errorf("类别 = %s, want %s", statusErr.Category, tc.wantCategory)
 			}
 		})
 	}

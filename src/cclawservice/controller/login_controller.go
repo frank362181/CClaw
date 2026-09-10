@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	cclawcommon "my.favorite/cclawservice/common"
 	exception2 "my.favorite/cclawservice/exception"
 	model "my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service"
@@ -59,14 +58,14 @@ func (lc *LoginController) Login(c *gin.Context) {
 	var lq model.LoginRequest
 	err := c.ShouldBindBodyWithJSON(&lq) //这里将body读取之后,后面如果想要再次读取将会失败
 	if err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusBadRequest, cclawcommon.ConstErrorLoginParameter, cclawcommon.ConstErrorLoginParameterMsg, nil)
+		respondKind(c, exception2.LoginParameterKind)
 		return
 	}
 
 	loginSession, err1 := loginService.Login(lq.Username, lq.Password)
 	if err1 != nil {
 		if errors.Is(err1, exception2.UserPasswordUnmatchErr) {
-			basic.GetBaseResponser().Failure(c, http.StatusOK, cclawcommon.ConstErrorUserNamePasswordUnmatch, cclawcommon.ConstErrorUserNamePasswordUnmatchMsg, nil)
+			respondKind(c, exception2.UserPasswordUnmatchKind)
 			return
 		}
 		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)

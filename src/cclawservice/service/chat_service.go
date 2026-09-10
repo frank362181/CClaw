@@ -134,7 +134,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 	// 调用 LLM 引擎取回完整回复(function-calling 开启且该 Agent 有工具时可能经过工具循环)
 	reply, err := s.completeChat(ctx, llmProvider, systemPrompt, req, toolSet)
 	if err != nil {
-		return nil, myException.LlmError(err, "chat service: runtime call error")
+		return nil, myException.LlmError(err, "chat service: runtime call chat")
 	}
 
 	// 组装应答
@@ -200,7 +200,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	if err != nil {
 		// 应用级运行超时:给可读错误,而不是笼统的 "request canceled by client"
 		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-			return "", myException.ChatRunTimeoutErrEx2("chat service: run timeout after %s", chatRunTimeout())
+			return "", myException.ChatRunTimeoutKind.Newf("chat service: run timeout after %s", chatRunTimeout())
 		}
 		return "", myException.LlmError(err, "chat service: runtime stream error")
 	}
@@ -209,7 +209,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	// 无任何正式内容且被内容安全策略拦截时,按内容合规业务错误返回(交由控制器提示)。
 	if code, msg := finishReasonNotice(finishReason); code != "" {
 		if strings.TrimSpace(reply) == "" && finishReason == common.FinishReasonContentFilter {
-			return "", myException.ChatLLMContentFilterErrEx2("chat service: output blocked by content filter")
+			return "", myException.ChatLLMContentFilterKind.Newf("chat service: output blocked by content filter")
 		}
 		if onNotice != nil {
 			onNotice(code, msg)
@@ -238,7 +238,7 @@ func finishReasonNotice(finishReason string) (code, msg string) {
 func (s *ChatService) InterruptChat(sender, sessionId string) error {
 	key := cCommon.BuildChatStreamKey(sender, sessionId)
 	if !harness.GetChatStreamRegistry().Cancel(key) {
-		return myException.ChatNotActiveErrEx2("chat stream not active: %s", sessionId)
+		return myException.ChatNotActiveKind.Newf("chat stream not active: %s", sessionId)
 	}
 	logging.LogDebugF("chat service: interrupt chat key:%s", key)
 	return nil
@@ -264,9 +264,9 @@ func (s *ChatService) acquireAgentGate(ctx context.Context, agent dataobject.TAg
 	if err != nil {
 		if ctx.Err() != nil {
 			// 客户端已断开/超时:按取消语义静默处理
-			return nil, myException.ChatCanceledErrEx2("chat service: acquire agent gate canceled for agent %s", agent.AgentId)
+			return nil, myException.ChatCanceledKind.Newf("chat service: acquire agent gate canceled for agent %s", agent.AgentId)
 		}
-		return nil, myException.ChatBusyErrEx2("chat service: agent %s busy, max concurrent %d", agent.AgentId, limit)
+		return nil, myException.ChatBusyKind.Newf("chat service: agent %s busy, max concurrent %d", agent.AgentId, limit)
 	}
 	return release, nil
 }
@@ -323,7 +323,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 	systemPrompt, err := s.promptService.BuildSystemPromptEx(agent, skillFiles, dataobject.BootstrapScopeNormal)
 	if err != nil {
 		logging.LogErrorF("chat service: build system prompt error:%s", err.Error())
-		return nil, dataobject.TAgent{}, nil, dataobject.TLlm{}, nil, myException.ChatLLMErrEx2("chat service: build system prompt error:%s", err.Error())
+		return nil, dataobject.TAgent{}, nil, dataobject.TLlm{}, nil, myException.ChatLLMKind.Newf("chat service: build system prompt error:%s", err.Error())
 	}
 
 	return req, agent, systemPrompt, llmProvider, harness.LoadToolSet(agentExtensionRoot, skillFiles), nil
@@ -413,7 +413,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 	for i := 0; i < cCommon.AgentToolLoopMax; i++ {
 		content, calls, err := s.llmClient.CompleteWithTools(ctx, llmProvider, messages, toolSet.LLMTools())
 		if err != nil {
-			return "", myException.LlmError(err, "chat service: runtime tool call error")
+			return "", myException.LlmError(err, "chat service: runtime tool call chat")
 		}
 		if len(calls) == 0 {
 			return content, nil
@@ -427,7 +427,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 			messages = append(messages, harness.BuildToolResultMessage(call.ID, result))
 		}
 	}
-	return "", myException.ChatToolLoopErrEx2("chat service: tool loop exceeded max iterations(%d)", cCommon.AgentToolLoopMax)
+	return "", myException.ChatToolLoopKind.Newf("chat service: tool loop exceeded max iterations(%d)", cCommon.AgentToolLoopMax)
 }
 
 // streamToolLoop 流式路径的工具调用循环:
@@ -562,5 +562,5 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 			messages = append(messages, harness.BuildToolResultMessage(r.item.callID, r.result))
 		}
 	}
-	return "", "", myException.ChatToolLoopErrEx2("chat service: tool stream loop exceeded max iterations(%d)", cCommon.AgentToolLoopMax)
+	return "", "", myException.ChatToolLoopKind.Newf("chat service: tool stream loop exceeded max iterations(%d)", cCommon.AgentToolLoopMax)
 }
