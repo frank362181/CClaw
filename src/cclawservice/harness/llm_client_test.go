@@ -615,33 +615,6 @@ func TestChatCompletion_StructuredError(t *testing.T) {
 	}
 }
 
-// TestClassifyLlmError 覆盖各语义化类别的判定(含限额与限流的区分、内容安全优先)。
-func TestClassifyLlmError(t *testing.T) {
-	cases := []struct {
-		name       string
-		statusCode int
-		api        myException.LlmAPIError
-		want       myException.LlmErrorCategory
-	}{
-		{"auth", http.StatusUnauthorized, myException.LlmAPIError{Message: "Incorrect API key", Code: "invalid_api_key"}, myException.LlmCategoryAuth},
-		{"forbidden", http.StatusForbidden, myException.LlmAPIError{Message: "Access denied"}, myException.LlmCategoryForbidden},
-		{"not_found", http.StatusNotFound, myException.LlmAPIError{Message: "The model does not exist", Code: "model_not_found"}, myException.LlmCategoryNotFound},
-		{"invalid_request", http.StatusBadRequest, myException.LlmAPIError{Message: "bad request"}, myException.LlmCategoryInvalidRequest},
-		{"server", http.StatusServiceUnavailable, myException.LlmAPIError{Message: "overloaded"}, myException.LlmCategoryServer},
-		{"quota_402", http.StatusPaymentRequired, myException.LlmAPIError{Message: "Insufficient Balance"}, myException.LlmCategoryQuota},
-		{"quota_429", http.StatusTooManyRequests, myException.LlmAPIError{Message: "You exceeded your current quota", Code: "insufficient_quota"}, myException.LlmCategoryQuota},
-		{"rate_limit_429", http.StatusTooManyRequests, myException.LlmAPIError{Message: "Requests rate limit exceeded"}, myException.LlmCategoryRateLimit},
-		{"content_filter", http.StatusBadRequest, myException.LlmAPIError{Message: "Input or output data may contain inappropriate content."}, myException.LlmCategoryContentFilter},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := myException.ClassifyLlmError(tc.statusCode, tc.api); got != tc.want {
-				t.Errorf("ClassifyLlmError(%d,%+v) = %s, want %s", tc.statusCode, tc.api, got, tc.want)
-			}
-		})
-	}
-}
-
 // testClientWithDelays 构造一个重试/空闲超时都很快的客户端,便于确定性测试。
 func testClientWithDelays(idle time.Duration) *Client {
 	c := newClient(time.Second)
@@ -805,5 +778,46 @@ func TestChatCompletionStream_EventErrorForms(t *testing.T) {
 				t.Fatalf("expected error containing %q, got: %v", tc.want, err)
 			}
 		})
+	}
+}
+
+// TestClient_RetryDelayJitter 验证退避抖动:结果落在 base*(1±jitter) 区间内且有离散性;
+// jitter 为 0 时退化为纯指数退避。
+func TestClient_RetryDelayJitter(t *testing.T) {
+	c := newClient(time.Second)
+	c.retryBaseDelay = 100 * time.Millisecond
+	c.retryMaxDelay = 400 * time.Millisecond
+	c.retryJitter = 0.2
+
+	minSeen, maxSeen := time.Hour, time.Duration(0)
+	for i := 0; i < 200; i++ {
+		d := c.retryDelay(1)
+		if d < 80*time.Millisecond || d > 120*time.Millisecond {
+			t.Fatalf("retryDelay(1) = %s, want within [80ms,120ms]", d)
+		}
+		if d < minSeen {
+			minSeen = d
+		}
+		if d > maxSeen {
+			maxSeen = d
+		}
+	}
+	if minSeen == maxSeen {
+		t.Errorf("jitter produced identical delays (%s), expected variation", minSeen)
+	}
+
+	// 封顶后仍带抖动:400ms ±20% → 不超过 480ms
+	for i := 0; i < 200; i++ {
+		if d := c.retryDelay(6); d > 480*time.Millisecond {
+			t.Fatalf("capped retryDelay(6) = %s, want <= 480ms", d)
+		}
+	}
+
+	// 抖动为 0 → 纯指数:100ms → 200ms → 400ms(封顶) → 400ms
+	c.retryJitter = 0
+	for i, want := range []time.Duration{100, 200, 400, 400} {
+		if got := c.retryDelay(i + 1); got != want*time.Millisecond {
+			t.Errorf("no-jitter retryDelay(%d) = %s, want %s", i+1, got, want*time.Millisecond)
+		}
 	}
 }

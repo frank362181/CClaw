@@ -212,7 +212,7 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 				if idle < interval {
 					continue // 期间有事件往来,无需心跳
 				}
-				emit("heartbeat", gin.H{"ts": time.Now().Unix()})
+				emit("heartbeat", gin.H{"ts": common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp})
 			}
 		}
 	}()

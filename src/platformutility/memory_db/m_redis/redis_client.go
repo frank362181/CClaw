@@ -3,7 +3,6 @@ package m_redis
 import (
 	"context"
 	"fmt"
-	"math"
 	"strconv"
 	"sync"
 	"time"
@@ -373,20 +372,26 @@ func (rdb *RedisClient) connectMemoryDb() error {
 	return nil
 }
 
-// reconnect 后台断线重建(由健康检查 goroutine 调用),带指数退避。
+// reconnect 后台断线重建(由健康检查 goroutine 调用),带指数退避 + 抖动。
 // 注意:不在请求路径调用;退避与拨号期间不持有写锁、不清空 mClient,
 // 旧连接继续服务,避免重连窗口期误伤在线请求。
 func (rdb *RedisClient) reconnect() error {
-	var lastErr error
-	for i := 0; i < rdb.MConfig.MaxRetries; i++ {
-		// 指数退避算法
-		exponent := int(math.Pow(2, float64(i)))
-		wait := time.Duration(exponent*rdb.MConfig.ReconnectBaseDelay) * time.Millisecond
-		if wait > 30*time.Second {
-			wait = 30 * time.Second
-		}
+	attempts := rdb.MConfig.MaxRetries
+	if attempts <= 0 {
+		attempts = 1
+	}
+	// 每次尝试前等待 reconnectBaseDelay(ms) * 2^(i),封顶 30s,再叠加 ±抖动。
+	// 抖动用于避免多实例/多调用方在同一时刻同步重连。
+	policy := common.BackoffPolicy{
+		BaseDelay:   time.Duration(rdb.MConfig.ReconnectBaseDelay) * time.Millisecond,
+		MaxDelay:    30 * time.Second,
+		JitterRatio: common.DefaultJitterRatio,
+	}
 
-		logging.LogInfoF("[Redis] reconnecting in %v (attempt %d:%d)", wait, i+1, rdb.MConfig.MaxRetries)
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		wait := policy.Delay(i + 1)
+		logging.LogInfoF("[Redis] reconnecting in %v (attempt %d:%d)", wait, i+1, attempts)
 
 		select {
 		case <-rdb.Ctx.Done():
@@ -417,7 +422,7 @@ func (rdb *RedisClient) reconnect() error {
 		return nil
 	}
 
-	return exception.MemoryDbErrEx2("reconnect failed after %d attempts,Error=%s", rdb.MConfig.MaxRetries, lastErr.Error())
+	return exception.MemoryDbErrEx2("reconnect failed after %d attempts,Error=%s", attempts, lastErr.Error())
 }
 
 func (rdb *RedisClient) connecting(fn func(ctx context.Context, cn *redis.Conn) error) (*redis.Client, error) {

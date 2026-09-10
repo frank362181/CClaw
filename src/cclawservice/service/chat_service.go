@@ -517,6 +517,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 					}
 				}()
 
+				//执行具体的工具
 				res, err := toolSet.ExecStream(ctx, run.name, run.arg, func(line string) {
 					lastOut.Store(pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().NanoTimestamp)
 					// 脚本 stdout 行:仅投递到通道,由唯一转发 goroutine 推送(不在此处直接写 SSE)

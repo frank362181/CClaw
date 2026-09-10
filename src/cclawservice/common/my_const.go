@@ -200,6 +200,7 @@ const (
 	LlmRetryMaxAttempts      = 3    // 可重试错误(429/5xx/断流)的最大尝试次数(含首次)
 	LlmRetryBaseDelayMs      = 500  // 指数退避基准(毫秒):500 → 1000 → 2000 …
 	LlmRetryMaxDelayMs       = 4000 // 单次退避上限(毫秒)
+	LlmRetryJitterRatio      = 0.2  // 退避抖动比例(±20%):打散并发重试,避免惊群
 	LlmStreamIdleTimeoutSecs = 60   // 流式读取空闲上限(秒):超过无任何数据则判定断流并中止
 	ChatStreamHeartbeatSecs  = 15   // SSE 空闲心跳间隔(秒):静默超时向浏览器发送心跳保活
 )

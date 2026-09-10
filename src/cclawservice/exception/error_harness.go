@@ -5,6 +5,7 @@
 package exception
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -736,13 +737,20 @@ func (te *ErrorChatLLMContentFilter) Is(target error) bool {
 	return false
 }
 
-// LlmAPIError 供应商返回的错误结构(OpenAI 风格)。
+// llmAPIError 供应商返回的错误体(OpenAI 风格);仅包内使用,不把供应商协议细节暴露给调用方。
 // Param 指出出错的具体字段(OpenAI 风格),便于定位请求配置问题。
-type LlmAPIError struct {
+type llmAPIError struct {
 	Message string `json:"message"`
 	Type    string `json:"type"`
 	Param   string `json:"param"`
 	Code    string `json:"code"`
+}
+
+// HasLlmError 判定 JSON 载荷中是否携带错误体(error 字段存在且非 null)。
+// 供调用方(harness)判断上游是否返回错误,而无需感知错误体的内部结构。
+func HasLlmError(payload json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(payload))
+	return trimmed != "" && trimmed != "null"
 }
 
 // LlmStatusError 结构化的 LLM 上游错误。
@@ -755,8 +763,9 @@ type LlmStatusError struct {
 	RequestID  string           // 上游 request_id(响应头),便于排障/提交工单
 	Stage      string           // 错误发生阶段:response(首字节前)/ stream(流中)
 	Category   LlmErrorCategory // 语义化类别
-	API        LlmAPIError      // 解析出的错误体(可能为空)
-	Raw        string           // 原始响应体(无法结构化解析时的兜底)
+
+	api llmAPIError // 解析出的错误体(包内;可能为空)
+	raw string      // 原始响应体(无法结构化解析时的兜底)
 }
 
 // LlmErrorCategory LLM 上游错误的语义化类别。
@@ -791,15 +800,17 @@ const (
 )
 
 // NewLlmResponseError 构造"HTTP 200 但响应体携带 error 字段"的结构化错误(同步路径)。
-func NewLlmResponseError(api LlmAPIError) *LlmStatusError {
+// payload 为错误体原始 JSON(即 error 字段的内容),由本包负责解析与分类。
+func NewLlmResponseError(payload json.RawMessage) *LlmStatusError {
+	api := parseLlmErrorBody(string(payload))
 	return &LlmStatusError{
 		ErrorDescription: exception.ErrorDescription{
 			ErrId: ErrorIdBizLlmStatus,
 		},
 		StatusCode: http.StatusOK,
 		Stage:      llmStageResponse,
-		Category:   ClassifyLlmError(http.StatusOK, api),
-		API:        api,
+		Category:   classifyLlmError(http.StatusOK, api),
+		api:        api,
 	}
 }
 
@@ -816,13 +827,18 @@ func NewLlmResponseTransportError(err error) *LlmStatusError {
 		},
 		Stage:    llmStageResponse,
 		Category: LlmCategoryServer,
-		API:      LlmAPIError{Message: detail, Type: "transport_error"},
-		Raw:      detail,
+		api:      llmAPIError{Message: detail, Type: "transport_error"},
+		raw:      detail,
 	}
 }
 
 // NewLlmStreamError 构造流中错误(连接已建立,HTTP 200)的结构化错误。
-func NewLlmStreamError(api LlmAPIError, requestID string) *LlmStatusError {
+// payload 为错误载荷原始 JSON/文本:能解析出结构则按结构分类,否则回退为纯文本消息。
+func NewLlmStreamError(payload json.RawMessage, requestID string) *LlmStatusError {
+	api := parseLlmErrorBody(string(payload))
+	if api.Message == "" && api.Code == "" && api.Type == "" {
+		api = llmAPIError{Message: strings.TrimSpace(string(payload))}
+	}
 	return &LlmStatusError{
 		ErrorDescription: exception.ErrorDescription{
 			ErrId: ErrorIdBizLlmStatus,
@@ -830,8 +846,8 @@ func NewLlmStreamError(api LlmAPIError, requestID string) *LlmStatusError {
 		StatusCode: http.StatusOK,
 		RequestID:  requestID,
 		Stage:      llmStageStream,
-		Category:   ClassifyLlmError(http.StatusOK, api),
-		API:        api,
+		Category:   classifyLlmError(http.StatusOK, api),
+		api:        api,
 	}
 }
 
@@ -850,16 +866,16 @@ func NewLlmStreamTransportError(err error, requestID string) *LlmStatusError {
 		RequestID: requestID,
 		Stage:     llmStageStream,
 		Category:  LlmCategoryServer,
-		API:       LlmAPIError{Message: detail, Type: "transport_error"},
-		Raw:       detail,
+		api:       llmAPIError{Message: detail, Type: "transport_error"},
+		raw:       detail,
 	}
 }
 
 // Error 实现 error 接口;文本包含阶段/状态码/类别/上游消息/request_id,便于日志诊断。
 func (e *LlmStatusError) Error() string {
-	msg := strings.TrimSpace(e.API.Message)
+	msg := strings.TrimSpace(e.api.Message)
 	if msg == "" {
-		msg = strings.TrimSpace(e.Raw)
+		msg = strings.TrimSpace(e.raw)
 	}
 	var b strings.Builder
 	b.WriteString("runtime client: ")

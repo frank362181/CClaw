@@ -32,6 +32,7 @@ import (
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service/common"
+	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
 )
@@ -50,20 +51,22 @@ type ChatCompletionUsage struct {
 }
 
 // ChatCompletionResponse chat/completions 应答体
+// Error 保留原始 JSON(error 字段内容),其结构与分类由 exception 包负责,不在本层暴露供应商协议细节。
 type ChatCompletionResponse struct {
-	ID      string                   `json:"id"`
-	Model   string                   `json:"model"`
-	Choices []ChatCompletionChoice   `json:"choices"`
-	Usage   *ChatCompletionUsage     `json:"usage,omitempty"`
-	Error   *myException.LlmAPIError `json:"error,omitempty"`
+	ID      string                 `json:"id"`
+	Model   string                 `json:"model"`
+	Choices []ChatCompletionChoice `json:"choices"`
+	Usage   *ChatCompletionUsage   `json:"usage,omitempty"`
+	Error   json.RawMessage        `json:"error,omitempty"`
 }
 
 // ChatCompletionChunk 流式应答的单个数据块(stream=true 时上游逐块返回,OpenAI 兼容)
+// Error 同上:保留原始 JSON。
 type ChatCompletionChunk struct {
 	ID      string                      `json:"id"`
 	Model   string                      `json:"model"`
 	Choices []ChatCompletionChunkChoice `json:"choices"`
-	Error   *myException.LlmAPIError    `json:"error,omitempty"`
+	Error   json.RawMessage             `json:"error,omitempty"`
 }
 
 // ChatCompletionChunkDelta 流式块中的增量(delta)。
@@ -95,6 +98,8 @@ type Client struct {
 	retryMaxAttempts int
 	retryBaseDelay   time.Duration
 	retryMaxDelay    time.Duration
+	// 退避抖动比例(±),用于打散并发重试;0 表示不抖动。
+	retryJitter float64
 	// 流式读取空闲超时:超过该时长无任何数据到达则中止本次流(0 表示禁用)。
 	streamIdle time.Duration
 }
@@ -117,6 +122,7 @@ func newClient(timeout time.Duration) *Client {
 		retryMaxAttempts: myCommon.LlmRetryMaxAttempts,
 		retryBaseDelay:   time.Duration(myCommon.LlmRetryBaseDelayMs) * time.Millisecond,
 		retryMaxDelay:    time.Duration(myCommon.LlmRetryMaxDelayMs) * time.Millisecond,
+		retryJitter:      myCommon.LlmRetryJitterRatio,
 		streamIdle:       time.Duration(myCommon.LlmStreamIdleTimeoutSecs) * time.Second,
 	}
 }
@@ -263,8 +269,8 @@ func (c *Client) completeWithToolsOnce(ctx context.Context, llmProvider dataobje
 	if err := json.Unmarshal(respBody, &resp); err != nil {
 		return "", nil, myException.RuntimeClientErrEx2("runtime client: unmarshal response: %v", err)
 	}
-	if resp.Error != nil && (resp.Error.Message != "" || resp.Error.Code != "" || resp.Error.Type != "") {
-		return "", nil, myException.NewLlmResponseError(*resp.Error)
+	if myException.HasLlmError(resp.Error) {
+		return "", nil, myException.NewLlmResponseError(resp.Error)
 	}
 	if len(resp.Choices) == 0 {
 		return "", nil, myException.RuntimeClientErrEx("runtime client: empty completion choices")
@@ -281,7 +287,7 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	idle := c.streamIdle
-	idleTimer := newStreamIdleTimer(idle, cancel)
+	idleTimer := pCommon.CreateTimerWithContext(idle, cancel)
 	if idleTimer != nil {
 		defer idleTimer.Stop()
 	}
@@ -347,8 +353,8 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 
 		var chunk ChatCompletionChunk
 		chunkOK := json.Unmarshal([]byte(data), &chunk) == nil
-		if apiErr := streamError(eventName, chunk, chunkOK, data); apiErr != nil {
-			return "", finishReason, emitted, myException.NewLlmStreamError(*apiErr, requestID)
+		if payload, isErr := streamErrorPayload(eventName, chunk, data); isErr {
+			return "", finishReason, emitted, myException.NewLlmStreamError(payload, requestID)
 		}
 		if !chunkOK || len(chunk.Choices) == 0 {
 			continue
@@ -391,7 +397,7 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	idle := c.streamIdle
-	idleTimer := newStreamIdleTimer(idle, cancel)
+	idleTimer := pCommon.CreateTimerWithContext(idle, cancel)
 	if idleTimer != nil {
 		defer idleTimer.Stop()
 	}
@@ -455,8 +461,8 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 
 		var chunk ChatCompletionChunk
 		chunkOK := json.Unmarshal([]byte(data), &chunk) == nil
-		if apiErr := streamError(eventName, chunk, chunkOK, data); apiErr != nil {
-			return "", nil, finishReason, emitted, myException.NewLlmStreamError(*apiErr, requestID)
+		if payload, isErr := streamErrorPayload(eventName, chunk, data); isErr {
+			return "", nil, finishReason, emitted, myException.NewLlmStreamError(payload, requestID)
 		}
 		if !chunkOK || len(chunk.Choices) == 0 {
 			continue
@@ -495,19 +501,15 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 	return strings.TrimSpace(sb.String()), acc.result(), finishReason, emitted, nil
 }
 
-// retryDelay 指数退避:第 n 次重试等待 base*2^(n-1),并以 retryMaxDelay 封顶。
+// retryDelay 指数退避 + 抖动:第 n 次重试等待 base*2^(n-1)(以 retryMaxDelay 封顶),
+// 再叠加 ±retryJitter 的等比例随机抖动(保留退避量级)。
+// 抖动用于打散并发调用方的重试时间点,避免同步重试造成惊群(thundering herd)。
 func (c *Client) retryDelay(retryIndex int) time.Duration {
-	if c.retryBaseDelay <= 0 || retryIndex <= 0 {
-		return 0
-	}
-	delay := c.retryBaseDelay
-	for i := 1; i < retryIndex && delay < c.retryMaxDelay; i++ {
-		delay *= 2
-	}
-	if c.retryMaxDelay > 0 && delay > c.retryMaxDelay {
-		delay = c.retryMaxDelay
-	}
-	return delay
+	return pCommon.BackoffPolicy{
+		BaseDelay:   c.retryBaseDelay,
+		MaxDelay:    c.retryMaxDelay,
+		JitterRatio: c.retryJitter,
+	}.Delay(retryIndex)
 }
 
 // retryWait 退避等待后继续重试(nextAttempt 为即将执行的尝试序号,从 2 开始);
@@ -529,34 +531,19 @@ func (c *Client) retryWait(ctx context.Context, nextAttempt int, lastErr error) 
 	}
 }
 
-// newStreamIdleTimer 启动流式读取的"空闲超时"定时器:超过 idle 无任何数据到达时调用 cancel 中止读取。
-// 需在每次收到数据后 Reset;idle<=0 时返回 nil(禁用)。
-func newStreamIdleTimer(idle time.Duration, cancel context.CancelFunc) *time.Timer {
-	if idle <= 0 {
-		return nil
-	}
-	return time.AfterFunc(idle, cancel)
-}
-
-// streamError 从单个 SSE 数据块中提取上游错误,兼容三种形态:
-//  1. OpenAI:    data: {"error":{...}}
-//  2. Anthropic: event: error + data: {"type":"error","error":{...}}
-//  3. 扁平结构:  event: error + data: {"code":...,"message":...}(无 error 外壳)
+// streamErrorPayload 取该 SSE 数据块中的错误载荷:
+//   - 数据块含 error 字段(OpenAI 风格)→ 取该字段
+//   - 事件类型为 error(Anthropic / 网关自定义)→ 取整个数据块
 //
-// 无错误返回 nil。
-func streamError(eventName string, chunk ChatCompletionChunk, chunkOK bool, data string) *myException.LlmAPIError {
-	if chunkOK && chunk.Error != nil &&
-		(chunk.Error.Message != "" || chunk.Error.Code != "" || chunk.Error.Type != "") {
-		return chunk.Error
+// 无错误时返回 ok=false。载荷的解析与分类由 exception 包负责。
+func streamErrorPayload(eventName string, chunk ChatCompletionChunk, data string) (json.RawMessage, bool) {
+	if myException.HasLlmError(chunk.Error) {
+		return chunk.Error, true
 	}
-	if !strings.EqualFold(eventName, "error") {
-		return nil
+	if strings.EqualFold(eventName, "error") {
+		return json.RawMessage(data), true
 	}
-	api := myException.ParseLlmErrorBody(data)
-	if api.Message == "" && api.Code == "" && api.Type == "" {
-		api = myException.LlmAPIError{Message: strings.TrimSpace(data)}
-	}
-	return &api
+	return nil, false
 }
 
 // streamReadError 归一化流读取失败:
@@ -632,8 +619,8 @@ func (c *Client) doCompletionOnce(ctx context.Context, llmProvider dataobject.TL
 	if err := json.Unmarshal(respBody, &resp); err != nil {
 		return "", myException.RuntimeClientErrEx2("runtime client: unmarshal response: %v", err)
 	}
-	if resp.Error != nil && (resp.Error.Message != "" || resp.Error.Code != "" || resp.Error.Type != "") {
-		return "", myException.NewLlmResponseError(*resp.Error)
+	if myException.HasLlmError(resp.Error) {
+		return "", myException.NewLlmResponseError(resp.Error)
 	}
 	if len(resp.Choices) == 0 {
 		return "", myException.RuntimeClientErrEx("runtime client: empty completion choices")

@@ -11,6 +11,7 @@ package common
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 )
 
 type hostInfo struct {
@@ -496,6 +498,15 @@ func Close(file *os.File) {
 
 func GetEnvString(key string) string {
 	return os.Getenv(key)
+}
+
+// CreateTimerWithContext 根据context的cancel创建一个timer
+func CreateTimerWithContext(idle time.Duration, cancel context.CancelFunc) *time.Timer {
+	if idle <= 0 {
+		return nil
+	}
+
+	return time.AfterFunc(idle, cancel)
 }
 
 // =================================== member of object ======================

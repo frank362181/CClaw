@@ -102,8 +102,8 @@ func (conn *CommonDatabase) openDatabase() error {
 		}
 	}
 
-	//open pool
-	err := conn.GetPool().OpenPool()
+	//open pool(失败时按 retry_* 配置做指数退避 + 抖动重试)
+	err := conn.OpenPoolWithRetry()
 	if err != nil {
 		return err
 	}

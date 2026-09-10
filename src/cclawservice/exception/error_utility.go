@@ -116,9 +116,9 @@ var (
 	}
 )
 
-// ClassifyLlmError 依据 HTTP 状态码与上游错误体判定语义化类别。
+// classifyLlmError 依据 HTTP 状态码与上游错误体判定语义化类别(包内使用)。
 // 优先级:内容安全 > 额度 > HTTP 状态码 > 文案兜底(流中错误无状态码时)。
-func ClassifyLlmError(statusCode int, api LlmAPIError) LlmErrorCategory {
+func classifyLlmError(statusCode int, api llmAPIError) LlmErrorCategory {
 	code := strings.ToLower(strings.TrimSpace(api.Code))
 	typ := strings.ToLower(strings.TrimSpace(api.Type))
 	msg := strings.ToLower(api.Message)
@@ -252,36 +252,35 @@ func ParseLlmResponseError(resp *http.Response, readBytes int64) error {
 		}
 	}
 
-	apiErr := ParseLlmErrorBody(raw)
+	apiErr := parseLlmErrorBody(raw)
 	return &LlmStatusError{
 		StatusCode: statusCode,
 		RequestID:  requestID,
 		Stage:      llmStageResponse,
-		Category:   ClassifyLlmError(statusCode, apiErr),
-		API:        apiErr,
-		Raw:        raw,
+		Category:   classifyLlmError(statusCode, apiErr),
+		api:        apiErr,
+		raw:        raw,
 	}
 }
 
-// ParseLlmErrorBody 解析上游错误体:优先 OpenAI 风格 {"error":{...}},回退扁平结构 {message,type,code,param}。
-// 导出供流式 SSE 解析复用(如 event: error 形态)。
-func ParseLlmErrorBody(raw string) LlmAPIError {
+// parseLlmErrorBody 解析上游错误体(包内):优先 OpenAI 风格 {"error":{...}},回退扁平结构 {message,type,code,param}。
+func parseLlmErrorBody(raw string) llmAPIError {
 	if strings.TrimSpace(raw) == "" {
-		return LlmAPIError{}
+		return llmAPIError{}
 	}
 	var wrapped struct {
-		Error *LlmAPIError `json:"error"`
+		Error *llmAPIError `json:"error"`
 	}
 	if json.Unmarshal([]byte(raw), &wrapped) == nil && wrapped.Error != nil &&
 		(wrapped.Error.Message != "" || wrapped.Error.Code != "" || wrapped.Error.Type != "") {
 		return *wrapped.Error
 	}
-	var flat LlmAPIError
+	var flat llmAPIError
 	if json.Unmarshal([]byte(raw), &flat) == nil &&
 		(flat.Message != "" || flat.Code != "" || flat.Type != "") {
 		return flat
 	}
-	return LlmAPIError{}
+	return llmAPIError{}
 }
 
 // requestIDHeaders 上游 request_id 可能出现的响应头(按优先级;http.Header.Get 大小写不敏感)。

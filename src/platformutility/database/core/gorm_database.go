@@ -77,7 +77,7 @@ func (g *GormDatabase) openGormDatabase() error {
 
 	sqlDb, _ := g.GetPool().GetDatabase()
 	if sqlDb == nil {
-		err := g.GetPool().OpenPool()
+		err := g.OpenPoolWithRetry()
 		if err != nil {
 			return exception.DatabaseErrorEx(err.Error())
 		}
