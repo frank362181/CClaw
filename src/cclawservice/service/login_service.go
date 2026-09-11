@@ -83,27 +83,28 @@ const sessionRefreshDivisor = 3
 func (service *LoginService) Login(username, password string) (*request.LoginSession, error) {
 	username = strings.ToLower(strings.TrimSpace(username))
 	if username == "" || password == "" {
-		return nil, exception.ParameterEmptyErrorEx("user or password is empty")
+		return nil, myException.LoginParameterKind.New("user or password is empty")
 	}
 
 	// 1. 锁定检查在凭据校验前：攻击期间锁定账号不落库
 	if service.throttleService.IsLocked(username) {
-		return nil, myException.UserPasswordUnmatchErr // 统一通用错误,不暴露锁定状态
+		// 统一通用错误(不暴露锁定状态);细节仅进日志
+		return nil, myException.UserPasswordUnmatchKind.New("account locked")
 	}
 
 	user, err := service.dbAccessor.GetUserByNameAndPassword(username, password)
 	if err != nil {
 		service.throttleService.RecordFailure(username)
 		if errors.Is(err, exception.UnMatchError) {
-			// 统一收敛为 凭据无效，不向controller层暴露细节
-			return nil, myException.UserPasswordUnmatchErr
+			// 统一收敛为 凭据无效,不向 controller 暴露底层细节(且不区分"账号不存在/禁用",防枚举)
+			return nil, myException.UserPasswordUnmatchKind.New("credential unmatch")
 		}
 		return nil, err
 	}
 
 	if user == nil || user.Deleted || user.Disabled {
 		service.throttleService.RecordFailure(username)
-		return nil, myException.UserPasswordUnmatchErr
+		return nil, myException.UserPasswordUnmatchKind.New("account not found or unavailable")
 	}
 
 	// 成功登录

@@ -59,6 +59,14 @@ func (p BackoffPolicy) Delay(retryIndex int) time.Duration {
 	return ApplyJitter(delay, p.JitterRatio)
 }
 
+func RetryBackPolicy(baseDelay, maxDelay time.Duration, jitterRate float64) BackoffPolicy {
+	return BackoffPolicy{
+		BaseDelay:   baseDelay,
+		MaxDelay:    maxDelay,
+		JitterRatio: jitterRate,
+	}
+}
+
 // ApplyJitter 对 delay 施加等比例随机抖动:结果落在 [delay*(1-ratio), delay*(1+ratio)]。
 // 该方式保留退避量级(不会把等待缩到接近 0),仅把并发调用方的时间点打散。
 // delay<=0 或 ratio<=0 时原样返回;ratio>1 时按 1 处理。

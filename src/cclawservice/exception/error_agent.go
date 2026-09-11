@@ -20,14 +20,11 @@ import (
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
-// codeAgentBase agent 域业务码基址:ConstErrorMax + 2000 = 4000。
-const codeAgentBase = basic.ConstErrorMax + 2000
-
 const (
-	codeAgentParameter = codeAgentBase + 1 + iota // 参数错误
-	codeAgentNotFound                             // 智能体不存在
-	codeAgentConflict                             // 智能体已存在/版本冲突
-	codeAgentWorkspace                            // 工作空间不可用
+	codeAgentParameter = codeErrorAgentBase + 1 + iota // 参数错误
+	codeAgentNotFound                                  // 智能体不存在
+	codeAgentConflict                                  // 智能体已存在/版本冲突
+	codeAgentWorkspace                                 // 工作空间不可用
 )
 
 var (

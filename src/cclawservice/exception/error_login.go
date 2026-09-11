@@ -16,19 +16,14 @@ import (
 	"net/http"
 
 	"my.favorite/cclawservice/apperr"
-	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
-// codeUserBase user/login 域业务码基址:ConstErrorMax + 1000 = 3000。
-// 域内自 +1 起按声明顺序连续分配(3001..3005);改动顺序会被契约测试拦下。
-const codeUserBase = basic.ConstErrorMax + 1000
-
 const (
-	codeUserUnAuthorized        = codeUserBase + 1 + iota // 用户未认证
-	codeLoginParameter                                    // 登录参数错误
-	codeUserNamePasswordUnmatch                           // 用户名或密码错误
-	codeNonToken                                          // 未携带 Token
-	codeInvalidToken                                      // Token 无效
+	codeUserUnAuthorized        = codeErrorUserBase + 1 + iota // 用户未认证
+	codeLoginParameter                                         // 登录参数错误
+	codeUserNamePasswordUnmatch                                // 用户名或密码错误
+	codeNonToken                                               // 未携带 Token
+	codeInvalidToken                                           // Token 无效
 )
 
 var (
@@ -73,8 +68,6 @@ var (
 		Msg:        "Token无效,请登录",
 	})
 )
-
-// ===== 兼容层:保持既有标识符与工厂签名,调用点无需改动 =====
 
 // UserPasswordUnmatchErr 用户名密码不匹配的哨兵(errors.Is 用)。
 var UserPasswordUnmatchErr = UserPasswordUnmatchKind.Sentinel()

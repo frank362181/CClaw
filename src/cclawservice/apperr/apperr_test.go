@@ -274,3 +274,29 @@ func TestSilentMetadata(t *testing.T) {
 		t.Fatalf("HTTPStatus 元数据丢失")
 	}
 }
+
+// TestNotifyMetadata Notify 用于调用方判断"必须醒目告知用户"(如欠费/密钥无效)。
+func TestNotifyMetadata(t *testing.T) {
+	kind := Register(Kind{Name: "test.apperr.notify", Msg: "模型服务额度不足,请充值后重试", Notify: true})
+
+	if !Notify(kind.New("quota exhausted")) {
+		t.Fatalf("Notify 未生效")
+	}
+	if !Notify(kind) { // Kind 本身作为错误值
+		t.Fatalf("Kind 作为错误值时应命中 Notify")
+	}
+	if Notify(testKindA.New("boom")) {
+		t.Fatalf("默认不应为 Notify")
+	}
+	if Notify(nil) || Notify(errors.New("plain")) {
+		t.Fatalf("nil 与非应用错误应为 false")
+	}
+}
+
+// TestRegisterRejectsSilentAndNotify 静默("不输出")与显式提醒("必须输出")语义冲突,
+// 必须在注册期拦截而不是运行时表现矛盾。
+func TestRegisterRejectsSilentAndNotify(t *testing.T) {
+	assertPanics(t, "Silent 与 Notify 同时为真", func() {
+		Register(Kind{Name: "test.apperr.silent_and_notify", Silent: true, Notify: true})
+	})
+}

@@ -6,9 +6,14 @@ import (
 	"strings"
 )
 
+const (
+	NullString  = "<nil>" //表示nil字符串
+	BlankString = ""      //空字符串
+)
+
 func ContainsString(text string, substrings []string) bool {
 	for _, s := range substrings {
-		if s != "" && strings.Contains(text, s) {
+		if s != BlankString && strings.Contains(text, s) {
 			return true
 		}
 	}
@@ -70,7 +75,7 @@ func SplitKeyWords(keywords string) []string {
 func ValueToString(v interface{}) (string, bool) {
 	switch value := v.(type) {
 	case nil:
-		return "", false
+		return BlankString, false
 	case string:
 		return value, true
 	case bool:
@@ -91,7 +96,7 @@ func ValueToString(v interface{}) (string, bool) {
 		// map / slice / 其他自定义类型：序列化为 JSON 文本
 		content, err := json.Marshal(value)
 		if err != nil {
-			return "", false
+			return BlankString, false
 		}
 		return string(content), true
 	}

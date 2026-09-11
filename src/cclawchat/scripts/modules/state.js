@@ -175,6 +175,7 @@ export const State = {
         if (!msg || !notice || !notice.code) return false;
         if (!Array.isArray(msg.notices)) msg.notices = [];
         const entry = { code: String(notice.code), msg: String(notice.msg || '') };
+        if (notice.level) entry.level = String(notice.level); // error 级告警需保留样式信息(重渲染时使用)
         const idx = msg.notices.findIndex(n => n.code === entry.code);
         if (idx >= 0) msg.notices[idx] = entry;
         else msg.notices.push(entry);

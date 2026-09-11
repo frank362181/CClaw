@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -29,62 +28,13 @@ import (
 
 	myCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
+	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
-	"my.favorite/cclawservice/service/common"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
 )
-
-// ChatCompletionChoice 一条候选回复
-type ChatCompletionChoice struct {
-	Index   int                `json:"index"`
-	Message common.ChatMessage `json:"message"`
-}
-
-// ChatCompletionUsage token 用量(可选,部分供应商流式返回时可能为空)
-type ChatCompletionUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`     // 本次请求的全部token,=请求的token+历史消息+工具调用结果+prompt token
-	CompletionTokens int `json:"completion_tokens"` // 本次请求的输出token
-	TotalTokens      int `json:"total_tokens"`      //prompt token + completion tokens
-}
-
-// ChatCompletionResponse chat/completions 应答体
-// Error 保留原始 JSON(error 字段内容),其结构与分类由 exception 包负责,不在本层暴露供应商协议细节。
-type ChatCompletionResponse struct {
-	ID      string                 `json:"id"`
-	Model   string                 `json:"model"`
-	Choices []ChatCompletionChoice `json:"choices"`
-	Usage   *ChatCompletionUsage   `json:"usage,omitempty"`
-	Error   json.RawMessage        `json:"error,omitempty"`
-}
-
-// ChatCompletionChunk 流式应答的单个数据块(stream=true 时上游逐块返回,OpenAI 兼容)
-// Error 同上:保留原始 JSON。
-type ChatCompletionChunk struct {
-	ID      string                      `json:"id"`
-	Model   string                      `json:"model"`
-	Choices []ChatCompletionChunkChoice `json:"choices"`
-	Error   json.RawMessage             `json:"error,omitempty"`
-}
-
-// ChatCompletionChunkDelta 流式块中的增量(delta)。
-// reasoning_content 是推理模型的思考过程增量(如 DeepSeek reasoner),仅在流式响应中出现、
-// 不参与请求体;这里把它实时转发给浏览器展示,不并入正式回复。
-type ChatCompletionChunkDelta struct {
-	Role             string                 `json:"role"`
-	Content          string                 `json:"content"`
-	ReasoningContent string                 `json:"reasoning_content,omitempty"`
-	ToolCalls        []common.ToolCallDelta `json:"tool_calls,omitempty"`
-}
-
-// ChatCompletionChunkChoice 流式块中的单个候选(增量文本在 delta.content / delta.reasoning_content)
-type ChatCompletionChunkChoice struct {
-	Index        int                      `json:"index"`
-	Delta        ChatCompletionChunkDelta `json:"delta"`
-	FinishReason *string                  `json:"finish_reason"`
-}
 
 // Client 一个可复用的 LLM chat/completions 客户端(线程安全)。
 type Client struct {
@@ -154,7 +104,7 @@ func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm
 // CompleteWithTools 执行一次同步 chat/completions(带工具),返回正式文本与工具调用(可能为空)。
 // 不执行工具:由调用方(工具循环)解析并执行返回的工具调用。
 // 429/5xx/断流(传输层)按指数退避重试(同步调用无副作用,可安全重试)。
-func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []common.ChatMessage, tools []common.Tool) (string, []common.ToolCall, error) {
+func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool) (string, []llmproto.ToolCall, error) {
 	req := BuildChatCompletionRequestWithTool(llmProvider, messages, tools, false)
 	var lastErr error
 	for attempt := 1; attempt <= c.retryMaxAttempts; attempt++ {
@@ -168,7 +118,7 @@ func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.T
 			return content, calls, nil
 		}
 		lastErr = err
-		if !myException.IsRetryableLlmError(err) {
+		if !llmproto.IsRetryableLlmError(err) {
 			return "", nil, err
 		}
 	}
@@ -199,7 +149,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobjec
 		}
 		lastErr, lastFinish = err, finishReason
 		// 已输出过任何增量 → 不可重试(避免重复内容)
-		if emitted || !myException.IsRetryableLlmError(err) {
+		if emitted || !llmproto.IsRetryableLlmError(err) {
 			return "", finishReason, err
 		}
 	}
@@ -213,7 +163,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobjec
 //     供调用方把工具意图实时推给前端(真正执行仍需等流结束拿到完整 arguments)。
 //   - 返回值:       累计正式文本 + 模型请求的工具调用(若有;arguments 已按 index 拼接完整) + finish_reason
 //   - 重试:         429/5xx/断流在"尚未输出任何内容/思考/工具意图"时按指数退避重试。
-func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []common.ChatMessage, tools []common.Tool, onChunk func(string), onReasoning func(string), onToolIntent func(name string)) (string, []common.ToolCall, string, error) {
+func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool, onChunk func(string), onReasoning func(string), onToolIntent func(name string)) (string, []llmproto.ToolCall, string, error) {
 	req := BuildChatCompletionRequestWithTool(llmProvider, messages, tools, true)
 	lastFinish := ""
 	var lastErr error
@@ -228,7 +178,7 @@ func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLl
 			return content, calls, finishReason, nil
 		}
 		lastErr, lastFinish = err, finishReason
-		if emitted || !myException.IsRetryableLlmError(err) {
+		if emitted || !llmproto.IsRetryableLlmError(err) {
 			return "", nil, finishReason, err
 		}
 	}
@@ -236,7 +186,7 @@ func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLl
 }
 
 // completeWithToolsOnce 执行一次同步(带工具)chat/completions(不含重试)。
-func (c *Client) completeWithToolsOnce(ctx context.Context, llmProvider dataobject.TLlm, req common.ChatCompletionRequest) (string, []common.ToolCall, error) {
+func (c *Client) completeWithToolsOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (string, []llmproto.ToolCall, error) {
 	httpReq, err := c.prepareRequest(ctx, llmProvider, req)
 	if err != nil {
 		return "", nil, err
@@ -245,32 +195,32 @@ func (c *Client) completeWithToolsOnce(ctx context.Context, llmProvider dataobje
 	httpResp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
-			return "", nil, myException.ErrRequestCanceled
+			return "", nil, llmproto.ErrRequestCanceled
 		}
-		return "", nil, myException.NewLlmResponseTransportError(err)
+		return "", nil, llmproto.NewLlmResponseTransportError(err)
 	}
 	defer func(Body io.ReadCloser) {
 		_ = Body.Close()
 	}(httpResp.Body)
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return "", nil, myException.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
+		return "", nil, llmproto.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
 	}
 
 	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, myCommon.MaxResponseBytes))
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
-			return "", nil, myException.ErrRequestCanceled
+			return "", nil, llmproto.ErrRequestCanceled
 		}
-		return "", nil, myException.NewLlmResponseTransportError(err)
+		return "", nil, llmproto.NewLlmResponseTransportError(err)
 	}
 
-	var resp ChatCompletionResponse
+	var resp llmproto.ChatCompletionResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
 		return "", nil, myException.RuntimeClientErrEx2("runtime client: unmarshal response: %v", err)
 	}
-	if myException.HasLlmError(resp.Error) {
-		return "", nil, myException.NewLlmResponseError(resp.Error)
+	if llmproto.HasError(resp.Error) {
+		return "", nil, llmproto.NewLlmResponseError(resp.Error)
 	}
 	if len(resp.Choices) == 0 {
 		return "", nil, myException.RuntimeClientErrEx("runtime client: empty completion choices")
@@ -282,7 +232,7 @@ func (c *Client) completeWithToolsOnce(ctx context.Context, llmProvider dataobje
 
 // chatCompletionStreamOnce 执行一次流式 chat/completions(不含重试;含空闲超时与 SSE 事件解析)。
 // 返回值 emitted 表示是否已向调用方输出过增量(决定上层能否安全重试)。
-func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider dataobject.TLlm, req common.ChatCompletionRequest, onChunk func(string), onReasoning func(string)) (string, string, bool, error) {
+func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest, onChunk func(string), onReasoning func(string)) (string, string, bool, error) {
 	// 空闲超时:上游长时间无任何数据 → 取消本次流(归类为可重试的传输层错误)
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -301,18 +251,18 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 	httpResp, err := c.streamClient.Do(httpReq)
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
-			return "", "", false, myException.ErrRequestCanceled
+			return "", "", false, llmproto.ErrRequestCanceled
 		}
-		return "", "", false, myException.NewLlmResponseTransportError(err)
+		return "", "", false, llmproto.NewLlmResponseTransportError(err)
 	}
 	defer func(Body io.ReadCloser) {
 		_ = Body.Close()
 	}(httpResp.Body)
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return "", "", false, myException.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
+		return "", "", false, llmproto.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
 	}
-	requestID := myException.LlmRequestID(httpResp.Header) // 流中错误带上上游 request_id,便于排障
+	requestID := llmproto.GetRequestIDFromLlmResponse(httpResp.Header) // 流中错误带上上游 request_id,便于排障
 	if idleTimer != nil {
 		idleTimer.Reset(idle) // 已收到响应头,重新计时
 	}
@@ -330,7 +280,7 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 			idleTimer.Reset(idle) // 收到数据 → 重置空闲计时
 		}
 		if ctx.Err() != nil {
-			return "", finishReason, emitted, myException.ErrRequestCanceled // 客户端已断开
+			return "", finishReason, emitted, llmproto.ErrRequestCanceled // 客户端已断开
 		}
 
 		line := strings.TrimSpace(scanner.Text())
@@ -351,10 +301,10 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 			break // 上游结束标记
 		}
 
-		var chunk ChatCompletionChunk
+		var chunk llmproto.ChatCompletionChunk
 		chunkOK := json.Unmarshal([]byte(data), &chunk) == nil
-		if payload, isErr := streamErrorPayload(eventName, chunk, data); isErr {
-			return "", finishReason, emitted, myException.NewLlmStreamError(payload, requestID)
+		if payload, isErr := llmproto.StreamErrorPayload(eventName, chunk, data); isErr {
+			return pCommon.BlankString, finishReason, emitted, llmproto.NewLlmStreamError(payload, requestID)
 		}
 		if !chunkOK || len(chunk.Choices) == 0 {
 			continue
@@ -371,7 +321,7 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 			emitted = true
 			onReasoning(delta.ReasoningContent)
 		}
-		if delta.Content == "" {
+		if delta.Content == pCommon.BlankString {
 			continue
 		}
 		sb.WriteString(delta.Content)
@@ -381,19 +331,19 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return "", finishReason, emitted, streamReadError(ctx, streamCtx, err, requestID, idle)
+		return pCommon.BlankString, finishReason, emitted, streamReadError(ctx, streamCtx, err, requestID, idle)
 	}
 
 	content := strings.TrimSpace(sb.String())
 	// 内容安全拦截可能无任何正式内容:透出 finish_reason 交由上层提示,不误报为"空流"
-	if content == "" && finishReason != common.FinishReasonContentFilter {
-		return "", finishReason, emitted, myException.RuntimeClientErrEx("runtime client: empty stream content")
+	if content == pCommon.BlankString && finishReason != llmproto.FinishReasonContentFilter {
+		return pCommon.BlankString, finishReason, emitted, myException.RuntimeClientErrEx("runtime client: empty stream content")
 	}
 	return content, finishReason, emitted, nil
 }
 
 // streamWithToolsOnce 执行一次带工具的流式 chat/completions(不含重试)。
-func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject.TLlm, req common.ChatCompletionRequest, onChunk func(string), onReasoning func(string), onToolIntent func(name string)) (string, []common.ToolCall, string, bool, error) {
+func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest, onChunk func(string), onReasoning func(string), onToolIntent func(name string)) (string, []llmproto.ToolCall, string, bool, error) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	idle := c.streamIdle
@@ -410,18 +360,18 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 	httpResp, err := c.streamClient.Do(httpReq)
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
-			return "", nil, "", false, myException.ErrRequestCanceled
+			return "", nil, "", false, llmproto.ErrRequestCanceled
 		}
-		return "", nil, "", false, myException.NewLlmResponseTransportError(err)
+		return "", nil, "", false, llmproto.NewLlmResponseTransportError(err)
 	}
 	defer func(Body io.ReadCloser) {
 		_ = Body.Close()
 	}(httpResp.Body)
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return "", nil, "", false, myException.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
+		return "", nil, "", false, llmproto.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
 	}
-	requestID := myException.LlmRequestID(httpResp.Header) // 流中错误带上上游 request_id,便于排障
+	requestID := llmproto.GetRequestIDFromLlmResponse(httpResp.Header) // 流中错误带上上游 request_id,便于排障
 	if idleTimer != nil {
 		idleTimer.Reset(idle)
 	}
@@ -439,7 +389,7 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 			idleTimer.Reset(idle)
 		}
 		if ctx.Err() != nil {
-			return "", nil, finishReason, emitted, myException.ErrRequestCanceled
+			return "", nil, finishReason, emitted, llmproto.ErrRequestCanceled
 		}
 
 		line := strings.TrimSpace(scanner.Text())
@@ -459,10 +409,10 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 			break
 		}
 
-		var chunk ChatCompletionChunk
+		var chunk llmproto.ChatCompletionChunk
 		chunkOK := json.Unmarshal([]byte(data), &chunk) == nil
-		if payload, isErr := streamErrorPayload(eventName, chunk, data); isErr {
-			return "", nil, finishReason, emitted, myException.NewLlmStreamError(payload, requestID)
+		if payload, isErr := llmproto.StreamErrorPayload(eventName, chunk, data); isErr {
+			return "", nil, finishReason, emitted, llmproto.NewLlmStreamError(payload, requestID)
 		}
 		if !chunkOK || len(chunk.Choices) == 0 {
 			continue
@@ -501,21 +451,10 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 	return strings.TrimSpace(sb.String()), acc.result(), finishReason, emitted, nil
 }
 
-// retryDelay 指数退避 + 抖动:第 n 次重试等待 base*2^(n-1)(以 retryMaxDelay 封顶),
-// 再叠加 ±retryJitter 的等比例随机抖动(保留退避量级)。
-// 抖动用于打散并发调用方的重试时间点,避免同步重试造成惊群(thundering herd)。
-func (c *Client) retryDelay(retryIndex int) time.Duration {
-	return pCommon.BackoffPolicy{
-		BaseDelay:   c.retryBaseDelay,
-		MaxDelay:    c.retryMaxDelay,
-		JitterRatio: c.retryJitter,
-	}.Delay(retryIndex)
-}
-
 // retryWait 退避等待后继续重试(nextAttempt 为即将执行的尝试序号,从 2 开始);
 // 等待期间客户端断开 → 返回 ErrRequestCanceled(不重试)。
 func (c *Client) retryWait(ctx context.Context, nextAttempt int, lastErr error) error {
-	delay := c.retryDelay(nextAttempt - 1)
+	delay := pCommon.RetryBackPolicy(c.retryBaseDelay, c.retryMaxDelay, c.retryJitter).Delay(nextAttempt - 1) //c.retryDelay(nextAttempt - 1)
 	logging.LogWarnF("runtime client: retry %d/%d after %s, last error: %v",
 		nextAttempt, c.retryMaxAttempts, delay, lastErr)
 	if delay <= 0 {
@@ -525,48 +464,14 @@ func (c *Client) retryWait(ctx context.Context, nextAttempt int, lastErr error) 
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		return myException.ErrRequestCanceled
+		return llmproto.ErrRequestCanceled
 	case <-timer.C:
 		return nil
 	}
 }
 
-// streamErrorPayload 取该 SSE 数据块中的错误载荷:
-//   - 数据块含 error 字段(OpenAI 风格)→ 取该字段
-//   - 事件类型为 error(Anthropic / 网关自定义)→ 取整个数据块
-//
-// 注意:这里的 "error" 是**上游协议**的事件名/字段名,与我们对前端下发的事件名无关。
-// 无错误时返回 ok=false。载荷的解析与分类由本包(harness)负责。
-func streamErrorPayload(eventName string, chunk ChatCompletionChunk, data string) (json.RawMessage, bool) {
-	if myException.HasLlmError(chunk.Error) {
-		return chunk.Error, true
-	}
-	if strings.EqualFold(eventName, "error") {
-		return json.RawMessage(data), true
-	}
-	return nil, false
-}
-
-// streamReadError 归一化流读取失败:
-//   - 客户端断开(外层 ctx 取消)      → ErrRequestCanceled(静默,不重试)
-//   - 空闲超时(仅内层 streamCtx 取消) → 传输层错误(可重试)
-//   - 其它(连接重置/EOF 等)          → 传输层错误(可重试)
-func streamReadError(ctx context.Context, streamCtx context.Context, err error, requestID string, idle time.Duration) error {
-	if ctx.Err() != nil {
-		return myException.ErrRequestCanceled
-	}
-	if idle > 0 && streamCtx.Err() != nil {
-		return myException.NewLlmStreamTransportError(
-			fmt.Errorf("stream idle timeout after %s without data: %v", idle, err), requestID)
-	}
-	if pException.IsContextCanceled(streamCtx, err) {
-		return myException.ErrRequestCanceled
-	}
-	return myException.NewLlmStreamTransportError(err, requestID)
-}
-
 // doCompletion 执行一次同步 chat/completions 并解析回复文本(429/5xx/断流按指数退避重试)。
-func (c *Client) doCompletion(ctx context.Context, llmProvider dataobject.TLlm, req common.ChatCompletionRequest) (string, error) {
+func (c *Client) doCompletion(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (string, error) {
 	var lastErr error
 	for attempt := 1; attempt <= c.retryMaxAttempts; attempt++ {
 		if attempt > 1 {
@@ -579,7 +484,7 @@ func (c *Client) doCompletion(ctx context.Context, llmProvider dataobject.TLlm, 
 			return content, nil
 		}
 		lastErr = err
-		if !myException.IsRetryableLlmError(err) {
+		if !llmproto.IsRetryableLlmError(err) {
 			return "", err
 		}
 	}
@@ -587,7 +492,7 @@ func (c *Client) doCompletion(ctx context.Context, llmProvider dataobject.TLlm, 
 }
 
 // doCompletionOnce 执行一次同步 chat/completions 请求并解析回复文本(同步/轻量调用共用,不含重试)。
-func (c *Client) doCompletionOnce(ctx context.Context, llmProvider dataobject.TLlm, req common.ChatCompletionRequest) (string, error) {
+func (c *Client) doCompletionOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (string, error) {
 	httpReq, err := c.prepareRequest(ctx, llmProvider, req)
 	if err != nil {
 		return "", err
@@ -596,32 +501,32 @@ func (c *Client) doCompletionOnce(ctx context.Context, llmProvider dataobject.TL
 	httpResp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
-			return "", myException.ErrRequestCanceled
+			return "", llmproto.ErrRequestCanceled
 		}
-		return "", myException.NewLlmResponseTransportError(err)
+		return "", llmproto.NewLlmResponseTransportError(err)
 	}
 	defer func(Body io.ReadCloser) {
 		_ = Body.Close()
 	}(httpResp.Body)
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return "", myException.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
+		return "", llmproto.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
 	}
 
 	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, myCommon.MaxResponseBytes))
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
-			return "", myException.ErrRequestCanceled
+			return "", llmproto.ErrRequestCanceled
 		}
-		return "", myException.NewLlmResponseTransportError(err)
+		return "", llmproto.NewLlmResponseTransportError(err)
 	}
 
-	var resp ChatCompletionResponse
+	var resp llmproto.ChatCompletionResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
 		return "", myException.RuntimeClientErrEx2("runtime client: unmarshal response: %v", err)
 	}
-	if myException.HasLlmError(resp.Error) {
-		return "", myException.NewLlmResponseError(resp.Error)
+	if llmproto.HasError(resp.Error) {
+		return "", llmproto.NewLlmResponseError(resp.Error)
 	}
 	if len(resp.Choices) == 0 {
 		return "", myException.RuntimeClientErrEx("runtime client: empty completion choices")
@@ -637,7 +542,7 @@ func (c *Client) doCompletionOnce(ctx context.Context, llmProvider dataobject.TL
 
 // prepareRequest 校验入参并构造请求(不发起网络调用)。
 // 同步(ChatCompletion)与流式(ChatCompletionStream)两条路径共用,保证请求构造一致。
-func (c *Client) prepareRequest(ctx context.Context, llmProvider dataobject.TLlm, req common.ChatCompletionRequest) (*http.Request, error) {
+func (c *Client) prepareRequest(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (*http.Request, error) {
 	if strings.TrimSpace(req.Model) == "" {
 		return nil, myException.RuntimeClientErrEx("runtime client: model is empty")
 	}

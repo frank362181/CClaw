@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 
@@ -64,11 +63,7 @@ func (lc *LoginController) Login(c *gin.Context) {
 
 	loginSession, err1 := loginService.Login(lq.Username, lq.Password)
 	if err1 != nil {
-		if errors.Is(err1, exception2.UserPasswordUnmatchErr) {
-			respondKind(c, exception2.UserPasswordUnmatchKind)
-			return
-		}
-		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
+		respondLoginError(c, err1)
 		return
 	}
 
@@ -98,7 +93,7 @@ func (lc *LoginController) Logout(c *gin.Context) {
 
 	token := strings.TrimSpace(c.GetHeader(basic.ConstHeaderToken))
 	if err := loginService.Logout(token); err != nil {
-		basic.GetBaseResponser().Failure(c, http.StatusInternalServerError, basic.ConstInternalServerError, basic.ConstInternalServerErrorMsg, nil)
+		respondLoginError(c, err)
 		return
 	}
 	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, nil)

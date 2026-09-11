@@ -14,30 +14,47 @@ import (
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
-// codeDatabase database 域业务码基址:ConstErrorMax + 1400 = 3400(域内自 +1 起)。
-const codeDatabase = basic.ConstErrorMax + 1400
-
 const (
-	codeDatabaseQueryError = codeDatabase + 1 + iota // 3401
+	codeDatabaseQueryError = codeErrorDatabase + 1 + iota // 3401
+	codeDatabaseExecError
 )
 
-// DatabaseKind 数据库访问失败(gorm 执行/连接错误)。
-var DatabaseKind = apperr.Register(apperr.Kind{
-	Name:       "database.query",
-	Code:       codeDatabaseQueryError,
-	HTTPStatus: http.StatusInternalServerError,
-	Msg:        basic.ConstInternalServerErrorMsg,
-})
+// DatabaseQueryKind 数据库访问失败(gorm 执行/连接错误)。
+var (
+	DatabaseQueryKind = apperr.Register(apperr.Kind{
+		Name:       "database.query",
+		Code:       codeDatabaseQueryError,
+		HTTPStatus: http.StatusInternalServerError,
+		Msg:        basic.ConstInternalServerErrorMsg,
+	})
+
+	DatabaseExecKind = apperr.Register(apperr.Kind{
+		Name:       "database.exec",
+		Code:       codeDatabaseExecError,
+		HTTPStatus: http.StatusInternalServerError,
+		Msg:        basic.ConstInternalServerErrorMsg,
+	})
+)
 
 // ===== 兼容层:保持既有标识符与工厂签名,调用点无需改动 =====
 
 // DatabaseQueryErr 数据库查询错误的哨兵(errors.Is 用)。
-var DatabaseQueryErr = DatabaseKind.Sentinel()
+var DatabaseQueryErr = DatabaseQueryKind.Sentinel()
 
 func DatabaseQueryErrEx(errTxt string) *apperr.Error {
-	return DatabaseKind.New(errTxt)
+	return DatabaseQueryKind.New(errTxt)
 }
 
 func DatabaseQueryErrEx2(errTxt string, a ...interface{}) *apperr.Error {
-	return DatabaseKind.Newf(errTxt, a...)
+	return DatabaseQueryKind.Newf(errTxt, a...)
+}
+
+var DatabaseExecErr = DatabaseExecKind.Sentinel()
+
+func DatabaseExecErrEx(errTxt string) *apperr.Error {
+	return DatabaseExecKind.New(errTxt)
+}
+
+func DatabaseExecErrEx2(errTxt string, a ...interface{}) *apperr.Error {
+	return DatabaseExecKind.Newf(errTxt, a...)
 }

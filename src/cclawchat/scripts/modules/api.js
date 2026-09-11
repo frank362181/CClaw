@@ -149,7 +149,10 @@ async function runRealChatStream(convId, content, token, signal, onChunk, onComp
             accumulated += payload.reply;
             onChunk(accumulated);
         } else if (payload && payload.msg) {
-            throw new Error(payload.msg);
+            const err = new Error(payload.msg);
+            // notify=true:用户可自行处理的错误(欠费/密钥无效/内容合规等),前端用醒目标注而非普通文字
+            err.notify = payload.notify === true;
+            throw err;
         }
         return false;
     };

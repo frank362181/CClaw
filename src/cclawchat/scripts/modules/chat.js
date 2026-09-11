@@ -173,9 +173,10 @@ export const ChatPage = {
                     const nl = document.createElement('div');
                     nl.className = 'notice-list';
                     msg.notices.forEach(n => {
+                        const alert = n.level === 'error';
                         const it = document.createElement('div');
-                        it.className = 'stream-notice';
-                        it.textContent = `⚠️ ${n.msg || ''}`;
+                        it.className = alert ? 'stream-notice alert-error' : 'stream-notice';
+                        it.textContent = `${alert ? '⛔' : '⚠️'} ${n.msg || ''}`;
                         nl.appendChild(it);
                     });
                     bubble.appendChild(nl);
@@ -406,13 +407,14 @@ export const ChatPage = {
             bubble.appendChild(list);
         }
         let item = list.querySelector(`.stream-notice[data-code="${notice.code}"]`);
+        const isAlert = notice.level === 'error'; // 错误级告警:用户可自行处理的错误(欠费/密钥/内容合规等)
         if (!item) {
             item = document.createElement('div');
-            item.className = 'stream-notice';
             item.dataset.code = notice.code;
             list.appendChild(item);
         }
-        item.textContent = `⚠️ ${notice.msg || ''}`;
+        item.className = isAlert ? 'stream-notice alert-error' : 'stream-notice';
+        item.textContent = `${isAlert ? '⛔' : '⚠️'} ${notice.msg || ''}`;
         this.scrollToBottom();
     },
 

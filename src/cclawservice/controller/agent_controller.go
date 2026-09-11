@@ -8,17 +8,14 @@
 package controller
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"my.favorite/cclawservice/apperr"
 	exception2 "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
 	model "my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service"
 	"my.favorite/platformutility/common"
-	pException "my.favorite/platformutility/exception"
 	"my.favorite/platformutility/webbase/middleware/basic"
 	"my.favorite/platformutility/webbase/middleware/controller"
 	baseController "my.favorite/platformutility/webbase/middleware/controller"
@@ -73,7 +70,7 @@ func (ac *AgentController) GetLLMProviders(c *gin.Context) {
 
 	list, err := svc.GetLLMProviders(loginSession.ComCode)
 	if err != nil {
-		ac.respondAgentError(c, err)
+		respondAgentError(c, err)
 		return
 	}
 
@@ -113,7 +110,7 @@ func (ac *AgentController) AddLLMProvider(c *gin.Context) {
 	}
 	p.OwnerId = loginSession.ComCode
 	if err := svc.AddLLMProvider(p); err != nil {
-		ac.respondAgentError(c, err)
+		respondAgentError(c, err)
 		return
 	}
 
@@ -154,7 +151,7 @@ func (ac *AgentController) UpdateLLMProvider(c *gin.Context) {
 
 	p.OwnerId = loginSession.ComCode
 	if err := svc.UpdateLLMProvider(p); err != nil {
-		ac.respondAgentError(c, err)
+		respondAgentError(c, err)
 		return
 	}
 
@@ -194,7 +191,7 @@ func (ac *AgentController) RemoveLLMProvider(c *gin.Context) {
 	}
 
 	if err := svc.RemoveLLMProvider(loginSession.ComCode, req.ProviderId); err != nil {
-		ac.respondAgentError(c, err)
+		respondAgentError(c, err)
 		return
 	}
 
@@ -230,7 +227,7 @@ func (ac *AgentController) GetAgents(c *gin.Context) {
 
 	list, err := svc.GetAgents(loginSession.ComCode)
 	if err != nil {
-		ac.respondAgentError(c, err)
+		respondAgentError(c, err)
 		return
 	}
 
@@ -271,7 +268,7 @@ func (ac *AgentController) AddAgent(c *gin.Context) {
 
 	a.OwnerId = loginSession.ComCode
 	if err := svc.AddAgent(a); err != nil {
-		ac.respondAgentError(c, err)
+		respondAgentError(c, err)
 		return
 	}
 
@@ -312,7 +309,7 @@ func (ac *AgentController) UpdateAgent(c *gin.Context) {
 
 	a.OwnerId = loginSession.ComCode
 	if err := svc.UpdateAgent(a); err != nil {
-		ac.respondAgentError(c, err)
+		respondAgentError(c, err)
 		return
 	}
 
@@ -351,7 +348,7 @@ func (ac *AgentController) RemoveAgent(c *gin.Context) {
 	}
 
 	if err := svc.RemoveAgent(loginSession.ComCode, req.AgentId); err != nil {
-		ac.respondAgentError(c, err)
+		respondAgentError(c, err)
 		return
 	}
 
@@ -394,7 +391,7 @@ func (ac *AgentController) GetStartupFiles(c *gin.Context) {
 
 	list, err := svc.GetAgentStartupFiles(loginSession.ComCode, req.AgentId)
 	if err != nil {
-		ac.respondAgentError(c, err)
+		respondAgentError(c, err)
 		return
 	}
 
@@ -435,7 +432,7 @@ func (ac *AgentController) GetStartupFile(c *gin.Context) {
 
 	file, err := svc.GetAgentStartupFile(loginSession.ComCode, req.AgentId, req.FileName)
 	if err != nil {
-		ac.respondAgentError(c, err)
+		respondAgentError(c, err)
 		return
 	}
 
@@ -471,7 +468,7 @@ func (ac *AgentController) GetSkills(c *gin.Context) {
 
 	list, err := svc.GetSkills(loginSession.ComCode)
 	if err != nil {
-		ac.respondAgentError(c, err)
+		respondAgentError(c, err)
 		return
 	}
 
@@ -512,7 +509,7 @@ func (ac *AgentController) AddSkill(c *gin.Context) {
 
 	sk.OwnerId = loginSession.ComCode
 	if err := svc.AddSkill(sk); err != nil {
-		ac.respondAgentError(c, err)
+		respondAgentError(c, err)
 		return
 	}
 
@@ -553,7 +550,7 @@ func (ac *AgentController) UpdateSkill(c *gin.Context) {
 
 	sk.OwnerId = loginSession.ComCode
 	if err := svc.UpdateSkill(sk); err != nil {
-		ac.respondAgentError(c, err)
+		respondAgentError(c, err)
 		return
 	}
 
@@ -592,7 +589,7 @@ func (ac *AgentController) RemoveSkill(c *gin.Context) {
 	}
 
 	if err := svc.RemoveSkill(loginSession.ComCode, req.SkillId); err != nil {
-		ac.respondAgentError(c, err)
+		respondAgentError(c, err)
 		return
 	}
 
@@ -609,24 +606,4 @@ func (ac *AgentController) getAgentService(c *gin.Context) (*service.AgentServic
 		return nil, false
 	}
 	return svc, true
-}
-
-// respondAgentError 业务层的错误表现为 http 正常,但业务层异常。
-// 具体呈现(HTTP 状态 / 业务码 / 文案)全部来自错误自带的 Kind;仅平台层错误在此归一为 agent 语义。
-func (ac *AgentController) respondAgentError(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, pException.ParameterEmptyError):
-		respondKind(c, exception2.AgentParameterKind)
-	case errors.Is(err, pException.UnMatchError):
-		respondKind(c, exception2.AgentNotFoundKind)
-	case errors.Is(err, pException.MatchError):
-		respondKind(c, exception2.AgentConflictKind)
-	default:
-		// 带 Kind 的业务错误(工作空间不可用/内部错误等)统一按 Kind 渲染
-		if kind := apperr.Of(err); kind != nil {
-			respondKind(c, kind)
-			return
-		}
-		basic.GetBaseResponser().Failure(c, http.StatusOK, basic.ConstErrorUnknow, basic.ConstErrorUnknowMsg, nil)
-	}
 }

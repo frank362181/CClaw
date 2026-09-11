@@ -30,10 +30,10 @@ import (
 	cCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/harness"
+	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/cclawservice/request"
-	"my.favorite/cclawservice/service/common"
 	core2 "my.favorite/cclawservice/service/core"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/database/core"
@@ -208,7 +208,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	// finish_reason 收尾:长度截断/内容合规 → 以独立 notice 事件告知前端(不污染回答正文)。
 	// 无任何正式内容且被内容安全策略拦截时,按内容合规业务错误返回(交由控制器提示)。
 	if code, msg := finishReasonNotice(finishReason); code != "" {
-		if strings.TrimSpace(reply) == "" && finishReason == common.FinishReasonContentFilter {
+		if strings.TrimSpace(reply) == "" && finishReason == llmproto.FinishReasonContentFilter {
 			return "", myException.ChatLLMContentFilterKind.Newf("chat service: output blocked by content filter")
 		}
 		if onNotice != nil {
@@ -223,9 +223,9 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 //   - content_filter: 输出被内容安全策略拦截,可能不完整
 func finishReasonNotice(finishReason string) (code, msg string) {
 	switch strings.TrimSpace(finishReason) {
-	case common.FinishReasonLength:
+	case llmproto.FinishReasonLength:
 		return cCommon.ChatNoticeTruncated, cCommon.ConstChatNoticeTruncatedMsg
-	case common.FinishReasonContentFilter:
+	case llmproto.FinishReasonContentFilter:
 		return cCommon.ChatNoticeContentFilter, cCommon.ConstChatNoticeContentFilterMsg
 	default:
 		return "", ""
@@ -409,7 +409,7 @@ func (s *ChatService) completeChat(ctx context.Context, llmProvider dataobject.T
 }
 
 // runToolLoop 同步路径的工具调用循环:调用LLM → 执行工具 → 结果回填 → 再次调用,直到模型给出最终文本。
-func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []common.ChatMessage, toolSet *harness.ToolSet) (string, error) {
+func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet) (string, error) {
 	for i := 0; i < cCommon.AgentToolLoopMax; i++ {
 		content, calls, err := s.llmClient.CompleteWithTools(ctx, llmProvider, messages, toolSet.LLMTools())
 		if err != nil {
@@ -434,7 +434,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 // 工具调用阶段实时推送给用户:模型声明调用(intent)→开始执行(running)→结果(done/error),
 // 最终内容增量通过 onChunk 流式转发。底层仍为多次上游请求(OpenAI 兼容协议不支持服务端工具循环),
 // 此处把多轮编排为一条面向客户端的事件流。
-func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []common.ChatMessage, toolSet *harness.ToolSet, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent)) (string, string, error) {
+func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent)) (string, string, error) {
 	seq := 0 // 本回合工具调用序号(跨轮自增,前端按 seq 追踪同一工具调用)
 	for i := 0; i < cCommon.AgentToolLoopMax; i++ {
 		if i > 0 && onStatus != nil {
@@ -544,7 +544,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 		<-fwdDone
 
 		if err := ctx.Err(); err != nil { // 中断加速:工具执行中用户取消,不再继续后续轮次
-			return "", "", myException.ErrRequestCanceled
+			return "", "", llmproto.ErrRequestCanceled
 		}
 
 		// 全部执行完成:按原始顺序回填 tool 消息并派发 done/error 事件

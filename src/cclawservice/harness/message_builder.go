@@ -5,21 +5,21 @@ import (
 	"strings"
 
 	"my.favorite/cclawservice/harness/ctxmgr"
+	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
-	"my.favorite/cclawservice/service/common"
 )
 
 // BuildSimpleChatMessage 以system/user 文本构建简单的prompt
-func BuildSimpleChatMessage(sysMsg, userMsg string) []common.ChatMessage {
-	return []common.ChatMessage{
+func BuildSimpleChatMessage(sysMsg, userMsg string) []llmproto.ChatMessage {
+	return []llmproto.ChatMessage{
 		{Role: "system", Content: sysMsg},
 		{Role: "user", Content: userMsg},
 	}
 }
 
-func BuildChatMessage(systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest) []common.ChatMessage {
-	return []common.ChatMessage{
+func BuildChatMessage(systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest) []llmproto.ChatMessage {
+	return []llmproto.ChatMessage{
 		{Role: "system", Content: systemPrompt.Prompt},
 		{Role: "user", Content: req.ReqMsg},
 	}
@@ -43,9 +43,9 @@ func BuildClassifySystemPrompt(agents []dataobject.ClassifyAgent) string {
 	return sb.String()
 }
 
-func BuildChatCompletionRequestWithString(llmProvider dataobject.TLlm, sysMsg string, userMsg string, maxTokens int, stream bool) common.ChatCompletionRequest {
+func BuildChatCompletionRequestWithString(llmProvider dataobject.TLlm, sysMsg string, userMsg string, maxTokens int, stream bool) llmproto.ChatCompletionRequest {
 	messages := BuildSimpleChatMessage(sysMsg, userMsg)
-	req := common.ChatCompletionRequest{
+	req := llmproto.ChatCompletionRequest{
 		Model:     llmProvider.GetModelName(),
 		Messages:  messages,
 		Stream:    stream,
@@ -67,9 +67,9 @@ func BuildChatCompletionRequestWithString(llmProvider dataobject.TLlm, sysMsg st
 // max_tokens 按输入 token 估算做动态计算,保证"估算输入 + max_tokens ≤ context_window",
 // 避免长输入时因超出供应商上下文窗口而报错(同步/流式两条路径共用)。
 // 未配置 ContextWindow(0)时不发送 max_tokens,由供应商使用其默认输出上限。
-func BuildChatCompletionRequest(llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *request.ChatRequest, stream bool) common.ChatCompletionRequest {
+func BuildChatCompletionRequest(llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *request.ChatRequest, stream bool) llmproto.ChatCompletionRequest {
 	messages := BuildChatMessage(systemPrompt, chatReq)
-	req := common.ChatCompletionRequest{
+	req := llmproto.ChatCompletionRequest{
 		Model:    llmProvider.GetModelName(),
 		Messages: messages,
 		Stream:   stream,
@@ -92,8 +92,8 @@ func BuildChatCompletionRequest(llmProvider dataobject.TLlm, systemPrompt *datao
 
 // BuildChatCompletionRequestWithTool 构造带工具的 chat/completions 请求体。
 // max_tokens 沿用与普通请求一致的动态推导(dynamicMaxTokens)。
-func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []common.ChatMessage, tools []common.Tool, stream bool) common.ChatCompletionRequest {
-	req := common.ChatCompletionRequest{
+func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool, stream bool) llmproto.ChatCompletionRequest {
+	req := llmproto.ChatCompletionRequest{
 		Model:    llmProvider.GetModelName(),
 		Messages: messages,
 		Stream:   stream,
@@ -115,16 +115,16 @@ func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []
 // BuildToolCallWithContentMessage 构造携带文本与工具调用的 assistant 消息(工具循环回填历史用)。
 // 模型可能在一轮里既输出文本又请求工具(OpenAI 规范允许 content 与 tool_calls 并存),
 // 文本须一并回填,否则下一轮 LLM 看不到自己刚说的话(上下文缺失)。
-func BuildToolCallWithContentMessage(content string, calls []common.ToolCall) common.ChatMessage {
-	return common.ChatMessage{Role: "assistant", Content: content, ToolCalls: calls}
+func BuildToolCallWithContentMessage(content string, calls []llmproto.ToolCall) llmproto.ChatMessage {
+	return llmproto.ChatMessage{Role: "assistant", Content: content, ToolCalls: calls}
 }
 
 // BuildToolCallMessage 构造纯工具调用(无文本)的 assistant 消息(向后兼容入口)。
-func BuildToolCallMessage(calls []common.ToolCall) common.ChatMessage {
+func BuildToolCallMessage(calls []llmproto.ToolCall) llmproto.ChatMessage {
 	return BuildToolCallWithContentMessage("", calls)
 }
 
 // BuildToolResultMessage 构造工具执行结果消息(role=tool,按 tool_call_id 关联)。
-func BuildToolResultMessage(toolCallID, content string) common.ChatMessage {
-	return common.ChatMessage{Role: "tool", ToolCallID: toolCallID, Content: content}
+func BuildToolResultMessage(toolCallID, content string) llmproto.ChatMessage {
+	return llmproto.ChatMessage{Role: "tool", ToolCallID: toolCallID, Content: content}
 }

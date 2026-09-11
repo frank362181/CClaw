@@ -65,7 +65,9 @@ export const StreamEngine = {
                         State.updateMessageContent(convId, msgId, request.content);
                         ChatPage.updateStreamingMessage(msgId, request.content, true);
                     } else {
-                        const message = `⚠️ ${error?.message || '网络错误，请稍后重试'}`;
+                        // notify=true 的错误(欠费/密钥/内容合规等)用醒目标注,与普通故障区分
+                        const icon = error?.notify ? '⛔' : '⚠️';
+                        const message = `${icon} ${error?.message || '网络错误，请稍后重试'}`;
                         State.updateMessageStatus(convId, msgId, '');
                         State.updateMessageContent(convId, msgId, message);
                         ChatPage.updateStreamingMessage(msgId, message, true);

@@ -3,7 +3,7 @@
 //
 // 设计目标:
 //  1. 单一事实来源:错误类别、对前端的业务码、HTTP 状态码、面向用户的文案(含建议动作)、
-//     是否可重试、是否静默,全部挂在 Kind 上。不再出现"错误类型在 exception、
+//     是否可重试、是否静默、是否必须显式提醒用户,全部挂在 Kind 上。不再出现"错误类型在 exception、
 //     用户文案在 common、HTTP 状态在 controller"三处漂移的问题。
 //  2. 构造即自解释:Kind.Newf(...) 生成的实例自带用户文案,上层无需再维护"错误→文案"映射表。
 //  3. 兼容 errors.Is:实例与 Kind(或 Kind.Sentinel())比较的是 Kind 指针,
@@ -19,6 +19,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+
+	"my.favorite/platformutility/common"
 )
 
 // Kind 描述一类应用错误:它是什么、对外如何呈现、具备什么行为特征。
@@ -30,12 +32,16 @@ type Kind struct {
 	Msg        string // 面向用户的文案(应包含可执行的建议动作)
 	Retryable  bool   // 是否属于"瞬时故障、可安全重试"(重试/熔断策略据此决策)
 	Silent     bool   // 是否静默:调用方不应再向前端输出该错误(如客户端已断开)
+	// Notify 是否必须显式提醒用户:该错误用户能自行处理(欠费/密钥无效/未开通/内容合规/
+	// 超时等),调用方必须以醒目方式呈现"原因 + 建议动作" —— 即使回答已输出过内容也不得
+	// 降级为通用提示,更不得静默丢弃。与 Silent 互斥(一个"不要输出",一个"必须输出")。
+	Notify bool
 }
 
 // String 便于日志/调试直接打印 Kind。
 func (k *Kind) String() string {
 	if k == nil {
-		return "<nil>"
+		return common.NullString
 	}
 	return k.Name
 }
@@ -194,6 +200,9 @@ func Register(k Kind) *Kind {
 	if strings.TrimSpace(k.Name) == "" {
 		panic("apperr: Kind.Name 不能为空")
 	}
+	if k.Silent && k.Notify {
+		panic(fmt.Sprintf("apperr: Kind 的 Silent 与 Notify 不能同时为真(语义冲突): %s", k.Name))
+	}
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	if old, dup := kindByName[k.Name]; dup {
@@ -251,13 +260,23 @@ func UserMsg(err error) string {
 	if kind := Of(err); kind != nil {
 		return kind.Msg
 	}
-	return ""
+	return common.BlankString
 }
 
 // Retryable 返回错误链上第一个应用错误是否可安全重试。
 func Retryable(err error) bool {
 	if kind := Of(err); kind != nil {
 		return kind.Retryable
+	}
+	return false
+}
+
+// Notify 返回错误链上第一个应用错误是否"必须显式提醒用户"。
+// 调用方(SSE/HTTP 响应层)据此决策:为 true 时不得降级为"回答可能不完整"之类的
+// 通用提示,也不得因内容已输出而丢失原因与建议动作。
+func Notify(err error) bool {
+	if kind := Of(err); kind != nil {
+		return kind.Notify
 	}
 	return false
 }

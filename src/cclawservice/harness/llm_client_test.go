@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/harness/ctxmgr"
+	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
-	"my.favorite/cclawservice/service/common"
+	pCommon "my.favorite/platformutility/common"
 )
 
 // capturedRequest 记录 mock 服务收到的请求,用于断言请求构造是否正确。
@@ -24,7 +24,7 @@ type capturedRequest struct {
 	Method  string
 	Path    string
 	Auth    string
-	Payload common.ChatCompletionRequest
+	Payload llmproto.ChatCompletionRequest
 }
 
 // newMockServer 构造一个 chat/completions mock 服务。
@@ -279,7 +279,7 @@ func TestChatCompletion_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := client.ChatCompletion(ctx, provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"))
-	if !errors.Is(err, myException.ErrRequestCanceled) {
+	if !errors.Is(err, llmproto.ErrRequestCanceled) {
 		t.Fatalf("expected ErrRequestCanceled, got: %v", err)
 	}
 }
@@ -499,8 +499,8 @@ func TestBuildChatCompletionRequest_DynamicMaxTokens_NoWindow(t *testing.T) {
 
 // TestEstimateInputTokens 验证估算函数的基本行为:CJK 密集文本比 ASCII 估算出更多 token。
 func TestEstimateInputTokens(t *testing.T) {
-	cjk := ctxmgr.EstimateInputTokens([]common.ChatMessage{{Role: "user", Content: strings.Repeat("中", 1000)}})
-	ascii := ctxmgr.EstimateInputTokens([]common.ChatMessage{{Role: "user", Content: strings.Repeat("a", 1000)}})
+	cjk := ctxmgr.EstimateInputTokens([]llmproto.ChatMessage{{Role: "user", Content: strings.Repeat("中", 1000)}})
+	ascii := ctxmgr.EstimateInputTokens([]llmproto.ChatMessage{{Role: "user", Content: strings.Repeat("a", 1000)}})
 	if cjk <= ascii {
 		t.Errorf("CJK estimate (%d) should exceed ASCII estimate (%d)", cjk, ascii)
 	}
@@ -535,11 +535,11 @@ func TestPrepareRequest_Validation(t *testing.T) {
 
 	cases := []struct {
 		name string
-		req  common.ChatCompletionRequest
+		req  llmproto.ChatCompletionRequest
 	}{
-		{"empty model", common.ChatCompletionRequest{Messages: []common.ChatMessage{{Role: "user", Content: "hi"}}}},
-		{"empty messages", common.ChatCompletionRequest{Model: "m"}},
-		{"empty base url", common.ChatCompletionRequest{Model: "m", Messages: []common.ChatMessage{{Role: "user", Content: "hi"}}}},
+		{"empty model", llmproto.ChatCompletionRequest{Messages: []llmproto.ChatMessage{{Role: "user", Content: "hi"}}}},
+		{"empty messages", llmproto.ChatCompletionRequest{Model: "m"}},
+		{"empty base url", llmproto.ChatCompletionRequest{Model: "m", Messages: []llmproto.ChatMessage{{Role: "user", Content: "hi"}}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -568,7 +568,7 @@ func TestChatCompletionStream_FinishReason(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if full != "部分" || finishReason != common.FinishReasonLength {
+		if full != "部分" || finishReason != llmproto.FinishReasonLength {
 			t.Errorf("full=%q finish=%q, want 部分/length", full, finishReason)
 		}
 	})
@@ -582,7 +582,7 @@ func TestChatCompletionStream_FinishReason(t *testing.T) {
 		if err != nil {
 			t.Fatalf("content_filter should pass through, got error: %v", err)
 		}
-		if full != "" || finishReason != common.FinishReasonContentFilter {
+		if full != "" || finishReason != llmproto.FinishReasonContentFilter {
 			t.Errorf("full=%q finish=%q, want empty/content_filter", full, finishReason)
 		}
 	})
@@ -600,11 +600,11 @@ func TestChatCompletion_StructuredError(t *testing.T) {
 	defer srv.Close()
 
 	_, err := testClientWithDelays(0).ChatCompletion(context.Background(), provider(srv.URL, "k", 0), systemPrompt("sys"), chatReq("hi"))
-	statusErr, ok := errors.AsType[*myException.LlmStatusError](err)
+	statusErr, ok := errors.AsType[*llmproto.LlmStatusError](err)
 	if !ok {
 		t.Fatalf("expected *LlmStatusError, got %T: %v", err, err)
 	}
-	if statusErr.Category != myException.LlmCategoryRateLimit {
+	if statusErr.Category != llmproto.LlmCategoryRateLimit {
 		t.Errorf("category = %s, want rate_limit", statusErr.Category)
 	}
 	if statusErr.StatusCode != http.StatusTooManyRequests {
@@ -756,25 +756,25 @@ func TestChatCompletionStream_EventErrorForms(t *testing.T) {
 		name         string
 		body         string
 		want         string
-		wantCategory myException.LlmErrorCategory
+		wantCategory llmproto.LlmErrorCategory
 	}{
 		{
 			name:         "anthropic error event",
 			body:         "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n",
 			want:         "Overloaded",
-			wantCategory: myException.LlmCategoryServer,
+			wantCategory: llmproto.LlmCategoryServer,
 		},
 		{
 			name:         "flat code message on error event",
 			body:         "event: error\ndata: {\"code\":\"Throttling.RateQuota\",\"message\":\"Requests rate limit exceeded\"}\n\n",
 			want:         "Requests rate limit exceeded",
-			wantCategory: myException.LlmCategoryRateLimit,
+			wantCategory: llmproto.LlmCategoryRateLimit,
 		},
 		{
 			name:         "plain text on error event",
 			body:         "event: error\ndata: upstream exploded\n\n",
 			want:         "upstream exploded",
-			wantCategory: myException.LlmCategoryUnknown,
+			wantCategory: llmproto.LlmCategoryUnknown,
 		},
 	}
 	for _, tc := range cases {
@@ -784,7 +784,7 @@ func TestChatCompletionStream_EventErrorForms(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("expected error containing %q, got: %v", tc.want, err)
 			}
-			statusErr, ok := errors.AsType[*myException.LlmStatusError](err)
+			statusErr, ok := errors.AsType[*llmproto.LlmStatusError](err)
 			if !ok {
 				t.Fatalf("应为结构化上游错误,实际 %T: %v", err, err)
 			}
@@ -805,7 +805,7 @@ func TestClient_RetryDelayJitter(t *testing.T) {
 
 	minSeen, maxSeen := time.Hour, time.Duration(0)
 	for i := 0; i < 200; i++ {
-		d := c.retryDelay(1)
+		d := pCommon.RetryBackPolicy(c.retryBaseDelay, c.retryMaxDelay, c.retryJitter).Delay(1) //c.retryDelay(1)
 		if d < 80*time.Millisecond || d > 120*time.Millisecond {
 			t.Fatalf("retryDelay(1) = %s, want within [80ms,120ms]", d)
 		}
@@ -822,7 +822,7 @@ func TestClient_RetryDelayJitter(t *testing.T) {
 
 	// 封顶后仍带抖动:400ms ±20% → 不超过 480ms
 	for i := 0; i < 200; i++ {
-		if d := c.retryDelay(6); d > 480*time.Millisecond {
+		if d := pCommon.RetryBackPolicy(c.retryBaseDelay, c.retryMaxDelay, c.retryJitter).Delay(6); d > 480*time.Millisecond {
 			t.Fatalf("capped retryDelay(6) = %s, want <= 480ms", d)
 		}
 	}
@@ -830,7 +830,7 @@ func TestClient_RetryDelayJitter(t *testing.T) {
 	// 抖动为 0 → 纯指数:100ms → 200ms → 400ms(封顶) → 400ms
 	c.retryJitter = 0
 	for i, want := range []time.Duration{100, 200, 400, 400} {
-		if got := c.retryDelay(i + 1); got != want*time.Millisecond {
+		if got := pCommon.RetryBackPolicy(c.retryBaseDelay, c.retryMaxDelay, c.retryJitter).Delay(i + 1); got != want*time.Millisecond {
 			t.Errorf("no-jitter retryDelay(%d) = %s, want %s", i+1, got, want*time.Millisecond)
 		}
 	}

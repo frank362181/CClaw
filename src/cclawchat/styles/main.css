@@ -822,6 +822,15 @@ body {
     gap: 4px;
 }
 
+/* 错误级告警(level=error):用户可自行处理的错误(欠费/密钥无效/内容合规等),
+   必须醒目提醒 —— 与“回答可能不完整”的普通提示区分开 */
+.message.assistant .bubble .stream-notice.alert-error {
+    color: #b3261e;
+    background: rgba(211, 47, 47, 0.12);
+    border-color: rgba(211, 47, 47, 0.45);
+    font-weight: 500;
+}
+
 .message.assistant .bubble .stream-notice {
     font-size: var(--font-size-xs);
     line-height: 1.6;

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"my.favorite/cclawservice/apperr"
 	cclawcommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	model "my.favorite/cclawservice/request"
@@ -261,11 +262,24 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 			// 避免 error 事件把已输出的回复覆盖成"引擎不可用"
 			// (上游错误已在 chat_service.LlmError 记录日志,不影响诊断)。
 			emit("notice", gin.H{"code": cclawcommon.ChatNoticeIncomplete, "msg": cclawcommon.ConstChatNoticeIncompleteMsg})
+			if apperr.Notify(err) {
+				// 必须显式提醒用户的错误(欠费/密钥无效/未开通/内容合规/超时等):
+				// 不得因"已输出内容"而降级 —— 否则用户只看到"可能不完整",既不知原因也无法自行处理。
+				emit("notice", gin.H{
+					"code":  cclawcommon.ChatNoticeError,
+					"msg":   myException.GetChatErrorUserMsg(err),
+					"level": cclawcommon.ChatNoticeLevelError,
+				})
+			}
 			emit("message", "[DONE]")
 			return
 		}
-		// 头部已作为 SSE 发送,无法再返回普通 JSON,改以 error 事件告知前端(按错误语义给对应文案)
-		emit("error", gin.H{"msg": myException.GetChatErrorUserMsg(err)})
+		// 头部已作为 SSE 发送,无法再返回普通 JSON,改以 error 事件告知前端(按错误语义给对应文案);
+		// notify 供前端对"用户可自行处理"的错误使用醒目样式。
+		emit("error", gin.H{
+			"msg":    myException.GetChatErrorUserMsg(err),
+			"notify": apperr.Notify(err),
+		})
 		return
 	}
 

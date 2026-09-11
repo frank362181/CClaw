@@ -169,7 +169,7 @@ const (
 	ChatStatusPreparing = "preparing" //解析任务/准备上下文
 	ChatStatusThinking  = "thinking"  //思考/推理中(等待首个 token)
 
-	// 工具调用过程中的阶段(tool 事件的 phase 值,下发前端;前端按此渲染状态,不可改名)
+	// ChatToolEventIntent 工具调用过程中的阶段(tool 事件的 phase 值,下发前端;前端按此渲染状态,不可改名)
 	ChatToolEventIntent   = "intent"   // 模型声明将调用工具
 	ChatToolEventRunning  = "running"  // 开始执行
 	ChatToolEventProgress = "progress" // 执行过程输出
@@ -193,6 +193,13 @@ const (
 	ChatNoticeTruncated     = "truncated"      // finish_reason=length:回答达到输出长度上限
 	ChatNoticeContentFilter = "content_filter" // finish_reason=content_filter:回答被内容安全策略拦截
 	ChatNoticeIncomplete    = "incomplete"     // 流中途中断(已输出部分内容):回答可能不完整
+
+	// ChatNoticeError 需显式提醒用户的错误(欠费/密钥无效/未开通/内容合规/超时等):以独立
+	// 告警提示下发,不覆盖已输出内容,也不降级为"可能不完整";文案取自错误的 Kind.Msg。
+	ChatNoticeError = "chat_error"
+
+	// ChatNoticeLevelError 通知级别:错误级(前端用醒目样式渲染,如红色图标与描边)。
+	ChatNoticeLevelError = "error"
 
 	ConstChatNoticeTruncatedMsg     = "回答已达长度上限,可能不完整"
 	ConstChatNoticeContentFilterMsg = "回答未通过模型内容安全审核,可能不完整"

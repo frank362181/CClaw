@@ -13,26 +13,26 @@ package harness
 import (
 	"strings"
 
-	"my.favorite/cclawservice/service/common"
+	"my.favorite/cclawservice/llmproto"
 )
 
 // toolCallAccumulator 流式工具调用累积器:按 index 保存调用,并拼接分片的 function.arguments。
 type toolCallAccumulator struct {
-	calls map[int]*common.ToolCall
+	calls map[int]*llmproto.ToolCall
 	args  map[int]*strings.Builder
 	order []int
 }
 
 func newToolCallAccumulator() *toolCallAccumulator {
 	return &toolCallAccumulator{
-		calls: make(map[int]*common.ToolCall),
+		calls: make(map[int]*llmproto.ToolCall),
 		args:  make(map[int]*strings.Builder),
 	}
 }
 
-func (a *toolCallAccumulator) add(delta common.ToolCallDelta) {
+func (a *toolCallAccumulator) add(delta llmproto.ToolCallDelta) {
 	if _, ok := a.calls[delta.Index]; !ok {
-		a.calls[delta.Index] = &common.ToolCall{}
+		a.calls[delta.Index] = &llmproto.ToolCall{}
 		a.args[delta.Index] = &strings.Builder{}
 		a.order = append(a.order, delta.Index)
 	}
@@ -52,8 +52,8 @@ func (a *toolCallAccumulator) add(delta common.ToolCallDelta) {
 }
 
 // result 按出现顺序返回完整的工具调用列表(arguments 已拼接完整)。
-func (a *toolCallAccumulator) result() []common.ToolCall {
-	out := make([]common.ToolCall, 0, len(a.order))
+func (a *toolCallAccumulator) result() []llmproto.ToolCall {
+	out := make([]llmproto.ToolCall, 0, len(a.order))
 	for _, idx := range a.order {
 		call := a.calls[idx]
 		call.Function.Arguments = a.args[idx].String()

@@ -42,6 +42,8 @@ func TestChatNoticeCodeContract(t *testing.T) {
 		{ChatNoticeTruncated, "truncated"},
 		{ChatNoticeContentFilter, "content_filter"},
 		{ChatNoticeIncomplete, "incomplete"},
+		{ChatNoticeError, "chat_error"},
+		{ChatNoticeLevelError, "error"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {

@@ -13,8 +13,8 @@
 package ctxmgr
 
 import (
+	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
-	sCommon "my.favorite/cclawservice/service/common"
 	pCommon "my.favorite/platformutility/common"
 )
 
@@ -24,7 +24,7 @@ import (
 //   - 未配置 ContextWindow 时返回 0(不发送 max_tokens,由供应商用其默认值)。
 //
 // 修复背景:早期版本仅按 context_window 推导(如 1M 窗口 + 小输入 → max_tokens ≈ 1M),
-func DynamicMaxTokens(llmProvider dataobject.TLlm, messages []sCommon.ChatMessage) int {
+func DynamicMaxTokens(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage) int {
 	if llmProvider.ContextWindow == 0 {
 		return 0 // 未配置返回 0 表示应用供应商的默认值
 	}
@@ -46,7 +46,7 @@ func DynamicMaxTokens(llmProvider dataobject.TLlm, messages []sCommon.ChatMessag
 //   - 其他字符(如英文/数字/标点)按 ~4 字符/token;
 //   - 每条消息附加 ~4 token 的角色/结构开销;
 //   - 结果上浮 20% 作为安全余量,避免估算偏低导致"输入 + max_tokens"仍越界。
-func EstimateInputTokens(messages []sCommon.ChatMessage) int {
+func EstimateInputTokens(messages []llmproto.ChatMessage) int {
 	const (
 		charsPerCJKToken   = 1.5
 		charsPerAsciiToken = 4.0
