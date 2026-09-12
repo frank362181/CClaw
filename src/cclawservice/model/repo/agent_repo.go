@@ -22,7 +22,7 @@ import (
 type AgentRepository struct {
 	mu sync.RWMutex
 
-	dataAccessor dataaccessor.IAccessor
+	dataAccessor dataaccessor.IAgentAccessor
 
 	llmProviders *common.SafeList[dataobject.TLlm]
 	agents       *common.SafeList[dataobject.TAgent]
@@ -77,7 +77,7 @@ var agentRepository = common.GetSingleton(func() *AgentRepository {
 }).Instance()
 
 func GetAgentRepository(db core.IBaseDatabase) IAgentRepository {
-	agentRepository.dataAccessor, _ = dataaccessor.GetAccessor(db)
+	agentRepository.dataAccessor, _ = dataaccessor.GetAgentAccessor(db)
 	return agentRepository
 }
 

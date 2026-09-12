@@ -88,7 +88,7 @@ func (ac *AgentController) GetLLMProviders(c *gin.Context) {
 //	@Param			NONCE			query		string					true	"盐"
 //	@Param			TIMESTAMP		query		string					true	"数值,表示请求端请求的时间(秒数)"
 //	@Param			SIGNATURE		query		string					true	"对请求内容的签名秒数"
-//	@Param			body			body		dataobject.TLLMProvider	true	"LLM Provider 对象"
+//	@Param			body			body		dataobject.TLlm	true	"LLM Provider 对象"
 //	@Success		200				{object}	basic.CommonResponse
 //	@Failure		400				{object}	basic.CommonResponse
 //	@Router			/api/llmProvider/add [post]
@@ -128,7 +128,7 @@ func (ac *AgentController) AddLLMProvider(c *gin.Context) {
 //	@Param			NONCE			query		string					true	"盐"
 //	@Param			TIMESTAMP		query		string					true	"数值,表示请求端请求的时间(秒数)"
 //	@Param			SIGNATURE		query		string					true	"对请求内容的签名秒数"
-//	@Param			body			body		dataobject.TLLMProvider	true	"LLM Provider 对象(含 dVersion)"
+//	@Param			body			body		dataobject.TLlm	true	"LLM Provider 对象(含 dVersion)"
 //	@Success		200				{object}	basic.CommonResponse
 //	@Failure		400				{object}	basic.CommonResponse
 //	@Router			/api/llmProvider/update [post]

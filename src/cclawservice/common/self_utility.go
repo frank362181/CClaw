@@ -1,5 +1,5 @@
 /**
-* Markdown 文档 YAML Front Matter 的拆分工具
+* 通用功能函数
 *
 * 约定:文档顶部的 --- 与 --- 之间为 YAML 元数据(如 name/description/summary 等),
 * 其余部分为正文。本工具只负责"拆分",具体字段的解析由各强类型结构体完成。
@@ -12,6 +12,7 @@ package common
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"my.favorite/cclawservice/model/dataobject"
@@ -125,7 +126,7 @@ func ValidateSkill(sk dataobject.TSkill) error {
 // 安全:agent_dir 必须为合法相对路径,防止工作区根逃出 <exeDir>/workspace。
 func BuildAgentBootstrapRoot(agent dataobject.TAgent) (string, bool) {
 	if !pCommon.IsSafeDir(agent.AgentDir) {
-		return "", false
+		return pCommon.BlankString, false
 	}
 
 	agentBootstrapRoot := filepath.Join(pCommon.GetExecutableDir(), AgentBootstrapDir, agent.OwnerId, agent.AgentDir)
@@ -133,13 +134,13 @@ func BuildAgentBootstrapRoot(agent dataobject.TAgent) (string, bool) {
 		return agentBootstrapRoot, true
 	}
 
-	return "", false
+	return pCommon.BlankString, false
 }
 
 func BuildAgentExtensionRoot(agent dataobject.TAgent) (string, bool) {
 	agentBootstrapRoot, ok := BuildAgentBootstrapRoot(agent)
 	if !ok {
-		return "", false
+		return pCommon.BlankString, false
 	}
 
 	skillRoot := filepath.Join(agentBootstrapRoot, AgentExtensionDirName)
@@ -152,7 +153,7 @@ func BuildAgentExtensionRoot(agent dataobject.TAgent) (string, bool) {
 func ResolveStartupPath(workspaceRoot, fileName string) (string, error) {
 	// 只允许纯文件名:不能包含路径分隔符、"." 或 ".."
 	if filepath.Base(fileName) != fileName || fileName == "." || fileName == ".." {
-		return "", pException.FilePathErrorEx("illegal document file name: " + fileName)
+		return pCommon.BlankString, pException.FilePathErrorEx("illegal document file name: " + fileName)
 	}
 
 	return pCommon.SafeJoin(workspaceRoot, filepath.Join(workspaceRoot, fileName))
@@ -168,12 +169,63 @@ func FindStartupDocFile(fileName string) (StartupDocSpec, bool) {
 	return StartupDocSpec{}, false
 }
 
-// BuildChatStreamKey 构造进行中流式聊天的注册键:发送者 + 会话号。
-// 以发送者(服务端认证,防伪造)为前缀,隔离不同用户;会话号隔离同一用户的不同会话。
-func BuildChatStreamKey(sender, sessionId string) string {
-	return strings.TrimSpace(sender) + ":" + strings.TrimSpace(sessionId)
+// ===================== session 业务表示部分函数===========================
+
+// CompactIdLen 会话/轮次业务主键长度上限,与 DDL 中 session_id / turn_id 的 VARCHAR(40) 对齐。
+// 长度需覆盖两类来源:
+//   - 客户端传入:标准 UUID 36 字符去分隔符后为 32 字符;
+//   - 服务端生成:NewCompactId(comCode) 为"单位编码(最长 16)+ UUID",上限 16+32=48,规整时截断到本值。
+const CompactIdLen = 40
+
+// sessionIdUnsafeChars 业务标识中不允许出现的字符(仅保留字母/数字/下划线,保证可安全用作目录名)。
+var sessionIdUnsafeChars = regexp.MustCompile(`[^0-9a-zA-Z_]`)
+
+// BuildTurnStreamKey 构造"进行中轮次"的注册键/中断键:<sender>:<turnId>。
+func BuildTurnStreamKey(sender, turnId string) string {
+	return strings.TrimSpace(sender) + ":" + strings.TrimSpace(turnId)
 }
 
-func BuildSessionKey(comCode, sessionId string) string {
-	return comCode + ":" + sessionId
+// NormalizeCompactId 把外部传入的业务标识规整为可安全落库/落盘的紧凑形式:
+//  1. 去首尾空白;
+//  2. 去掉 '-' 分隔符(标准 UUID 36 → 32 字符);
+//  3. 过滤其余非 [0-9a-zA-Z_] 字符(防路径穿越/非法字符);
+//  4. 超长截断(兜底,正常路径不会触发)。
+//
+// 该函数是幂等的:NormalizeCompactId(NormalizeCompactId(x)) == NormalizeCompactId(x),
+// 因此前端每次携带同一个 convId / turnId 反复调用也始终得到同一个规范值。
+// 规整后为空表示入参非法,调用方应重新生成业务标识。
+func NormalizeCompactId(compactId string) string {
+	s := strings.TrimSpace(compactId)
+	if s == pCommon.BlankString {
+		return pCommon.BlankString
+	}
+
+	s = strings.ReplaceAll(s, "-", pCommon.BlankString)
+	s = sessionIdUnsafeChars.ReplaceAllString(s, pCommon.BlankString)
+	if len(s) > CompactIdLen {
+		s = s[:CompactIdLen]
+	}
+	return s
 }
+
+// NewCompactId 生成紧凑唯一 ID(UUID v4 去分隔符后为 32 字符),prefix 为可选可读前缀。
+//
+// 前缀约定(与调用方保持一致):
+//   - session_id:传 comCode(单位编码),便于按单位归档会话历史目录;
+//   - turn_id:    传空串 —— turnId 必须"不含发送者",跨用户隔离统一由 BuildTurnStreamKey 承担,
+//     避免 turnId 出现"有时含 sender、有时不含"的双重语义。
+//
+// 前缀会占用 CompactIdLen 的额度(前缀 + 32 字符 UUID 超长时截断),故前缀宜短。
+func NewCompactId(prefix string) string {
+	return NormalizeCompactId(prefix + pCommon.GenerateUUID())
+}
+
+func BuildSessionName(message string) string {
+	name := strings.TrimSpace(pCommon.TruncateRunes(strings.TrimSpace(message), SessionNameMaxLen))
+	if name == pCommon.BlankString {
+		return SessionDefaultName
+	}
+	return name
+}
+
+// ======================================================================

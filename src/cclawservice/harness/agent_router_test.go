@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	cCommon "my.favorite/cclawservice/common"
+	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	pCommon "my.favorite/platformutility/common"
@@ -56,7 +57,7 @@ func testAgents() []dataobject.TAgent {
 // newAgentRouterForTest 构造路由器并清空全局会话绑定,保证用例相互独立。
 // 路由器为全局单例(GetAgentRouter),每次测试重新注入 fake 仓库即可。
 func newAgentRouterForTest(rep repo.IAgentRepository) *AgentRouter {
-	GetChatSessionAgentRegistry().Clear()
+	ctxmgr.GetChatSessionAgentMgr().Clear()
 	return GetAgentRouter(rep)
 }
 

@@ -31,6 +31,9 @@ definitions:
         type: string
       AgentName:
         type: string
+      BootstrapTotalChars:
+        description: 启动文件最大的大小
+        type: integer
       CompactionMode:
         description: 压缩模式
         type: integer
@@ -76,7 +79,7 @@ definitions:
       dVersion:
         $ref: '#/definitions/optimisticlock.Version'
     type: object
-  dataobject.TLLMProvider:
+  dataobject.TLlm:
     properties:
       AuthMode:
         type: integer
@@ -99,6 +102,7 @@ definitions:
         description: 每百万token输入的单价
         type: number
       MaxTokens:
+        description: 单词聊天返回的最大的token数量大小
         type: integer
       OutputCost:
         description: 每百万token输出的单价
@@ -120,6 +124,9 @@ definitions:
         allOf:
         - $ref: '#/definitions/optimisticlock.Version'
         description: 乐观锁
+      model:
+        description: 实际请求使用的模型名(厂商命名,如 deepseek-v4-pro);为空回退 ProviderId
+        type: string
       providerId:
         description: 供应商ID
         type: string
@@ -131,6 +138,9 @@ definitions:
         type: boolean
       reasoningEx:
         description: 是否支持推理力度参数
+        type: boolean
+      thinkingNonStreaming:
+        description: 非流模式下是否支持思考,false/true=否/是
         type: boolean
       vendor:
         description: LLM厂家名称,如deepseek,anthropic,OpenAI等
@@ -157,14 +167,23 @@ definitions:
         description: 指向skill的作用域
         type: integer
     type: object
-  model.AgentIDRequest:
+  optimisticlock.Version:
+    properties:
+      int64:
+        format: int64
+        type: integer
+      valid:
+        description: Valid is true if Int64 is not NULL
+        type: boolean
+    type: object
+  request.AgentIDRequest:
     properties:
       agentId:
         type: string
     required:
     - agentId
     type: object
-  model.AgentStartupFileRequest:
+  request.AgentStartupFileRequest:
     properties:
       agentId:
         type: string
@@ -174,7 +193,13 @@ definitions:
     - agentId
     - fileName
     type: object
-  model.ChatRequest:
+  request.ChatInterruptRequest:
+    properties:
+      turnId:
+        description: 会话标识,对应发起聊天时的 sessionId
+        type: string
+    type: object
+  request.ChatRequest:
     properties:
       agentId:
         description: 可选:会话对应的目标Agent(暂未启用)
@@ -197,221 +222,53 @@ definitions:
       sessionId:
         description: 表示会话的session，在一个会话中的就属于同一个session
         type: string
+      turnId:
+        description: turn id
+        type: string
     type: object
-  model.ChatResponse:
+  request.ChatResponse:
     properties:
       chatChannel:
         description: 聊天的频道,1=WEB,2,FEISHU 等
-        type: integer
-      chatId:
-        description: 本次聊天的消息ID,用于标识本次聊天的位置
         type: integer
       chatType:
         description: 聊天类型，0/1:私聊/群聊
         type: integer
       reply:
-        description: AI 回复内容(LLM 引擎接入前为演示应答)
+        description: AI 回复内容(由 LLM 引擎返回的真实回复)
         type: string
+      respTime:
+        description: 消息响应的时间
+        type: integer
       senderId:
         description: 发送者,以服务端认证信息为准
         type: string
       sessionId:
         type: string
-    type: object
-  model.ChatResponseEx:
-    properties:
-      data:
-        $ref: '#/definitions/model.ChatResponse'
-      reqId:
-        type: string
-      reqMethod:
-        description: 用户请求的方法
-        type: string
-      reqPath:
-        type: string
-      reqTimestamp:
-        type: integer
-      respCode:
-        description: 响应码,业务层级
-        type: integer
-      respMsg:
-        description: 响应的消息
-        type: string
-      respTimestamp:
-        type: integer
-    type: object
-  model.ChatsRequest:
-    properties:
-      chats:
-        items:
-          type: string
-        type: array
-      senderId:
+      turnId:
+        description: 本次聊天的消息ID,用于标识本次聊天的位置
         type: string
     type: object
-  model.ChatsResponse:
-    properties:
-      chats:
-        items:
-          $ref: '#/definitions/model.ChatResponse'
-        type: array
-      senderId:
-        type: string
-    type: object
-  model.ChatsResponseEx:
-    properties:
-      data:
-        $ref: '#/definitions/model.ChatsResponse'
-      reqId:
-        type: string
-      reqMethod:
-        description: 用户请求的方法
-        type: string
-      reqPath:
-        type: string
-      reqTimestamp:
-        type: integer
-      respCode:
-        description: 响应码,业务层级
-        type: integer
-      respMsg:
-        description: 响应的消息
-        type: string
-      respTimestamp:
-        type: integer
-    type: object
-  model.LLMProviderIDRequest:
+  request.LLMProviderIDRequest:
     properties:
       providerId:
         type: string
     required:
     - providerId
     type: object
-  model.LoginRequest:
+  request.LoginRequest:
     properties:
       password:
         type: string
       username:
         type: string
     type: object
-  model.SessionRequest:
-    properties:
-      agentId:
-        description: session对应的调用目标Agent
-        type: string
-      chatChannel:
-        description: 聊天渠道
-        type: integer
-      chatType:
-        description: 聊天类型
-        type: integer
-      senderId:
-        description: 发起新会话的userName
-        type: string
-      sessionId:
-        description: 标识会话session
-        type: string
-      sessionName:
-        type: string
-    type: object
-  model.SessionResponse:
-    properties:
-      chatChannel:
-        type: integer
-      chatType:
-        type: integer
-      genAt:
-        description: session创建的时间
-        type: integer
-      removed:
-        description: 是否删除的标记
-        type: integer
-      senderId:
-        description: 发起新会话的userName
-        type: string
-      sessionData:
-        description: 用来存放session所有交互历史的文件名,内容格式为JSON
-        type: string
-      sessionId:
-        type: string
-      sessionName:
-        description: session name
-        type: string
-    type: object
-  model.SessionResponseEx:
-    properties:
-      data:
-        $ref: '#/definitions/model.SessionResponse'
-      reqId:
-        type: string
-      reqMethod:
-        description: 用户请求的方法
-        type: string
-      reqPath:
-        type: string
-      reqTimestamp:
-        type: integer
-      respCode:
-        description: 响应码,业务层级
-        type: integer
-      respMsg:
-        description: 响应的消息
-        type: string
-      respTimestamp:
-        type: integer
-    type: object
-  model.SessionsRequest:
-    properties:
-      endTime:
-        type: integer
-      senderId:
-        description: userName
-        type: string
-      startTime:
-        type: integer
-    type: object
-  model.SessionsResponse:
-    properties:
-      senderId:
-        type: string
-    type: object
-  model.SessionsResponseEx:
-    properties:
-      data:
-        $ref: '#/definitions/model.SessionsResponse'
-      reqId:
-        type: string
-      reqMethod:
-        description: 用户请求的方法
-        type: string
-      reqPath:
-        type: string
-      reqTimestamp:
-        type: integer
-      respCode:
-        description: 响应码,业务层级
-        type: integer
-      respMsg:
-        description: 响应的消息
-        type: string
-      respTimestamp:
-        type: integer
-    type: object
-  model.SkillIDRequest:
+  request.SkillIDRequest:
     properties:
       skillId:
         type: string
     required:
     - skillId
-    type: object
-  optimisticlock.Version:
-    properties:
-      int64:
-        format: int64
-        type: integer
-      valid:
-        description: Valid is true if Int64 is not NULL
-        type: boolean
     type: object
 host: localhost:8443
 info:
@@ -497,7 +354,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/model.AgentIDRequest'
+          $ref: '#/definitions/request.AgentIDRequest'
       produces:
       - application/json
       responses:
@@ -543,7 +400,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/model.AgentStartupFileRequest'
+          $ref: '#/definitions/request.AgentStartupFileRequest'
       produces:
       - application/json
       responses:
@@ -589,7 +446,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/model.AgentIDRequest'
+          $ref: '#/definitions/request.AgentIDRequest'
       produces:
       - application/json
       responses:
@@ -721,14 +578,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/model.ChatRequest'
+          $ref: '#/definitions/request.ChatRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/model.ChatResponseEx'
+            $ref: '#/definitions/request.ChatResponse'
         "400":
           description: Bad Request
           schema:
@@ -736,11 +593,11 @@ paths:
       summary: 发送聊天消息
       tags:
       - 聊天管理
-  /api/createSession:
+  /api/chat/interrupt:
     post:
       consumes:
       - application/json
-      description: 创建全新的聊天会话
+      description: 用户点击中断按钮后,立即停止指定会话正在进行的思考/推理/流式输出,并通知大模型停止。仅在聊天已开始(流式进行中)时支持,否则返回"未在聊天"错误。
       parameters:
       - description: Login成功返回后得到的token
         in: header
@@ -762,31 +619,32 @@ paths:
         name: SIGNATURE
         required: true
         type: string
-      - description: 聊天内容
+      - description: 中断参数
         in: body
         name: body
         required: true
         schema:
-          $ref: '#/definitions/model.SessionRequest'
+          $ref: '#/definitions/request.ChatInterruptRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/model.SessionResponseEx'
+            $ref: '#/definitions/basic.CommonResponse'
         "400":
           description: Bad Request
           schema:
             $ref: '#/definitions/basic.CommonResponse'
-      summary: 创建新的会话
+      summary: 中断流式聊天
       tags:
       - 聊天管理
-  /api/deleteChat:
+  /api/chat/stream:
     post:
       consumes:
       - application/json
-      description: 删除聊天
+      description: 接收 cclawchat 聊天界面发来的消息,以 SSE(Server-Sent Events)流式返回 AI 应答;增量在
+        data 的 {"reply":"..."} 中,[DONE] 表示结束,error 事件表示失败
       parameters:
       - description: Login成功返回后得到的token
         in: header
@@ -813,111 +671,19 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/model.ChatsRequest'
+          $ref: '#/definitions/request.ChatRequest'
       produces:
-      - application/json
+      - text/event-stream
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/model.ChatsResponseEx'
+            $ref: '#/definitions/request.ChatResponse'
         "400":
           description: Bad Request
           schema:
             $ref: '#/definitions/basic.CommonResponse'
-      summary: 删除聊天
-      tags:
-      - 聊天管理
-  /api/deleteSession:
-    post:
-      consumes:
-      - application/json
-      description: 获取会话历史
-      parameters:
-      - description: Login成功返回后得到的token
-        in: header
-        name: AUTHORIZATION
-        required: true
-        type: string
-      - description: 盐
-        in: query
-        name: NONCE
-        required: true
-        type: string
-      - description: 数值,表示请求端请求的时间(秒数)
-        in: query
-        name: TIMESTAMP
-        required: true
-        type: string
-      - description: 对请求内容的签名秒数
-        in: query
-        name: SIGNATURE
-        required: true
-        type: string
-      - description: 聊天内容
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/model.SessionsRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/model.SessionsResponseEx'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/basic.CommonResponse'
-      summary: 获取会话历史
-      tags:
-      - 聊天管理
-  /api/getSessions:
-    post:
-      consumes:
-      - application/json
-      description: 获取会话历史列表
-      parameters:
-      - description: Login成功返回后得到的token
-        in: header
-        name: AUTHORIZATION
-        required: true
-        type: string
-      - description: 盐
-        in: query
-        name: NONCE
-        required: true
-        type: string
-      - description: 数值,表示请求端请求的时间(秒数)
-        in: query
-        name: TIMESTAMP
-        required: true
-        type: string
-      - description: 对请求内容的签名秒数
-        in: query
-        name: SIGNATURE
-        required: true
-        type: string
-      - description: 聊天内容
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/model.SessionsRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/model.SessionsResponseEx'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/basic.CommonResponse'
-      summary: 获取会话历史列表
+      summary: 流式发送聊天消息
       tags:
       - 聊天管理
   /api/llmProvider/add:
@@ -951,7 +717,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/dataobject.TLLMProvider'
+          $ref: '#/definitions/dataobject.TLlm'
       produces:
       - application/json
       responses:
@@ -997,7 +763,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/model.LLMProviderIDRequest'
+          $ref: '#/definitions/request.LLMProviderIDRequest'
       produces:
       - application/json
       responses:
@@ -1043,7 +809,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/dataobject.TLLMProvider'
+          $ref: '#/definitions/dataobject.TLlm'
       produces:
       - application/json
       responses:
@@ -1124,7 +890,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/model.LoginRequest'
+          $ref: '#/definitions/request.LoginRequest'
       produces:
       - application/json
       responses:
@@ -1295,7 +1061,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/model.SkillIDRequest'
+          $ref: '#/definitions/request.SkillIDRequest'
       produces:
       - application/json
       responses:

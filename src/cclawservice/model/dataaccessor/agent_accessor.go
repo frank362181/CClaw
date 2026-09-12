@@ -2,91 +2,68 @@ package dataaccessor
 
 import (
 	"errors"
-	"strings"
 
 	"gorm.io/gorm"
 	exception2 "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
-	"my.favorite/platformutility/common/hash"
 	"my.favorite/platformutility/database/core"
 	"my.favorite/platformutility/exception"
 )
 
-type GormAccessor struct {
+type IAgentAccessor interface {
+	GetDatabase() core.IBaseDatabase
+
+	GetAllLLMProviders() ([]dataobject.TLlm, error)
+	GetAllAgents() ([]dataobject.TAgent, error)
+	GetAllSkills() ([]dataobject.TSkill, error)
+	GetAllAgentRouteRules() ([]dataobject.TAgentRouteRule, error)
+
+	CreateLLMProvider(provider *dataobject.TLlm) error
+	UpdateLLMProvider(provider *dataobject.TLlm) error
+	DeleteLLMProvider(ownerId, providerId string) error
+
+	CreateAgent(agent *dataobject.TAgent) error
+	UpdateAgent(agent *dataobject.TAgent) error
+	DeleteAgent(ownerId, agentId string) error
+
+	CreateSkill(skill *dataobject.TSkill) error
+	UpdateSkill(skill *dataobject.TSkill) error
+	DeleteSkill(ownerId, skillId string) error
+}
+
+type AgentAccessor struct {
 	BaseAccessor
 
 	gormDb *gorm.DB
 }
 
-var gormAccessor = pCommon.GetSingleton(func() *GormAccessor {
-	return &GormAccessor{
+var agentAccessor = pCommon.GetSingleton(func() *AgentAccessor {
+	return &AgentAccessor{
 		BaseAccessor: BaseAccessor{
 			db: nil,
 		},
 	}
 }).Instance()
 
-func GetGormAccessor(db core.IBaseDatabase) IAccessor {
-	gormAccessor.db = db
+func GetAgentAccessor(db core.IBaseDatabase) (IAgentAccessor, error) {
+	if db == nil {
+		return nil, exception.ParameterEmptyErrorEx("agent accessor: database is nil")
+	}
 
-	//仅仅支持gorm实现
-	gormDb, ok := gormAccessor.db.(*core.GormDatabase)
+	gormDb, ok := db.(*core.GormDatabase)
 	if !ok {
-		return nil
+		return nil, exception.UnsupportedExceptionErrorEx2("agent accessor: database type[%s] mismatch", db.GetAccessorType())
 	}
 
-	gormAccessor.gormDb = gormDb.GetDB()
-	return gormAccessor
-}
-
-func (g *GormAccessor) GetUserByNameAndPassword(username, userpass string) (*dataobject.TAccount, error) {
-	username = strings.ToLower(username)
-	username = strings.TrimSpace(username)
-	if len(username) == 0 {
-		return nil, exception.ParameterEmptyErrorEx("username must not be empty")
-	}
-
-	var user dataobject.TAccount
-	err := g.gormDb.First(&user, "login_name = ?", username).Error
-	if err != nil {
-		//找不到用户
-		return nil, exception.UnMatchErrorEx2("username=%s can not find", username)
-	}
-
-	encryptedPass := hash.HmacSha256(user.LoginKey, userpass)
-	// 恒定时间比较,避免时序侧信道泄露 LoginKey/LoginPass 信息
-	if hash.HmacEqual([]byte(encryptedPass), []byte(user.LoginPass)) {
-		return &user, nil
-	}
-
-	return nil, exception2.UserPasswordUnmatchEx("username and password do not match")
-}
-
-func (g *GormAccessor) GetUserByAccount(username string) (*dataobject.TAccount, error) {
-	username = strings.ToLower(username)
-	username = strings.TrimSpace(username)
-	if len(username) == 0 {
-		return nil, exception.ParameterEmptyErrorEx("username must not be empty")
-	}
-
-	var user dataobject.TAccount
-	err := g.gormDb.First(&user, "login_name = ?", username).Error
-
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil // 未命中,约定返回(nil,nil),由调用方判空
-	}
-
-	if err != nil {
-		return nil, err // 真实db错误透传
-	}
-
-	return &user, nil
+	agentAccessor.db = db
+	agentAccessor.gormDb = gormDb.GetDB()
+	return agentAccessor, nil
 }
 
 // ============================== 读取(仅未删除记录) =============================
 
-func (g *GormAccessor) GetAllLLMProviders() ([]dataobject.TLlm, error) {
+func (g *AgentAccessor) GetAllLLMProviders() ([]dataobject.TLlm, error) {
 	var list []dataobject.TLlm
 	err := g.gormDb.Where("deleted = 0").Find(&list).Error
 	if err != nil {
@@ -95,7 +72,7 @@ func (g *GormAccessor) GetAllLLMProviders() ([]dataobject.TLlm, error) {
 	return list, nil
 }
 
-func (g *GormAccessor) GetAllAgents() ([]dataobject.TAgent, error) {
+func (g *AgentAccessor) GetAllAgents() ([]dataobject.TAgent, error) {
 	var list []dataobject.TAgent
 	err := g.gormDb.Where("deleted = 0").Find(&list).Error
 	if err != nil {
@@ -104,7 +81,7 @@ func (g *GormAccessor) GetAllAgents() ([]dataobject.TAgent, error) {
 	return list, nil
 }
 
-func (g *GormAccessor) GetAllSkills() ([]dataobject.TSkill, error) {
+func (g *AgentAccessor) GetAllSkills() ([]dataobject.TSkill, error) {
 	var list []dataobject.TSkill
 	err := g.gormDb.Where("deleted = 0").Find(&list).Error
 	if err != nil {
@@ -113,7 +90,7 @@ func (g *GormAccessor) GetAllSkills() ([]dataobject.TSkill, error) {
 	return list, nil
 }
 
-func (g *GormAccessor) GetAllAgentRouteRules() ([]dataobject.TAgentRouteRule, error) {
+func (g *AgentAccessor) GetAllAgentRouteRules() ([]dataobject.TAgentRouteRule, error) {
 	var list []dataobject.TAgentRouteRule
 	err := g.gormDb.Where("deleted = 0").Find(&list).Error
 	if err != nil {
@@ -128,7 +105,7 @@ func (g *GormAccessor) GetAllAgentRouteRules() ([]dataobject.TAgentRouteRule, er
 //   - 已存在活跃(未删除)记录 -> 冲突
 //   - 存在软删除记录占用唯一键 -> 复活该记录(覆盖字段, deleted=0)
 //   - 否则全新插入
-func (g *GormAccessor) CreateLLMProvider(p *dataobject.TLlm) error {
+func (g *AgentAccessor) CreateLLMProvider(p *dataobject.TLlm) error {
 	var count int64
 	if err := g.gormDb.Model(&dataobject.TLlm{}).
 		Where("provider_id = ? AND deleted = 0", p.ProviderId).Count(&count).Error; err != nil {
@@ -150,7 +127,7 @@ func (g *GormAccessor) CreateLLMProvider(p *dataobject.TLlm) error {
 	}
 	if res.RowsAffected > 0 {
 		// 复活成功:回读最新 d_version 写回内存结构,避免仓库缓存携带旧版本导致后续 Update 误报 409
-		WriteBackRevivedVersion(g, &dataobject.TLlm{}, "provider_id", p.ProviderId, &p.DVersion)
+		WriteBackRevivedVersion(g.gormDb, &dataobject.TLlm{}, "provider_id", p.ProviderId, &p.DVersion)
 		return nil
 	}
 
@@ -163,7 +140,7 @@ func (g *GormAccessor) CreateLLMProvider(p *dataobject.TLlm) error {
 }
 
 // UpdateLLMProvider 更新 LLM Provider(乐观锁:d_version 不匹配返回冲突)
-func (g *GormAccessor) UpdateLLMProvider(p *dataobject.TLlm) error {
+func (g *AgentAccessor) UpdateLLMProvider(p *dataobject.TLlm) error {
 	var cur dataobject.TLlm
 	err := g.gormDb.Where("provider_id = ? AND owner_id = ? AND deleted = 0", p.ProviderId, p.OwnerId).First(&cur).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -193,7 +170,7 @@ func (g *GormAccessor) UpdateLLMProvider(p *dataobject.TLlm) error {
 }
 
 // DeleteLLMProvider 软删除 LLM Provider
-func (g *GormAccessor) DeleteLLMProvider(ownerId, providerId string) error {
+func (g *AgentAccessor) DeleteLLMProvider(ownerId, providerId string) error {
 	res := g.gormDb.Model(&dataobject.TLlm{}).
 		Where("provider_id = ? AND owner_id = ? AND deleted = 0", providerId, ownerId).
 		Update("deleted", 1)
@@ -208,7 +185,7 @@ func (g *GormAccessor) DeleteLLMProvider(ownerId, providerId string) error {
 
 // ============================== Agent 写操作 =============================
 
-func (g *GormAccessor) CreateAgent(a *dataobject.TAgent) error {
+func (g *AgentAccessor) CreateAgent(a *dataobject.TAgent) error {
 	var count int64
 	if err := g.gormDb.Model(&dataobject.TAgent{}).
 		Where("agent_id = ? AND deleted = 0", a.AgentId).Count(&count).Error; err != nil {
@@ -229,7 +206,7 @@ func (g *GormAccessor) CreateAgent(a *dataobject.TAgent) error {
 	}
 	if res.RowsAffected > 0 {
 		// 复活成功:回读最新 d_version 写回内存结构,避免仓库缓存携带旧版本导致后续 Update 误报 409
-		WriteBackRevivedVersion(g, &dataobject.TAgent{}, "agent_id", a.AgentId, &a.DVersion)
+		WriteBackRevivedVersion(g.gormDb, &dataobject.TAgent{}, "agent_id", a.AgentId, &a.DVersion)
 		return nil
 	}
 
@@ -239,7 +216,7 @@ func (g *GormAccessor) CreateAgent(a *dataobject.TAgent) error {
 	}
 	return nil
 }
-func (g *GormAccessor) UpdateAgent(a *dataobject.TAgent) error {
+func (g *AgentAccessor) UpdateAgent(a *dataobject.TAgent) error {
 	var cur dataobject.TAgent
 	err := g.gormDb.Where("agent_id = ? AND owner_id = ? AND deleted = 0", a.AgentId, a.OwnerId).First(&cur).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -268,7 +245,7 @@ func (g *GormAccessor) UpdateAgent(a *dataobject.TAgent) error {
 	return nil
 }
 
-func (g *GormAccessor) DeleteAgent(ownerId, agentId string) error {
+func (g *AgentAccessor) DeleteAgent(ownerId, agentId string) error {
 	res := g.gormDb.Model(&dataobject.TAgent{}).
 		Where("agent_id = ? AND owner_id =? AND deleted = 0", agentId, ownerId).
 		Update("deleted", 1)
@@ -283,7 +260,7 @@ func (g *GormAccessor) DeleteAgent(ownerId, agentId string) error {
 
 // ============================== Skill 写操作 =============================
 
-func (g *GormAccessor) CreateSkill(sk *dataobject.TSkill) error {
+func (g *AgentAccessor) CreateSkill(sk *dataobject.TSkill) error {
 	var count int64
 	if err := g.gormDb.Model(&dataobject.TSkill{}).
 		Where("skill_id = ? AND deleted = 0", sk.SkillId).Count(&count).Error; err != nil {
@@ -304,7 +281,7 @@ func (g *GormAccessor) CreateSkill(sk *dataobject.TSkill) error {
 	}
 	if res.RowsAffected > 0 {
 		// 复活成功:回读最新 d_version 写回内存结构,避免仓库缓存携带旧版本导致后续 Update 误报 409
-		WriteBackRevivedVersion(g, &dataobject.TSkill{}, "skill_id", sk.SkillId, &sk.DVersion)
+		WriteBackRevivedVersion(g.gormDb, &dataobject.TSkill{}, "skill_id", sk.SkillId, &sk.DVersion)
 		return nil
 	}
 
@@ -315,7 +292,7 @@ func (g *GormAccessor) CreateSkill(sk *dataobject.TSkill) error {
 	return nil
 }
 
-func (g *GormAccessor) UpdateSkill(sk *dataobject.TSkill) error {
+func (g *AgentAccessor) UpdateSkill(sk *dataobject.TSkill) error {
 	var cur dataobject.TSkill
 	err := g.gormDb.Where("skill_id = ? AND owner_id = ? AND deleted = 0", sk.SkillId, sk.OwnerId).First(&cur).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -344,7 +321,7 @@ func (g *GormAccessor) UpdateSkill(sk *dataobject.TSkill) error {
 	return nil
 }
 
-func (g *GormAccessor) DeleteSkill(ownerId, skillId string) error {
+func (g *AgentAccessor) DeleteSkill(ownerId, skillId string) error {
 	res := g.gormDb.Model(&dataobject.TSkill{}).
 		Where("skill_id = ? AND owner_id = ? AND deleted = 0", skillId, ownerId).
 		Update("deleted", 1)

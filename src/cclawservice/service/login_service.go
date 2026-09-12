@@ -29,7 +29,7 @@ import (
 type LoginService struct {
 	baseService.BaseService
 
-	dbAccessor     dataaccessor.IAccessor
+	dbAccessor     dataaccessor.IUserAccessor
 	sessionService core.ISessionService
 
 	throttleService *core.ThrottleService
@@ -56,8 +56,8 @@ func GetLoginService(memoryDB memoryDbCommon.IMemoryDB, db databaseCore.IBaseDat
 		return nil, exception.ParameterEmptyErrorEx("login service: parameters are nil")
 	}
 
-	var accessor dataaccessor.IAccessor
-	accessor, err := dataaccessor.GetAccessor(db)
+	var accessor dataaccessor.IUserAccessor
+	accessor, err := dataaccessor.GetUserAccessor(db)
 	if err != nil {
 		return nil, err
 	}

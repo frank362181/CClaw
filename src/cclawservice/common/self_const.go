@@ -6,10 +6,13 @@ import (
 	"my.favorite/cclawservice/model/dataobject"
 )
 
-// ContextAuthenticatedUser is the gin.Context key for the server-verified user.
-const ContextAuthenticatedUser = "cclaw.authenticatedUser"
-
 const (
+	// DefaultSessionListLimit 未指定上限时的默认返回条数。(读数据库)
+	DefaultSessionListLimit = 30
+
+	// ContextAuthenticatedUser is the gin.Context key for the server-verified user.
+	ContextAuthenticatedUser = "cclaw.authenticatedUser"
+
 	OwnerIdPlatform = "000000" //属于平台资产定义
 
 	// DefaultReloadDatabaseCacheTTLSeconds 配置缓存 TTL(多实例部署时,各实例从 DB 刷新 LLM provider/agent/skill 配置的过期时间)
@@ -161,6 +164,28 @@ const (
 	ChatChannelFeiShu   = 2 //飞书端
 	ChatChannelWechat   = 3 //微信端
 	ChatChannelDingTalk = 4 //钉钉端
+)
+
+// ==================== 会话管理模块(阶段1:双写落库 + 历史文件) ====================
+// 对应 data/ddl_sqlite3.sql 的 t_session / t_turn / t_turn_tool 三张表。
+// 设计:会话内容写入 memory_{yyyyMMddHHmmss}.md,t_session.chat_data 只保存该文件名,
+// 文件目录由 session_id 推导为 <exeDir>/cclaw/chat_history/<session_id>/。
+const (
+	// ChatHistoryDirName 会话历史文件根目录名(与 AgentBootstrapDir 同级)。
+	ChatHistoryDirName = "chat_history"
+	// ChatHistoryFilePrefix 历史文件名前缀:memory_{yyyyMMddHHmmss}.md
+	ChatHistoryFilePrefix = "memory_"
+	// ChatHistoryFileExt 历史文件扩展名。
+	ChatHistoryFileExt = ".md"
+
+	// SessionNameMaxLen 会话名称长度上限(对齐 t_session.session_name VARCHAR(64))。
+	SessionNameMaxLen = 64
+	// SessionDefaultName 无可用标题时的会话名称(首条消息为空时兜底)。
+	SessionDefaultName = "NewSession"
+
+	// TurnToolRespMaxLen 工具返回值写入 t_turn_tool.tool_resp(VARCHAR(256))时的截断长度。
+	// 完整工具输出落在历史文件里,DB 只留可读摘要。
+	TurnToolRespMaxLen = 256
 )
 
 // ==================== chat 流式状态 ====================

@@ -1,5 +1,5 @@
 /**
-* Agent 内容路由器（方案：用户显式选择 + 根据内容推理 + 兜底）
+* Agent 内容路由器（用户显式选择 + 根据内容推理 + 兜底）
 *
 * 职责:在用户未显式指定 Agent 时,根据消息内容选择最合适的 Agent,
 * 使"不良资产智能助手"等专用 Agent 能在用户未手动选择时也被自动命中。
@@ -27,6 +27,7 @@ import (
 	"time"
 
 	myCommon "my.favorite/cclawservice/common"
+	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/platformutility/common"
@@ -38,7 +39,7 @@ import (
 type AgentRouter struct {
 	agentRepo     repo.IAgentRepository
 	llmClient     *Client
-	sessionAgents *ChatSessionAgentRegistry
+	sessionAgents *ctxmgr.ChatSessionAgentRegistry
 
 	llmRoutingOn bool          // 是否启用 LLM 智能分类路由
 	llmTimeout   time.Duration // LLM 分类超时
@@ -49,7 +50,7 @@ var agentRouter = common.GetSingleton(func() *AgentRouter {
 	return &AgentRouter{
 		agentRepo:     nil,
 		llmClient:     NewClient(),
-		sessionAgents: GetChatSessionAgentRegistry(),
+		sessionAgents: ctxmgr.GetChatSessionAgentMgr(),
 		llmRoutingOn:  myCommon.AgentRoutingLLMEnabled,
 		llmTimeout:    time.Duration(myCommon.AgentRoutingLLMTimeoutSeconds) * time.Second,
 		llmMaxTokens:  myCommon.AgentRoutingLLMMaxTokens,

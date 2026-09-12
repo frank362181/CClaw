@@ -58,7 +58,7 @@ func GetChatController(svc pService.IService, sGate, cGate *core.ConcurrencyGate
 //	@Param			TIMESTAMP		query		string				true	"数值,表示请求端请求的时间(秒数)"
 //	@Param			SIGNATURE		query		string				true	"对请求内容的签名秒数"
 //	@Param			body		body		model.ChatRequest	true	"聊天内容"
-//	@Success		200			{object}	model.ChatResponseEx
+//	@Success		200			{object}	model.ChatResponse
 //	@Failure		400			{object}	basic.CommonResponse
 //	@Router			/api/chat [post]
 func (cc *ChatController) Chat(c *gin.Context) {
@@ -108,8 +108,9 @@ func (cc *ChatController) Chat(c *gin.Context) {
 //	@Param			NONCE			query		string			true	"盐"
 //	@Param			TIMESTAMP		query		string			true	"数值,表示请求端请求的时间(秒数)"
 //	@Param			SIGNATURE		query		string			true	"对请求内容的签名秒数"
-//	@Param			body		body		model.ChatRequest	true	"聊天内容"
-//	@Success		200			{object}	model.ChatResponseEx
+//	@Param			body			body		model.ChatRequest	true	"聊天内容"
+//	@Failure		400			{object} 		basic.CommonResponse
+//	@Success		200			{object}		model.ChatResponse
 //	@Router			/api/chat/stream [post]
 func (cc *ChatController) ChatStream(c *gin.Context) {
 	chatService, ok := cc.getChatService(c)
@@ -173,9 +174,9 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 		}
 		if c.Request.Context().Err() != nil {
 			disconnected = true
-			// 提前取消上游:命中断开立即退流(会话号在 ChatStream 内已生成/规整)
-			if strings.TrimSpace(req.SessionId) != "" {
-				_ = chatService.InterruptChat(sender, req.SessionId)
+			// 提前取消上游:命中断开立即退流(turnId 由 ChatStream 内的规整逻辑保证非空)
+			if strings.TrimSpace(req.TurnId) != "" {
+				_ = chatService.InterruptChat(sender, req.TurnId)
 			}
 			return
 		}
@@ -310,20 +311,19 @@ func (cc *ChatController) InterruptChat(c *gin.Context) {
 		return
 	}
 
+	// 发送者以服务端认证信息为准(认证 interceptor 已写入上下文),确保只能中断自己的轮次
 	loginSession, ok := getAuthentication(c)
 	if !ok {
 		return
 	}
 
 	var req model.ChatInterruptRequest
-	if err := c.ShouldBindBodyWithJSON(&req); err != nil || strings.TrimSpace(req.SessionId) == "" {
+	if err := c.ShouldBindBodyWithJSON(&req); err != nil || strings.TrimSpace(req.TurnId) == "" {
 		respondKind(c, myException.ChatParameterKind)
 		return
 	}
 
-	// 发送者以服务端认证信息为准(认证 interceptor 已写入上下文),确保只能中断自己的聊天
-	sender := loginSession.LoginName
-	if err := chatService.InterruptChat(sender, req.SessionId); err != nil {
+	if err := chatService.InterruptChat(loginSession.LoginName, req.TurnId); err != nil {
 		respondChatError(c, err)
 		return
 	}

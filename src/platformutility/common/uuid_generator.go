@@ -11,12 +11,24 @@ import (
 	"sync"
 )
 
+type uuidGenerator struct {
+	pool sync.Pool
+}
+
 var uuidInstance = GetSingleton(func() *uuidGenerator {
 	return buildUUIDGenerator()
 }).Instance()
 
-type uuidGenerator struct {
-	pool sync.Pool
+// BuildUUIDGenerator 构建 UUID 生成器
+func buildUUIDGenerator() *uuidGenerator {
+	return &uuidGenerator{
+		pool: sync.Pool{
+			New: func() interface{} {
+				// 预分配 36 字节数组 用来存放 UUID
+				return &[36]byte{}
+			},
+		},
+	}
 }
 
 func GenerateUUID() string {
@@ -53,16 +65,4 @@ func (g *uuidGenerator) generateUUID() string {
 
 	// 最后一步转换成string
 	return string(buf[:])
-}
-
-// BuildUUIDGenerator 构建 UUID 生成器
-func buildUUIDGenerator() *uuidGenerator {
-	return &uuidGenerator{
-		pool: sync.Pool{
-			New: func() interface{} {
-				// 预分配 36 字节数组 用来存放 UUID
-				return &[36]byte{}
-			},
-		},
-	}
 }

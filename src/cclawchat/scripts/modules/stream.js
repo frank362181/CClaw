@@ -11,16 +11,18 @@ export const StreamEngine = {
 
     start(convId, userContent, onComplete, onError) {
         this.cancel();
-        const requestId = genId();
+        // turnId 即"本轮"标识:由前端生成,随聊天请求下发(后端用于落库 t_turn.turn_id 与应答回显),
+        // 中断时再回传给后端(后端以 <登录名>:<turnId> 定位本轮进行中的流)。
+        const turnId = genId();
         const msgId = genId();
-        const request = { requestId, convId, msgId, controller: null, content: '', statusText: '', reasoning: '', interruptFallback: null };
+        const request = { turnId, convId, msgId, controller: null, content: '', statusText: '', reasoning: '', interruptFallback: null };
         this._activeRequest = request;
         State.isStreaming = true;
         ChatPage.updateSendButton(); // 流式中:发送按钮变为中断按钮
         State.addMessage(convId, 'assistant', '', msgId);
         ChatPage.appendStreamingMessage(convId, msgId);
 
-        const isCurrent = () => this._activeRequest?.requestId === requestId;
+        const isCurrent = () => this._activeRequest?.turnId === turnId;
         const finish = () => {
             if (!isCurrent()) return false;
             this._activeRequest = null;
@@ -36,6 +38,7 @@ export const StreamEngine = {
 
         request.controller = API.sendMessageStream(
             convId,
+            turnId,
             userContent,
             State.user?.token,
             content => {
@@ -107,7 +110,7 @@ export const StreamEngine = {
                 ChatPage.updateStreamingNotice(msgId, notice);
             },
         );
-        return { msgId, cancel: () => this.cancel(requestId) };
+        return { msgId, cancel: () => this.cancel(turnId) };
     },
 
     /**
@@ -121,7 +124,7 @@ export const StreamEngine = {
     async interrupt(convId) {
         const request = this._activeRequest;
         if (!request || request.convId !== convId) return false;
-        const requestId = request.requestId;
+        const turnId = request.turnId;
 
         // 先标记“已中断”（无论后端经流关闭还是本地中止收尾，用户都能看到反馈）
         State.markMessageInterrupted(request.convId, request.msgId);
@@ -130,24 +133,24 @@ export const StreamEngine = {
 
         // 兜底：后端未及时关闭流时本地中止
         request.interruptFallback = setTimeout(() => {
-            if (this.isActive() && this._activeRequest?.requestId === requestId) {
-                this.cancel(requestId, { interrupted: true });
+            if (this.isActive() && this._activeRequest?.turnId === turnId) {
+                this.cancel(turnId, { interrupted: true });
             }
         }, INTERRUPT_FALLBACK_MS);
 
-        // 通知后端停止对应会话的流式聊天（主机制）
+        // 通知后端停止本轮流式聊天（主机制）
         try {
-            await API.interruptChat(convId, State.user?.token);
+            await API.interruptChat(turnId, State.user?.token);
         } catch (_) {
-            // 后端不可达/会话未在聊天：由本地中止兜底
-            this.cancel(requestId, { interrupted: true });
+            // 后端不可达/该轮次未在聊天：由本地中止兜底
+            this.cancel(turnId, { interrupted: true });
         }
         return true;
     },
 
-    cancel(requestId, opts = {}) {
+    cancel(turnId, opts = {}) {
         const request = this._activeRequest;
-        if (!request || (requestId && request.requestId !== requestId)) return false;
+        if (!request || (turnId && request.turnId !== turnId)) return false;
         this._activeRequest = null;
         State.isStreaming = false;
         if (request.interruptFallback) {

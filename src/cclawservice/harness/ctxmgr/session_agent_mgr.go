@@ -12,7 +12,7 @@
 *     后续可平滑替换为 Redis/DB 实现,对外接口保持不变。
 **/
 
-package harness
+package ctxmgr
 
 import (
 	"sync"
@@ -29,7 +29,8 @@ type sessionAgentBinding struct {
 
 // ChatSessionAgentRegistry 会话→Agent 的绑定注册表(线程安全)。
 type ChatSessionAgentRegistry struct {
-	mu         sync.RWMutex
+	mu sync.RWMutex
+
 	bindings   map[string]sessionAgentBinding
 	ttlSeconds int64 // 条目有效期;<=0 表示永不过期
 	maxEntries int   // 容量上限;<=0 表示不限制
@@ -38,7 +39,7 @@ type ChatSessionAgentRegistry struct {
 // defaultSessionBindingMaxEntries 会话绑定的容量上限,防止内存无限膨胀。
 const defaultSessionBindingMaxEntries = 100000
 
-var chatSessionAgentRegistry = common.GetSingleton(func() *ChatSessionAgentRegistry {
+var chatSessionAgentMgr = common.GetSingleton(func() *ChatSessionAgentRegistry {
 	return &ChatSessionAgentRegistry{
 		bindings:   make(map[string]sessionAgentBinding),
 		ttlSeconds: myCommon.SessionAgentBindingTTLSeconds,
@@ -46,23 +47,23 @@ var chatSessionAgentRegistry = common.GetSingleton(func() *ChatSessionAgentRegis
 	}
 }).Instance()
 
-// GetChatSessionAgentRegistry 返回全局唯一的会话-Agent 绑定注册表。
-func GetChatSessionAgentRegistry() *ChatSessionAgentRegistry {
-	return chatSessionAgentRegistry
+// GetChatSessionAgentMgr 返回全局唯一的会话-Agent 绑定注册表。
+func GetChatSessionAgentMgr() *ChatSessionAgentRegistry {
+	return chatSessionAgentMgr
 }
 
 // Get 查询指定会话绑定的 Agent;不存在或已过期返回 ok=false(过期条目惰性删除)。
 func (r *ChatSessionAgentRegistry) Get(comCode, sessionId string) (string, bool) {
-	if sessionId == "" {
-		return "", false
+	if sessionId == common.BlankString {
+		return common.BlankString, false
 	}
-	key := myCommon.BuildSessionKey(comCode, sessionId)
+	key := sessionId //myCommon.BuildSessionKey(comCode, sessionId)
 
 	r.mu.RLock()
 	b, ok := r.bindings[key]
 	r.mu.RUnlock()
 	if !ok {
-		return "", false
+		return common.BlankString, false
 	}
 
 	// 惰性过期:命中后判断 TTL,过期则删除并视为未绑定
@@ -71,17 +72,17 @@ func (r *ChatSessionAgentRegistry) Get(comCode, sessionId string) (string, bool)
 		r.mu.Lock()
 		delete(r.bindings, key)
 		r.mu.Unlock()
-		return "", false
+		return common.BlankString, false
 	}
 	return b.agentId, true
 }
 
 // Set 记录"会话→Agent"绑定;超出容量时先清理过期项,仍不足则整体清空(防内存膨胀)。
 func (r *ChatSessionAgentRegistry) Set(comCode, sessionId, agentId string) {
-	if sessionId == "" || agentId == "" {
+	if sessionId == common.BlankString || agentId == common.BlankString {
 		return
 	}
-	key := myCommon.BuildSessionKey(comCode, sessionId)
+	key := sessionId //myCommon.BuildSessionKey(comCode, sessionId)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -100,7 +101,7 @@ func (r *ChatSessionAgentRegistry) ClearKey(comCode, sessionId string) {
 	if sessionId == "" {
 		return
 	}
-	key := myCommon.BuildSessionKey(comCode, sessionId)
+	key := sessionId //myCommon.BuildSessionKey(comCode, sessionId)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.bindings, key)

@@ -30,6 +30,7 @@ import (
 	cCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/harness"
+	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
@@ -75,6 +76,10 @@ type ChatService struct {
 	llmClient     *harness.Client
 	agentRouter   *harness.AgentRouter
 
+	// sessionService 会话管理(阶段1双写:只写不读的旁路)。
+	// 为 nil 或未启用时全部记录动作静默跳过,不影响聊天主流程。
+	sessionService *ChatSessionService
+
 	functionCalling bool // 是否启用 function-calling(由 ini [sandBox] functionCalling 控制)
 }
 
@@ -94,10 +99,12 @@ var chatService = pCommon.GetSingleton(func() *ChatService {
 // GetChatService 构建聊天服务。
 //   - db:             用于读取 Agent / LLM Provider / Skill 配置(与 AgentService 共用同一仓库单例)
 //   - functionCalling:是否启用 function-calling(工具调用),来源于 [sandBox] functionCalling 配置
-func GetChatService(db core.IBaseDatabase, functionCalling bool) baseService.IService {
+//   - sessionRecord:  是否启用会话记录(阶段1双写),来源于 [chat] sessionRecord 配置
+func GetChatService(db core.IBaseDatabase, functionCalling bool, sessionRecord bool) baseService.IService {
 	chatService.agentRepo = repo.GetAgentRepository(db)
 	chatService.agentRouter = harness.GetAgentRouter(chatService.agentRepo)
 	chatService.functionCalling = functionCalling
+	chatService.sessionService = GetChatSessionService(db, sessionRecord)
 
 	return chatService
 }
@@ -131,10 +138,19 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 	}
 	defer release()
 
+	// 会话建档(阶段1双写:旁路,只写不读;失败不影响聊天)
+	session, recorded := s.sessionService.Begin(sender, agent, req)
+
 	// 调用 LLM 引擎取回完整回复(function-calling 开启且该 Agent 有工具时可能经过工具循环)
-	reply, err := s.completeChat(ctx, llmProvider, systemPrompt, req, toolSet)
+	recorder := newTurnRecorder()
+	reply, err := s.completeChat(ctx, llmProvider, systemPrompt, req, toolSet, recorder)
 	if err != nil {
 		return nil, myException.LlmError(err, "chat service: runtime call chat")
+	}
+
+	// 轮次落库:问题/工具/回复写入历史文件并登记 t_turn / t_turn_tool
+	if recorded {
+		s.sessionService.AppendTurn(session, req, reply, recorder.Snapshot())
 	}
 
 	// 组装应答
@@ -144,8 +160,9 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 		SessionId:   req.SessionId,
 		ChatType:    req.ChatType,
 		ChatChannel: req.ChatChannel,
-		ChatId:      now,
+		TurnId:      req.TurnId, // 回显客户端生成的 turnId,保证客户端能定位本轮
 		Reply:       reply,
+		RespTime:    now,
 	}
 	return resp, nil
 }
@@ -172,12 +189,14 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	}
 	defer release()
 
-	// 注册为"进行中的流式聊天",供中断 API 按会话键取消(不同用户/会话相互隔离)。
+	// 注册为"进行中的轮次",供中断 API 按轮次取消(不同用户/轮次相互隔离)。
 	// 派生可取消上下文:客户端断开或用户点击中断都会终止 LLM 流式读取。
+	// 注册键必须是 <sender>:<turnId>:中断 API 只收到 turnId,用同一规则构造才能命中;
+	// 以发送者为前缀则避免跨用户冒用 turnId 中断他人流。
 	streamCtx, cancel := context.WithCancel(ctx)
-	key := cCommon.BuildChatStreamKey(sender, req.SessionId)
-	harness.GetChatStreamRegistry().Register(key, cancel)
-	defer harness.GetChatStreamRegistry().Unregister(key)
+	key := cCommon.BuildTurnStreamKey(sender, req.TurnId)
+	ctxmgr.GetTurnStreamMgr().Register(key, cancel)
+	defer ctxmgr.GetTurnStreamMgr().Unregister(key)
 
 	// 应用级运行超时:界定"这一轮任务最多跑多久"(工具循环 + LLM 生成整段)。
 	// 与传输层 writeTimeout 解耦——任务时长由 chatRunTimeout()(可 env 覆盖)决定,
@@ -189,31 +208,40 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 		onStatus(cCommon.ChatStatusThinking, "正在思考…")
 	}
 
+	// 会话建档(阶段1双写:旁路,只写不读;失败不影响聊天)
+	session, recorded := s.sessionService.Begin(sender, agent, req)
+
 	// function-calling 开启且该 Agent 有可用工具时,走工具调用循环(工具阶段状态提示,最终内容流式转发);
 	// 否则保持原有的纯流式转发。
+	recorder := newTurnRecorder()
 	var reply, finishReason string
 	if s.functionCalling && toolSet != nil && len(toolSet.LLMTools()) > 0 {
-		reply, finishReason, err = s.streamToolLoop(runCtx, llmProvider, harness.BuildChatMessage(systemPrompt, req), toolSet, onChunk, onStatus, onReasoning, onTool)
+		reply, finishReason, err = s.streamToolLoop(runCtx, llmProvider, harness.BuildChatMessage(systemPrompt, req), toolSet, onChunk, onStatus, onReasoning, onTool, recorder)
 	} else {
 		reply, finishReason, err = s.llmClient.ChatCompletionStream(runCtx, llmProvider, systemPrompt, req, onChunk, onReasoning)
 	}
 	if err != nil {
 		// 应用级运行超时:给可读错误,而不是笼统的 "request canceled by client"
 		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-			return "", myException.ChatRunTimeoutKind.Newf("chat service: run timeout after %s", chatRunTimeout())
+			return pCommon.BlankString, myException.ChatRunTimeoutKind.Newf("chat service: run timeout after %s", chatRunTimeout())
 		}
-		return "", myException.LlmError(err, "chat service: runtime stream error")
+		return pCommon.BlankString, myException.LlmError(err, "chat service: runtime stream error")
 	}
 
 	// finish_reason 收尾:长度截断/内容合规 → 以独立 notice 事件告知前端(不污染回答正文)。
 	// 无任何正式内容且被内容安全策略拦截时,按内容合规业务错误返回(交由控制器提示)。
 	if code, msg := finishReasonNotice(finishReason); code != "" {
-		if strings.TrimSpace(reply) == "" && finishReason == llmproto.FinishReasonContentFilter {
-			return "", myException.ChatLLMContentFilterKind.Newf("chat service: output blocked by content filter")
+		if strings.TrimSpace(reply) == pCommon.BlankString && finishReason == llmproto.FinishReasonContentFilter {
+			return pCommon.BlankString, myException.ChatLLMContentFilterKind.Newf("chat service: output blocked by content filter")
 		}
 		if onNotice != nil {
 			onNotice(code, msg)
 		}
+	}
+
+	// 轮次落库(阶段1双写:旁路,只写不读;失败不影响回复)
+	if recorded {
+		s.sessionService.AppendTurn(session, req, reply, recorder.Snapshot())
 	}
 	return reply, nil
 }
@@ -232,19 +260,58 @@ func finishReasonNotice(finishReason string) (code, msg string) {
 	}
 }
 
-// InterruptChat 中断指定会话进行中的流式聊天(用户点击中断按钮)。
-// 仅在聊天已开始(流式进行中)时支持;会话不存在或已结束时返回"未在聊天"错误。
-// key 以发送者(服务端认证)为前缀,保证不同用户、不同会话的聊天相互隔离、互不影响。
-func (s *ChatService) InterruptChat(sender, sessionId string) error {
-	key := cCommon.BuildChatStreamKey(sender, sessionId)
-	if !harness.GetChatStreamRegistry().Cancel(key) {
-		return myException.ChatNotActiveKind.Newf("chat stream not active: %s", sessionId)
+// InterruptChat 中断指定轮次进行中的流式聊天(用户点击中断按钮)。
+// 仅在聊天已开始(流式进行中)时支持;该轮次不在聊天中则返回"未在聊天"错误。
+// 键与 ChatStream 注册时一致(<sender>:<turnId>),并以发送者隔离不同用户。
+func (s *ChatService) InterruptChat(sender, turnId string) error {
+	key := cCommon.BuildTurnStreamKey(sender, cCommon.NormalizeCompactId(turnId))
+	if !ctxmgr.GetTurnStreamMgr().Cancel(key) {
+		return myException.ChatNotActiveKind.Newf("chat stream not active: %s", turnId)
 	}
-	logging.LogDebugF("chat service: interrupt chat key:%s", key)
+	logging.LogInfoF("chat stream: interrupt chat key:%s", key)
 	return nil
 }
 
-// =============================== private functions & methods========================
+// =============================== private functions & methods===========================
+
+func (s *ChatService) normalizeRequest(comCode, sender string, req *request.ChatRequest) *request.ChatRequest {
+	// 会话标识:统一带单位编码前缀 —— 无论客户端是否提供。
+	clientSessionId := cCommon.NormalizeCompactId(req.SessionId)
+	if clientSessionId == pCommon.BlankString {
+		req.SessionId = cCommon.NewCompactId(comCode)
+	} else {
+		// 幂等:客户端**回传服务端签发的 session_id**时不能重复叠加单位前缀。
+		// 否则 comCode + (comCode + uuid) 会算出另一个 session_id(且超长被截断),
+		// 结果是:续写/恢复会话时被拆成新会话,历史永远接不上。
+		// 触发场景:Phase2 的"会话列表/恢复会话"、飞书/微信等渠道适配器回传会话标识。
+		prefix := cCommon.NormalizeCompactId(comCode)
+		clientSessionId = strings.TrimPrefix(clientSessionId, prefix)
+		req.SessionId = cCommon.NormalizeCompactId(comCode + clientSessionId)
+	}
+
+	req.TurnId = cCommon.NormalizeCompactId(req.TurnId)
+	if req.TurnId == pCommon.BlankString {
+		// 兜底生成时**不**带 sender 前缀:turnId 只保证"单用户内唯一"
+		req.TurnId = cCommon.NewCompactId(pCommon.BlankString)
+	}
+
+	// 提问时间:客户端未提供时,以"服务端收到请求的时刻"兜底(Web 端目前不发送 genAt)。
+	if req.GenAt <= 0 {
+		req.GenAt = pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
+	}
+
+	// chat type,默认为私聊
+	if req.ChatType == 0 {
+		req.ChatType = cCommon.ChatTypePrivate
+	}
+
+	// chat channel default = web
+	if req.ChatChannel == 0 {
+		req.ChatChannel = cCommon.ChatChannelWeb
+	}
+
+	return req
+}
 
 // acquireAgentGate 获取目标 Agent 的并发许可(每 Agent 闸)。
 //   - 上限取 t_agent.max_concurrent;未配置(<=0)用 DefaultAgentConcurrency;
@@ -293,18 +360,12 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 		req.SenderId = strings.TrimSpace(sender)
 	}
 
-	// 3. 会话标识:客户端可传入;为空则由服务端生成
-	if strings.TrimSpace(req.SessionId) == "" {
-		req.SessionId = pCommon.GenerateUUID()
-	}
-
-	// 4. 缺省类型
-	if req.ChatType == 0 {
-		req.ChatType = cCommon.ChatTypePrivate
-	}
-	if req.ChatChannel == 0 {
-		req.ChatChannel = cCommon.ChatChannelWeb
-	}
+	// 3. 会话/轮次标识:客户端可传入;为空则由服务端生成。
+	//    统一规整为 <=40 字符的紧凑形式(t_session.session_id 与 t_turn.turn_id 均为 VARCHAR(40)):
+	//    前端 crypto.randomUUID() 与服务端 GenerateUUID() 产出的是 36 字符标准 UUID,
+	//    去分隔符后为 32 字符;服务端生成的带前缀 ID 最长 48 → 截断到 40。
+	//    该值会被用作历史文件目录名,规整中的字符过滤顺带杜绝了路径穿越。
+	s.normalizeRequest(comCode, sender, req)
 
 	// 5. 解析目标 Agent(混合路由:显式 → 会话绑定 → 关键词 → LLM 分类 → 默认)
 	agent, err := s.resolveAgent(ctx, comCode, req.SessionId, req.ReqMsg, req.AgentId)
@@ -401,15 +462,16 @@ func (s *ChatService) collectSkillFiles(comCode string, agent dataobject.TAgent)
 }
 
 // completeChat 取回完整回复:function-calling 开启且该 Agent 有可用工具时走工具循环,否则走普通同步调用。
-func (s *ChatService) completeChat(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest, toolSet *harness.ToolSet) (string, error) {
+// recorder 用于旁路记录本轮调用过的工具(可为 nil)。
+func (s *ChatService) completeChat(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest, toolSet *harness.ToolSet, recorder *turnRecorder) (string, error) {
 	if s.functionCalling && toolSet != nil && len(toolSet.LLMTools()) > 0 {
-		return s.runToolLoop(ctx, llmProvider, harness.BuildChatMessage(systemPrompt, req), toolSet)
+		return s.runToolLoop(ctx, llmProvider, harness.BuildChatMessage(systemPrompt, req), toolSet, recorder)
 	}
 	return s.llmClient.ChatCompletion(ctx, llmProvider, systemPrompt, req)
 }
 
 // runToolLoop 同步路径的工具调用循环:调用LLM → 执行工具 → 结果回填 → 再次调用,直到模型给出最终文本。
-func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet) (string, error) {
+func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet, recorder *turnRecorder) (string, error) {
 	for i := 0; i < cCommon.AgentToolLoopMax; i++ {
 		content, calls, err := s.llmClient.CompleteWithTools(ctx, llmProvider, messages, toolSet.LLMTools())
 		if err != nil {
@@ -420,10 +482,13 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 		}
 		messages = append(messages, harness.BuildToolCallWithContentMessage(content, calls)) // 缺口1:工具轮文本一并回填
 		for _, call := range calls {
+			callTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 			result, err := toolSet.Exec(ctx, call.Function.Name, call.Function.Arguments)
+			respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 			if err != nil {
 				result = fmt.Sprintf(`{"error":%q}`, err.Error())
 			}
+			recorder.Record(call.Function.Name, callTime, respTime, result) // 旁路记录(recorder 为 nil 时静默)
 			messages = append(messages, harness.BuildToolResultMessage(call.ID, result))
 		}
 	}
@@ -434,7 +499,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 // 工具调用阶段实时推送给用户:模型声明调用(intent)→开始执行(running)→结果(done/error),
 // 最终内容增量通过 onChunk 流式转发。底层仍为多次上游请求(OpenAI 兼容协议不支持服务端工具循环),
 // 此处把多轮编排为一条面向客户端的事件流。
-func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent)) (string, string, error) {
+func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent), recorder *turnRecorder) (string, string, error) {
 	seq := 0 // 本回合工具调用序号(跨轮自增,前端按 seq 追踪同一工具调用)
 	for i := 0; i < cCommon.AgentToolLoopMax; i++ {
 		if i > 0 && onStatus != nil {
@@ -479,9 +544,11 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 		}
 
 		type toolResultItem struct {
-			item   toolRunItem
-			result string
-			err    error
+			item     toolRunItem
+			result   string
+			err      error
+			callTime int64 // 工具调用时间(Unix 秒,旁路记录用)
+			respTime int64 // 工具返回时间(Unix 秒,旁路记录用)
 		}
 		results := make([]toolResultItem, len(runs))
 
@@ -523,9 +590,10 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 					// 脚本 stdout 行:仅投递到通道,由唯一转发 goroutine 推送(不在此处直接写 SSE)
 					lineCh <- ToolEvent{Phase: cCommon.ChatToolEventProgress, Seq: run.seq, Name: run.name, Detail: line}
 				})
+				respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 				close(stopHeart)
 				<-heartDone
-				results[k] = toolResultItem{item: run, result: res, err: err}
+				results[k] = toolResultItem{item: run, result: res, err: err, callTime: startTime.Timestamp, respTime: respTime}
 			}(k, run)
 		}
 
@@ -553,12 +621,14 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 				if onTool != nil {
 					onTool(ToolEvent{Phase: cCommon.ChatToolEventError, Seq: r.item.seq, Name: r.item.name, Detail: r.err.Error()})
 				}
+				recorder.Record(r.item.name, r.callTime, r.respTime, r.err.Error()) // 旁路记录(recorder 为 nil 时静默)
 				messages = append(messages, harness.BuildToolResultMessage(r.item.callID, fmt.Sprintf(`{"error":%q}`, r.err.Error())))
 				continue
 			}
 			if onTool != nil {
 				onTool(ToolEvent{Phase: cCommon.ChatToolEventDone, Seq: r.item.seq, Name: r.item.name, Detail: pCommon.TruncateRunes(r.result, 600)})
 			}
+			recorder.Record(r.item.name, r.callTime, r.respTime, r.result) // 旁路记录(recorder 为 nil 时静默)
 			messages = append(messages, harness.BuildToolResultMessage(r.item.callID, r.result))
 		}
 	}

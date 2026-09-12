@@ -33,12 +33,17 @@ async function runMockStream(content, signal, onChunk, onComplete, onStatus) {
  * - 与 GetAgents/GetSkills 等受保护接口一致，携带 TIMESTAMP/NONCE/SIGNATURE（防重放），
  *   并附 AUTHORIZATION 令牌，故会经过后端全局 filter 与认证 interceptor。
  * - 请求体字段与后端 model.ChatRequest 的 json 标签（camelCase）对齐。
+ * - turnId 由前端生成（一轮一个）：后端用于落库 t_turn.turn_id、应答回显，
+ *   并且是中断 API 的唯一凭据，故必须与流式路径使用同一套语义。
  * - 一次性返回 JSON 应答（ChatResponse.reply）；默认走流式（runRealChatStream），
  *   当 CHAT_STREAM_FORMAT 非 'sse' 时作为回退路径使用。
+ * @param {string} convId 会话标识（对应后端 sessionId）
+ * @param {string} turnId 本轮标识（对应后端 turnId）
  */
-async function runRealChat(convId, content, token, signal, onChunk, onComplete) {
+async function runRealChat(convId, turnId, content, token, signal, onChunk, onComplete) {
     const body = {
         sessionId: convId,
+        turnId,
         requestMsg: content,
         chatType: 0,    // 私聊
         chatChannel: 1, // WEB 端
@@ -75,10 +80,13 @@ async function runRealChat(convId, content, token, signal, onChunk, onComplete) 
  *     data: {"msg":"..."}     → 后端错误事件，抛出 Error
  * - 携带 TIMESTAMP/NONCE/SIGNATURE（防重放）与 AUTHORIZATION 令牌，与登录一致。
  * - 支持 signal 取消（AbortController），取消时静默结束不触发完成回调。
+ * @param {string} convId 会话标识（对应后端 sessionId）
+ * @param {string} turnId 本轮标识（对应后端 turnId）：落库、回显与中断都用它
  */
-async function runRealChatStream(convId, content, token, signal, onChunk, onComplete, onStatus, onReasoning, onTool, onNotice) {
+async function runRealChatStream(convId, turnId, content, token, signal, onChunk, onComplete, onStatus, onReasoning, onTool, onNotice) {
     const body = {
         sessionId: convId,
+        turnId,
         requestMsg: content,
         chatType: 0,    // 私聊
         chatChannel: 1, // WEB 端
@@ -184,15 +192,20 @@ async function runRealChatStream(convId, content, token, signal, onChunk, onComp
 }
 
 export const API = {
-    sendMessageStream(convId, content, token, onChunk, onComplete, onError, onStatus, onReasoning, onTool, onNotice) {
+    /**
+     * 发送一条聊天消息（默认 SSE 流式）。
+     * @param {string} convId 会话标识（对应后端 sessionId）
+     * @param {string} turnId 本轮标识（对应后端 turnId，与 interruptChat 共用）
+     */
+    sendMessageStream(convId, turnId, content, token, onChunk, onComplete, onError, onStatus, onReasoning, onTool, onNotice) {
         const controller = new AbortController();
         // SSE 为默认真实路径；ENABLE_MOCK 时走模拟流；CHAT_STREAM_FORMAT 非 'sse' 时回退同步 JSON
         const useStream = CONFIG.CHAT_STREAM_FORMAT === 'sse';
         const task = CONFIG.ENABLE_MOCK
             ? runMockStream(content, controller.signal, onChunk, onComplete, onStatus)
             : useStream
-                ? runRealChatStream(convId, content, token, controller.signal, onChunk, onComplete, onStatus, onReasoning, onTool, onNotice)
-                : runRealChat(convId, content, token, controller.signal, onChunk, onComplete);
+                ? runRealChatStream(convId, turnId, content, token, controller.signal, onChunk, onComplete, onStatus, onReasoning, onTool, onNotice)
+                : runRealChat(convId, turnId, content, token, controller.signal, onChunk, onComplete);
         task.catch(error => {
             if (error.name !== 'AbortError' && !controller.signal.aborted) onError?.(error);
         });
@@ -200,16 +213,18 @@ export const API = {
     },
 
     /**
-     * 中断指定会话进行中的流式聊天：POST /api/chat/interrupt。
+     * 中断指定轮次进行中的流式聊天：POST /api/chat/interrupt。
      * - 携带 TIMESTAMP / NONCE / SIGNATURE（防重放）与 AUTHORIZATION 令牌，与聊天一致。
-     * - 仅在聊天已开始（流式进行中）时后端支持；会话未在聊天时返回业务错误。
+     * - 后端以 <登录名>:<turnId> 定位进行中的流，因此必须以**本轮**的 turnId 调用；
+     *   后端仅允许中断自己发起的轮次。
+     * - 仅在聊天已开始（流式进行中）时后端支持；该轮次不在聊天中时返回业务错误。
      * - 请求超时缩短（不受全局 120s 影响），保证中断操作尽快返回。
-     * @param {string} convId 会话标识（对应发起聊天时的 sessionId）
+     * @param {string} turnId 本轮标识（对应发送聊天时的 turnId）
      * @param {string} token 登录令牌（AUTHORIZATION 请求头）
      */
-    async interruptChat(convId, token) {
-        if (!convId) throw new Error('缺少会话标识，无法中断');
-        const body = { sessionId: convId };
+    async interruptChat(turnId, token) {
+        if (!turnId) throw new Error('缺少轮次标识，无法中断');
+        const body = { turnId };
         const TIMESTAMP = String(Math.floor(Date.now() / 1000));
         const NONCE = getRandomNonce();
         const SIGNATURE = await HmacSHA256Hex(CONFIG.SIGN_KEY, JSON.stringify(body) + TIMESTAMP + NONCE);

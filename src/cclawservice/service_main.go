@@ -234,7 +234,10 @@ func (m *ServiceMain) SetupChatController() error {
 	// function-calling 开关来自 ini [sandBox] functionCalling(默认关闭,安全兜底)
 	functionCalling, _ := m.configHelper.GetBoolValueDefault("sandBox", "functionCalling", false)
 
-	chatService := service.GetChatService(m.database, functionCalling)
+	// 会话记录开关来自 ini [chat] sessionRecord(阶段1双写:只写不读的旁路,默认开启)
+	sessionRecord, _ := m.configHelper.GetBoolValueDefault("chat", "sessionRecord", true)
+
+	chatService := service.GetChatService(m.database, functionCalling, sessionRecord)
 	chatController := selfController.GetChatController(chatService, m.streamGate, m.chatGate)
 
 	urlFunMap := make(map[string]gin.HandlerFunc)

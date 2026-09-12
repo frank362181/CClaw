@@ -16,6 +16,14 @@ import (
 	"time"
 )
 
+func TimestampText(timestamp int64) string {
+	if timestamp <= 0 {
+		return GetDatetimeUtilityInstance().getCurrentDatetime().DatetimeStr
+	}
+
+	return time.Unix(timestamp, 0).Format("2006-01-02 15:04:05")
+}
+
 type DatetimeUtility struct {
 	timezone *time.Location
 }

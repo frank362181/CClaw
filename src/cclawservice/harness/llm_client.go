@@ -28,6 +28,7 @@ import (
 
 	myCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
+	"my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
@@ -110,7 +111,7 @@ func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.T
 	for attempt := 1; attempt <= c.retryMaxAttempts; attempt++ {
 		if attempt > 1 {
 			if err := c.retryWait(ctx, attempt, lastErr); err != nil {
-				return "", nil, err
+				return pCommon.BlankString, nil, err
 			}
 		}
 		content, calls, err := c.completeWithToolsOnce(ctx, llmProvider, req)
@@ -119,10 +120,10 @@ func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.T
 		}
 		lastErr = err
 		if !llmproto.IsRetryableLlmError(err) {
-			return "", nil, err
+			return pCommon.BlankString, nil, err
 		}
 	}
-	return "", nil, lastErr
+	return pCommon.BlankString, nil, lastErr
 }
 
 // ChatCompletionStream 以流式(SSE)方式调用 chat/completions。
@@ -140,7 +141,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobjec
 	for attempt := 1; attempt <= c.retryMaxAttempts; attempt++ {
 		if attempt > 1 {
 			if err := c.retryWait(ctx, attempt, lastErr); err != nil {
-				return "", lastFinish, err
+				return pCommon.BlankString, lastFinish, err
 			}
 		}
 		content, finishReason, emitted, err := c.chatCompletionStreamOnce(ctx, llmProvider, req, onChunk, onReasoning)
@@ -150,10 +151,10 @@ func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobjec
 		lastErr, lastFinish = err, finishReason
 		// 已输出过任何增量 → 不可重试(避免重复内容)
 		if emitted || !llmproto.IsRetryableLlmError(err) {
-			return "", finishReason, err
+			return pCommon.BlankString, finishReason, err
 		}
 	}
-	return "", lastFinish, lastErr
+	return pCommon.BlankString, lastFinish, lastErr
 }
 
 // StreamWithTools 流式执行一次 chat/completions(带工具):
@@ -170,7 +171,7 @@ func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLl
 	for attempt := 1; attempt <= c.retryMaxAttempts; attempt++ {
 		if attempt > 1 {
 			if err := c.retryWait(ctx, attempt, lastErr); err != nil {
-				return "", nil, lastFinish, err
+				return pCommon.BlankString, nil, lastFinish, err
 			}
 		}
 		content, calls, finishReason, emitted, err := c.streamWithToolsOnce(ctx, llmProvider, req, onChunk, onReasoning, onToolIntent)
@@ -179,51 +180,51 @@ func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLl
 		}
 		lastErr, lastFinish = err, finishReason
 		if emitted || !llmproto.IsRetryableLlmError(err) {
-			return "", nil, finishReason, err
+			return pCommon.BlankString, nil, finishReason, err
 		}
 	}
-	return "", nil, lastFinish, lastErr
+	return pCommon.BlankString, nil, lastFinish, lastErr
 }
 
 // completeWithToolsOnce 执行一次同步(带工具)chat/completions(不含重试)。
 func (c *Client) completeWithToolsOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (string, []llmproto.ToolCall, error) {
 	httpReq, err := c.prepareRequest(ctx, llmProvider, req)
 	if err != nil {
-		return "", nil, err
+		return pCommon.BlankString, nil, err
 	}
 
 	httpResp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
-			return "", nil, llmproto.ErrRequestCanceled
+			return pCommon.BlankString, nil, llmproto.ErrRequestCanceled
 		}
-		return "", nil, llmproto.NewLlmResponseTransportError(err)
+		return pCommon.BlankString, nil, llmproto.NewLlmResponseTransportError(err)
 	}
 	defer func(Body io.ReadCloser) {
 		_ = Body.Close()
 	}(httpResp.Body)
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return "", nil, llmproto.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
+		return pCommon.BlankString, nil, llmproto.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
 	}
 
 	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, myCommon.MaxResponseBytes))
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
-			return "", nil, llmproto.ErrRequestCanceled
+			return pCommon.BlankString, nil, llmproto.ErrRequestCanceled
 		}
-		return "", nil, llmproto.NewLlmResponseTransportError(err)
+		return pCommon.BlankString, nil, llmproto.NewLlmResponseTransportError(err)
 	}
 
 	var resp llmproto.ChatCompletionResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return "", nil, myException.RuntimeClientErrEx2("runtime client: unmarshal response: %v", err)
+		return pCommon.BlankString, nil, myException.RuntimeClientErrEx2("runtime client: unmarshal response: %v", err)
 	}
 	if llmproto.HasError(resp.Error) {
-		return "", nil, llmproto.NewLlmResponseError(resp.Error)
+		return pCommon.BlankString, nil, llmproto.NewLlmResponseError(resp.Error)
 	}
 	if len(resp.Choices) == 0 {
-		return "", nil, myException.RuntimeClientErrEx("runtime client: empty completion choices")
+		return pCommon.BlankString, nil, myException.RuntimeClientErrEx("runtime client: empty completion choices")
 	}
 
 	msg := resp.Choices[0].Message
@@ -244,23 +245,23 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 
 	httpReq, err := c.prepareRequest(streamCtx, llmProvider, req)
 	if err != nil {
-		return "", "", false, err
+		return pCommon.BlankString, pCommon.BlankString, false, err
 	}
 
 	// 流式使用独立客户端:无整体超时,长流不会被固定上限(如 60s)中断
 	httpResp, err := c.streamClient.Do(httpReq)
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
-			return "", "", false, llmproto.ErrRequestCanceled
+			return pCommon.BlankString, pCommon.BlankString, false, llmproto.ErrRequestCanceled
 		}
-		return "", "", false, llmproto.NewLlmResponseTransportError(err)
+		return pCommon.BlankString, pCommon.BlankString, false, llmproto.NewLlmResponseTransportError(err)
 	}
 	defer func(Body io.ReadCloser) {
 		_ = Body.Close()
 	}(httpResp.Body)
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return "", "", false, llmproto.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
+		return pCommon.BlankString, pCommon.BlankString, false, llmproto.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
 	}
 	requestID := llmproto.GetRequestIDFromLlmResponse(httpResp.Header) // 流中错误带上上游 request_id,便于排障
 	if idleTimer != nil {
@@ -280,12 +281,12 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 			idleTimer.Reset(idle) // 收到数据 → 重置空闲计时
 		}
 		if ctx.Err() != nil {
-			return "", finishReason, emitted, llmproto.ErrRequestCanceled // 客户端已断开
+			return pCommon.BlankString, finishReason, emitted, llmproto.ErrRequestCanceled // 客户端已断开
 		}
 
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" { // SSE 事件块结束:重置事件类型
-			eventName = ""
+		if line == pCommon.BlankString { // SSE 事件块结束:重置事件类型
+			eventName = pCommon.BlankString
 			continue
 		}
 		if strings.HasPrefix(line, "event:") {
@@ -317,7 +318,7 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 
 		delta := choice.Delta
 		// 思考过程增量(reasoning_content):只转发给调用方(前端实时展示),不并入正式回复
-		if delta.ReasoningContent != "" && onReasoning != nil {
+		if delta.ReasoningContent != pCommon.BlankString && onReasoning != nil {
 			emitted = true
 			onReasoning(delta.ReasoningContent)
 		}
@@ -331,7 +332,7 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return pCommon.BlankString, finishReason, emitted, streamReadError(ctx, streamCtx, err, requestID, idle)
+		return pCommon.BlankString, finishReason, emitted, common.StreamReadError(ctx, streamCtx, err, requestID, idle)
 	}
 
 	content := strings.TrimSpace(sb.String())
@@ -389,12 +390,12 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 			idleTimer.Reset(idle)
 		}
 		if ctx.Err() != nil {
-			return "", nil, finishReason, emitted, llmproto.ErrRequestCanceled
+			return pCommon.BlankString, nil, finishReason, emitted, llmproto.ErrRequestCanceled
 		}
 
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" { // SSE 事件块结束:重置事件类型
-			eventName = ""
+		if line == pCommon.BlankString { // SSE 事件块结束:重置事件类型
+			eventName = pCommon.BlankString
 			continue
 		}
 		if strings.HasPrefix(line, "event:") {
@@ -424,11 +425,11 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 		}
 
 		delta := choice.Delta
-		if delta.ReasoningContent != "" && onReasoning != nil {
+		if delta.ReasoningContent != pCommon.BlankString && onReasoning != nil {
 			emitted = true
 			onReasoning(delta.ReasoningContent)
 		}
-		if delta.Content != "" {
+		if delta.Content != pCommon.BlankString {
 			sb.WriteString(delta.Content)
 			emitted = true
 			if onChunk != nil {
@@ -445,7 +446,7 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return "", nil, finishReason, emitted, streamReadError(ctx, streamCtx, err, requestID, idle)
+		return "", nil, finishReason, emitted, common.StreamReadError(ctx, streamCtx, err, requestID, idle)
 	}
 
 	return strings.TrimSpace(sb.String()), acc.result(), finishReason, emitted, nil
@@ -485,56 +486,56 @@ func (c *Client) doCompletion(ctx context.Context, llmProvider dataobject.TLlm, 
 		}
 		lastErr = err
 		if !llmproto.IsRetryableLlmError(err) {
-			return "", err
+			return pCommon.BlankString, err
 		}
 	}
-	return "", lastErr
+	return pCommon.BlankString, lastErr
 }
 
 // doCompletionOnce 执行一次同步 chat/completions 请求并解析回复文本(同步/轻量调用共用,不含重试)。
 func (c *Client) doCompletionOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (string, error) {
 	httpReq, err := c.prepareRequest(ctx, llmProvider, req)
 	if err != nil {
-		return "", err
+		return pCommon.BlankString, err
 	}
 
 	httpResp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
-			return "", llmproto.ErrRequestCanceled
+			return pCommon.BlankString, llmproto.ErrRequestCanceled
 		}
-		return "", llmproto.NewLlmResponseTransportError(err)
+		return pCommon.BlankString, llmproto.NewLlmResponseTransportError(err)
 	}
 	defer func(Body io.ReadCloser) {
 		_ = Body.Close()
 	}(httpResp.Body)
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return "", llmproto.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
+		return pCommon.BlankString, llmproto.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
 	}
 
 	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, myCommon.MaxResponseBytes))
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
-			return "", llmproto.ErrRequestCanceled
+			return pCommon.BlankString, llmproto.ErrRequestCanceled
 		}
-		return "", llmproto.NewLlmResponseTransportError(err)
+		return pCommon.BlankString, llmproto.NewLlmResponseTransportError(err)
 	}
 
 	var resp llmproto.ChatCompletionResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return "", myException.RuntimeClientErrEx2("runtime client: unmarshal response: %v", err)
+		return pCommon.BlankString, myException.RuntimeClientErrEx2("runtime client: unmarshal response: %v", err)
 	}
 	if llmproto.HasError(resp.Error) {
-		return "", llmproto.NewLlmResponseError(resp.Error)
+		return pCommon.BlankString, llmproto.NewLlmResponseError(resp.Error)
 	}
 	if len(resp.Choices) == 0 {
-		return "", myException.RuntimeClientErrEx("runtime client: empty completion choices")
+		return pCommon.BlankString, myException.RuntimeClientErrEx("runtime client: empty completion choices")
 	}
 
 	content := strings.TrimSpace(resp.Choices[0].Message.Content)
-	if content == "" {
-		return "", myException.RuntimeClientErrEx("runtime client: empty completion content")
+	if content == pCommon.BlankString {
+		return pCommon.BlankString, myException.RuntimeClientErrEx("runtime client: empty completion content")
 	}
 
 	return content, nil
@@ -543,14 +544,14 @@ func (c *Client) doCompletionOnce(ctx context.Context, llmProvider dataobject.TL
 // prepareRequest 校验入参并构造请求(不发起网络调用)。
 // 同步(ChatCompletion)与流式(ChatCompletionStream)两条路径共用,保证请求构造一致。
 func (c *Client) prepareRequest(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (*http.Request, error) {
-	if strings.TrimSpace(req.Model) == "" {
+	if strings.TrimSpace(req.Model) == pCommon.BlankString {
 		return nil, myException.RuntimeClientErrEx("runtime client: model is empty")
 	}
 	if len(req.Messages) == 0 {
 		return nil, myException.RuntimeClientErrEx("runtime client: messages is empty")
 	}
 	baseURL := strings.TrimSpace(llmProvider.BaseUrl)
-	if baseURL == "" {
+	if baseURL == pCommon.BlankString {
 		return nil, myException.RuntimeClientErrEx("runtime client: base url is empty")
 	}
 
@@ -565,7 +566,7 @@ func (c *Client) prepareRequest(ctx context.Context, llmProvider dataobject.TLlm
 		return nil, myException.RuntimeClientErrEx2("runtime client: new request: %v", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if key := strings.TrimSpace(llmProvider.ApiKey); key != "" {
+	if key := strings.TrimSpace(llmProvider.ApiKey); key != pCommon.BlankString {
 		httpReq.Header.Set("Authorization", "Bearer "+key)
 	}
 	return httpReq, nil

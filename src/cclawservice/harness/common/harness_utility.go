@@ -1,0 +1,61 @@
+/**
+* harness包的工具函数
+**/
+
+package common
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	cCommon "my.favorite/cclawservice/common"
+	"my.favorite/cclawservice/llmproto"
+	pCommon "my.favorite/platformutility/common"
+	pException "my.favorite/platformutility/exception"
+)
+
+// StreamReadError 归一化流读取失败:
+// 流式读取失败的归一化:把底层读流错误分类为"客户端断开"或"传输层故障"。
+//   - 客户端断开(外层 ctx 取消)      → ErrRequestCanceled(静默,不重试)
+//   - 空闲超时(仅内层 streamCtx 取消) → 传输层错误(可重试)
+//   - 其它(连接重置/EOF 等)          → 传输层错误(可重试)
+func StreamReadError(ctx context.Context, streamCtx context.Context, err error, requestID string, idle time.Duration) error {
+	if ctx.Err() != nil {
+		return llmproto.ErrRequestCanceled
+	}
+	if idle > 0 && streamCtx.Err() != nil {
+		return llmproto.NewLlmStreamTransportError(
+			fmt.Errorf("stream idle timeout after %s without data: %v", idle, err), requestID)
+	}
+	if pException.IsContextCanceled(streamCtx, err) {
+		return llmproto.ErrRequestCanceled
+	}
+	return llmproto.NewLlmStreamTransportError(err, requestID)
+}
+
+// BuildHistoryFileName 构造会话历史文件名:memory_{yyyyMMddHHmmss}.md
+// 与 DDL 注释中的 "memory_{datetime}.md" 保持一致。
+func BuildHistoryFileName(at *pCommon.DatetimeItem) string {
+	datetime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime()
+	if at != nil {
+		datetime = at
+	}
+	return cCommon.ChatHistoryFilePrefix + FormatCompactDatetime(datetime) + cCommon.ChatHistoryFileExt
+}
+
+// BuildHistoryLockKey 历史写入的会话级锁键。
+// 刻意加 "history:" 前缀与服务层的会话锁区分:二者是不同临界区,
+// 且 AppendTurn 已持有 <sessionId> 会话锁,若这里复用同一键会自锁。
+func BuildHistoryLockKey(sessionId string) string {
+	return "history:" + strings.TrimSpace(sessionId)
+}
+
+// FormatCompactDatetime 把时间格式化为 yyyyMMddHHmmss(用于文件名)。
+func FormatCompactDatetime(at *pCommon.DatetimeItem) string {
+	if at == nil {
+		return pCommon.BlankString
+	}
+	return fmt.Sprintf("%04d%02d%02d%02d%02d%02d", at.Year, at.Month, at.Day, at.Hour, at.Minute, at.Second)
+}
