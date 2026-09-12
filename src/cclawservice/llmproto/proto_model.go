@@ -2,7 +2,7 @@
 * 上游 LLM 协议 DTO(OpenAI 兼容):请求体 / 应答体 / 流式块 / 消息与工具结构。
 *
 * 纯协议层,不依赖任何业务定义;供 harness(组装请求/解析应答)、service(拼装对话历史)
-* 共同使用。同包文件:error.go/classify.go/http.go/retry.go(错误侧协议)。
+* 共同使用。同包文件:proto_error.go/classify.go/proto_utility.go。
 **/
 
 package llmproto

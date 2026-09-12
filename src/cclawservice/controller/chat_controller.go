@@ -67,7 +67,7 @@ func (cc *ChatController) Chat(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c)
+	loginSession, ok := getAuthentication(c)
 	if !ok {
 		return
 	}
@@ -117,7 +117,7 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c)
+	loginSession, ok := getAuthentication(c)
 	if !ok {
 		return
 	}
@@ -310,7 +310,7 @@ func (cc *ChatController) InterruptChat(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c)
+	loginSession, ok := getAuthentication(c)
 	if !ok {
 		return
 	}

@@ -1,12 +1,12 @@
 /**
-* LLM 上游协议适配层:错误体 DTO、结构化错误类型与构造器。
+* LLM 上游协议适配层:错误体 DTO、结构化错误类型与构造器。(作用于与上游协议中表示错误关联的部分)
 *
 * 定位:只关心"上游说了什么"(HTTP 状态码 / 错误体 / request_id / 是否可重试),
 * 不关心"业务上如何呈现给用户"——后者由 exception 包的 Kind 表与 MapLlmStatusError 负责。
 *
 * 分层约定:apperr ← llmproto ← exception ← harness ← service ← controller。
 * 严禁本包 import my.favorite/cclawservice 下的其它包,否则会与 exception ↔ harness 形成 import cycle。
-* 同包文件:classify.go(特征词/分类/错误体解析)、http.go(request_id、非 2xx 响应解析)、retry.go(重试判定)。
+* 同包文件:classify.go(特征词/分类/错误体解析)、proto_utility.go(request_id、非 2xx 响应解析)。
 **/
 
 package llmproto
@@ -57,7 +57,7 @@ func NewLlmResponseError(payload json.RawMessage) *LlmStatusError {
 	return &LlmStatusError{
 		StatusCode: http.StatusOK,
 		Stage:      llmStageResponse,
-		Category:   ClassifyLlmError(http.StatusOK, api),
+		Category:   classifyLlmError(http.StatusOK, api),
 		api:        api,
 	}
 }
@@ -88,7 +88,7 @@ func NewLlmStreamError(payload json.RawMessage, requestID string) *LlmStatusErro
 		StatusCode: http.StatusOK,
 		RequestID:  requestID,
 		Stage:      llmStageStream,
-		Category:   ClassifyLlmError(http.StatusOK, api),
+		Category:   classifyLlmError(http.StatusOK, api),
 		api:        api,
 	}
 }

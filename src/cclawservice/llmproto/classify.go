@@ -8,7 +8,6 @@
 package llmproto
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -104,9 +103,9 @@ const (
 	LlmCategoryUnknown LlmErrorCategory = "unknown"
 )
 
-// ClassifyLlmError 依据 HTTP 状态码与上游错误体判定语义化类别。
+// classifyLlmError 依据 HTTP 状态码与上游错误体判定语义化类别。
 // 优先级:内容安全 > 额度 > HTTP 状态码 > 文案兜底(流中错误无状态码时)。
-func ClassifyLlmError(statusCode int, api LlmAPIError) LlmErrorCategory {
+func classifyLlmError(statusCode int, api LlmAPIError) LlmErrorCategory {
 	code := strings.ToLower(strings.TrimSpace(api.Code))
 	typ := strings.ToLower(strings.TrimSpace(api.Type))
 	msg := strings.ToLower(api.Message)
@@ -160,34 +159,4 @@ func ClassifyLlmError(statusCode int, api LlmAPIError) LlmErrorCategory {
 		return LlmCategoryInvalidRequest
 	}
 	return LlmCategoryUnknown
-}
-
-// parseLlmErrorBody 解析上游错误体:优先 OpenAI 风格 {"error":{...}},回退扁平结构
-// {message,type,code,param}。
-func parseLlmErrorBody(raw string) LlmAPIError {
-	if strings.TrimSpace(raw) == "" {
-		return LlmAPIError{}
-	}
-	var wrapped struct {
-		Error *LlmAPIError `json:"error"`
-	}
-	if json.Unmarshal([]byte(raw), &wrapped) == nil && wrapped.Error != nil &&
-		(wrapped.Error.Message != "" || wrapped.Error.Code != "" || wrapped.Error.Type != "") {
-		return *wrapped.Error
-	}
-	var flat LlmAPIError
-	if json.Unmarshal([]byte(raw), &flat) == nil &&
-		(flat.Message != "" || flat.Code != "" || flat.Type != "") {
-		return flat
-	}
-	return LlmAPIError{}
-}
-
-// IsQuotaError 判定错误是否为"LLM 额度耗尽/欠费"(裸错误兜底;结构化错误请用 LlmStatusError.Category)。
-// 上游可能用非标准状态码返回欠费(如 dashscope/深度),因此需要文案特征兜底。
-func IsQuotaError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return pCommon.ContainsString(strings.ToLower(err.Error()), quotaSignals)
 }

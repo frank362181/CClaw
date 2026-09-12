@@ -1,3 +1,7 @@
+/*
+* controller层的工具函数
+ */
+
 package controller
 
 import (
@@ -13,7 +17,7 @@ import (
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 
-func GetAuthentication(c *gin.Context) (*request.LoginSession, bool) {
+func getAuthentication(c *gin.Context) (*request.LoginSession, bool) {
 	tempValue, exists := c.Get(cclawcommon.ContextAuthenticatedUser)
 	if !exists {
 		respondKindAbort(c, myException.UserUnAuthorizedKind)

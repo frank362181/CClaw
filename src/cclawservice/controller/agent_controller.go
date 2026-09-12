@@ -63,7 +63,7 @@ func (ac *AgentController) GetLLMProviders(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c)
+	loginSession, ok := getAuthentication(c)
 	if !ok {
 		return
 	}
@@ -98,7 +98,7 @@ func (ac *AgentController) AddLLMProvider(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := getAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -138,7 +138,7 @@ func (ac *AgentController) UpdateLLMProvider(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := getAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -179,7 +179,7 @@ func (ac *AgentController) RemoveLLMProvider(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := getAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -220,7 +220,7 @@ func (ac *AgentController) GetAgents(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := getAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -255,7 +255,7 @@ func (ac *AgentController) AddAgent(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := getAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -296,7 +296,7 @@ func (ac *AgentController) UpdateAgent(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := getAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -337,7 +337,7 @@ func (ac *AgentController) RemoveAgent(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := getAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -378,7 +378,7 @@ func (ac *AgentController) GetStartupFiles(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := getAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -419,7 +419,7 @@ func (ac *AgentController) GetStartupFile(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := getAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -461,7 +461,7 @@ func (ac *AgentController) GetSkills(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := getAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -496,7 +496,7 @@ func (ac *AgentController) AddSkill(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := getAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -537,7 +537,7 @@ func (ac *AgentController) UpdateSkill(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := getAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
@@ -578,7 +578,7 @@ func (ac *AgentController) RemoveSkill(c *gin.Context) {
 		return
 	}
 
-	loginSession, ok := GetAuthentication(c) //ac.isAuthenticated(c)
+	loginSession, ok := getAuthentication(c) //ac.isAuthenticated(c)
 	if !ok {
 		return
 	}
