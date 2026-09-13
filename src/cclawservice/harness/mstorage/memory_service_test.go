@@ -1,4 +1,4 @@
-package service
+package mstorage
 
 import (
 	"fmt"
@@ -13,6 +13,7 @@ import (
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
+	"my.favorite/cclawservice/service"
 	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/database"
 	"my.favorite/platformutility/database/core"
@@ -78,7 +79,7 @@ func newSessionTestDatabase(t *testing.T) core.IBaseDatabase {
 func TestChatSessionDoubleWrite(t *testing.T) {
 	db := newSessionTestDatabase(t)
 
-	svc := GetChatSessionService(db, true)
+	svc := GetMemoryService(db, true)
 	if !svc.Enabled() {
 		t.Fatal("会话记录服务应处于启用状态")
 	}
@@ -120,7 +121,7 @@ func TestChatSessionDoubleWrite(t *testing.T) {
 	if session.BeginTimestamp <= 0 || session.ChatType != req.ChatType || session.ChatChannel != req.ChatChannel {
 		t.Errorf("会话元数据错误: %+v", session)
 	}
-	if !strings.HasPrefix(session.ChatData, cCommon.ChatHistoryFilePrefix) || !strings.HasSuffix(session.ChatData, cCommon.ChatHistoryFileExt) {
+	if !strings.HasPrefix(session.ChatData, cCommon.ChatMemoryFilePrefix) || !strings.HasSuffix(session.ChatData, cCommon.ChatMemoryFileExt) {
 		t.Errorf("会话历史文件名不符合约定: %q", session.ChatData)
 	}
 	if session.SessionName == "" || len([]rune(session.SessionName)) > cCommon.SessionNameMaxLen {
@@ -261,7 +262,7 @@ func TestChatSessionDoubleWrite(t *testing.T) {
 func TestChatSessionServiceDisabled(t *testing.T) {
 	db := newSessionTestDatabase(t)
 
-	svc := GetChatSessionService(db, false)
+	svc := GetMemoryService(db, false)
 	if svc.Enabled() {
 		t.Fatal("关闭开关后会话记录服务不应处于启用状态")
 	}
@@ -277,10 +278,10 @@ func TestChatSessionServiceDisabled(t *testing.T) {
 		t.Errorf("未启用时 EndSession 应静默返回 nil,实际 %v", err)
 	}
 
-	if _, err := ctxmgr.GetHistoryFileWriter().HistoryDir("abc123"); err != nil {
+	if _, err := GetMemoryFileWriter().MemoryDir("abc123"); err != nil {
 		t.Fatalf("前置检查失败: %v", err)
 	}
-	if dir, _ := ctxmgr.GetHistoryFileWriter().HistoryDir("abc123"); fileExists(dir) {
+	if dir, _ := GetMemoryFileWriter().MemoryDir("abc123"); fileExists(dir) {
 		t.Errorf("未启用时不应创建历史目录: %s", dir)
 	}
 }
@@ -289,7 +290,7 @@ func TestChatSessionServiceDisabled(t *testing.T) {
 // 回归点:曾出现"注册键用随机新 ID、中断用客户端 turnId"的错配,
 // 导致中断 API 永远返回"未在聊天";同时不能丢掉发送者前缀,否则可跨用户冒用 turnId 中断。
 func TestInterruptChatKeyScopedBySender(t *testing.T) {
-	svc := &ChatService{} // InterruptChat 只依赖全局轮次流注册表,无需其他依赖
+	svc := &service.ChatService{} // InterruptChat 只依赖全局轮次流注册表,无需其他依赖
 	registry := ctxmgr.GetTurnStreamMgr()
 
 	const (
@@ -331,7 +332,7 @@ func TestInterruptChatKeyScopedBySender(t *testing.T) {
 func TestChatSessionRejectsForeignSender(t *testing.T) {
 	db := newSessionTestDatabase(t)
 
-	svc := GetChatSessionService(db, true)
+	svc := GetMemoryService(db, true)
 	agent := dataobject.TAgent{AgentId: "agent_001", AgentDir: "default", OwnerId: "100001"}
 	req := &request.ChatRequest{SessionId: "share-1", TurnId: "turn-a", ReqMsg: "A 的问题", ChatChannel: 1}
 
@@ -357,7 +358,7 @@ func TestChatSessionRejectsForeignSender(t *testing.T) {
 // 该约定一旦被破坏(例如给 turnId 也加上 sender 前缀),BuildTurnStreamKey 就退化成重复拼接,
 // 更危险的是会让人误以为"turnId 已含 sender"从而删掉 key 上的前缀,重新引入跨用户中断漏洞。
 func TestNormalizeRequestIdConventions(t *testing.T) {
-	svc := &ChatService{}
+	svc := &service.ChatService{}
 
 	// 客户端未提供 sessionId / turnId → 走服务端兜底生成
 	req := &request.ChatRequest{}
@@ -438,11 +439,11 @@ func TestNormalizeRequestIdConventions(t *testing.T) {
 func TestChatTurnTimeSemantics(t *testing.T) {
 	db := newSessionTestDatabase(t)
 
-	svc := GetChatSessionService(db, true)
+	svc := GetMemoryService(db, true)
 	agent := dataobject.TAgent{AgentId: "agent_001", AgentDir: "default", OwnerId: "100001"}
 
 	req := &request.ChatRequest{SessionId: "timing-1", TurnId: "turn-time-1", ReqMsg: "天气如何", ChatChannel: 1}
-	(&ChatService{}).normalizeRequest("100001", "alice", req) // 等价于 prepareChat 中的规整
+	(&service.ChatService{}).normalizeRequest("100001", "alice", req) // 等价于 prepareChat 中的规整
 	if req.GenAt <= 0 {
 		t.Fatal("normalizeRequest 应兜底 req.GenAt")
 	}
@@ -493,7 +494,7 @@ func cleanupHistoryDir(t *testing.T, sessionId string) {
 	t.Helper()
 
 	t.Cleanup(func() {
-		if dir, err := ctxmgr.GetHistoryFileWriter().HistoryDir(sessionId); err == nil {
+		if dir, err := GetMemoryFileWriter().MemoryDir(sessionId); err == nil {
 			_ = os.RemoveAll(dir)
 		}
 	})
@@ -503,7 +504,7 @@ func cleanupHistoryDir(t *testing.T, sessionId string) {
 func readHistoryFile(t *testing.T, sessionId, fileName string) string {
 	t.Helper()
 
-	dir, err := ctxmgr.GetHistoryFileWriter().HistoryDir(sessionId)
+	dir, err := GetMemoryFileWriter().MemoryDir(sessionId)
 	if err != nil {
 		t.Fatalf("解析历史目录失败: %v", err)
 	}

@@ -37,7 +37,7 @@
 *   - nextIndex 缓存有容量上限,超出整体重置,防止随会话数无限膨胀。
 **/
 
-package ctxmgr
+package mstorage
 
 import (
 	"errors"
@@ -61,11 +61,13 @@ const (
 	HistoryRecordTool      = "tool"      // 工具调用
 )
 
-// historyRecordHeaderString 匹配记录头 "## [<n>] ...",用于恢复下一条记录序号。
-var historyRecordHeaderString = `(?m)^## \[(\d+)\]`
+// memoryRecordHeaderString 匹配记录头 "## [<n>] ...",用于恢复下一条记录序号。
+var memoryRecordHeaderString = `(?m)^## \[(\d+)\]`
 
-// HistoryFileWriter 会话历史文件写入器(线程安全)。
-type HistoryFileWriter struct {
+// MemoryFileRWriter 会话历史文件读写器(线程安全)。
+type MemoryFileRWriter struct {
+	MemoryStorage
+
 	mu         sync.Mutex
 	nextIndex  map[string]int // 历史文件绝对路径 -> 下一条记录序号
 	maxEntries int            // nextIndex 容量上限;<=0 表示不限制
@@ -80,42 +82,45 @@ const (
 	defaultTailScanChunkBytes = 64 * 1024
 )
 
-var historyFileWriter = pCommon.GetSingleton(func() *HistoryFileWriter {
-	return &HistoryFileWriter{
+var memoryFileRWriter = pCommon.GetSingleton(func() *MemoryFileRWriter {
+	return &MemoryFileRWriter{
+		MemoryStorage: MemoryStorage{
+			storageType: MemoryStorageMDFile,
+		},
 		nextIndex:  make(map[string]int),
 		maxEntries: defaultHistoryIndexMaxEntries,
 	}
 }).Instance()
 
-// GetHistoryFileWriter 返回全局唯一的历史文件写入器。
-func GetHistoryFileWriter() *HistoryFileWriter {
-	return historyFileWriter
+// GetMemoryFileWriter 返回全局唯一的历史文件写入器。
+func GetMemoryFileWriter() IMemoryStorage { //*MemoryFileRWriter {
+	return memoryFileRWriter
 }
 
-// HistoryDir 返回某会话的历史文件目录:<exeDir>/cclaw/chat_history/<session_id>。
+// MemoryDir 返回某会话的历史文件目录:<exeDir>/cclaw/chat_history/<session_id>。
 // session_id 直接参与路径拼接,必须满足两个条件:
 //  1. 是安全的相对路径(非绝对、无 . / .. 段)—— 由 IsSafeDir 保证;
 //  2. 是"单一路径段"(不含任何目录分隔符)。
-func (w *HistoryFileWriter) HistoryDir(sessionId string) (string, error) {
+func (w *MemoryFileRWriter) MemoryDir(sessionId string) (string, error) {
 	sessionId = strings.TrimSpace(sessionId)
 	if !pCommon.IsSafeDir(sessionId) || strings.ContainsAny(sessionId, `/\`) {
 		return pCommon.BlankString, pException.FilePathErrorEx("illegal session id for history dir: " + sessionId)
 	}
-	return filepath.Join(pCommon.GetExecutableDir(), myCommon.AgentBootstrapDir, myCommon.ChatHistoryDirName, sessionId), nil
+	return filepath.Join(pCommon.GetExecutableDir(), myCommon.AgentBootstrapDir, myCommon.ChatMemoryDirName, sessionId), nil
 }
 
 // Ensure 确保会话历史文件存在并返回其文件名(不含目录)。
 //   - 文件不存在时写入头部(会话标识 + 元数据行);
 //   - 文件已存在时直接返回文件名,不覆盖既有内容。
-func (w *HistoryFileWriter) Ensure(sessionId string, at *pCommon.DatetimeItem, headerLines []string) (string, error) {
-	fileName := hCommon.BuildHistoryFileName(at)
+func (w *MemoryFileRWriter) Ensure(sessionId string, at *pCommon.DatetimeItem, headerLines []string) (string, error) {
+	fileName := hCommon.BuildMemoryFileName(at)
 	path, err := w.resolvePath(sessionId, fileName)
 	if err != nil {
 		return pCommon.BlankString, err
 	}
 
 	// 与 Append 共用同一把会话锁:避免"判不存在"与"追加写"交错写出重复头部
-	unlock := GetSessionLocks().Lock(hCommon.BuildHistoryLockKey(sessionId))
+	unlock := GetStorageLocks().Lock(hCommon.BuildHistoryLockKey(sessionId))
 	defer unlock()
 
 	if pCommon.FileExists(path) {
@@ -126,7 +131,7 @@ func (w *HistoryFileWriter) Ensure(sessionId string, at *pCommon.DatetimeItem, h
 	_, _ = fmt.Fprintf(&sb, "# NewSession %s\n\n", sessionId)
 	for _, line := range headerLines {
 		line = strings.TrimSpace(line)
-		if line == "" {
+		if line == pCommon.BlankString {
 			continue
 		}
 		sb.WriteString("- ")
@@ -155,24 +160,24 @@ func (w *HistoryFileWriter) Ensure(sessionId string, at *pCommon.DatetimeItem, h
 //  3. 兜底:从文件末尾反向扫描最后一个记录头。
 //
 // 取最大值同时满足两个目标:DB 更新时立即跟上,DB 陈旧时也不会回退。
-func (w *HistoryFileWriter) Append(sessionId, fileName, recordType, title, content, timeText string, hintIndex int) (int, error) {
+func (w *MemoryFileRWriter) Append(sessionId, fileName, recordType, title, content, timeText string, hintIndex int) (int, error) {
 	path, err := w.resolvePath(sessionId, fileName)
 	if err != nil {
 		return 0, err
 	}
 
 	header := recordType
-	if t := strings.TrimSpace(title); t != "" {
+	if t := strings.TrimSpace(title); t != pCommon.BlankString {
 		header = recordType + ":" + t
 	}
 
-	if strings.TrimSpace(timeText) == "" {
+	if strings.TrimSpace(timeText) == pCommon.BlankString {
 		timeText = pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().DatetimeStr
 	}
 
 	// 会话级串行:同一会话内"分配序号 + 追加写"必须原子;不同会话互不阻塞。
 	// 锁在磁盘 IO 与尾部扫描期间保持——但只阻塞同一会话。
-	unlock := GetSessionLocks().Lock(hCommon.BuildHistoryLockKey(sessionId))
+	unlock := GetStorageLocks().Lock(hCommon.BuildHistoryLockKey(sessionId))
 	defer unlock()
 
 	index := w.nextIndexFor(path, hintIndex)
@@ -188,7 +193,7 @@ func (w *HistoryFileWriter) Append(sessionId, fileName, recordType, title, conte
 
 // nextIndexFor 解析本次写入应使用的序号(详见 Append 的序号取值顺序)。
 // 注意:可能触发磁盘扫描,故**不**在 w.mu 内调用。
-func (w *HistoryFileWriter) nextIndexFor(path string, hintIndex int) int {
+func (w *MemoryFileRWriter) nextIndexFor(path string, hintIndex int) int {
 	w.mu.Lock()
 	index := w.nextIndex[path]
 	w.mu.Unlock()
@@ -203,7 +208,7 @@ func (w *HistoryFileWriter) nextIndexFor(path string, hintIndex int) int {
 }
 
 // setNextIndex 记录下一个可用序号;缓存满时整体重置,保证内存有界。
-func (w *HistoryFileWriter) setNextIndex(path string, next int) {
+func (w *MemoryFileRWriter) setNextIndex(path string, next int) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -217,14 +222,14 @@ func (w *HistoryFileWriter) setNextIndex(path string, next int) {
 
 // resolvePath 把(会话标识, 文件名)解析为历史文件绝对路径,并确保目录存在。
 // 文件名必须是纯文件名,防止穿越出会话目录。
-func (w *HistoryFileWriter) resolvePath(sessionId, fileName string) (string, error) {
-	dir, err := w.HistoryDir(sessionId)
+func (w *MemoryFileRWriter) resolvePath(sessionId, fileName string) (string, error) {
+	dir, err := w.MemoryDir(sessionId)
 	if err != nil {
 		return pCommon.BlankString, err
 	}
 
 	fileName = strings.TrimSpace(fileName)
-	if fileName == "" || filepath.Base(fileName) != fileName {
+	if fileName == pCommon.BlankString || filepath.Base(fileName) != fileName {
 		return pCommon.BlankString, pException.FilePathErrorEx("illegal history file name: " + fileName)
 	}
 
@@ -235,7 +240,7 @@ func (w *HistoryFileWriter) resolvePath(sessionId, fileName string) (string, err
 }
 
 // appendToFile 以追加方式写入文本;文件不存在则创建。
-func (w *HistoryFileWriter) appendToFile(path, text string) error {
+func (w *MemoryFileRWriter) appendToFile(path, text string) error {
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return pException.FilePathErrorEx("open history file error: " + err.Error())
@@ -283,7 +288,7 @@ func scanTailNextRecordIndex(path string) int {
 		}
 		if n > 0 {
 			// 本块覆盖 [start, EOF):只要最后一个记录头不在块首被截断,这里的最大值就是全局最大值
-			if index := pCommon.GetIntFromRegex(historyRecordHeaderString, buf[:n]); index > 0 { //maxRecordIndexIn(buf[:n]); index > 0 {
+			if index := pCommon.GetIntFromRegex(memoryRecordHeaderString, buf[:n]); index > 0 { //maxRecordIndexIn(buf[:n]); index > 0 {
 				return index + 1
 			}
 		}

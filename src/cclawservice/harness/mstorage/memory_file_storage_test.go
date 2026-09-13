@@ -1,4 +1,4 @@
-package ctxmgr
+package mstorage
 
 import (
 	"fmt"
@@ -12,14 +12,14 @@ import (
 
 // newHistoryTestWriter 构造一个独立的写入器 + 唯一会话标识,并在用例结束后清理落盘目录。
 // 刻意不使用全局单例:索引恢复能力需要在"进程重启"语义下验证。
-func newHistoryTestWriter(t *testing.T) (*HistoryFileWriter, string) {
+func newHistoryTestWriter(t *testing.T) (*MemoryFileRWriter, string) {
 	t.Helper()
 
 	sessionId := myCommon.NewCompactId("testhist")
-	writer := &HistoryFileWriter{nextIndex: make(map[string]int)}
+	writer := &MemoryFileRWriter{nextIndex: make(map[string]int)}
 
 	t.Cleanup(func() {
-		if dir, err := writer.HistoryDir(sessionId); err == nil {
+		if dir, err := writer.MemoryDir(sessionId); err == nil {
 			_ = os.RemoveAll(dir)
 		}
 	})
@@ -35,11 +35,11 @@ func TestHistoryFileEnsureCreatesFile(t *testing.T) {
 		t.Fatalf("Ensure 失败: %v", err)
 	}
 
-	if !strings.HasPrefix(fileName, myCommon.ChatHistoryFilePrefix) || !strings.HasSuffix(fileName, myCommon.ChatHistoryFileExt) {
+	if !strings.HasPrefix(fileName, myCommon.ChatMemoryFilePrefix) || !strings.HasSuffix(fileName, myCommon.ChatMemoryFileExt) {
 		t.Fatalf("历史文件名不符合 memory_{datetime}.md 约定: %q", fileName)
 	}
 
-	dir, err := writer.HistoryDir(sessionId)
+	dir, err := writer.MemoryDir(sessionId)
 	if err != nil {
 		t.Fatalf("HistoryDir 失败: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestHistoryFileEnsureIdempotent(t *testing.T) {
 	}
 
 	// 第二次 Ensure 会以新的时间戳算出文件名;此时应保持既有文件不被破坏
-	dir, _ := writer.HistoryDir(sessionId)
+	dir, _ := writer.MemoryDir(sessionId)
 	if content, err := os.ReadFile(filepath.Join(dir, first)); err != nil || !strings.Contains(string(content), "你好") {
 		t.Fatalf("既有历史文件内容不应丢失: err=%v content=%s", err, content)
 	}
@@ -113,7 +113,7 @@ func TestHistoryFileAppendIndexSequence(t *testing.T) {
 		}
 	}
 
-	dir, _ := writer.HistoryDir(sessionId)
+	dir, _ := writer.MemoryDir(sessionId)
 	content, err := os.ReadFile(filepath.Join(dir, fileName))
 	if err != nil {
 		t.Fatalf("读取历史文件失败: %v", err)
@@ -143,7 +143,7 @@ func TestHistoryFileIndexRecovery(t *testing.T) {
 	}
 
 	// 全新写入器(等价于进程重启后的空缓存)
-	restarted := &HistoryFileWriter{nextIndex: make(map[string]int)}
+	restarted := &MemoryFileRWriter{nextIndex: make(map[string]int)}
 	index, err := restarted.Append(sessionId, fileName, HistoryRecordAssistant, "", "回复", "", 0)
 	if err != nil {
 		t.Fatalf("重启后 Append 失败: %v", err)
@@ -155,22 +155,22 @@ func TestHistoryFileIndexRecovery(t *testing.T) {
 
 // TestHistoryDirRejectsUnsafeSessionId 会话标识参与路径拼接,必须拒绝越级/嵌套型入参。
 func TestHistoryDirRejectsUnsafeSessionId(t *testing.T) {
-	writer := &HistoryFileWriter{nextIndex: make(map[string]int)}
+	writer := &MemoryFileRWriter{nextIndex: make(map[string]int)}
 
 	for _, unsafe := range []string{"", ".", "..", "../evil", "a/b", `a\b`, `..\evil`, "/abs/path", "a/../b"} {
-		if _, err := writer.HistoryDir(unsafe); err == nil {
+		if _, err := writer.MemoryDir(unsafe); err == nil {
 			t.Errorf("不安全会话标识 %q 应被拒绝", unsafe)
 		}
 	}
 
-	if _, err := writer.HistoryDir("safesession_001"); err != nil {
+	if _, err := writer.MemoryDir("safesession_001"); err != nil {
 		t.Errorf("合法会话标识不应被拒绝: %v", err)
 	}
 }
 
 // TestHistoryResolvePathRejectsNestedFileName 文件名必须是纯文件名,不允许带目录。
 func TestHistoryResolvePathRejectsNestedFileName(t *testing.T) {
-	writer := &HistoryFileWriter{nextIndex: make(map[string]int)}
+	writer := &MemoryFileRWriter{nextIndex: make(map[string]int)}
 
 	if _, err := writer.Append("safesession", "../escape.md", HistoryRecordUser, "", "x", "", 0); err == nil {
 		t.Error("带目录的历史文件名应被拒绝")
@@ -256,7 +256,7 @@ func TestHistoryTailScanHandlesLargeLastRecord(t *testing.T) {
 	}
 
 	// 模拟进程重启:缓存为空且不给 hint,只能靠尾部扫描恢复
-	restarted := &HistoryFileWriter{nextIndex: make(map[string]int)}
+	restarted := &MemoryFileRWriter{nextIndex: make(map[string]int)}
 	index, err := restarted.Append(sessionId, fileName, HistoryRecordUser, "", "第三个问题", "", 0)
 	if err != nil {
 		t.Fatalf("重启后 Append 失败: %v", err)
@@ -270,7 +270,7 @@ func TestHistoryTailScanHandlesLargeLastRecord(t *testing.T) {
 // 否则会随会话数单调增长(长期运行的内存泄漏)。
 func TestHistoryIndexCacheBounded(t *testing.T) {
 	const limit = 4
-	writer := &HistoryFileWriter{nextIndex: make(map[string]int), maxEntries: limit}
+	writer := &MemoryFileRWriter{nextIndex: make(map[string]int), maxEntries: limit}
 
 	for i := 0; i < limit*5; i++ {
 		writer.setNextIndex(fmt.Sprintf("/tmp/session-%d/memory.md", i), i+1)

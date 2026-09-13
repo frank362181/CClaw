@@ -1,5 +1,5 @@
 /*
-* file:session_service.go
+* file:memory_service.go
 * description:
 *	专门用户定义和实现与用户登录相关的session,token业务逻辑处理
  */

@@ -31,6 +31,7 @@ import (
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/harness"
 	"my.favorite/cclawservice/harness/ctxmgr"
+	"my.favorite/cclawservice/harness/mstorage"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
@@ -78,7 +79,7 @@ type ChatService struct {
 
 	// sessionService 会话管理(阶段1双写:只写不读的旁路)。
 	// 为 nil 或未启用时全部记录动作静默跳过,不影响聊天主流程。
-	sessionService *ChatSessionService
+	sessionService *mstorage.MemoryService
 
 	functionCalling bool // 是否启用 function-calling(由 ini [sandBox] functionCalling 控制)
 }
@@ -104,7 +105,7 @@ func GetChatService(db core.IBaseDatabase, functionCalling bool, sessionRecord b
 	chatService.agentRepo = repo.GetAgentRepository(db)
 	chatService.agentRouter = harness.GetAgentRouter(chatService.agentRepo)
 	chatService.functionCalling = functionCalling
-	chatService.sessionService = GetChatSessionService(db, sessionRecord)
+	chatService.sessionService = mstorage.GetMemoryService(db, sessionRecord)
 
 	return chatService
 }
@@ -142,7 +143,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 	session, recorded := s.sessionService.Begin(sender, agent, req)
 
 	// 调用 LLM 引擎取回完整回复(function-calling 开启且该 Agent 有工具时可能经过工具循环)
-	recorder := newTurnRecorder()
+	recorder := mstorage.NewTurnRecorder()
 	reply, err := s.completeChat(ctx, llmProvider, systemPrompt, req, toolSet, recorder)
 	if err != nil {
 		return nil, myException.LlmError(err, "chat service: runtime call chat")
@@ -213,7 +214,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 
 	// function-calling 开启且该 Agent 有可用工具时,走工具调用循环(工具阶段状态提示,最终内容流式转发);
 	// 否则保持原有的纯流式转发。
-	recorder := newTurnRecorder()
+	recorder := mstorage.NewTurnRecorder()
 	var reply, finishReason string
 	if s.functionCalling && toolSet != nil && len(toolSet.LLMTools()) > 0 {
 		reply, finishReason, err = s.streamToolLoop(runCtx, llmProvider, harness.BuildChatMessage(systemPrompt, req), toolSet, onChunk, onStatus, onReasoning, onTool, recorder)
@@ -463,7 +464,7 @@ func (s *ChatService) collectSkillFiles(comCode string, agent dataobject.TAgent)
 
 // completeChat 取回完整回复:function-calling 开启且该 Agent 有可用工具时走工具循环,否则走普通同步调用。
 // recorder 用于旁路记录本轮调用过的工具(可为 nil)。
-func (s *ChatService) completeChat(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest, toolSet *harness.ToolSet, recorder *turnRecorder) (string, error) {
+func (s *ChatService) completeChat(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest, toolSet *harness.ToolSet, recorder *mstorage.TurnRecorder) (string, error) {
 	if s.functionCalling && toolSet != nil && len(toolSet.LLMTools()) > 0 {
 		return s.runToolLoop(ctx, llmProvider, harness.BuildChatMessage(systemPrompt, req), toolSet, recorder)
 	}
@@ -471,7 +472,7 @@ func (s *ChatService) completeChat(ctx context.Context, llmProvider dataobject.T
 }
 
 // runToolLoop 同步路径的工具调用循环:调用LLM → 执行工具 → 结果回填 → 再次调用,直到模型给出最终文本。
-func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet, recorder *turnRecorder) (string, error) {
+func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet, recorder *mstorage.TurnRecorder) (string, error) {
 	for i := 0; i < cCommon.AgentToolLoopMax; i++ {
 		content, calls, err := s.llmClient.CompleteWithTools(ctx, llmProvider, messages, toolSet.LLMTools())
 		if err != nil {
@@ -499,7 +500,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 // 工具调用阶段实时推送给用户:模型声明调用(intent)→开始执行(running)→结果(done/error),
 // 最终内容增量通过 onChunk 流式转发。底层仍为多次上游请求(OpenAI 兼容协议不支持服务端工具循环),
 // 此处把多轮编排为一条面向客户端的事件流。
-func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent), recorder *turnRecorder) (string, string, error) {
+func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent), recorder *mstorage.TurnRecorder) (string, string, error) {
 	seq := 0 // 本回合工具调用序号(跨轮自增,前端按 seq 追踪同一工具调用)
 	for i := 0; i < cCommon.AgentToolLoopMax; i++ {
 		if i > 0 && onStatus != nil {

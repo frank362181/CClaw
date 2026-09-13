@@ -12,7 +12,7 @@
 *   - 全局锁只用于保护 entries 表本身,不在持锁期间做 IO。
 **/
 
-package ctxmgr
+package mstorage
 
 import (
 	"sync"
@@ -26,24 +26,24 @@ type sessionLockEntry struct {
 	refs int
 }
 
-// SessionLocks 会话锁管理器(线程安全)。
-type SessionLocks struct {
+// StorageLocks 会话锁管理器(线程安全)。
+type StorageLocks struct {
 	mu      sync.Mutex
 	entries map[string]*sessionLockEntry
 }
 
-var sessionLocks = pCommon.GetSingleton(func() *SessionLocks {
-	return &SessionLocks{entries: make(map[string]*sessionLockEntry)}
+var storageLocks = pCommon.GetSingleton(func() *StorageLocks {
+	return &StorageLocks{entries: make(map[string]*sessionLockEntry)}
 }).Instance()
 
-// GetSessionLocks 返回全局唯一的会话锁管理器。
-func GetSessionLocks() *SessionLocks {
-	return sessionLocks
+// GetStorageLocks 返回全局唯一的会话锁管理器。
+func GetStorageLocks() *StorageLocks {
+	return storageLocks
 }
 
 // Lock 获取指定键的独占锁,返回释放函数。调用方必须释放,惯用法:defer unlock()。
 // key 为空时退化为全局锁(等价于串行化所有会话),仅作为异常入参的兜底。
-func (l *SessionLocks) Lock(key string) func() {
+func (l *StorageLocks) Lock(key string) func() {
 	l.mu.Lock()
 	entry, ok := l.entries[key]
 	if !ok {

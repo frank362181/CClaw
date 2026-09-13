@@ -171,12 +171,12 @@ const (
 // 设计:会话内容写入 memory_{yyyyMMddHHmmss}.md,t_session.chat_data 只保存该文件名,
 // 文件目录由 session_id 推导为 <exeDir>/cclaw/chat_history/<session_id>/。
 const (
-	// ChatHistoryDirName 会话历史文件根目录名(与 AgentBootstrapDir 同级)。
-	ChatHistoryDirName = "chat_history"
-	// ChatHistoryFilePrefix 历史文件名前缀:memory_{yyyyMMddHHmmss}.md
-	ChatHistoryFilePrefix = "memory_"
-	// ChatHistoryFileExt 历史文件扩展名。
-	ChatHistoryFileExt = ".md"
+	// ChatMemoryDirName 会话历史文件根目录名(与 AgentBootstrapDir 同级)。
+	ChatMemoryDirName = "chat_history"
+	// ChatMemoryFilePrefix 历史文件名前缀:memory_{yyyyMMddHHmmss}.md
+	ChatMemoryFilePrefix = "memory_"
+	// ChatMemoryFileExt 历史文件扩展名。
+	ChatMemoryFileExt = ".md"
 
 	// SessionNameMaxLen 会话名称长度上限(对齐 t_session.session_name VARCHAR(64))。
 	SessionNameMaxLen = 64

@@ -35,14 +35,14 @@ func StreamReadError(ctx context.Context, streamCtx context.Context, err error, 
 	return llmproto.NewLlmStreamTransportError(err, requestID)
 }
 
-// BuildHistoryFileName 构造会话历史文件名:memory_{yyyyMMddHHmmss}.md
+// BuildMemoryFileName 构造会话历史文件名:memory_{yyyyMMddHHmmss}.md
 // 与 DDL 注释中的 "memory_{datetime}.md" 保持一致。
-func BuildHistoryFileName(at *pCommon.DatetimeItem) string {
+func BuildMemoryFileName(at *pCommon.DatetimeItem) string {
 	datetime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime()
 	if at != nil {
 		datetime = at
 	}
-	return cCommon.ChatHistoryFilePrefix + FormatCompactDatetime(datetime) + cCommon.ChatHistoryFileExt
+	return cCommon.ChatMemoryFilePrefix + FormatCompactDatetime(datetime) + cCommon.ChatMemoryFileExt
 }
 
 // BuildHistoryLockKey 历史写入的会话级锁键。

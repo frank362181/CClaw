@@ -1,4 +1,4 @@
-package ctxmgr
+package mstorage
 
 import (
 	"sync"
@@ -9,7 +9,7 @@ import (
 // TestSessionLocksSerializesSameKey 同一会话键必须互斥:
 // 会话内 seq(轮次序号)与历史文件 index 都是"读最大值 + 1",并发进入会分配重复值。
 func TestSessionLocksSerializesSameKey(t *testing.T) {
-	locks := GetSessionLocks()
+	locks := GetStorageLocks()
 
 	const goroutines = 8
 	counter := 0
@@ -49,7 +49,7 @@ func TestSessionLocksSerializesSameKey(t *testing.T) {
 // TestSessionLocksIndependentKeys 不同会话键之间不应互相阻塞
 // (否则一个长会话会串死所有其他会话)。
 func TestSessionLocksIndependentKeys(t *testing.T) {
-	locks := GetSessionLocks()
+	locks := GetStorageLocks()
 
 	unlockA := locks.Lock("session-a")
 	defer unlockA()
@@ -70,7 +70,7 @@ func TestSessionLocksIndependentKeys(t *testing.T) {
 
 // TestSessionLocksReleaseRemovesEntry 释放后必须回收锁对象,否则 entries 会随会话数无限膨胀。
 func TestSessionLocksReleaseRemovesEntry(t *testing.T) {
-	locks := GetSessionLocks()
+	locks := GetStorageLocks()
 	key := "session-recycle"
 
 	unlock := locks.Lock(key)
@@ -87,7 +87,7 @@ func TestSessionLocksReleaseRemovesEntry(t *testing.T) {
 
 // TestSessionLocksReentrantAfterRelease 释放后可再次获取(引用计数未把条目永久锁死)。
 func TestSessionLocksReentrantAfterRelease(t *testing.T) {
-	locks := GetSessionLocks()
+	locks := GetStorageLocks()
 	key := "session-reentrant"
 
 	for i := 0; i < 3; i++ {

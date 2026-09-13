@@ -1,5 +1,6 @@
 /**
-* 会话管理服务(阶段1:双写落库 + 历史文件)
+* 聊天历史管理(阶段1:双写落库 + 历史文件)
+* 聊天历史的访问入口
 *
 * 职责(对应 data/ddl_sqlite3.sql 的三张表):
 *   1. 会话建档:t_session 幂等创建,并确保历史文件 memory_{datetime}.md 存在;
@@ -15,14 +16,13 @@
 * 必须串行,统一由 ctxmgr.GetSessionLocks() 按 sessionId 加锁保护。
 **/
 
-package service
+package mstorage
 
 import (
 	"strings"
 	"sync"
 
 	cCommon "my.favorite/cclawservice/common"
-	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
@@ -40,19 +40,19 @@ type TurnToolRecord struct {
 	RespTime int64  // 返回时间(Unix 秒)
 }
 
-// turnRecorder 收集"本轮调用过的工具"。
+// TurnRecorder 收集"本轮调用过的工具"。
 // 必须并发安全:流式路径同一轮的多个工具是并行执行的。
-type turnRecorder struct {
+type TurnRecorder struct {
 	mu    sync.Mutex
 	tools []TurnToolRecord
 }
 
-func newTurnRecorder() *turnRecorder {
-	return &turnRecorder{}
+func NewTurnRecorder() *TurnRecorder {
+	return &TurnRecorder{}
 }
 
 // Record 登记一次工具调用(rec 为 nil 时静默忽略,便于同步/流式共用同一份工具循环代码)。
-func (r *turnRecorder) Record(toolName string, callTime, respTime int64, result string) {
+func (r *TurnRecorder) Record(toolName string, callTime, respTime int64, result string) {
 	if r == nil {
 		return
 	}
@@ -68,7 +68,7 @@ func (r *turnRecorder) Record(toolName string, callTime, respTime int64, result 
 }
 
 // Snapshot 返回已登记工具的快照(按登记顺序,即真实执行顺序)。
-func (r *turnRecorder) Snapshot() []TurnToolRecord {
+func (r *TurnRecorder) Snapshot() []TurnToolRecord {
 	if r == nil {
 		return nil
 	}
@@ -84,48 +84,48 @@ func (r *turnRecorder) Snapshot() []TurnToolRecord {
 	return out
 }
 
-// ChatSessionService 会话管理服务。
-type ChatSessionService struct {
+// MemoryService 记忆管理服务。
+type MemoryService struct {
 	baseService.BaseService
 
 	sessionAccessor dataaccessor.ISessionAccessor
 	enabled         bool
 }
 
-var chatSessionService = pCommon.GetSingleton(func() *ChatSessionService {
-	return &ChatSessionService{
+var memoryService = pCommon.GetSingleton(func() *MemoryService {
+	return &MemoryService{
 		BaseService: baseService.BaseService{
-			Name:        "chatSessionService",
-			Description: "persist chat sessions, turns and tool calls (phase 1: write-only side channel)",
+			Name:        "memoryService",
+			Description: "persist memory, turns and tool calls (phase 1: write-only side channel)",
 		},
 	}
 }).Instance()
 
-// GetChatSessionService 构建会话管理服务。
+// GetMemoryService 构建记忆管理服务。
 //   - enabled:来自 ini [chat] sessionRecord,关闭时本服务完全旁路(不写库、不写文件);
 //   - 数据访问器构建失败时自动降级为"关闭",保证聊天主流程不受影响。
-func GetChatSessionService(db core.IBaseDatabase, enabled bool) *ChatSessionService {
+func GetMemoryService(db core.IBaseDatabase, enabled bool) *MemoryService {
 	accessor, err := dataaccessor.GetSessionAccessor(db)
 	if err != nil {
 		logging.LogErrorF("chat session service: build accessor failed, session record disabled: %s", err.Error())
-		chatSessionService.sessionAccessor = nil
-		chatSessionService.enabled = false
-		return chatSessionService
+		memoryService.sessionAccessor = nil
+		memoryService.enabled = false
+		return memoryService
 	}
 
-	chatSessionService.sessionAccessor = accessor
-	chatSessionService.enabled = enabled
-	return chatSessionService
+	memoryService.sessionAccessor = accessor
+	memoryService.enabled = enabled
+	return memoryService
 }
 
 // Enabled 报告本服务是否生效(供调用方跳过无谓的记录开销)。
-func (s *ChatSessionService) Enabled() bool {
+func (s *MemoryService) Enabled() bool {
 	return s.usable()
 }
 
 // Begin 会话建档(幂等):不存在则创建 t_session + 历史文件,已存在则复用并按需补齐历史文件名。
 // 返回值 ok=false 表示记录不可用(未启用/出错),调用方应继续聊天流程。
-func (s *ChatSessionService) Begin(sender string, agent dataobject.TAgent, req *request.ChatRequest) (dataobject.TSession, bool) {
+func (s *MemoryService) Begin(sender string, agent dataobject.TAgent, req *request.ChatRequest) (dataobject.TSession, bool) {
 	if !s.usable() || req == nil {
 		return dataobject.TSession{}, false
 	}
@@ -136,7 +136,7 @@ func (s *ChatSessionService) Begin(sender string, agent dataobject.TAgent, req *
 		return dataobject.TSession{}, false
 	}
 
-	unlock := ctxmgr.GetSessionLocks().Lock(sessionId)
+	unlock := GetStorageLocks().Lock(sessionId)
 	defer unlock()
 
 	now := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime()
@@ -148,14 +148,12 @@ func (s *ChatSessionService) Begin(sender string, agent dataobject.TAgent, req *
 		return dataobject.TSession{}, false
 	}
 	if existing != nil {
-		// 归属校验:sessionId 由客户端提供,而 t_session 按 Excel 设计没有 owner 列,
 		// sender 是唯一可用的归属凭据。若不一致,说明客户端在复用他人会话 ——
 		// 必须拒绝记录,否则会把 B 的问答追加进 A 的会话与历史文件。
-		if !strings.EqualFold(strings.TrimSpace(existing.Sender), strings.TrimSpace(sender)) {
-			logging.LogWarnF("chat session service: session %s belongs to another sender, skip record", sessionId)
+		if _, ok := s.isSameOwner(sender, existing); !ok {
 			return dataobject.TSession{}, false
 		}
-		return s.ensureHistoryFile(sessionId, *existing, now), true
+		return s.ensureMemoryFile(sessionId, *existing, now), true
 	}
 
 	// 2. 首条消息 → 建档
@@ -170,7 +168,7 @@ func (s *ChatSessionService) Begin(sender string, agent dataobject.TAgent, req *
 	}
 
 	// 先落历史文件:文件名要一并写进 t_session.chat_data
-	fileName, fileErr := ctxmgr.GetHistoryFileWriter().Ensure(sessionId, now, s.historyHeaderLines(session, now))
+	fileName, fileErr := GetMemoryFileWriter().Ensure(sessionId, now, s.memoryFileHeaderLines(session, now))
 	if fileErr != nil {
 		// 文件失败不阻断建档:chat_data 留空,后续轮次会再尝试补齐
 		logging.LogWarnF("chat session service: create history file for %s error:%s", sessionId, fileErr.Error())
@@ -181,7 +179,7 @@ func (s *ChatSessionService) Begin(sender string, agent dataobject.TAgent, req *
 	if err = s.sessionAccessor.CreateSession(&session); err != nil {
 		// 并发下可能已被其它请求建档(唯一键冲突):回读一次,复用先到者
 		if again, loadErr := s.sessionAccessor.GetSession(sessionId); loadErr == nil && again != nil {
-			return s.ensureHistoryFile(sessionId, *again, now), true
+			return s.ensureMemoryFile(sessionId, *again, now), true
 		}
 		logging.LogWarnF("chat session service: create session %s error:%s", sessionId, err.Error())
 		return dataobject.TSession{}, false
@@ -192,7 +190,7 @@ func (s *ChatSessionService) Begin(sender string, agent dataobject.TAgent, req *
 
 // AppendTurn 记录一轮:写入 t_turn + t_turn_tool,并把内容追加到历史文件。
 // reply 为最终回复文本,tools 为本轮调用过的工具(可为空)。
-func (s *ChatSessionService) AppendTurn(sess dataobject.TSession, req *request.ChatRequest, reply string, tools []TurnToolRecord) {
+func (s *MemoryService) AppendTurn(sess dataobject.TSession, req *request.ChatRequest, reply string, tools []TurnToolRecord) {
 	if !s.usable() || req == nil {
 		return
 	}
@@ -202,7 +200,7 @@ func (s *ChatSessionService) AppendTurn(sess dataobject.TSession, req *request.C
 		return
 	}
 
-	unlock := ctxmgr.GetSessionLocks().Lock(sessionId)
+	unlock := GetStorageLocks().Lock(sessionId)
 	defer unlock()
 
 	// 1. 轮次标识:优先用客户端传入的 turnId —— 它与"中断"、"应答回显"用的是同一个标识,
@@ -245,14 +243,14 @@ func (s *ChatSessionService) AppendTurn(sess dataobject.TSession, req *request.C
 	}
 
 	fileName := strings.TrimSpace(sess.ChatData)
-	writer := ctxmgr.GetHistoryFileWriter()
+	writer := GetMemoryFileWriter()
 
 	// 5. 历史文件:按真实发生顺序写入 问题 → 工具 → 回复。
 	//    每条都带上期望序号(从 DB 推出的 nextIndex 起递增),
 	//    写入器会取"DB 序号与本进程缓存"的最大值,保证序号只增不减(见写入器的序号契约)。
 	chatIndex := 0
 	if fileName != "" {
-		if idx, err := writer.Append(sessionId, fileName, ctxmgr.HistoryRecordUser, "", req.ReqMsg, pCommon.TimestampText(chatTime), nextIndex); err == nil {
+		if idx, err := writer.Append(sessionId, fileName, HistoryRecordUser, "", req.ReqMsg, pCommon.TimestampText(chatTime), nextIndex); err == nil {
 			chatIndex = idx
 		} else {
 			logging.LogWarnF("chat session service: append user record error:%s", err.Error())
@@ -270,7 +268,7 @@ func (s *ChatSessionService) AppendTurn(sess dataobject.TSession, req *request.C
 			RespTime:   tool.RespTime,
 		})
 		if fileName != "" {
-			if _, err := writer.Append(sessionId, fileName, ctxmgr.HistoryRecordTool, tool.ToolName, tool.Result, pCommon.TimestampText(tool.CallTime), nextIndex+1+i); err != nil {
+			if _, err := writer.Append(sessionId, fileName, HistoryRecordTool, tool.ToolName, tool.Result, pCommon.TimestampText(tool.CallTime), nextIndex+1+i); err != nil {
 				logging.LogWarnF("chat session service: append tool record error:%s", err.Error())
 			}
 		}
@@ -278,7 +276,7 @@ func (s *ChatSessionService) AppendTurn(sess dataobject.TSession, req *request.C
 
 	respIndex := 0
 	if fileName != "" {
-		if idx, err := writer.Append(sessionId, fileName, ctxmgr.HistoryRecordAssistant, "", reply, pCommon.TimestampText(now.Timestamp), nextIndex+1+len(tools)); err == nil {
+		if idx, err := writer.Append(sessionId, fileName, HistoryRecordAssistant, "", reply, pCommon.TimestampText(now.Timestamp), nextIndex+1+len(tools)); err == nil {
 			respIndex = idx
 		} else {
 			logging.LogWarnF("chat session service: append assistant record error:%s", err.Error())
@@ -311,7 +309,7 @@ func (s *ChatSessionService) AppendTurn(sess dataobject.TSession, req *request.C
 
 // EndSession 结束会话(供后续阶段:空闲超时/手动结束/触发 compact 调用)。
 // 阶段1 不主动调用:结束语义属于会话生命周期管理,留待接入空闲超时与压缩时统一编排。
-func (s *ChatSessionService) EndSession(sessionId string, reason int) error {
+func (s *MemoryService) EndSession(sessionId string, reason int) error {
 	if !s.usable() {
 		return nil
 	}
@@ -328,17 +326,27 @@ func (s *ChatSessionService) EndSession(sessionId string, reason int) error {
 // ============================== private functions & methods ==============================
 
 // usable 报告记录能力是否可用(已启用 + 数据访问器就绪)。
-func (s *ChatSessionService) usable() bool {
+func (s *MemoryService) usable() bool {
 	return s != nil && s.enabled && s.sessionAccessor != nil
 }
 
-// ensureHistoryFile 保证会话已有历史文件:chat_data 为空(此前创建失败)时补建并回写。
-func (s *ChatSessionService) ensureHistoryFile(sessionId string, session dataobject.TSession, now *pCommon.DatetimeItem) dataobject.TSession {
+// 归属校验:sessionId 由客户端提供,而 t_session 按 Excel 设计没有 owner 列
+func (s *MemoryService) isSameOwner(sender string, session *dataobject.TSession) (dataobject.TSession, bool) {
+	if strings.EqualFold(strings.TrimSpace(sender), strings.TrimSpace(session.Sender)) {
+		return *session, true
+	}
+
+	logging.LogWarnF("chat session service: session %s belongs to another sender, skip record", session.SessionId)
+	return dataobject.TSession{}, false
+}
+
+// ensureMemoryFile 保证会话已有历史文件:chat_data 为空(此前创建失败)时补建并回写。
+func (s *MemoryService) ensureMemoryFile(sessionId string, session dataobject.TSession, now *pCommon.DatetimeItem) dataobject.TSession {
 	if strings.TrimSpace(session.ChatData) != "" {
 		return session
 	}
 
-	fileName, err := ctxmgr.GetHistoryFileWriter().Ensure(sessionId, now, s.historyHeaderLines(session, now))
+	fileName, err := GetMemoryFileWriter().Ensure(sessionId, now, s.memoryFileHeaderLines(session, now))
 	if err != nil {
 		logging.LogWarnF("chat session service: ensure history file for %s error:%s", sessionId, err.Error())
 		return session
@@ -351,8 +359,8 @@ func (s *ChatSessionService) ensureHistoryFile(sessionId string, session dataobj
 	return session
 }
 
-// historyHeaderLines 构造历史文件头部的元数据行。
-func (s *ChatSessionService) historyHeaderLines(session dataobject.TSession, now *pCommon.DatetimeItem) []string {
+// memoryFileHeaderLines 构造历史文件头部的元数据行。
+func (s *MemoryService) memoryFileHeaderLines(session dataobject.TSession, now *pCommon.DatetimeItem) []string {
 	beginText := pCommon.TimestampText(session.BeginTimestamp)
 	if now != nil && session.BeginTimestamp <= 0 {
 		beginText = now.DatetimeStr
