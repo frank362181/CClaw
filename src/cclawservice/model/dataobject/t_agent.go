@@ -6,10 +6,31 @@ package dataobject
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"gorm.io/plugin/optimisticlock"
 )
+
+const (
+	// CompactionModeDefault 默认模式:把需要压缩的区间整体摘要为一条摘要记录。
+	CompactionModeDefault = 0
+	// CompactionModeSafeguard 保全模式:分块摘要 + 摘要后校验关键信息(路径/结论/待办)是否保留,
+	// 未保留则收窄覆盖区间,宁可多留原文也不丢要点。
+	CompactionModeSafeguard = 1
+)
+
+// CompactionModeName 返回压缩模式的稳定名称(供日志/可观测性使用,不得用于业务判断)。
+func CompactionModeName(mode int) string {
+	switch mode {
+	case CompactionModeDefault:
+		return "default"
+	case CompactionModeSafeguard:
+		return "safeguard"
+	default:
+		return "unknown(" + strconv.Itoa(mode) + ")"
+	}
+}
 
 // TLlm 表示大模型供应商数据对象
 type TLlm struct {
@@ -118,7 +139,10 @@ type TAgent struct {
 
 	CompactionMode      int `json:"CompactionMode"`      //压缩模式
 	BootstrapTotalChars int `json:"BootstrapTotalChars"` //启动文件最大的大小
-	ReverseTokenFloor   int `json:"ReverseTokenFloor"`   //压缩时保留的最小token数量
+	// ReverseTokenFloor 为系统提示(AGENTS.md 等启动文档 + 折叠进 system 的历史摘要)
+	// 预留的最小 token 额度:约束"历史可以占多少",保证规则文档不被历史挤掉。
+	// 注意:它**不是**"历史至少要保留多少";取值应明显小于模型 ContextWindow。
+	ReverseTokenFloor int `json:"ReverseTokenFloor"`
 
 	MaxConcurrents int `gorm:"column:max_concurrent" json:"MaxConcurrents"` // DDL 列为 max_concurrent
 	SubAgents      int `json:"SubAgents"`

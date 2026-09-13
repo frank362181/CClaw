@@ -136,6 +136,30 @@ func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.T
 //     而是原样透出 finish_reason,由上层给出"内容合规"提示。
 func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *request.ChatRequest, onChunk func(delta string), onReasoning func(delta string)) (string, string, error) {
 	req := BuildChatCompletionRequest(llmProvider, systemPrompt, chatReq, true) // 已强制 stream=true
+	return c.streamRequest(ctx, llmProvider, req, onChunk, onReasoning)
+}
+
+// ChatCompletionMessages 以**完整消息序列**做同步 chat/completions。
+//
+// 与 ChatCompletion 的区别:后者固定按 [system, 本轮用户消息] 两段构建,
+// 无法携带历史;上下文读回装配后必须走本方法(max_tokens 的动态推导不变,见
+// BuildChatCompletionRequestWithTool,它会按整段消息估算输入)。
+func (c *Client) ChatCompletionMessages(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage) (string, error) {
+	req := BuildChatCompletionRequestWithTool(llmProvider, messages, nil, false)
+	return c.doCompletion(ctx, llmProvider, req)
+}
+
+// ChatCompletionStreamMessages 以**完整消息序列**做流式 chat/completions。
+// 语义与 ChatCompletionStream 完全一致(含"已输出增量即不重试"),仅消息来源不同。
+func (c *Client) ChatCompletionStreamMessages(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, onChunk func(delta string), onReasoning func(delta string)) (string, string, error) {
+	req := BuildChatCompletionRequestWithTool(llmProvider, messages, nil, true)
+	return c.streamRequest(ctx, llmProvider, req, onChunk, onReasoning)
+}
+
+// streamRequest 执行一次流式请求的重试编排(已构建好请求体)。
+// 重试约定:429/5xx/断流在"尚未向客户端输出任何增量"时按指数退避重试;
+// 一旦有增量输出则不再重试(避免重复内容)。
+func (c *Client) streamRequest(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest, onChunk func(delta string), onReasoning func(delta string)) (string, string, error) {
 	lastFinish := ""
 	var lastErr error
 	for attempt := 1; attempt <= c.retryMaxAttempts; attempt++ {

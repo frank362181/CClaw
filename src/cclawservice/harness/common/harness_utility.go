@@ -52,6 +52,20 @@ func BuildHistoryLockKey(sessionId string) string {
 	return "history:" + strings.TrimSpace(sessionId)
 }
 
+// BuildCompactionLockKey 压缩临界区的会话级锁键。
+// 同样必须与 history 锁键区分:压缩的临界区内部会调用历史写入(Append),
+// 而 Append 自己会取 history 锁 —— 复用同键必然自锁。
+func BuildCompactionLockKey(sessionId string) string {
+	return "compact:" + strings.TrimSpace(sessionId)
+}
+
+// BuildMemoryDocLockKey 长期记忆文件(MEMORY.md)的写锁键。
+// 粒度是**文件路径**:同一 Agent 的多次蒸馏必须串行(读-比对-写),
+// 不同 Agent 之间互不阻塞;键名同样刻意与 history/compact 区分。
+func BuildMemoryDocLockKey(path string) string {
+	return "memorydoc:" + strings.TrimSpace(path)
+}
+
 // FormatCompactDatetime 把时间格式化为 yyyyMMddHHmmss(用于文件名)。
 func FormatCompactDatetime(at *pCommon.DatetimeItem) string {
 	if at == nil {

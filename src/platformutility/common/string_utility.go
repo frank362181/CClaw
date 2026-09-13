@@ -11,6 +11,12 @@ const (
 	BlankString = ""      //空字符串
 )
 
+// EndsWithBlankLine 判断一段正文是否以空行(记录终止符)结尾。
+func EndsWithBlankLine(s string) bool {
+	trimmed := strings.TrimRight(s, "\n")
+	return len(s) > 0 && len(s)-len(trimmed) >= 2
+}
+
 func ContainsString(text string, substrings []string) bool {
 	for _, s := range substrings {
 		if s != BlankString && strings.Contains(text, s) {
@@ -21,8 +27,27 @@ func ContainsString(text string, substrings []string) bool {
 	return false
 }
 
+// NormalizeFact 事实的规范化形式:去空白、去标点差异、小写。
+// 目的:同一事实的不同措辞(空格/标点/大小写)不应被重复写入。
+func NormalizeFact(fact string) string {
+	fact = strings.TrimSpace(fact)
+	if fact == BlankString {
+		return BlankString
+	}
+	var sb strings.Builder
+	for _, r := range fact {
+		switch r {
+		case ' ', '\t', '。', '，', ',', '.', ';', '；', '!', '！', '?', '？', ':', '：', '、':
+			continue
+		default:
+			sb.WriteRune(r)
+		}
+	}
+	return strings.ToLower(sb.String())
+}
+
 // TruncateRunes 按 rune 安全截断,避免截断多字节字符;fast-path 直接按字节比较。
-func TruncateRunes(s string, max int) string {
+func TruncateRunes(s string, max int, marker string) string {
 	if max <= 0 || len(s) <= max {
 		return s
 	}
@@ -32,7 +57,7 @@ func TruncateRunes(s string, max int) string {
 		return s
 	}
 
-	return string(runes[:max])
+	return string(runes[:max]) + marker
 }
 
 // IsCJK 判断字符是否属于中日韩(CJK)文字区。

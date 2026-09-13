@@ -5,7 +5,11 @@
 * 从而保持上下文一致,并避免每次消息都重复执行内容路由(关键词/LLM 分类)。
 *
 * 设计说明:
-*   - key 形如 "<comCode>:<sessionId>",以单位编码为前缀,隔离不同单位;
+*   - key 就是 sessionId 本身。sessionId 由 chat_service.prepareChat 在路由之前统一规整
+*     (normalizeRequest → 统一带上 comCode 前缀,见 common.NormalizeCompactId),
+*     所以它**已经按单位隔离**;这里再拼一次 comCode 只会得到 "100001:100001abc…" 的重复前缀,
+*     没有任何额外隔离效果。comCode 入参保留在签名上:一是让"按单位隔离"的意图可见,
+*     二是将来换成 Redis/多实例实现时可按 (comCode, sessionId) 组合键落地;
 *   - 条目带 TTL(秒),过期后按惰性方式在读取/写入时清理;
 *   - 有容量上限,超出时先清理过期项,仍超出则整体清空(防内存膨胀的安全阀);
 *   - 目前为内存实现:进程重启后绑定丢失、多实例部署不共享,

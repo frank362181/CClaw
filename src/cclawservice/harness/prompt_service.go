@@ -118,7 +118,7 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 			budget = cCommon.MaxUserDocChars
 		}
 		if runeLen := len([]rune(content)); runeLen > budget {
-			content = common2.TruncateRunes(content, budget)
+			content = common2.TruncateRunes(content, budget, common2.BlankString)
 			truncated = append(truncated, doc.FileName)
 		}
 
@@ -236,7 +236,7 @@ func enforceTotalBudget(sections []dataobject.SystemPromptSection, cap int, trun
 		if budget > 0 {
 			kept = append(kept, dataobject.SystemPromptSection{
 				Title:   sections[i].Title,
-				Content: common2.TruncateRunes(sections[i].Content, budget),
+				Content: common2.TruncateRunes(sections[i].Content, budget, common2.BlankString),
 			})
 			truncated = append(truncated, sections[i].Title)
 			budget = 0
@@ -290,7 +290,7 @@ func renderSkillsCatalog(skills []dataobject.SkillDocument) (string, bool) {
 			}
 			desc := meta.Description
 			if descMax > 0 {
-				desc = common2.TruncateRunes(desc, descMax)
+				desc = common2.TruncateRunes(desc, descMax, common2.BlankString)
 			}
 			if len(desc) > 0 {
 				sb.WriteString(": ")

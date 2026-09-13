@@ -27,6 +27,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"my.favorite/platformutility/common/hash"
+	pException "my.favorite/platformutility/exception"
 )
 
 type hostInfo struct {
@@ -431,6 +434,15 @@ func SafeJoinExisting(root, target string) (string, bool) {
 	return abs, true
 }
 
+func ComputeStringFingerprint(text string, maxBytes int) string {
+	if len(text) > maxBytes {
+		text = text[:maxBytes]
+	}
+
+	fingerPrint, _ := hash.SHA256(text)
+	return fingerPrint
+}
+
 func ComputeFileFingerprint(path string) string {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -485,6 +497,61 @@ func ReadFile(fileName string, maxSize int64) ([]byte, int64, error) {
 	}
 
 	return data, fileSize, nil
+}
+
+// ReadFileRange 读取 [start, end) 区间;end <= 0 或超出文件尾时读到 EOF。
+func ReadFileRange(path string, start, end int64) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return BlankString, pException.FilePathErrorEx("open history file error: " + err.Error())
+	}
+	defer func() { _ = file.Close() }()
+
+	length := end - start
+	if length <= 0 {
+		return BlankString, nil
+	}
+
+	buf := make([]byte, length)
+	n, err := file.ReadAt(buf, start)
+	if err != nil && err != io.EOF {
+		return BlankString, pException.FilePathErrorEx("read history file error: " + err.Error())
+	}
+	return string(buf[:n]), nil
+}
+
+// ReadTextIfExists 读取文本文件；不存在返回空串（不是错误）
+func ReadTextIfExists(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return BlankString, nil
+		}
+
+		return BlankString, pException.FilePathErrorEx("read memory file error: " + err.Error())
+	}
+
+	return string(data), nil
+}
+
+// WriteTextAtomically 原子写:先写同目录临时文件,再改名覆盖
+func WriteTextAtomically(path, content string) error {
+	dir := filepath.Dir(path)
+	if err := CreateDir(dir); err != nil {
+		return pException.FilePathErrorEx2("create memory file dir error: %s", err.Error())
+	}
+
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
+		return pException.FilePathErrorEx2("write memory file error: %s", err.Error())
+	}
+
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return pException.FilePathErrorEx2("rename memory file error: %s", err.Error())
+	}
+
+	return nil
 }
 
 func Close(file *os.File) {

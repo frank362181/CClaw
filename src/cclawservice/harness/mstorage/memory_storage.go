@@ -22,6 +22,10 @@ type IMemoryStorage interface {
 	MemoryDir(sessionId string) (string, error)
 	Ensure(sessionId string, at *pCommon.DatetimeItem, headerLines []string) (string, error)
 	Append(sessionId, fileName, recordType, title, content, timeText string, hintIndex int) (int, error)
+
+	// Read 读回某会话历史文件的全部记录(按序号升序);文件不存在返回 (nil, nil)。
+	// 返回的切片是内部缓存,调用方只读。
+	Read(sessionId, fileName string) ([]MemoryRecord, error)
 }
 
 type MemoryStorage struct {

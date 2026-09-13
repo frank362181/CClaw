@@ -221,7 +221,7 @@ func NewCompactId(prefix string) string {
 }
 
 func BuildSessionName(message string) string {
-	name := strings.TrimSpace(pCommon.TruncateRunes(strings.TrimSpace(message), SessionNameMaxLen))
+	name := strings.TrimSpace(pCommon.TruncateRunes(strings.TrimSpace(message), SessionNameMaxLen, pCommon.BlankString))
 	if name == pCommon.BlankString {
 		return SessionDefaultName
 	}
