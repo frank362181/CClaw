@@ -305,6 +305,32 @@ func (w *MemoryFileRWriter) setNextIndex(path string, next int) {
 	w.nextIndex[path] = next
 }
 
+// ForgetSession 丢弃某会话历史文件的序号缓存与读回快照(测试与运维用)。
+//
+// 两个缓存都按**历史文件绝对路径**键控,而路径由"会话号 + 文件名(含时间戳)"决定。
+// 删掉磁盘上的历史文件之后必须一并丢弃缓存,否则紧接着复用的同号会话会从缓存的序号
+// 继续分配(序号看起来"跳号"),测试之间也会互相污染。
+func (w *MemoryFileRWriter) ForgetSession(sessionId string) {
+	dir, err := w.MemoryDir(sessionId)
+	if err != nil {
+		return
+	}
+	prefix := dir + string(filepath.Separator)
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for path := range w.nextIndex {
+		if strings.HasPrefix(path, prefix) {
+			delete(w.nextIndex, path)
+		}
+	}
+	for path := range w.records {
+		if strings.HasPrefix(path, prefix) {
+			delete(w.records, path)
+		}
+	}
+}
+
 // ============================== private functions & methods ==============================
 
 // resolvePath 把(会话标识, 文件名)解析为历史文件绝对路径,并确保目录存在。

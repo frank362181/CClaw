@@ -9,9 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	cCommon "my.favorite/cclawservice/common"
 	hCommon "my.favorite/cclawservice/harness/common"
+	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	pCommon "my.favorite/platformutility/common"
@@ -191,7 +193,7 @@ func TestBuildSystemPromptScopeFiltering(t *testing.T) {
 	promptService := GetPromptService()
 
 	// subagent: 仅 AGENTS.md,不继承父 agent 的人格/用户/记忆
-	sub, err := promptService.BuildSystemPromptEx(agent, nil, dataobject.BootstrapScopeSubagent)
+	sub, err := promptService.BuildSystemPromptEx(agent, nil, hCommon.BootstrapScopeSubagent)
 	if err != nil {
 		t.Fatalf("subagent error:%s", err.Error())
 	}
@@ -205,7 +207,7 @@ func TestBuildSystemPromptScopeFiltering(t *testing.T) {
 	}
 
 	// cron: AGENTS/SOUL/IDENTITY/USER,不含 MEMORY.md(隐私)
-	cron, err := promptService.BuildSystemPromptEx(agent, nil, dataobject.BootstrapScopeCron)
+	cron, err := promptService.BuildSystemPromptEx(agent, nil, hCommon.BootstrapScopeCron)
 	if err != nil {
 		t.Fatalf("cron error:%s", err.Error())
 	}
@@ -217,7 +219,7 @@ func TestBuildSystemPromptScopeFiltering(t *testing.T) {
 	}
 
 	// heartbeat: 不注入启动文件
-	hb, err := promptService.BuildSystemPromptEx(agent, nil, dataobject.BootstrapScopeHeartbeat)
+	hb, err := promptService.BuildSystemPromptEx(agent, nil, hCommon.BootstrapScopeHeartbeat)
 	if err != nil {
 		t.Fatalf("heartbeat error:%s", err.Error())
 	}
@@ -301,5 +303,122 @@ func TestBuildSystemPromptRejectsOversizeFile(t *testing.T) {
 	err := repo.GetPromptRepository().AddSkill("agent-4", "huge", hugeFile)
 	if err == nil {
 		t.Fatalf("expected oversize file to be rejected")
+	}
+}
+
+func TestEffectiveBootstrapBudget(t *testing.T) {
+	cases := []struct {
+		name       string
+		configured int
+		want       int
+	}{
+		{"explicit budget", 80000, 80000},
+		{"zero falls back to default", 0, hCommon.MaxBootstrapTotalChars},
+		{"negative falls back to default", -1, hCommon.MaxBootstrapTotalChars},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := ctxmgr.BoostrapBudget(c.configured); got != c.want {
+				t.Errorf("effectiveBootstrapBudget(%d)=%d want=%d", c.configured, got, c.want)
+			}
+		})
+	}
+}
+
+func TestCapSectionsTruncatesOversizedSection(t *testing.T) {
+	oversize := strings.Repeat("中", hCommon.MaxPromptSectionLen+500)
+	sections := []dataobject.SystemPromptSection{
+		{Title: "AGENTS.md", Content: "# ok"},
+		{Title: "HUGE.md", Content: oversize},
+	}
+
+	got, truncated := capSections(sections, hCommon.MaxPromptSectionLen, nil)
+
+	if len(got) != 2 {
+		t.Fatalf("section count should be preserved: got=%d", len(got))
+	}
+	if got[0].Content != "# ok" {
+		t.Errorf("section within limit should be untouched: %q", got[0].Content)
+	}
+	// 空 marker 表示纯截断:结果为恰好 limit 个 rune
+	if runes := len([]rune(got[1].Content)); runes != hCommon.MaxPromptSectionLen {
+		t.Errorf("oversize section runes=%d want=%d", runes, hCommon.MaxPromptSectionLen)
+	}
+	if !utf8.ValidString(got[1].Content) {
+		t.Errorf("truncated content must stay valid UTF-8")
+	}
+	if len(truncated) != 1 || truncated[0] != "HUGE.md" {
+		t.Errorf("truncated list mismatch: %v", truncated)
+	}
+}
+
+func TestCapSectionsNoopWithinLimitOrDisabled(t *testing.T) {
+	sections := []dataobject.SystemPromptSection{{Title: "A", Content: "short"}}
+
+	got, truncated := capSections(sections, hCommon.MaxPromptSectionLen, nil)
+	if len(got) != 1 || got[0].Content != "short" || len(truncated) != 0 {
+		t.Errorf("capSections should be a no-op within limit: %v %v", got, truncated)
+	}
+
+	// limit<=0 表示不限制
+	got, truncated = capSections(sections, 0, nil)
+	if len(got) != 1 || got[0].Content != "short" || len(truncated) != 0 {
+		t.Errorf("limit<=0 should disable the guard: %v %v", got, truncated)
+	}
+}
+
+func TestUniqueStringsKeepsFirstOrder(t *testing.T) {
+	got := pCommon.UniqueStrings([]string{"AGENTS.md", "SOUL.md", "AGENTS.md", "SOUL.md", "TOOLS.md"})
+	want := []string{"AGENTS.md", "SOUL.md", "TOOLS.md"}
+
+	if len(got) != len(want) {
+		t.Fatalf("len mismatch: got=%v want=%v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("index %d: got=%q want=%q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestBuildSystemPromptTotalBudgetFallback(t *testing.T) {
+	// 未配置 bootstrap_total_chars(0)的 agent:总预算应回落到默认值。
+	// 每个文件都在单文件预算内,但四份叠加超过默认总预算,必须被裁剪。
+	agent := newTestAgent(t, "t-owner", "agent-budget", "agent-budget", func(root string) {
+		writeFile(t, filepath.Join(root, "AGENTS.md"), "# A\n"+strings.Repeat("a", 20000))
+		writeFile(t, filepath.Join(root, "SOUL.md"), "# S\n"+strings.Repeat("b", 20000))
+		writeFile(t, filepath.Join(root, "TOOLS.md"), "# T\n"+strings.Repeat("c", 20000))
+		writeFile(t, filepath.Join(root, "BOOTSTRAP.md"), "# B\n"+strings.Repeat("d", 20000))
+	})
+	if agent.BootstrapTotalChars != 0 {
+		t.Fatalf("precondition: agent must be unconfigured (0)")
+	}
+
+	promptService := GetPromptService()
+	prompt, err := promptService.BuildSystemPrompt(agent, nil)
+	if err != nil {
+		t.Fatalf("BuildSystemPrompt error:%s", err.Error())
+	}
+
+	// 截断提示 section 是在总预算之后追加的固定说明段(与"输出语言"尾巴同性质),不参与预算
+	injected := 0
+	for i := range prompt.Sections {
+		if prompt.Sections[i].Title == "Bootstrap Context Notice" {
+			continue
+		}
+		injected += len([]rune(prompt.Sections[i].Content))
+	}
+
+	// 4 份 20000 rune 的文档,默认总预算 60000:应保留 3 份、丢弃第 4 份,且尽量填满预算
+	if injected != hCommon.MaxBootstrapTotalChars {
+		t.Errorf("injected sections total=%d want exactly=%d (fallback budget must be applied and filled)",
+			injected, hCommon.MaxBootstrapTotalChars)
+	}
+	if len(prompt.Truncated) == 0 {
+		t.Errorf("expected total-budget truncation to be recorded")
+	}
+	if !strings.Contains(prompt.Prompt, "Bootstrap Context Notice") {
+		t.Errorf("expected truncation notice section")
 	}
 }

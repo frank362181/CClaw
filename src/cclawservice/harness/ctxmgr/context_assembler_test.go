@@ -42,8 +42,8 @@ func TestAssembleContextWithoutHistory(t *testing.T) {
 	if result.Messages[1].Content != "你好" {
 		t.Errorf("本轮用户消息不正确: %q", result.Messages[1].Content)
 	}
-	if result.Trimmed || result.NeedCompaction {
-		t.Errorf("无历史时不应判定为已裁剪/需压缩: %+v", result)
+	if result.Trimmed || result.BudgetExhausted {
+		t.Errorf("无历史时不应判定为已裁剪/预算耗尽: %+v", result)
 	}
 }
 
@@ -243,8 +243,14 @@ func TestAssembleContextBudgetTrimsOldestGroups(t *testing.T) {
 	policy.ReverseTokenFloor = 64 // 系统提示预留(此处远小于 SYS 实际值,以实际值为准)
 	result := AssembleContext("SYS", records, "本轮问题", policy)
 
-	if !result.Trimmed || !result.NeedCompaction {
+	if !result.Trimmed || !ShouldCompact(result) {
 		t.Fatalf("预算不足时必须判定为已裁剪且需压缩: %+v", result)
+	}
+	if result.BudgetExhausted {
+		t.Errorf("预算仍为正时不应标记预算耗尽: %+v", result)
+	}
+	if result.DroppedRecordCount != result.DroppedCount {
+		t.Errorf("无工具记录折叠时,被裁记录数应等于消息数: records=%d messages=%d", result.DroppedRecordCount, result.DroppedCount)
 	}
 	if result.DroppedFrom != 1 {
 		t.Errorf("裁剪应从最老记录开始(序号 1),实际 from=%d", result.DroppedFrom)
@@ -278,7 +284,7 @@ func TestAssembleContextNoTrimWithoutWindow(t *testing.T) {
 	}
 
 	result := AssembleContext("SYS", records, "问题", DefaultContextPolicy())
-	if result.Trimmed || result.NeedCompaction {
+	if result.Trimmed || result.BudgetExhausted {
 		t.Fatalf("未配置窗口时不应裁剪: %+v", result)
 	}
 	if len(result.Messages) != 4 {
@@ -339,13 +345,13 @@ func TestAssembleContextSystemFloorReservesPromptSpace(t *testing.T) {
 func TestSystemReserveTokens(t *testing.T) {
 	system := llmproto.ChatMessage{Role: hCommon.RoleSystem, Content: strings.Repeat("a", 400)} // 约 100 tokens
 
-	if got := systemReserveTokens(ContextPolicy{}, system); got != EstimateInputTokens([]llmproto.ChatMessage{system}) {
+	if got := calcSystemReservedTokens(ContextPolicy{}, system); got != EstimateInputTokens([]llmproto.ChatMessage{system}) {
 		t.Errorf("未配置 floor 时应用实际估算: %d", got)
 	}
-	if got := systemReserveTokens(ContextPolicy{ReverseTokenFloor: 50}, system); got != EstimateInputTokens([]llmproto.ChatMessage{system}) {
+	if got := calcSystemReservedTokens(ContextPolicy{ReverseTokenFloor: 50}, system); got != EstimateInputTokens([]llmproto.ChatMessage{system}) {
 		t.Errorf("floor 小于实际时应以实际为准: %d", got)
 	}
-	if got := systemReserveTokens(ContextPolicy{ReverseTokenFloor: 9999}, system); got != 9999 {
+	if got := calcSystemReservedTokens(ContextPolicy{ReverseTokenFloor: 9999}, system); got != 9999 {
 		t.Errorf("floor 大于实际时应以 floor 为准: %d", got)
 	}
 }
@@ -406,18 +412,99 @@ func TestFitMessagesKeepsLastGroupAndPairs(t *testing.T) {
 	}
 }
 
-// TestShouldCompact 压缩触发判定:compaction_mode=0(default) 与 1(safeguard) 都允许压缩,
-// 但只有真的裁掉了历史才触发。
+// TestShouldCompact 压缩触发判定(与 compaction_mode 无关):
+//   - 被裁的**记录**数达到门槛才触发;
+//   - 历史预算为 0 时永不触发 —— 压缩改变不了 system 预留,问题在配置。
 func TestShouldCompact(t *testing.T) {
-	dropped := AssembleResult{NeedCompaction: true, DroppedFrom: 1, DroppedTo: 10}
-	if !ShouldCompact(dataobject.TAgent{CompactionMode: dataobject.CompactionModeDefault}, dropped) {
-		t.Error("default 模式应允许压缩")
+	dropped := AssembleResult{Trimmed: true, DroppedFrom: 1, DroppedTo: 10, DroppedRecordCount: hCommon.CompactionMinRecords}
+	if !ShouldCompact(dropped) {
+		t.Error("被裁记录数达到门槛时应触发压缩")
 	}
-	if !ShouldCompact(dataobject.TAgent{CompactionMode: dataobject.CompactionModeSafeguard}, dropped) {
-		t.Error("safeguard 模式应允许压缩")
+
+	short := dropped
+	short.DroppedRecordCount = hCommon.CompactionMinRecords - 1
+	if ShouldCompact(short) {
+		t.Error("被裁记录数不足门槛时不应触发压缩(不划算)")
 	}
-	if ShouldCompact(dataobject.TAgent{}, AssembleResult{}) {
+
+	// 预算耗尽:区间再大也不该压 —— 压缩不改变 system 预留,再怎么压历史预算还是 0
+	exhausted := dropped
+	exhausted.BudgetExhausted = true
+	if ShouldCompact(exhausted) {
+		t.Error("历史预算为 0 时不应触发压缩(应改配置而不是反复烧 LLM 调用)")
+	}
+
+	if ShouldCompact(AssembleResult{}) {
 		t.Error("未裁剪时不应触发压缩")
+	}
+}
+
+// TestAssembleContextBudgetExhaustedMarksNoCompaction 预留额度挤掉全部历史时,
+// 必须标记预算耗尽并**不**触发压缩(否则每轮都会白烧一次压缩调用)。
+func TestAssembleContextBudgetExhaustedMarksNoCompaction(t *testing.T) {
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", "问题一"),
+		record(2, hCommon.HistoryRecordTypeAssistant, "", "回答一"),
+		record(3, hCommon.HistoryRecordTypeUser, "", "问题二"),
+		record(4, hCommon.HistoryRecordTypeAssistant, "", "回答二"),
+	}
+
+	// floor 远超窗口:历史预算被压到 0
+	policy := ContextPolicy{ContextWindow: 200, OutputReserve: 10, ReverseTokenFloor: 5000, ToolReplayMaxRunes: 100}
+	result := AssembleContext("SYS", records, "问题", policy)
+
+	if !result.BudgetExhausted {
+		t.Fatalf("窗口被预留额度吃光时应标记预算耗尽: %+v", result)
+	}
+	if ShouldCompact(result) {
+		t.Error("预算耗尽时不得触发压缩")
+	}
+	if got := strings.Join(roles(result.Messages), ","); got != "system,user" {
+		t.Errorf("预算耗尽时只应保留 system + 本轮问题: %s", got)
+	}
+}
+
+// TestAssembleContextUsesActiveSummariesOnly 回归(P2):"哪些摘要生效"必须与写端
+// (hCommon.ActiveSummaries / SummaryOverBudget)用同一规则 ——
+// 被更晚摘要取代的摘要不得再注入,否则会出现"按 A 规则判断要不要压缩、按 B 规则决定注入什么"。
+// 合并摘要是唯一会刻意把早期摘要记录序号纳入 covers 区间的路径。
+func TestAssembleContextUsesActiveSummariesOnly(t *testing.T) {
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", "老问题"),
+		record(2, hCommon.HistoryRecordTypeAssistant, "", "老回答"),
+		summaryRecord(9, 1, 8, "第一段摘要(应被取代)"),
+		record(10, hCommon.HistoryRecordTypeUser, "", "中段问题"),
+		summaryRecord(18, 1, 18, "合并后的摘要(应生效)"),
+		record(19, hCommon.HistoryRecordTypeUser, "", "新问题"),
+	}
+
+	result := AssembleContext("SYS", records, "当前问题", DefaultContextPolicy())
+
+	system := result.Messages[0].Content
+	if !strings.Contains(system, "合并后的摘要") {
+		t.Fatalf("生效摘要必须注入 system: %q", system)
+	}
+	if strings.Contains(system, "第一段摘要") {
+		t.Errorf("已被取代的摘要不得注入: %q", system)
+	}
+
+	// 被 covers 1-18 覆盖的普通记录(1/2/10)一律不回放
+	joined := ""
+	for _, msg := range result.Messages[1:] {
+		joined += msg.Content
+	}
+	for _, gone := range []string{"老问题", "老回答", "中段问题"} {
+		if strings.Contains(joined, gone) {
+			t.Errorf("被摘要覆盖的记录不应回放: %q", gone)
+		}
+	}
+	if !strings.Contains(joined, "新问题") {
+		t.Errorf("未被覆盖的记录必须回放: %q", joined)
+	}
+
+	// 与写端口径一致:生效摘要唯一、注入体积等于该摘要
+	if got := len(hCommon.ActiveSummaries(records)); got != 1 {
+		t.Errorf("生效摘要应只有 1 条,实际 %d", got)
 	}
 }
 
@@ -427,7 +514,7 @@ func TestContextPolicyFor(t *testing.T) {
 	if policy.ContextWindow != 32768 || policy.ReverseTokenFloor != 2048 {
 		t.Errorf("策略推导不正确: %+v", policy)
 	}
-	if policy.OutputReserve != DefaultOutputReserveTokens || policy.ToolReplayMaxRunes != DefaultToolReplayMaxRunes {
+	if policy.OutputReserve != hCommon.DefaultOutputReserveTokens || policy.ToolReplayMaxRunes != hCommon.DefaultToolReplayMaxRunes {
 		t.Errorf("默认值应被补齐: %+v", policy)
 	}
 }

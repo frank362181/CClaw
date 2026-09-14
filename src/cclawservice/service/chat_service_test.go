@@ -22,6 +22,21 @@ import (
 // 说明:本文件承载"必须与被测对象同包"的用例(ChatService 的非导出方法)。
 // 从 mstorage 包迁出:service 依赖 mstorage,若在 mstorage 内引用 service 会构成 import cycle。
 
+// TestNeedDistillNowCadence 蒸馏节拍:轮次达到门槛且正好落在间隔上时触发一次。
+// turns 由 AppendTurn 返回(本轮序号 = 会话内最大序号),因此这里固定住"第 10/20/30… 轮触发"的语义。
+func TestNeedDistillNowCadence(t *testing.T) {
+	cases := map[int]bool{
+		0: false, 1: false, 5: false, 6: false, 9: false,
+		10: true, 11: false, 20: true, 30: true, 100: true,
+	}
+
+	for turns, want := range cases {
+		if got := ctxmgr.NeedDistillNow(turns); got != want {
+			t.Errorf("needDistillNow(%d) = %v, want %v", turns, got, want)
+		}
+	}
+}
+
 // newChatServiceTestDatabase 创建一个临时 SQLite 库并建好会话三表(测试辅助)。
 func newChatServiceTestDatabase(t *testing.T) core.IBaseDatabase {
 	t.Helper()

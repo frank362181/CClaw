@@ -37,14 +37,6 @@ import (
 	pCommon "my.favorite/platformutility/common"
 )
 
-// 装配默认参数
-const (
-	// DefaultToolReplayMaxRunes 单条工具结果回放的最大字符数(控制历史体积;完整内容仍在文件里)
-	DefaultToolReplayMaxRunes = 1200
-	// DefaultOutputReserveTokens 为模型输出预留的 token 数
-	DefaultOutputReserveTokens = 1024
-)
-
 // 工具结果块标记:既是给模型的语义分隔,也是"这段不是助手原话"的明确提示。
 const (
 	historyToolBlockOpen  = "<工具结果>"
@@ -63,8 +55,8 @@ type ContextPolicy struct {
 // DefaultContextPolicy 返回默认策略(未配置任何压缩参数时的安全值)。
 func DefaultContextPolicy() ContextPolicy {
 	return ContextPolicy{
-		OutputReserve:      DefaultOutputReserveTokens,
-		ToolReplayMaxRunes: DefaultToolReplayMaxRunes,
+		OutputReserve:      hCommon.DefaultOutputReserveTokens,
+		ToolReplayMaxRunes: hCommon.DefaultToolReplayMaxRunes,
 	}
 }
 
@@ -85,17 +77,20 @@ type AssembleResult struct {
 	Messages []llmproto.ChatMessage // 完整消息序列(system + 历史 + 本轮用户)
 	Summary  string                 // 折叠进 system 的历史摘要文本(为空表示无摘要)
 
-	Trimmed        bool // 是否因预算裁剪掉了历史
-	DroppedFrom    int  // 被裁掉的记录序号区间起点(闭区间;0 表示无)
-	DroppedTo      int  // 被裁掉的记录序号区间终点(闭区间;0 表示无)
-	DroppedCount   int  // 被裁掉的记录条数
-	NeedCompaction bool // 是否需要压缩(裁剪已发生 → 应当把被裁区间压缩为摘要)
+	Trimmed            bool // 是否因预算裁剪掉了历史
+	DroppedFrom        int  // 被裁掉的记录序号区间起点(闭区间;0 表示无)
+	DroppedTo          int  // 被裁掉的记录序号区间终点(闭区间;0 表示无)
+	DroppedCount       int  // 被裁掉的历史消息条数(工具结果折叠后的条数)
+	DroppedRecordCount int  // 被裁掉的历史**记录**条数(工具记录各算一条) —— 压缩门槛用它
+	BudgetExhausted    bool // 历史预算已为 0(窗口扣掉输出预留与系统提示预留后没有剩余)
 }
 
 // historyItem 一条历史消息及其来源记录序号(用于裁剪后报告被裁区间)。
 type historyItem struct {
-	index int // 来源记录序号;多条工具记录合成时为其中最大序号
-	msg   llmproto.ChatMessage
+	index    int // 来源记录序号;多条工具记录合成时为其中最大序号
+	minIndex int // 来源记录的最小序号(工具折叠进同轮助手消息时可能小于 index)
+	records  int // 来源记录条数(折叠的工具记录各算一条)
+	msg      llmproto.ChatMessage
 }
 
 // AssembleContext 装配完整上下文。
@@ -117,27 +112,35 @@ func AssembleContext(systemPrompt string, records []hCommon.MemoryRecord, curren
 	result := AssembleResult{Summary: summaryText}
 
 	// 历史预算 = 窗口 - 输出预留 - 系统提示预留 - 本轮用户消息
-	// 系统提示预留取 max(实际估算, reverse_token_floor):即便系统提示很小(或将来变短),
-	// 也为 AGENTS.md 等规则文档保留 floor 的额度;系统提示实际更大时以实际为准。
-	//
 	// 窗口未知(ContextWindow<=0)时不裁剪,保持阶段1行为(不做任何预算推断)。
 	var kept, dropped []historyItem
 	if policy.ContextWindow <= 0 {
 		kept = items
 	} else {
-		budget := policy.ContextWindow - policy.OutputReserve -
-			systemReserveTokens(policy, system) - EstimateInputTokens([]llmproto.ChatMessage{current})
+		//budget := policy.ContextWindow - policy.OutputReserve -
+		//	CalcSystemReservedTokens(policy, system) - EstimateInputTokens([]llmproto.ChatMessage{current})
+		budget := Budget(policy, system) - EstimateInputTokens([]llmproto.ChatMessage{current})
 		if budget < 0 {
 			budget = 0 // 窗口不够:本轮不带历史(而不是强行塞入历史把请求顶出窗口)
 		}
+		// 预算为 0 意味着"一条历史都放不下",此时压缩毫无意义:压缩不改变 system 预留,
+		// 真正的问题是配置(reverse_token_floor / OutputReserve 相对窗口过大),要改配置而不是反复压缩。
+		result.BudgetExhausted = budget <= 0
 		kept, dropped = trimHistoryItems(items, budget)
 	}
 	if len(dropped) > 0 {
 		result.Trimmed = true
-		result.NeedCompaction = true
 		result.DroppedCount = len(dropped)
-		result.DroppedFrom = dropped[0].index
-		result.DroppedTo = dropped[len(dropped)-1].index
+		result.DroppedFrom, result.DroppedTo = dropped[0].minIndex, dropped[0].index
+		for i := range dropped {
+			result.DroppedRecordCount += dropped[i].records
+			if dropped[i].minIndex < result.DroppedFrom {
+				result.DroppedFrom = dropped[i].minIndex
+			}
+			if dropped[i].index > result.DroppedTo {
+				result.DroppedTo = dropped[i].index
+			}
+		}
 	}
 
 	messages := make([]llmproto.ChatMessage, 0, len(kept)+2)
@@ -176,7 +179,8 @@ func FitMessages(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, p
 		return messages
 	}
 
-	budget := policy.ContextWindow - policy.OutputReserve - systemReserveTokens(policy, messages[0])
+	//budget := policy.ContextWindow - policy.OutputReserve - CalcSystemReservedTokens(policy, messages[0])
+	budget := Budget(policy, messages[0])
 	if budget < 0 {
 		budget = 0
 	}
@@ -205,10 +209,11 @@ func FitMessages(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, p
 	return fitted
 }
 
-// ShouldCompact 判断装配结果是否触发压缩 —— **与模式无关**:default/safeguard 都触发,
-// 如何压缩交给compaction mode来决定
-func ShouldCompact(agent dataobject.TAgent, result AssembleResult) bool {
-	return result.NeedCompaction && result.DroppedFrom > 0 && result.DroppedTo >= result.DroppedFrom
+func ShouldCompact(result AssembleResult) bool {
+	if result.BudgetExhausted {
+		return false
+	}
+	return result.DroppedFrom > 0 && result.DroppedRecordCount >= hCommon.CompactionMinRecords
 }
 
 // ============================== private functions & methods ==============================
@@ -216,10 +221,10 @@ func ShouldCompact(agent dataobject.TAgent, result AssembleResult) bool {
 // normalizePolicy 补齐策略默认值。
 func normalizePolicy(policy ContextPolicy) ContextPolicy {
 	if policy.OutputReserve <= 0 {
-		policy.OutputReserve = DefaultOutputReserveTokens
+		policy.OutputReserve = hCommon.DefaultOutputReserveTokens
 	}
 	if policy.ToolReplayMaxRunes <= 0 {
-		policy.ToolReplayMaxRunes = DefaultToolReplayMaxRunes
+		policy.ToolReplayMaxRunes = hCommon.DefaultToolReplayMaxRunes
 	}
 	if policy.ReverseTokenFloor < 0 {
 		policy.ReverseTokenFloor = 0
@@ -243,61 +248,28 @@ func composeSystemMessage(systemPrompt, summaryText string) llmproto.ChatMessage
 //
 // 摘要记录(covers: from-to)取代了区间内的原始记录:被取代的记录不再回放,
 // 否则同一段历史会既以摘要、又以原文出现,既浪费预算也干扰模型判断。
+//
+// "哪些摘要仍生效""哪些记录已被取代"这两个判定**必须**用 hCommon 里的共享实现
+// (与写端 compactionRun / 合并触发 SummaryOverBudget 同一规则),否则会出现
+// "按 A 规则判断要不要压缩、按 B 规则决定注入什么"的漂移。
 func splitSummaryAndActive(records []hCommon.MemoryRecord) (summaryText string, active []hCommon.MemoryRecord) {
-	var summaries []hCommon.MemoryRecord
-	covered := make(map[int]bool)
-
-	for _, rec := range records {
-		if rec.IsSummary() {
-			summaries = append(summaries, rec)
-			for i := rec.CoversFrom; i > 0 && i <= rec.CoversTo; i++ {
-				covered[i] = true
-			}
-			continue
-		}
-		active = append(active, rec)
+	if len(hCommon.SummariesOf(records)) == 0 {
+		return "", records
 	}
 
-	if len(summaries) == 0 {
-		return "", filterCovered(active, covered)
-	}
-
-	// 多条摘要按序号升序拼接(序号即时间顺序),
-	// 后一条摘要若覆盖了前一条,则前一条本身也被取代,不再回放。
 	var texts []string
-	for i, rec := range summaries {
-		superseded := false
-		for _, later := range summaries[i+1:] {
-			if later.Covers(rec.Index) {
-				superseded = true
-				break
-			}
-		}
-		if superseded {
-			continue
-		}
+	for _, rec := range hCommon.ActiveSummaries(records) {
 		if content := strings.TrimSpace(rec.Content); content != "" {
 			texts = append(texts, content)
 		}
 	}
-	return strings.Join(texts, "\n\n"), filterCovered(active, covered)
-}
-
-// filterCovered 过滤掉已被摘要取代的记录。
-func filterCovered(records []hCommon.MemoryRecord, covered map[int]bool) []hCommon.MemoryRecord {
-	if len(covered) == 0 {
-		return records
-	}
-	kept := make([]hCommon.MemoryRecord, 0, len(records))
-	for _, rec := range records {
-		if !covered[rec.Index] {
-			kept = append(kept, rec)
-		}
-	}
-	return kept
+	return strings.Join(texts, "\n\n"), hCommon.ActivePlainRecords(records)
 }
 
 // buildHistoryItems 把记录映射为历史消息(工具记录折叠进同轮助手消息)。
+//
+// 每条 item 同时记录其**来源记录**的最小序号与条数:压缩门槛要按"记录条数"判断
+// (折叠后的消息条数会被工具记录放大),而 covers 区间要用**记录**序号表达。
 func buildHistoryItems(records []hCommon.MemoryRecord, toolMaxRunes int) []historyItem {
 	items := make([]historyItem, 0, len(records))
 	var pending []hCommon.MemoryRecord
@@ -309,9 +281,18 @@ func buildHistoryItems(records []hCommon.MemoryRecord, toolMaxRunes int) []histo
 		block := renderToolBlock(pending, toolMaxRunes)
 		if target != nil {
 			target.msg.Content = strings.TrimSpace(target.msg.Content + "\n\n" + block)
+			target.records += len(pending)
+			if pending[0].Index < target.minIndex {
+				target.minIndex = pending[0].Index
+			}
 		} else {
 			// 该轮没有助手回复(如被中断):工具结果仍要保留,单独作为一条助手消息回放
-			items = append(items, historyItem{index: anchor, msg: llmproto.ChatMessage{Role: hCommon.RoleAssistant, Content: block}})
+			items = append(items, historyItem{
+				index:    anchor,
+				minIndex: pending[0].Index,
+				records:  len(pending),
+				msg:      llmproto.ChatMessage{Role: hCommon.RoleAssistant, Content: block},
+			})
 		}
 		pending = nil
 	}
@@ -324,17 +305,17 @@ func buildHistoryItems(records []hCommon.MemoryRecord, toolMaxRunes int) []histo
 			if strings.TrimSpace(rec.Content) == "" {
 				continue // 空提问无信息量(异常数据),不回放
 			}
-			items = append(items, historyItem{index: rec.Index, msg: llmproto.ChatMessage{Role: hCommon.RoleUser, Content: rec.Content}})
+			items = append(items, historyItem{index: rec.Index, minIndex: rec.Index, records: 1,
+				msg: llmproto.ChatMessage{Role: hCommon.RoleUser, Content: rec.Content}})
 		case hCommon.HistoryRecordTypeTool: //mstorage.HistoryRecordTool:
 			pending = append(pending, rec)
 		case hCommon.HistoryRecordTypeAssistant: //mstorage.HistoryRecordAssistant:
 			// 空助手消息(模型只输出思考内容、或内容被安全策略拦下)不回放:
-			// 它不携带任何信息,却会占用预算并干扰模型对消息序列的判断。
-			// 若本轮还有工具结果,下面 flush 会单独成一条助手消息,工具产出不会丢。
 			if strings.TrimSpace(rec.Content) == "" {
 				continue
 			}
-			item := historyItem{index: rec.Index, msg: llmproto.ChatMessage{Role: hCommon.RoleAssistant, Content: rec.Content}}
+			item := historyItem{index: rec.Index, minIndex: rec.Index, records: 1,
+				msg: llmproto.ChatMessage{Role: hCommon.RoleAssistant, Content: rec.Content}}
 			flush(&item, rec.Index)
 			items = append(items, item)
 		}
@@ -359,22 +340,6 @@ func renderToolBlock(tools []hCommon.MemoryRecord, maxRunes int) string {
 	sb.WriteString("\n")
 	sb.WriteString(historyToolBlockClose)
 	return sb.String()
-}
-
-// systemReserveTokens 计算系统提示应占用的 token 额度。
-//
-// 取 max(系统提示实际估算, policy.ReverseTokenFloor):
-//   - reverse_token_floor 的语义是"为 AGENTS.md 等启动文档预留的最小空间",
-//     即它约束的是**历史可以占多少**,而不是"历史至少保留多少";
-//   - 系统提示实际更大时以实际为准(不能因为 floor 小就超窗)。
-//
-// 历史摘要会被折叠进 system 消息,因此这个额度同时也保护了摘要不被历史挤掉。
-func systemReserveTokens(policy ContextPolicy, system llmproto.ChatMessage) int {
-	reserve := EstimateInputTokens([]llmproto.ChatMessage{system})
-	if policy.ReverseTokenFloor > reserve {
-		return policy.ReverseTokenFloor
-	}
-	return reserve
 }
 
 // trimHistoryItems 在预算内保留尽可能新的历史(从尾部向前累加),返回保留与丢弃的两部分。

@@ -102,7 +102,7 @@ func IsQuotaError(err error) bool {
 }
 
 // ErrRequestCanceled 表示请求上下文被取消(客户端断开/超时),而非上游故障。
-var ErrRequestCanceled = errors.New("runtime client: request context canceled")
+//var ErrRequestCanceled = errors.New("runtime client: request context canceled")
 
 // IsRetryableLlmError 判定错误是否可安全重试(瞬时故障)。
 //   - 传输层故障(连接失败/断流;StatusCode==0)可重试;

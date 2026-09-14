@@ -1,6 +1,8 @@
 package exception
 
-import "my.favorite/platformutility/webbase/middleware/basic"
+import (
+	"my.favorite/platformutility/webbase/middleware/basic"
+)
 
 // 定义每个error类型的编码段
 const (

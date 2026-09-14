@@ -11,17 +11,18 @@
 package common
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	hCommon "my.favorite/cclawservice/harness/common"
+	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
 )
-
-// ========================== 以下函数是对agent,runtime provider,skills进行规整和校验 ============================
 
 func NormalizeOwner(ownerId *string) {
 	if strings.TrimSpace(*ownerId) == "" {
@@ -186,4 +187,58 @@ func BuildSessionName(message string) string {
 	return name
 }
 
-// ======================================================================
+// IsInterrupted 用于报告一次失败是否属于“被中断”(用户取消/客户断开/任务超时)
+func IsInterrupted(runCtx context.Context, err error) bool {
+	if runCtx != nil && (errors.Is(runCtx.Err(), context.Canceled) || errors.Is(runCtx.Err(), context.DeadlineExceeded)) {
+		return true
+	}
+
+	return err != nil && errors.Is(err, llmproto.ErrRequestCanceled)
+}
+
+// InterruptionReason 归类中断原因
+func InterruptionReason(runCtx context.Context, err error) string {
+	switch {
+	case runCtx != nil && errors.Is(runCtx.Err(), context.DeadlineExceeded):
+		return "run timeout"
+	case runCtx != nil && errors.Is(runCtx.Err(), context.Canceled):
+		return "interrupted by user or client disconnected"
+	case err != nil && errors.Is(err, llmproto.ErrRequestCanceled):
+		return "upstream stream canceled"
+	default:
+		return "stream error"
+	}
+}
+
+// FinishReasonNotice 把上游finish_reason映射为独立的收尾提示(code + 文案)
+func FinishReasonNotice(finishReason string) (code, msg string) {
+	switch strings.TrimSpace(finishReason) {
+	case llmproto.FinishReasonLength:
+		return ChatNoticeTruncated, ConstChatNoticeTruncatedMsg
+	case llmproto.FinishReasonContentFilter:
+		return ChatNoticeContentFilter, ConstChatNoticeContentFilterMsg
+	default:
+		return "", ""
+	}
+}
+
+// maintenanceSlots 后台记忆维护的全局并发闸(压缩/蒸馏都要调用 LLM)。
+var maintenanceSlots = make(chan struct{}, hCommon.CompactionMaxConcurrent)
+
+// AcquireMaintenanceSlot 非阻塞获取一个维护名额(拿不到就放弃本次)。
+func AcquireMaintenanceSlot() bool {
+	select {
+	case maintenanceSlots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// ReleaseMaintenanceSlot 释放维护名额。
+func ReleaseMaintenanceSlot() {
+	select {
+	case <-maintenanceSlots:
+	default:
+	}
+}

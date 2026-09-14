@@ -143,19 +143,20 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 	if err != nil {
 		// 中断轮次记录(旁路):同步路径没有向客户端输出内容,
 		// 因此只在"本次失败确属中断/超时"时留痕(提问已发生,审计需要)。
-		if recorded && isInterrupted(ctx, err) {
-			s.memoryService.AppendInterruptedTurn(session, req, pCommon.BlankString, recorder.Snapshot(), interruptionReason(ctx, err))
+		if recorded && cCommon.IsInterrupted(ctx, err) {
+			s.memoryService.AppendInterruptedTurn(session, req, pCommon.BlankString, recorder.Snapshot(), cCommon.InterruptionReason(ctx, err))
 		}
 		return nil, myException.LlmError(err, "chat service: runtime call chat")
 	}
 
 	// 轮次落库:问题/工具/回复写入历史文件并登记 t_turn / t_turn_tool
+	turnSeq := 0
 	if recorded {
-		s.memoryService.AppendTurn(session, req, reply, recorder.Snapshot())
+		turnSeq = s.memoryService.AppendTurn(session, req, reply, recorder.Snapshot())
 	}
 
 	// 记忆维护(旁路、异步):按需压缩历史、按需蒸馏长期记忆
-	s.triggerMemoryMaintenance(session, agent, llmProvider, assembled)
+	s.triggerMemoryMaintenance(session, agent, llmProvider, assembled, turnSeq)
 
 	// 组装应答
 	now := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
@@ -213,7 +214,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	// 会话建档(阶段1双写:旁路,只写不读;失败不影响聊天)
 	session, recorded := s.memoryService.Begin(sender, agent, req)
 
-	// 上下文读回装配(与同步路径共用同一入口,保证两条路径上下文一致)
+	// 将system,user,memory等信息进行装配
 	assembled := s.assembleChatContext(session, agent, llmProvider, systemPrompt, req)
 
 	// 累计已产出的回复:中断/失败时也要把"用户已经看到的内容"记入历史,
@@ -239,8 +240,8 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	}
 	if err != nil {
 		// 中断轮次记录(旁路):已产出部分内容,或本次失败属中断/超时,都要留痕
-		if recorded && (strings.TrimSpace(streamed.String()) != pCommon.BlankString || isInterrupted(runCtx, err)) {
-			s.memoryService.AppendInterruptedTurn(session, req, streamed.String(), recorder.Snapshot(), interruptionReason(runCtx, err))
+		if recorded && (strings.TrimSpace(streamed.String()) != pCommon.BlankString || cCommon.IsInterrupted(runCtx, err)) {
+			s.memoryService.AppendInterruptedTurn(session, req, streamed.String(), recorder.Snapshot(), cCommon.InterruptionReason(runCtx, err))
 		}
 
 		// 应用级运行超时:给可读错误,而不是笼统的 "request canceled by client"
@@ -252,7 +253,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 
 	// finish_reason 收尾:长度截断/内容合规 → 以独立 notice 事件告知前端(不污染回答正文)。
 	// 无任何正式内容且被内容安全策略拦截时,按内容合规业务错误返回(交由控制器提示)。
-	if code, msg := finishReasonNotice(finishReason); code != "" {
+	if code, msg := cCommon.FinishReasonNotice(finishReason); code != "" {
 		if strings.TrimSpace(reply) == pCommon.BlankString && finishReason == llmproto.FinishReasonContentFilter {
 			return pCommon.BlankString, myException.ChatLLMContentFilterKind.Newf("chat service: output blocked by content filter")
 		}
@@ -262,27 +263,14 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	}
 
 	// 轮次落库(阶段1双写:旁路,只写不读;失败不影响回复)
+	turnSeq := 0
 	if recorded {
-		s.memoryService.AppendTurn(session, req, reply, recorder.Snapshot())
+		turnSeq = s.memoryService.AppendTurn(session, req, reply, recorder.Snapshot())
 	}
 
 	// 记忆维护(旁路、异步):与同步路径共用同一触发条件
-	s.triggerMemoryMaintenance(session, agent, llmProvider, assembled)
+	s.triggerMemoryMaintenance(session, agent, llmProvider, assembled, turnSeq)
 	return reply, nil
-}
-
-// finishReasonNotice 把上游 finish_reason 映射为独立的收尾提示(code + 文案;无需提示返回空串)。
-//   - length:         回答达到输出长度上限,可能被截断
-//   - content_filter: 输出被内容安全策略拦截,可能不完整
-func finishReasonNotice(finishReason string) (code, msg string) {
-	switch strings.TrimSpace(finishReason) {
-	case llmproto.FinishReasonLength:
-		return cCommon.ChatNoticeTruncated, cCommon.ConstChatNoticeTruncatedMsg
-	case llmproto.FinishReasonContentFilter:
-		return cCommon.ChatNoticeContentFilter, cCommon.ConstChatNoticeContentFilterMsg
-	default:
-		return "", ""
-	}
 }
 
 // InterruptChat 中断指定轮次进行中的流式聊天(用户点击中断按钮)。
@@ -484,25 +472,16 @@ func (s *ChatService) collectSkillFiles(comCode string, agent dataobject.TAgent)
 	return files, agentExtensionRoot
 }
 
-// triggerMemoryMaintenance 触发后台记忆维护(旁路、异步):先按需压缩,再按需蒸馏。
+// triggerMemoryMaintenance 触发后台记忆维护(旁路、异步):按需蒸馏、按需压缩、按需合并摘要。
 //
 // 为什么合并成一个后台任务:
 //
-//	两者都是"耗一次 LLM 调用、与用户回复无关"的记忆维护动作,合并后同一会话只起一个协程,
+//	三者都是"耗一次 LLM 调用、与用户回复无关"的记忆维护动作,合并后同一会话只起一个协程,
 //	并共享同一次读回结果,避免重复 IO。
 //
-// 触发条件:
-//   - 压缩:装配阶段因预算裁掉了历史(会话确实变长了);
-//   - 蒸馏:轮次跨过节流阈值(每 DistillIntervalTurns 轮一次),把长期有效事实沉淀到 MEMORY.md。
-//
-// 为什么异步、为什么用独立上下文、为什么失败只记日志:
-//   - 压缩/蒸馏都要额外的 LLM 调用(秒级),绝不能占用用户等待回复的时间;
-//     它们也不改变本轮结果(本轮上下文已在装配阶段裁剪完毕,发出去的消息本身合法),
-//     只是让**后续**轮次的历史重新变小、长期记忆更完整;
-//   - 请求上下文在 HTTP 处理器返回后即被取消,后台任务必须用独立上下文,
-//     同时给它明确上限:不允许旁路任务长期占用协程;
-//   - 记忆是增强能力,失败只记日志,不能成为聊天链路的故障点(与阶段1双写同一原则)。
-func (s *ChatService) triggerMemoryMaintenance(session dataobject.TSession, agent dataobject.TAgent, llmProvider dataobject.TLlm, assembled ctxmgr.AssembleResult) {
+// **执行顺序是契约** —— 蒸馏必须在压缩之前(否则被压缩的原文对蒸馏永久不可见),
+// 顺序由 maintenancePlan.steps 给出并单测锁住。
+func (s *ChatService) triggerMemoryMaintenance(session dataobject.TSession, agent dataobject.TAgent, llmProvider dataobject.TLlm, assembled ctxmgr.AssembleResult, turnSeq int) {
 	if s.memoryService == nil || !s.memoryService.Enabled() {
 		return
 	}
@@ -510,21 +489,46 @@ func (s *ChatService) triggerMemoryMaintenance(session dataobject.TSession, agen
 		return
 	}
 
-	needCompact := ctxmgr.ShouldCompact(agent, assembled)
+	// 预算为 0:窗口扣掉输出预留与系统提示预留后没有剩余,压缩改变不了这一点,
+	// 反复压缩只会白烧 LLM 调用。这里明确告警并把问题指向配置,而不是继续压
+	if assembled.BudgetExhausted {
+		logging.LogWarnF("chat service: history budget is exhausted for session=%s (context_window - output reserve - max(est(system), reverse_token_floor) <= 0); compaction disabled, check the agent/model config",
+			session.SessionId)
+	}
+
+	needCompact := ctxmgr.ShouldCompact(assembled)
 	// 冷却期内直接不起后台任务:省掉协程 + 一次全量读回(Compact 内部还会再判一次,以那里为准)
 	if needCompact && !mstorage.GetCompactionThrottle().Allow(session.SessionId, pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp) {
 		needCompact = false
 	}
-	turns := s.memoryService.TurnCount(session.SessionId)
-	needDistill := turns >= hCommon.DistillMinTurns && turns%hCommon.DistillIntervalTurns == 0
-	if !needCompact && !needDistill {
+	// 轮次数直接取"本轮刚落库的序号" —— AppendTurn 已经查过一次 MAX(seq),
+	// 这里不再重复查询(它在请求路径上、且在本函数的所有早退判断之前)。
+	// 只有本轮未被记录(建档失败/幂等跳过)时才退回一次查询:那时序号没有推进。
+	turns := turnSeq
+	if turns <= 0 {
+		turns = s.memoryService.TurnCount(session.SessionId)
+	}
+	needDistill := ctxmgr.NeedDistillNow(turns)
+	// 摘要总量超预算 → 合并最旧的一批摘要。装配结果里的 Summary 就是将要注入 system 的摘要正文,
+	// 直接量它的长度即可,不必为此多读一次历史文件。
+	// 预算耗尽时不做合并:摘要再小也装不下历史,问题在配置(与压缩被禁同一个理由)。
+	needMerge := !assembled.BudgetExhausted && len([]rune(assembled.Summary)) > hCommon.MaxSummaryTotalRunes
+	if !needCompact && !needDistill && !needMerge {
 		return
 	}
 
 	// 压缩模式来源:t_agent.compaction_mode —— 0=default(整体摘要) / 1=safeguard(分块+保全),
 	// 常量与名称见 dataobject.CompactionMode*,模式差异集中在 mstorage/compaction.go。
 	from, to, mode := assembled.DroppedFrom, assembled.DroppedTo, agent.CompactionMode
+
+	// 获得一个维护routine，避免无限次获取打满LLM
+	if !cCommon.AcquireMaintenanceSlot() {
+		logging.LogDebugF("chat service: memory maintenance slot unavailable, skip session=%s", session.SessionId)
+		return
+	}
+
 	go func() {
+		defer cCommon.ReleaseMaintenanceSlot()
 		defer func() { // 后台协程必须自兜 panic:否则单个会话的异常会带崩整个进程
 			if r := recover(); r != nil {
 				logging.LogErrorF("chat service: panic in memory maintenance of %s: %v", session.SessionId, r)
@@ -540,51 +544,40 @@ func (s *ChatService) triggerMemoryMaintenance(session dataobject.TSession, agen
 			return
 		}
 
-		if needCompact {
-			if _, err = s.memoryService.Compact(ctx, session, records, from, to, mode, s.summarizer(llmProvider)); err != nil {
-				logging.LogWarnF("chat service: compact history of %s error:%s", session.SessionId, err.Error())
-			}
-		}
-		if needDistill {
-			// 蒸馏只取原始记录(Distill 内部会过滤摘要记录),因此压缩后无需重读
-			if _, err = s.memoryService.Distill(ctx, session, records, agent, s.summarizer(llmProvider)); err != nil {
-				logging.LogWarnF("chat service: distill memory of %s error:%s", session.SessionId, err.Error())
+		// 动作顺序见 maintenancePlan.steps:蒸馏 → 压缩 → 合并摘要。
+		// 先蒸馏再压缩,两个目标都达到:长期记忆拿到完整原文,历史体积随后有界。
+		plan := maintenancePlan{distill: needDistill, compact: needCompact, merge: needMerge}
+		for _, step := range plan.steps() {
+			switch step {
+			case stepDistill:
+				if _, err = s.memoryService.Distill(ctx, session, records, agent, s.summarizer(llmProvider)); err != nil {
+					logging.LogWarnF("chat service: distill memory of %s error:%s", session.SessionId, err.Error())
+				}
+
+			case stepCompact:
+				if _, err = s.memoryService.Compact(ctx, session, records, from, to, mode, s.summarizer(llmProvider)); err != nil {
+					logging.LogWarnF("chat service: compact history of %s error:%s", session.SessionId, err.Error())
+				}
+
+			case stepMerge:
+				// 合并必须基于**最新**内容:压缩刚写完摘要,摘要集合与总量都变了。
+				// (蒸馏只动 MEMORY.md,不改历史文件,因此无需为它重读。)
+				if latest, readErr := s.memoryService.ReadRecords(session); readErr == nil {
+					records = latest
+				} else {
+					logging.LogWarnF("chat service: re-read records before merge of %s error:%s",
+						session.SessionId, readErr.Error())
+				}
+
+				// 以**重读后**的判定为准:压缩本身也可能把摘要总量推过阈值。
+				if ctxmgr.SummaryOverBudget(records) {
+					if _, err = s.memoryService.CompactSummaries(ctx, session, records, s.summarizer(llmProvider)); err != nil {
+						logging.LogWarnF("chat service: merge summaries of %s error:%s", session.SessionId, err.Error())
+					}
+				}
 			}
 		}
 	}()
-}
-
-// summarizer 把 LLM 客户端包装为"摘要生成器"注入 mstorage。
-// 之所以注入而不是让 mstorage 直接调用 LLM:维持依赖方向 harness/ctxmgr,mstorage 为基础包,
-// 反向依赖会形成 import cycle;注入后单测也能用假摘要器替换真实模型。
-func (s *ChatService) summarizer(llmProvider dataobject.TLlm) mstorage.Summarizer {
-	return func(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
-		return s.llmClient.Complete(ctx, llmProvider, systemPrompt, userPrompt, hCommon.SummaryMaxTokens)
-	}
-}
-
-// isInterrupted 报告一次失败是否属于"被中断"(用户取消/客户端断开/任务超时)。
-// 仅用于决定是否记录中断轮次:普通上游报错(鉴权/限流/协议不符)不是中断,
-// 若把它也写进历史,会在会话里累积一堆没有回答的提问,反而污染上下文。
-func isInterrupted(runCtx context.Context, err error) bool {
-	if runCtx != nil && (errors.Is(runCtx.Err(), context.Canceled) || errors.Is(runCtx.Err(), context.DeadlineExceeded)) {
-		return true
-	}
-	return err != nil && errors.Is(err, llmproto.ErrRequestCanceled)
-}
-
-// interruptionReason 归类中断原因(仅用于日志观测,不落库)。
-func interruptionReason(runCtx context.Context, err error) string {
-	switch {
-	case runCtx != nil && errors.Is(runCtx.Err(), context.DeadlineExceeded):
-		return "run timeout"
-	case runCtx != nil && errors.Is(runCtx.Err(), context.Canceled):
-		return "interrupted by user or client disconnected"
-	case err != nil && errors.Is(err, llmproto.ErrRequestCanceled):
-		return "upstream stream canceled"
-	default:
-		return "stream error"
-	}
 }
 
 // assembleChatContext 读回会话历史并装配成本轮完整的 LLM 消息序列。
@@ -791,4 +784,20 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 		}
 	}
 	return "", "", myException.ChatToolLoopKind.Newf("chat service: tool stream loop exceeded max iterations(%d)", hCommon.AgentToolLoopMax)
+}
+
+// summarizer 把 LLM 客户端包装为"摘要生成器"注入 mstorage。
+// 之所以注入而不是让 mstorage 直接调用 LLM:维持依赖方向 harness/ctxmgr,mstorage 为基础包,
+func (s *ChatService) summarizer(llmProvider dataobject.TLlm) mstorage.Summarizer {
+	return func(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+		text, finishReason, err := s.llmClient.CompleteWithFinish(ctx, llmProvider, systemPrompt, userPrompt, hCommon.SummaryMaxTokens)
+		if err != nil {
+			return text, err
+		}
+		if finishReason == llmproto.FinishReasonLength {
+			return pCommon.BlankString, myException.RuntimeClientErrEx(
+				"summarizer output was truncated by max_tokens (finish_reason=length)")
+		}
+		return text, nil
+	}
 }

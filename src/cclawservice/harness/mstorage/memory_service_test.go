@@ -312,10 +312,13 @@ func TestChatSessionRejectsForeignSender(t *testing.T) {
 }
 
 // cleanupHistoryDir 注册会话历史目录的清理(测试辅助)。
+// 同时丢弃写入器的序号缓存:该缓存按文件路径键控,只删文件不清缓存会让
+// 后续复用的同号会话从缓存序号继续(序号跳号、用例互相污染)。
 func cleanupHistoryDir(t *testing.T, sessionId string) {
 	t.Helper()
 
 	t.Cleanup(func() {
+		GetMemoryFileWriter().ForgetSession(sessionId)
 		if dir, err := GetMemoryFileWriter().MemoryDir(sessionId); err == nil {
 			_ = os.RemoveAll(dir)
 		}

@@ -5,15 +5,9 @@
 * 从而让历史体积有界,同时不丢失早期信息(见 memory_file_storage.go 顶部的序号契约)。
 *
 * 关键设计(为什么这样做):
-*  1. **只追加、不重排**。摘要作为一条**序号更大**的新记录追加到同一个历史文件末尾,
-*     并用自己的 covers 行标注它取代的记录区间。绝不删除/重排原记录 ——
-*     t_turn.chat_index / resp_index 保存的是历史序号,一旦回退就会索引错位。
-*  2. **不需要新表**。t_session/t_turn/t_turn_tool 三表结构保持不变,摘要只活在历史文件里;
-*     读取端(ctxmgr.AssembleContext)按 covers 跳过被取代的记录。
-*  3. **不阻塞用户回复**。压缩由调用方在回复产出后异步触发,失败只记日志:
+*  1. **不阻塞用户回复**。压缩由调用方在回复产出后异步触发,失败只记日志:
 *     记忆是增强能力,不能成为聊天链路的故障点。
-*  4. **两种模式**(t_agent.compaction_mode,由调用方传入,本文件内只影响下面三处):
-*  5. **幂等**。压缩前先确认目标区间尚未被已有摘要覆盖;同一会话的压缩串行化(专用锁键)。
+*  2. **幂等**。压缩前先确认目标区间尚未被已有摘要覆盖;同一会话的压缩串行化(专用锁键)。
 **/
 
 package mstorage
@@ -34,18 +28,32 @@ import (
 type Summarizer func(ctx context.Context, systemPrompt, userPrompt string) (string, error)
 
 // 压缩提示词
-const (
-	compactionSystemPrompt = "你是对话历史压缩器。你的任务是把给定的历史片段压缩为简明摘要,供后续对话继续使用。\n" +
-		"要求:\n" +
-		"1. 保留事实性信息:用户的目标与偏好、已确认的结论、关键数据(数字、编号、日期)、" +
-		"文件路径与命令、尚未完成的待办事项及其状态;\n" +
-		"2. 删除寒暄、重复表述与无关细节;\n" +
-		"3. 只依据给定内容,不得推测或补造任何信息;不确定的内容标注为“未确认”;\n" +
-		"4. 用第三人称陈述,按时间顺序分条列出,不要输出标题之外的多余格式;\n" +
-		"5. 若片段中有工具调用结果,只保留结论性的数据,不要复述原始输出全文。"
+//
+// 长度上限必须**显式写给模型**:模型自己理解"简明"时,输出长度会随输入一起膨胀,
+// 而 MaxSummaryRunes(落盘截断)与上游 max_tokens 都是硬上限 —— 一旦顶到,摘要会被截断/报错,
+// 整轮压缩白跑(且下一轮还会挑中同一段,形成"永远压不掉"的死循环)。
+var compactionSystemPrompt = fmt.Sprintf("你是对话历史压缩器。你的任务是把给定的历史片段压缩为简明摘要,供后续对话继续使用。\n"+
+	"要求:\n"+
+	"1. 保留事实性信息:用户的目标与偏好、已确认的结论、关键数据(数字、编号、日期)、"+
+	"文件路径与命令、尚未完成的待办事项及其状态;\n"+
+	"2. 删除寒暄、重复表述与无关细节;\n"+
+	"3. 只依据给定内容,不得推测或补造任何信息;不确定的内容标注为“未确认”;\n"+
+	"4. 用第三人称陈述,按时间顺序分条列出,不要输出标题之外的多余格式;\n"+
+	"5. 若片段中有工具调用结果,只保留结论性的数据,不要复述原始输出全文;\n"+
+	"6. 摘要长度不超过 %d 个字符(中文字符按 1 个计),宁可更短。", hCommon.MaxSummaryRunes)
 
+const (
 	compactionUserHeader = "请压缩下面这段历史(记录序号 %d-%d):\n\n"
+
+	// compactionMergeUserHeader 合并摘要时的用户提示:输入是"已有摘要正文"而非原始记录。
+	compactionMergeUserHeader = "请把下面这组历史摘要合并为一条更精炼的摘要(记录序号 %d-%d)。\n" +
+		"它们将被你的输出取代,所以必须覆盖它们**全部**的信息,不得丢失要点:\n\n"
 )
+
+// compactionMergeSystemPrompt 合并摘要专用系统提示(输入是摘要而非原始记录)。
+// 规则编号接在 compactionSystemPrompt 之后(它已经用到 6)。
+var compactionMergeSystemPrompt = compactionSystemPrompt + "\n" +
+	"7. 这次输入本身已经是摘要:你要做的是合并同类项,保留全部事实与结论,只删重复表述。"
 
 // keyTokenPattern 关键信息采样:文件路径、长数字(编号/金额/日期)、带扩展名的文件名。
 // 【safeguard 专属】仅用于保全校验(判断摘要是否丢掉了"不能丢"的信息)。
@@ -59,36 +67,230 @@ type CompactionResult struct {
 	Summary      string // 摘要正文(便于日志/测试观测)
 	Mode         int    // 实际使用的模式
 	Degraded     bool   // 是否因保全校验失败而降级(缩小了覆盖区间)
+	Merged       int    // 合并摘要时被取代的摘要条数(0 表示本次不是合并)
 }
 
-// ============================== private functions & methods ==============================
+// buildMergeUserPrompt 渲染"合并摘要"的输入(输入是摘要正文,不是原始记录)。
+func buildMergeUserPrompt(set []hCommon.MemoryRecord, from, to int) string {
+	var sb strings.Builder
+	_, _ = fmt.Fprintf(&sb, compactionMergeUserHeader, from, to)
+	for i := range set {
+		_, _ = fmt.Fprintf(&sb, "[%d] (covers %d-%d): %s\n", set[i].Index, set[i].CoversFrom, set[i].CoversTo,
+			pCommon.TruncateRunes(strings.TrimSpace(set[i].Content), hCommon.MemoryExcerptRunes, hCommon.TruncatedMarker))
+	}
+	return sb.String()
+}
 
-// compactionTargets 取出区间内尚未被摘要覆盖的普通记录(按序号升序)。
-func compactionTargets(records []hCommon.MemoryRecord, from, to int) []hCommon.MemoryRecord {
-	var covered []hCommon.MemoryRecord
-	for _, rec := range records {
-		if rec.IsSummary() {
-			covered = append(covered, rec)
+// recordsInRange 取出 [from,to] 内的记录(升序)。
+func recordsInRange(records []hCommon.MemoryRecord, from, to int) []hCommon.MemoryRecord {
+	var in []hCommon.MemoryRecord
+	for i := range records {
+		if records[i].Index >= from && records[i].Index <= to {
+			in = append(in, records[i])
 		}
 	}
+	return in
+}
 
-	targets := make([]hCommon.MemoryRecord, 0, to-from+1)
-	for _, rec := range records {
-		if rec.IsSummary() || rec.Index < from || rec.Index > to {
+// compactionRun 在 [from,to] 内挑出**一段可安全压缩的连续普通记录**。
+//
+// 为什么必须"连续"且"不含摘要记录"(P0:covers 的精确性):
+// 摘要落盘时用 `covers: A-B` 表达"这段历史已由本摘要代表",读取端据此让区间内的记录永久退出回放。
+// 这个承诺只有在"区间内每条记录都真的送进过模型"时才成立,因此屏障只有三种:
+//   - 摘要记录本身:区间不能跨过它 —— 否则后续的"被更晚摘要取代"判定会把那条早期摘要
+//     误判为已被取代,而新摘要里并没有它的内容(信息静默丢失);
+//   - 已被摘要代表的记录:它已由摘要代表,不是本次任务;
+//   - 序号不连续:区间中间有空洞,无法用单区间表达。
+//
+// 为什么要"挑"而不是"从头取第一段":屏障前面的残留段可能不足 CompactionMinRecords
+// (例如摘要序号紧跟在 1~3 条新记录之后 —— 这是常态,因为摘要序号是 LLM 调用结束后才分配的),
+// 从头取会让屏障后面的记录**永远够不到**,压缩就此停摆。
+// 因此这里在所有候选段里挑一段:优先"条数达标且体积最大"的(体积最大 = 最可能通过收益门槛),
+// 没有达标的段时返回体积最大的那段(交由调用方按门槛拒绝)。
+func compactionRun(records []hCommon.MemoryRecord, from, to int) []hCommon.MemoryRecord {
+	covered := hCommon.CoveredIndexes(hCommon.SummariesOf(records))
+
+	var best, bestUsable, current []hCommon.MemoryRecord
+	flush := func() {
+		if len(current) == 0 {
+			return
+		}
+		if volume(best) < volume(current) {
+			best = current
+		}
+		if len(current) >= hCommon.CompactionMinRecords && volume(bestUsable) < volume(current) {
+			bestUsable = current
+		}
+		current = nil
+	}
+
+	for i := range records {
+		rec := records[i]
+		if rec.Index < from || rec.Index > to {
 			continue
 		}
-		superseded := false
-		for _, sum := range covered {
-			if sum.Covers(rec.Index) {
-				superseded = true
+		blocked := rec.IsSummary() || covered[rec.Index] ||
+			(len(current) > 0 && rec.Index != current[len(current)-1].Index+1)
+		if blocked {
+			flush()
+			continue
+		}
+		current = append(current, rec)
+	}
+	flush()
+
+	if len(bestUsable) > 0 {
+		return bestUsable
+	}
+	return best
+}
+
+// volume 一段记录的正文总长(rune),用于挑选"最值得压缩"的段。
+func volume(records []hCommon.MemoryRecord) int {
+	return hCommon.RecordsRunes(records)
+}
+
+// fitCompactionRange 按"送入摘要模型的字符预算"收缩区间**尾部**。
+//
+// 关键:宁可不压,也不能"丢弃区间内的记录却宣称覆盖整个区间" ——
+// covers 是承诺,区间内的每条记录都必须真的送进模型,否则那部分原文会永久退出回放。
+// 因此放不下时收缩 coverTo(剩下的部分下次再压),而不是把记录丢在区间里。
+// 返回收缩后的记录集与其长度;记录集至少保留 1 条。
+func fitCompactionRange(run []hCommon.MemoryRecord) ([]hCommon.MemoryRecord, int) {
+	if len(run) == 0 {
+		return nil, 0
+	}
+
+	total := 0
+	fit := 0
+	for i := range run {
+		lineRunes := utf8.RuneCountInString(compactionPromptLine(run[i]))
+		if i > 0 && total+lineRunes > hCommon.MaxCompactionInputChars {
+			break
+		}
+		total += lineRunes
+		fit = i + 1
+	}
+	return run[:fit], fit
+}
+
+// coverChecker 预建的"序号 → 记录"索引。
+// verifyCovers 只需遍历 covers 区间,而不是全量记录:
+// mergeCandidate 会对每个候选前缀各校验一次,用索引可把复杂度从 O(记录数 × 摘要数)
+// 降到 O(区间长度 × 摘要数)。
+type coverChecker map[int]hCommon.MemoryRecord
+
+// newCoverChecker 为一批记录建索引(建一次可反复校验)。
+func newCoverChecker(records []hCommon.MemoryRecord) coverChecker {
+	checker := make(coverChecker, len(records))
+	for i := range records {
+		checker[records[i].Index] = records[i]
+	}
+	return checker
+}
+
+// verify 校验 covers 区间 [from,to] 与"真正送进模型的记录集合"是否一致。
+// 见 verifyCovers 的规则说明。
+func (c coverChecker) verify(from, to int, consumed, covered map[int]bool) error {
+	for index := from; index <= to; index++ {
+		rec, ok := c[index]
+		if !ok {
+			continue // 该序号没有记录(空洞):没有"未经摘要的原文"可言
+		}
+		if consumed[index] || covered[index] {
+			continue
+		}
+
+		kind := "记录"
+		if rec.IsSummary() {
+			kind = "摘要记录"
+		}
+		return fmt.Errorf("covers %d-%d over-claims: %s #%d was never sent to the model", from, to, kind, index)
+	}
+	return nil
+}
+
+// verifyCovers 校验"摘要声明的 covers 区间"与"真正送进模型的记录集合"一致。
+//
+// 规则:区间 [from,to] 内的每条记录必须满足其一 ——
+//  1. 属于本次送入模型的集合(consumed);
+//  2. 已被**既有摘要**覆盖(它本来就已退出回放,不因本条摘要而改变)。
+//
+// 不满足时必须放弃落盘:过度承诺会让未经摘要的原文永久退出回放(信息静默丢失)。
+func verifyCovers(records []hCommon.MemoryRecord, from, to int, consumed, covered map[int]bool) error {
+	return newCoverChecker(records).verify(from, to, consumed, covered)
+}
+
+// effectiveSummaryCap 按源体积推导摘要长度上限。
+// 压缩的价值来自"变小":若摘要上限仍不小于源体积,压完只会更占预算(而摘要折进 system,
+// system 越长历史预算越小 —— 会形成正反馈)。源太小时调用方直接跳过压缩。
+func effectiveSummaryCap(srcRunes int) int {
+	limit := int(float64(srcRunes) * hCommon.SummaryShrinkRatio)
+	if limit < hCommon.SummaryMinRunes {
+		limit = hCommon.SummaryMinRunes
+	}
+	if limit > hCommon.MaxSummaryRunes {
+		limit = hCommon.MaxSummaryRunes
+	}
+	return limit
+}
+
+// mergeCandidate 选出可以安全合并的摘要集合(从最旧开始的**前缀**),返回集合与 covers 区间。
+//
+// 合并产生的 covers 区间 [A,B]:
+//
+//	A = 集合中最旧摘要的 CoversFrom
+//	B = max(集合中最大 CoversTo, 集合中最大摘要记录序号)  ← 必须含摘要序号才能取代它们
+//
+// 随后用 verifyCovers 校验:区间内每条普通记录必须已被既有摘要覆盖,
+// 每条摘要记录必须属于本集合(否则它不会被取代,内容会重复注入)。
+// 从最大前缀向下尝试;找不到(或不足 2 条)返回 nil ——
+// 宁可摘要略超预算,也不写一条"过度承诺"的摘要(那会永久丢历史)。
+func mergeCandidate(records []hCommon.MemoryRecord) ([]hCommon.MemoryRecord, int, int) {
+	summaries := hCommon.SummariesOf(records)
+	if len(summaries) < hCommon.CompactionMergeMinSummaries {
+		return nil, 0, 0
+	}
+
+	covered := hCommon.CoveredIndexes(summaries)
+	checker := newCoverChecker(records)
+	for size := len(summaries); size >= hCommon.CompactionMergeMinSummaries; size-- {
+		set := summaries[:size]
+		if set[0].CoversFrom <= 0 {
+			continue
+		}
+
+		from, to := set[0].CoversFrom, set[0].CoversTo
+		consumed := make(map[int]bool, size)
+		inSet := make(map[int]bool, size)
+		for i := range set {
+			inSet[set[i].Index] = true
+			consumed[set[i].Index] = true
+			if set[i].CoversTo > to {
+				to = set[i].CoversTo
+			}
+			if set[i].Index > to {
+				to = set[i].Index
+			}
+		}
+
+		// 区间内若存在"不属于本集合的摘要记录",它不会被取代 → 需要换更大的集合
+		complete := true
+		for index := from; index <= to; index++ {
+			if rec, ok := checker[index]; ok && rec.IsSummary() && !inSet[index] {
+				complete = false
 				break
 			}
 		}
-		if !superseded {
-			targets = append(targets, rec)
+		if !complete {
+			continue
 		}
+		if err := checker.verify(from, to, consumed, covered); err != nil {
+			continue
+		}
+		return set, from, to
 	}
-	return targets
+	return nil, 0, 0
 }
 
 // summarizeOnce —— default 模式:整段区间一次摘要。
@@ -122,23 +324,21 @@ func summarizeInBlocks(ctx context.Context, targets []hCommon.MemoryRecord, summ
 	return strings.Join(blocks, "\n"), nil
 }
 
-// buildCompactionUserPrompt 渲染送入模型的源文本(逐条限长 + 总量上限)。
+// compactionPromptLine 渲染一条记录送入摘要模型的文本(逐条限长)。
+func compactionPromptLine(rec hCommon.MemoryRecord) string {
+	body := pCommon.TruncateRunes(strings.TrimSpace(rec.Content), hCommon.MemoryExcerptRunes, hCommon.TruncatedMarker)
+	return fmt.Sprintf("[%d] %s: %s\n", rec.Index, recordLabel(rec), body)
+}
+
+// buildCompactionUserPrompt 渲染送入模型的源文本。
+//
+// records 必须已经是 compactionRun + fitCompactionRange 之后的**连续**区间:
+// 这里**不再丢弃任何记录** —— 丢弃记录会让 covers 变成对"未经摘要的原文"的过度承诺。
 func buildCompactionUserPrompt(records []hCommon.MemoryRecord, from, to int) string {
 	var sb strings.Builder
 	_, _ = fmt.Fprintf(&sb, compactionUserHeader, from, to)
-
-	total := 0
-	for _, rec := range records {
-		body := pCommon.TruncateRunes(strings.TrimSpace(rec.Content), hCommon.CompactionRecordExcerptRunes, hCommon.TruncatedMarker)
-		line := fmt.Sprintf("[%d] %s: %s\n", rec.Index, recordLabel(rec), body)
-
-		// 超预算则停止追加:装配/压缩都以"序号小的先丢"为原则,这里同样优先保留较新的内容
-		if total+utf8.RuneCountInString(line) > hCommon.MaxCompactionInputChars {
-			sb.WriteString("\n(更早的内容已略去)\n")
-			break
-		}
-		sb.WriteString(line)
-		total += utf8.RuneCountInString(line)
+	for i := range records {
+		sb.WriteString(compactionPromptLine(records[i]))
 	}
 	return sb.String()
 }
@@ -163,8 +363,10 @@ func recordLabel(rec hCommon.MemoryRecord) string {
 
 // buildSummaryRecordContent 构造摘要记录正文:首行 covers 标注,其后为摘要正文。
 // covers 行是机器可读的契约(读取端据此跳过被取代的记录),必须固定格式。
-// 正文按 MaxSummaryRunes 截断:调用方(Compact)**已先截断再做保全校验**,
-// 此处是幂等的兜底,确保"校验过的文本"与"落盘的文本"始终一致。
+//
+// 正文的**主上限**由调用方按源体积推导(effectiveSummaryCap),这里按 MaxSummaryRunes
+// 再截断一次只是幂等兜底(保证"校验过的文本"与"落盘的文本"永远一致);
+// 调大 MaxSummaryRunes 不会放大实际摘要 —— 实际上限看 effectiveSummaryCap。
 func buildSummaryRecordContent(from, to int, summary string) string {
 	return fmt.Sprintf("covers: %d-%d\n\n%s", from, to, pCommon.TruncateRunes(summary, hCommon.MaxSummaryRunes, hCommon.TruncatedMarker))
 }
@@ -202,6 +404,10 @@ func keyRetentionRatio(records []hCommon.MemoryRecord, summary string) (float64,
 }
 
 // 【safeguard 专属】degradeCoverTo 保全校验失败时的降级:只覆盖较老的一半,让较新的原文继续可回放。
+//
+// 已知且可接受的副作用:摘要正文是按**整段** run 生成的,降级后只声明覆盖前半,
+// 于是后半的内容会"摘要里有、原文也回放"一次(重复占预算,方向安全 —— 不会丢信息)。
+// 要消除它需要按降级后的区间重新摘要(多一次 LLM 调用),当前不做。
 func degradeCoverTo(targets []hCommon.MemoryRecord, from, to int) int {
 	if len(targets) < 2 {
 		return to

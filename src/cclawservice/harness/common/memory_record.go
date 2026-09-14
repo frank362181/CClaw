@@ -118,6 +118,107 @@ func CompactionStat(targets []MemoryRecord) string {
 	return fmt.Sprintf("records=%d chars=%d", len(targets), chars)
 }
 
+// RecordsRunes 汇总一批记录的正文总长(rune),用于压缩的"收益验证"。
+func RecordsRunes(records []MemoryRecord) int {
+	chars := 0
+	for i := range records {
+		chars += utf8.RuneCountInString(records[i].Content)
+	}
+	return chars
+}
+
+// CoveredIndexes 汇总摘要记录已经取代的记录序号集合。
+func CoveredIndexes(summaries []MemoryRecord) map[int]bool {
+	covered := make(map[int]bool)
+	for i := range summaries {
+		sum := summaries[i]
+		for index := sum.CoversFrom; index > 0 && index <= sum.CoversTo; index++ {
+			covered[index] = true
+		}
+	}
+	return covered
+}
+
+// SummariesOf 取出全部摘要记录(按序号升序;含已被取代的)。
+func SummariesOf(records []MemoryRecord) []MemoryRecord {
+	var summaries []MemoryRecord
+	for i := range records {
+		if records[i].IsSummary() {
+			summaries = append(summaries, records[i])
+		}
+	}
+	return summaries
+}
+
+// PlainRecords 取出全部普通记录(按序号升序;不含摘要记录)。
+func PlainRecords(records []MemoryRecord) []MemoryRecord {
+	plain := make([]MemoryRecord, 0, len(records))
+	for i := range records {
+		if !records[i].IsSummary() {
+			plain = append(plain, records[i])
+		}
+	}
+	return plain
+}
+
+// ActivePlainRecords 取出**仍会回放**的普通记录:既不是摘要记录,也没有被任何摘要代表。
+//
+// 这是"读取端回放"与"蒸馏输入"共用的口径:被摘要代表的记录既不再回放,
+// 也不应再参与蒸馏(否则旧内容会占满蒸馏窗口,新内容永远蒸馏不到)。
+func ActivePlainRecords(records []MemoryRecord) []MemoryRecord {
+	summaries := SummariesOf(records)
+	if len(summaries) == 0 {
+		return PlainRecords(records)
+	}
+
+	covered := CoveredIndexes(summaries)
+	kept := make([]MemoryRecord, 0, len(records))
+	for i := range records {
+		if records[i].IsSummary() || covered[records[i].Index] {
+			continue
+		}
+		kept = append(kept, records[i])
+	}
+	return kept
+}
+
+// ActiveSummaries 返回**仍然生效**的摘要记录(按序号升序)。
+//
+// 取代判定:某条更晚的摘要的 covers 区间包含了本条摘要自己的记录序号。
+// 正常情况下不会发生 —— 普通压缩的 covers 区间刻意不含任何摘要记录序号(见 mstorage.compactionRun);
+// 只有"合并摘要"刻意把被合并的摘要记录序号纳入区间时,才会发生取代。
+func ActiveSummaries(records []MemoryRecord) []MemoryRecord {
+	summaries := SummariesOf(records)
+	if len(summaries) == 0 {
+		return nil
+	}
+
+	active := make([]MemoryRecord, 0, len(summaries))
+	for i := range summaries {
+		superseded := false
+		for j := i + 1; j < len(summaries); j++ {
+			if summaries[j].Covers(summaries[i].Index) {
+				superseded = true
+				break
+			}
+		}
+		if !superseded {
+			active = append(active, summaries[i])
+		}
+	}
+	return active
+}
+
+// SummariesRunes 汇总生效摘要的正文总长(rune),即注入 system 时的摘要体积。
+// 过滤空正文与生效摘要保持一致(空正文不会被注入)。
+func SummariesRunes(records []MemoryRecord) int {
+	total := 0
+	for _, sum := range ActiveSummaries(records) {
+		total += utf8.RuneCountInString(strings.TrimSpace(sum.Content))
+	}
+	return total
+}
+
 // ============================== private functions & methods ==============================
 
 // scanRecordHeaders 扫描全部记录头(要求 "## [" 处于行首)。

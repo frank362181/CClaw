@@ -50,6 +50,9 @@ const (
 	llmStageStream   = "stream"   // 流中:SSE 已建连(HTTP 200)后发生错误
 )
 
+// ErrRequestCanceled 表示请求上下文被取消(客户端断开/超时),而非上游故障。
+var ErrRequestCanceled = errors.New("runtime client: request context canceled")
+
 // NewLlmResponseError 构造"HTTP 200 但响应体携带 error 字段"的结构化错误(同步路径)。
 // payload 为错误体原始 JSON(即 error 字段的内容),由本包负责解析与分类。
 func NewLlmResponseError(payload json.RawMessage) *LlmStatusError {

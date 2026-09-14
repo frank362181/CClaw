@@ -4,6 +4,8 @@
 
 package common
 
+import "strconv"
+
 // ==================== agent 启动文档与 skill 文档 ====================
 
 // AgentDocumentKind 定义 agent 启动文档的种类
@@ -108,13 +110,12 @@ const (
 	StartupFileCacheTTLSeconds = 30
 
 	MaxAgentDocSize        = 256 * 1024 //agent 启动文档单文件读取上限:256KB
-	MaxSkillDocSize        = 256 * 1024 //skill 文档单文件读取上限:256KB
-	MaxBootstrapFileChars  = 20000      //单个启动文档注入上限(OpenClaw bootstrapMaxChars 默认值)
-	MaxBootstrapTotalChars = 60000      //启动文档注入总上限(OpenClaw bootstrapTotalMaxChars 默认值)
-	MaxUserDocChars        = 4000       //USER.md 单独的字符上限
+	MaxBootstrapFileChars  = 20 * 1024  //单个启动文档注入上限(OpenClaw bootstrapMaxChars 默认值)
+	MaxBootstrapTotalChars = 60 * 1024  //启动文档注入总上限(OpenClaw bootstrapTotalMaxChars 默认值)
+	MaxUserDocChars        = 4 * 1024   //USER.md 单独的字符上限
 )
 
-// MaxPromptSectionLen 的大小限制
+// MaxPromptSectionLen 由 prompt_service.assembleSystemPrompt 中的 capSections 施加。
 const (
 	MaxPromptSectionLen = 32 * 1024 //system prompt 单个 section 的最大 rune 数
 )
@@ -130,16 +131,20 @@ const (
 // skill 元数据目录预算
 const (
 	SkillDocFileName     = "SKILL.md" //skill.md:技能定义
+	MaxSkillDocSize      = 256 * 1024 //skill 文档单文件读取上限:256KB
 	MaxSkillsInPrompt    = 150        //注入 prompt 的 skill 数量上限
 	MaxSkillsPromptChars = 18000      //skill 元数据目录的字符上限
 )
 
 const (
 	AgentRoutingLLMEnabled        = true // 是否启用 LLM 智能分类路由(关键词未命中时的兜底路由方式)。
-	AgentRoutingLLMTimeoutSeconds = 5    // LLM 分类调用超时(秒),避免拖慢主聊天流程。
+	AgentRoutingLLMTimeoutSeconds = 10   // LLM 分类调用超时(秒),避免拖慢主聊天流程。
 	AgentRoutingLLMMaxTokens      = 1024 // LLM 分类输出 token 上限(分类只需返回一个短 AgentId)。
 	SessionAgentBindingTTLSeconds = 3600 // 会话→Agent 内存绑定的有效期(秒),过期后重新路由。
 	AgentToolLoopMax              = 30   // function-calling 工具循环的最大迭代次数(防止模型反复请求工具导致死循环/超时)。
+
+	DefaultToolReplayMaxRunes  = 1200 // 单条工具结果回放的最大字符数(控制历史体积;完整内容仍在文件里)
+	DefaultOutputReserveTokens = 4096 // 为模型输出预留的 token 数
 )
 
 // LLM 调用重试 / 单次请求空闲超时/流式空闲超时 / SSE 心跳相关配置(秒或毫秒;<=0 表示禁用)。
@@ -191,6 +196,23 @@ const (
 	TurnToolRespMaxLen   = 256            //工具输出截取的字符数
 )
 
+const (
+	CompactionModeDefault   = 0 // 默认模式:把需要压缩的区间整体摘要为一条摘要记录。
+	CompactionModeSafeguard = 1 // 保全模式:分块摘要 + 摘要后校验关键信息(路径/结论/待办)是否保留,
+)
+
+// CompactionModeName 返回压缩模式的稳定名称(供日志/可观测性使用,不得用于业务判断)。
+func CompactionModeName(mode int) string {
+	switch mode {
+	case CompactionModeDefault:
+		return "default"
+	case CompactionModeSafeguard:
+		return "safeguard"
+	default:
+		return "unknown(" + strconv.Itoa(mode) + ")"
+	}
+}
+
 // TruncatedMarker 截断标记:工具/历史的截断处显式标出省略号。
 const TruncatedMarker = "…"
 
@@ -200,25 +222,75 @@ const (
 	SafeguardMinKeyRetention = 0.5 // 关键信息保有率下限
 )
 
+// 记忆参数(压缩与蒸馏共用)
+const (
+	// MemoryExcerptRunes 单条记录送入模型的正文上限。
+	MemoryExcerptRunes = 2000
+)
+
 // 压缩参数
 const (
-	CompactionMinRecords         = 4     // 触发压缩的最小记录数(区间太小不值得一次 LLM 调用)
-	MaxCompactionInputChars      = 24000 // 送入摘要模型的源文本字符上限(超出按序号从新到旧舍弃)
-	MaxSummaryRunes              = 4000  // 摘要记录正文的字符上限(摘要自身也要有预算)
-	CompactionRecordExcerptRunes = 2000  // 单条记录送入模型时的最大字符数
+	CompactionMinRecords    = 4     // 触发压缩的最小记录数(区间太小不值得一次 LLM 调用)
+	MaxCompactionInputChars = 24000 // 送入摘要模型的源文本字符上限:放不下时**收缩覆盖区间**(绝不丢弃区间内的记录,见 fitCompactionRange)
+	MaxSummaryRunes         = 4000  // 摘要记录正文的字符上限(摘要自身也要有预算)
 
-	CompactionRunTimeout = 120  //后台压缩的最长时长,因为压缩也是要调用LLM的,超时就放弃,下一轮再来
-	SummaryMaxTokens     = 2048 //SummaryMaxTokens,摘要也要有预算
+	// SummaryShrinkRatio 压缩收益门槛:压缩的价值来自"变小",因此摘要上限随源体积收缩,源太小时直接跳过。
+	//   有效上限 = clamp(源 runes * SummaryShrinkRatio, SummaryMinRunes, MaxSummaryRunes)
+	//   源 runes <= 有效上限 → 压缩没有净收益 → 不发起 LLM 调用。
+	SummaryShrinkRatio = 0.6 // 摘要不超过源体积的比例
+	SummaryMinRunes    = 400 // 摘要的下限(再小就没有信息量)
+
+	// MaxSummaryTotalRunes 注入 system 的历史摘要总量上限。
+	// 摘要会被拼接后折进 system 消息,不设总量上限的话长会话的 system 会单调增长,
+	// 而 system 越长历史预算越小 —— 会形成正反馈,因此超限时合并最旧的一批摘要。
+	MaxSummaryTotalRunes = 12000
+
+	CompactionRunTimeout = 120 //后台压缩的最长时长,因为压缩也是要调用LLM的,超时就放弃,下一轮再来
+
+	// SummaryMaxTokens 摘要/长期记忆这类"维护调用"的输出 token 上限。
+	// 必须 ≥ 代码自己承诺的长度上限,否则契约与能力自相矛盾:
+	//   - 落盘上限 MaxSummaryRunes(4000 rune)≈ 2667 token(中文按 1.5 字符/token 估);
+	//   - 蒸馏要求模型回"完整列表" —— DistillMaxMemoryFacts(20) × DistillMaxFactRunes(200) = 4000 rune。
+	// 取 2048 时,模型一旦写满就会被上游截断,而 finish_reason=length 在 summarizer 里被当作失败
+	// → 同一段记录每轮重试、永远压不掉(实测阈值刚好落在大段中文对话上)。
+	SummaryMaxTokens = 4096
+
+	// CompactionMaxConcurrent 后台记忆维护(压缩/蒸馏)的全局并发上限:
+	// 记忆是旁路增强,不应把上游 RPM/TPM 配额吃光、挤掉用户真正的对话请求。
+	CompactionMaxConcurrent = 3
+	// CompactionMergeMinSummaries 触发"摘要合并"所需的最少摘要条数(只合并不了 1 条)。
+	CompactionMergeMinSummaries = 2
 )
 
 // 蒸馏参数
 const (
 	// DistillMinTurns 蒸馏的触发条件
 	DistillMinTurns      = 6  // 触发蒸馏的最少轮次数(太短的会话没有长期价值)
-	DistillMinRecords    = 6  // 触发蒸馏的最小记录数(太短的对话没有长期价值)
+	DistillMinRecords    = 6  // **首次**蒸馏的最小记录数(太短的对话没有长期价值)
 	DistillIntervalTurns = 10 // 蒸馏间隔(轮次):每跨过这么多个轮次蒸馏一次
 
-	DistillMaxFacts          = 8                     // 单次蒸馏最多写入的条目数(避免一次会话灌满长期记忆)
+	// DistillMemoryDocMaxChars MEMORY.md 的体积上限(蒸馏写入时裁剪)。
+	//
+	// 刻意**小于**单文档注入上限 MaxBootstrapFileChars:MEMORY.md 在启动文档注入顺序
+	// (AGENTS → SOUL → … → BOOTSTRAP → MEMORY)里是**最后**一段,总预算
+	// (enforceTotalBudget)吃紧时它是第一个被截断/丢弃的 —— 写满到单文档上限,
+	// 就会出现"事实写进了文件、却从没进过 prompt,同时为了这个预算把旧事实删了"。
+	DistillMemoryDocMaxChars = 12 * 1024
+
+	// DistillSimilarFactRatio / DistillSimilarFactMinRunes "新事实覆盖旧事实"的判定阈值:
+	// 两条事实的字符二元组 Jaccard 相似度 ≥ 阈值、且都不短于下限时,视为同一槽位的更新
+	// (例:"单位编码固定为 100001" → "单位编码固定为 100002")。
+	// 只做**同义改写/取值更新**这一层,语义级去重本地做不到,不假装能做。
+	DistillSimilarFactRatio    = 0.6
+	DistillSimilarFactMinRunes = 10
+
+	DistillMaxFacts = 8 // 单次蒸馏最多写入的条目数(避免一次会话灌满长期记忆)
+	// DistillMaxMemoryFacts 自动记忆区**总计**允许保留的条目数上限。
+	// 与 DistillMaxFacts 的区别:自动区是**整体重写**的"当前状态列表",
+	// 所以这里限制的是列表总长,而 DistillMaxFacts 限制的是单次解析出的条数。
+	DistillMaxMemoryFacts = 20
+	// DistillMinFactRunes 一条事实的最短长度:短于此的"事实"多半是前言/残句/标签。
+	DistillMinFactRunes      = 8
 	DistillMaxFactRunes      = 200                   // 单条事实的最大字符数
 	DistillMaxInputChars     = 20000                 // 送入模型的源文本字符上限
 	DistillSectionTimeLayout = "2006-01-02 15:04:05" // 小节标题的时间格式

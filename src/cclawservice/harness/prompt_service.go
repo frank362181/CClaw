@@ -7,10 +7,9 @@
 *   - 固定注入顺序:AGENTS -> SOUL -> IDENTITY -> USER -> TOOLS -> BOOTSTRAP -> MEMORY
 *   - 必需文件(AGENTS.md)缺失时注入 [MISSING] 标记;可选文件缺失/空白则省略
 *   - 按会话范围(正常/子代理/定时/心跳)过滤注入的文件,并据此控制 MEMORY.md 等隐私文件
-*   - 预算:每文件 20K、USER.md 4K、总量 60K;超限截断并记录
+*   - 预算:每文件 20K、USER.md 4K、单 section 32K、总量取 agent 配置
+*          (未配置时回落到 MaxBootstrapTotalChars 60K);超限一律截断并记录
 *   - skill 只注入元数据目录(名称+版本+描述),正文按需加载;目录有独立预算
-*
-* 与 LoginService 保持一致:组合 baseService.BaseService + 工厂方法 GetPromptService()。
 **/
 
 package harness
@@ -22,9 +21,10 @@ import (
 
 	cCommon "my.favorite/cclawservice/common"
 	hCommon "my.favorite/cclawservice/harness/common"
+	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
-	common2 "my.favorite/platformutility/common"
+	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging"
 	baseService "my.favorite/platformutility/webbase/middleware/service"
 )
@@ -93,7 +93,7 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 	// ---- 启动文档(顺序:AGENTS -> SOUL -> IDENTITY -> USER -> TOOLS -> BOOTSTRAP -> MEMORY) ----
 	for i := range documents {
 		doc := &documents[i]
-		if !isKindAllowedInScope(doc.Kind, scope) {
+		if !hCommon.IsKindAllowedInScope(doc.Kind, scope) {
 			continue
 		}
 
@@ -118,7 +118,7 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 			budget = hCommon.MaxUserDocChars
 		}
 		if runeLen := len([]rune(content)); runeLen > budget {
-			content = common2.TruncateRunes(content, budget, common2.BlankString)
+			content = pCommon.TruncateRunes(content, budget, pCommon.BlankString)
 			truncated = append(truncated, doc.FileName)
 		}
 
@@ -140,13 +140,27 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 		}
 	}
 
+	// ---- 单 section 硬上限:任何 section 都不得超过 MaxPromptSectionLen ----
+	sections, truncated = capSections(sections, hCommon.MaxPromptSectionLen, truncated)
+
 	// ---- 总预算控制:优先保留高优先级文件,超限从尾部压缩 ----
-	sections, truncated = enforceTotalBudget(sections, agent.BootstrapTotalChars, truncated)
+	sections, truncated = truncateTailBudget(sections, ctxmgr.BoostrapBudget(agent.BootstrapTotalChars), truncated)
+
+	// MEMORY.md 在注入顺序里是**最后**一段,总预算吃紧时它是第一个被截断/丢弃的。
+	// 蒸馏按 DistillMemoryDocMaxChars 往这个文件里写长期记忆,一旦被挤掉,
+	// 就会出现"事实写进了文件、却从没进过 prompt"——必须让它可见。
+	for i := range truncated {
+		if truncated[i] == hCommon.MemoryDocFileName {
+			logging.LogWarnF("prompt service: agent=%s long-term memory (%s) was truncated by the prompt budget; distilled facts may never reach the prompt",
+				agent.AgentId, hCommon.MemoryDocFileName)
+			break
+		}
+	}
 
 	// ---- 截断提示(OpenClaw: "## Bootstrap Context Notice") ----
 	if len(truncated) > 0 {
 		notice := "⚠️ Some bootstrap files were truncated to stay within the prompt budget: " +
-			strings.Join(truncated, ", ") + "."
+			strings.Join(pCommon.UniqueStrings(truncated), ", ") + "."
 		sections = append(sections, dataobject.SystemPromptSection{
 			Title:   "Bootstrap Context Notice",
 			Content: notice,
@@ -184,32 +198,27 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 	}, nil
 }
 
-// isKindAllowedInScope 按会话范围过滤启动文档(参考 OpenClaw filterBootstrapFilesForSession)。
-//   - normal:   注入全部(含 MEMORY.md)
-//   - subagent: 仅 AGENTS.md(不继承父 agent 的人格/用户/记忆)
-//   - cron:     AGENTS/SOUL/IDENTITY/USER,不含 MEMORY.md
-//   - heartbeat: 不注入启动文件
-func isKindAllowedInScope(kind hCommon.AgentDocumentKind, scope hCommon.BootstrapScope) bool {
-	switch scope {
-	case hCommon.BootstrapScopeSubagent:
-		return kind == hCommon.AgentDocAgent
-	case hCommon.BootstrapScopeCron:
-		switch kind {
-		case hCommon.AgentDocAgent, hCommon.AgentDocSoul,
-			hCommon.AgentDocIdentity, hCommon.AgentDocUser:
-			return true
-		}
-		return false
-	case hCommon.BootstrapScopeHeartbeat:
-		return false
-	default:
-		return true
+// capSections 对单个 section 施加硬上限:任何 section 的 rune 数不得超过 limit。
+// limit <= 0 表示不限制。超限内容被截断,并记录对应 section 标题。
+func capSections(sections []dataobject.SystemPromptSection, limit int, truncated []string) ([]dataobject.SystemPromptSection, []string) {
+	if limit <= 0 {
+		return sections, truncated
 	}
+
+	for i := range sections {
+		if len([]rune(sections[i].Content)) <= limit {
+			continue
+		}
+		sections[i].Content = pCommon.TruncateRunes(sections[i].Content, limit, pCommon.BlankString)
+		truncated = append(truncated, sections[i].Title)
+	}
+
+	return sections, truncated
 }
 
-// enforceTotalBudget 对全部注入内容施加总预算:从前向后保留高优先级文件,
+// truncateTailBudget 对全部注入内容施加总预算:从前向后保留高优先级文件,
 // 超限时从尾部截断/丢弃,并返回被截断的文件清单。
-func enforceTotalBudget(sections []dataobject.SystemPromptSection, cap int, truncated []string) ([]dataobject.SystemPromptSection, []string) {
+func truncateTailBudget(sections []dataobject.SystemPromptSection, cap int, truncated []string) ([]dataobject.SystemPromptSection, []string) {
 	if cap <= 0 {
 		return sections, truncated
 	}
@@ -236,7 +245,7 @@ func enforceTotalBudget(sections []dataobject.SystemPromptSection, cap int, trun
 		if budget > 0 {
 			kept = append(kept, dataobject.SystemPromptSection{
 				Title:   sections[i].Title,
-				Content: common2.TruncateRunes(sections[i].Content, budget, common2.BlankString),
+				Content: pCommon.TruncateRunes(sections[i].Content, budget, pCommon.BlankString),
 			})
 			truncated = append(truncated, sections[i].Title)
 			budget = 0
@@ -290,7 +299,7 @@ func renderSkillsCatalog(skills []dataobject.SkillDocument) (string, bool) {
 			}
 			desc := meta.Description
 			if descMax > 0 {
-				desc = common2.TruncateRunes(desc, descMax, common2.BlankString)
+				desc = pCommon.TruncateRunes(desc, descMax, pCommon.BlankString)
 			}
 			if len(desc) > 0 {
 				sb.WriteString(": ")

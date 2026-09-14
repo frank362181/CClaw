@@ -15,6 +15,29 @@ import (
 	pException "my.favorite/platformutility/exception"
 )
 
+// IsKindAllowedInScope 按会话范围过滤启动文档(参考 OpenClaw filterBootstrapFilesForSession)。
+//   - normal:   注入全部(含 MEMORY.md)
+//   - subagent: 仅 AGENTS.md(不继承父 agent 的人格/用户/记忆)
+//   - cron:     AGENTS/SOUL/IDENTITY/USER,不含 MEMORY.md
+//   - heartbeat: 不注入启动文件
+func IsKindAllowedInScope(kind AgentDocumentKind, scope BootstrapScope) bool {
+	switch scope {
+	case BootstrapScopeSubagent:
+		return kind == AgentDocAgent
+	case BootstrapScopeCron:
+		switch kind {
+		case AgentDocAgent, AgentDocSoul,
+			AgentDocIdentity, AgentDocUser:
+			return true
+		}
+		return false
+	case BootstrapScopeHeartbeat:
+		return false
+	default:
+		return true
+	}
+}
+
 // FrontMatterDelimiter front matter 的定界符
 const FrontMatterDelimiter = "---"
 

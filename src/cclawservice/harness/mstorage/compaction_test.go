@@ -11,6 +11,10 @@ import (
 	"my.favorite/cclawservice/model/dataobject"
 )
 
+// bulkBody 给测试记录补足正文。压缩有收益门槛(源体积不大于摘要下限时主动跳过),
+// 因此压缩类用例的记录正文必须足够长。
+func bulkBody() string { return strings.Repeat("细节说明", 60) } // 240 rune
+
 // record 构造一条历史记录(测试辅助)
 func record(index int, recordType, title, content string) hCommon.MemoryRecord {
 	return hCommon.MemoryRecord{Index: index, RecordType: recordType, Title: title, Content: content}
@@ -27,13 +31,15 @@ func fakeSummarizer(text string, calls *int) Summarizer {
 }
 
 // compactRecords 构造 12 条普通记录(测试辅助):6 轮问答。
+// 正文刻意写得足够长:压缩的价值来自"变小",源体积不大于摘要下限的区间会被收益门槛拦下。
 func compactRecords() []hCommon.MemoryRecord {
+	body := strings.Repeat("历史细节", 40) // 每条约 160 rune
 	var records []hCommon.MemoryRecord
 	index := 1
 	for i := 0; i < 6; i++ {
 		records = append(records,
-			record(index, hCommon.HistoryRecordTypeUser, "", "问题"+string(rune('1'+i))),
-			record(index+1, hCommon.HistoryRecordTypeAssistant, "", "回答"+string(rune('1'+i))),
+			record(index, hCommon.HistoryRecordTypeUser, "", "问题"+string(rune('1'+i))+" "+body),
+			record(index+1, hCommon.HistoryRecordTypeAssistant, "", "回答"+string(rune('1'+i))+" "+body),
 		)
 		index += 2
 	}
@@ -81,7 +87,7 @@ func TestCompactWritesSummaryAppendedNotRenumbered(t *testing.T) {
 		t.Fatalf("应写入 12 条记录,实际 %d", len(readBack))
 	}
 
-	result, err := svc.Compact(context.Background(), session, readBack, 1, 8, dataobject.CompactionModeDefault,
+	result, err := svc.Compact(context.Background(), session, readBack, 1, 8, hCommon.CompactionModeDefault,
 		fakeSummarizer("用户先问了 8 个问题,助手逐一回答。", nil))
 	if err != nil {
 		t.Fatalf("Compact 失败: %v", err)
@@ -126,13 +132,13 @@ func TestCompactIdempotentSkipsCoveredRange(t *testing.T) {
 	svc := newCompactService()
 
 	records, _ := GetMemoryFileWriter().Read(sessionId, fileName)
-	if _, err := svc.Compact(context.Background(), session, records, 1, 8, dataobject.CompactionModeDefault,
+	if _, err := svc.Compact(context.Background(), session, records, 1, 8, hCommon.CompactionModeDefault,
 		fakeSummarizer("第一次摘要。", nil)); err != nil {
 		t.Fatalf("首次压缩失败: %v", err)
 	}
 
 	records, _ = GetMemoryFileWriter().Read(sessionId, fileName)
-	second, err := svc.Compact(context.Background(), session, records, 1, 8, dataobject.CompactionModeDefault,
+	second, err := svc.Compact(context.Background(), session, records, 1, 8, hCommon.CompactionModeDefault,
 		fakeSummarizer("第二次摘要(不应写入)。", nil))
 	if err != nil {
 		t.Fatalf("二次压缩失败: %v", err)
@@ -156,7 +162,7 @@ func TestCompactSkipsTooSmallRange(t *testing.T) {
 
 	calls := 0
 	records, _ := GetMemoryFileWriter().Read(sessionId, fileName)
-	result, err := svc.Compact(context.Background(), session, records, 1, 2, dataobject.CompactionModeDefault,
+	result, err := svc.Compact(context.Background(), session, records, 1, 2, hCommon.CompactionModeDefault,
 		fakeSummarizer("摘要", &calls))
 	if err != nil {
 		t.Fatalf("Compact 失败: %v", err)
@@ -171,19 +177,19 @@ func TestCompactSkipsTooSmallRange(t *testing.T) {
 func TestCompactSafeguardDegradesWhenKeysLost(t *testing.T) {
 	writer, sessionId := newHistoryTestWriter(t)
 	records := []hCommon.MemoryRecord{
-		record(1, hCommon.HistoryRecordTypeUser, "", "帮我看 /Volumes/Wisdom/MyIdea/CClaw/src/data/ddl_sqlite3.sql"),
-		record(2, hCommon.HistoryRecordTypeAssistant, "", "该文件共 123456 行,已阅读完成。"),
-		record(3, hCommon.HistoryRecordTypeUser, "", "再看 agentService/config/agentdefault.json"),
-		record(4, hCommon.HistoryRecordTypeAssistant, "", "已阅读完毕,包含 987654 个字段配置。"),
-		record(5, hCommon.HistoryRecordTypeUser, "", "继续分析 memory_service.go"),
-		record(6, hCommon.HistoryRecordTypeAssistant, "", "分析完成。"),
+		record(1, hCommon.HistoryRecordTypeUser, "", "帮我看 /Volumes/Wisdom/MyIdea/CClaw/src/data/ddl_sqlite3.sql "+bulkBody()),
+		record(2, hCommon.HistoryRecordTypeAssistant, "", "该文件共 123456 行,已阅读完成。"+bulkBody()),
+		record(3, hCommon.HistoryRecordTypeUser, "", "再看 agentService/config/agentdefault.json "+bulkBody()),
+		record(4, hCommon.HistoryRecordTypeAssistant, "", "已阅读完毕,包含 987654 个字段配置。"+bulkBody()),
+		record(5, hCommon.HistoryRecordTypeUser, "", "继续分析 memory_service.go "+bulkBody()),
+		record(6, hCommon.HistoryRecordTypeAssistant, "", "分析完成。"+bulkBody()),
 	}
 	fileName := writeRecords(t, writer, sessionId, records)
 	session := dataobject.TSession{SessionId: sessionId, ChatData: fileName}
 	svc := newCompactService()
 
 	readBack, _ := GetMemoryFileWriter().Read(sessionId, fileName)
-	result, err := svc.Compact(context.Background(), session, readBack, 1, 6, dataobject.CompactionModeSafeguard,
+	result, err := svc.Compact(context.Background(), session, readBack, 1, 6, hCommon.CompactionModeSafeguard,
 		fakeSummarizer("用户阅读了几个文件,内容已看。", nil)) // 刻意不含路径与编号
 	if err != nil {
 		t.Fatalf("Compact 失败: %v", err)
@@ -203,10 +209,10 @@ func TestCompactSafeguardDegradesWhenKeysLost(t *testing.T) {
 func TestCompactSafeguardKeepsWhenKeysRetained(t *testing.T) {
 	writer, sessionId := newHistoryTestWriter(t)
 	records := []hCommon.MemoryRecord{
-		record(1, hCommon.HistoryRecordTypeUser, "", "查看 /Volumes/Wisdom/MyIdea/CClaw/src/data/ddl_sqlite3.sql"),
-		record(2, hCommon.HistoryRecordTypeAssistant, "", "该文件定义 123456 条约束。"),
-		record(3, hCommon.HistoryRecordTypeUser, "", "还有 config/agentdefault.json 呢"),
-		record(4, hCommon.HistoryRecordTypeAssistant, "", "含 987654 个配置项。"),
+		record(1, hCommon.HistoryRecordTypeUser, "", "查看 /Volumes/Wisdom/MyIdea/CClaw/src/data/ddl_sqlite3.sql "+bulkBody()),
+		record(2, hCommon.HistoryRecordTypeAssistant, "", "该文件定义 123456 条约束。"+bulkBody()),
+		record(3, hCommon.HistoryRecordTypeUser, "", "还有 config/agentdefault.json 呢"+bulkBody()),
+		record(4, hCommon.HistoryRecordTypeAssistant, "", "含 987654 个配置项。"+bulkBody()),
 	}
 	fileName := writeRecords(t, writer, sessionId, records)
 	session := dataobject.TSession{SessionId: sessionId, ChatData: fileName}
@@ -215,7 +221,7 @@ func TestCompactSafeguardKeepsWhenKeysRetained(t *testing.T) {
 	readBack, _ := GetMemoryFileWriter().Read(sessionId, fileName)
 	summary := "已查看 /Volumes/Wisdom/MyIdea/CClaw/src/data/ddl_sqlite3.sql(定义 123456 条约束)" +
 		"与 config/agentdefault.json(含 987654 个配置项)。"
-	result, err := svc.Compact(context.Background(), session, readBack, 1, 4, dataobject.CompactionModeSafeguard,
+	result, err := svc.Compact(context.Background(), session, readBack, 1, 4, hCommon.CompactionModeSafeguard,
 		fakeSummarizer(summary, nil))
 	if err != nil {
 		t.Fatalf("Compact 失败: %v", err)
@@ -238,7 +244,7 @@ func TestCompactSafeguardSummarizesInBlocks(t *testing.T) {
 		if i%2 == 0 {
 			kind = hCommon.HistoryRecordTypeAssistant
 		}
-		records = append(records, record(i, kind, "", "内容"))
+		records = append(records, record(i, kind, "", strings.Repeat("内容", 30)))
 	}
 	fileName := writeRecords(t, writer, sessionId, records)
 	session := dataobject.TSession{SessionId: sessionId, ChatData: fileName}
@@ -246,7 +252,7 @@ func TestCompactSafeguardSummarizesInBlocks(t *testing.T) {
 
 	calls := 0
 	readBack, _ := GetMemoryFileWriter().Read(sessionId, fileName)
-	if _, err := svc.Compact(context.Background(), session, readBack, 1, 60, dataobject.CompactionModeSafeguard,
+	if _, err := svc.Compact(context.Background(), session, readBack, 1, 60, hCommon.CompactionModeSafeguard,
 		fakeSummarizer("内容", &calls)); err != nil {
 		t.Fatalf("Compact 失败: %v", err)
 	}
@@ -258,12 +264,12 @@ func TestCompactSafeguardSummarizesInBlocks(t *testing.T) {
 // TestCompactionModeName 模式名称映射(日志可观测性):0→default、1→safeguard、其余显式标未知。
 func TestCompactionModeName(t *testing.T) {
 	cases := map[int]string{
-		dataobject.CompactionModeDefault:   "default",
-		dataobject.CompactionModeSafeguard: "safeguard",
-		7:                                  "unknown(7)",
+		hCommon.CompactionModeDefault:   "default",
+		hCommon.CompactionModeSafeguard: "safeguard",
+		7:                               "unknown(7)",
 	}
 	for mode, want := range cases {
-		if got := dataobject.CompactionModeName(mode); got != want {
+		if got := hCommon.CompactionModeName(mode); got != want {
 			t.Errorf("CompactionModeName(%d) = %q, want %q", mode, got, want)
 		}
 	}
@@ -274,12 +280,12 @@ func TestCompactionModeName(t *testing.T) {
 func TestCompactTruncatesBeforeVerify(t *testing.T) {
 	writer, sessionId := newHistoryTestWriter(t)
 	records := []hCommon.MemoryRecord{
-		record(1, hCommon.HistoryRecordTypeUser, "", "配置文件是 config/agentdefault.json,单位编码 100001"),
-		record(2, hCommon.HistoryRecordTypeAssistant, "", "已记录。"),
-		record(3, hCommon.HistoryRecordTypeUser, "", "继续。"),
-		record(4, hCommon.HistoryRecordTypeAssistant, "", "好的。"),
-		record(5, hCommon.HistoryRecordTypeUser, "", "还有别的吗。"),
-		record(6, hCommon.HistoryRecordTypeAssistant, "", "暂时没有。"),
+		record(1, hCommon.HistoryRecordTypeUser, "", "配置文件是 config/agentdefault.json,单位编码 100001 "+bulkBody()),
+		record(2, hCommon.HistoryRecordTypeAssistant, "", "已记录。"+bulkBody()),
+		record(3, hCommon.HistoryRecordTypeUser, "", "继续。"+bulkBody()),
+		record(4, hCommon.HistoryRecordTypeAssistant, "", "好的。"+bulkBody()),
+		record(5, hCommon.HistoryRecordTypeUser, "", "还有别的吗。"+bulkBody()),
+		record(6, hCommon.HistoryRecordTypeAssistant, "", "暂时没有。"+bulkBody()),
 	}
 	fileName := writeRecords(t, writer, sessionId, records)
 	session := dataobject.TSession{SessionId: sessionId, ChatData: fileName}
@@ -291,7 +297,7 @@ func TestCompactTruncatesBeforeVerify(t *testing.T) {
 	summary := long + "配置为 config/agentdefault.json,单位编码 100001"
 
 	readBack, _ := GetMemoryFileWriter().Read(sessionId, fileName)
-	result, err := svc.Compact(context.Background(), session, readBack, 1, 6, dataobject.CompactionModeSafeguard,
+	result, err := svc.Compact(context.Background(), session, readBack, 1, 6, hCommon.CompactionModeSafeguard,
 		fakeSummarizer(summary, nil))
 	if err != nil {
 		t.Fatalf("Compact 失败: %v", err)
@@ -318,12 +324,16 @@ func TestCompactTruncatesBeforeVerify(t *testing.T) {
 func TestCompactThrottledAfterDegrade(t *testing.T) {
 	writer, sessionId := newHistoryTestWriter(t)
 	records := []hCommon.MemoryRecord{
-		record(1, hCommon.HistoryRecordTypeUser, "", "看 /Volumes/Wisdom/MyIdea/CClaw/src/data/ddl_sqlite3.sql"),
-		record(2, hCommon.HistoryRecordTypeAssistant, "", "共 123456 行。"),
-		record(3, hCommon.HistoryRecordTypeUser, "", "再看 config/agentdefault.json"),
-		record(4, hCommon.HistoryRecordTypeAssistant, "", "共 987654 项。"),
-		record(5, hCommon.HistoryRecordTypeUser, "", "继续"),
-		record(6, hCommon.HistoryRecordTypeAssistant, "", "好"),
+		record(1, hCommon.HistoryRecordTypeUser, "", "看 /Volumes/Wisdom/MyIdea/CClaw/src/data/ddl_sqlite3.sql "+bulkBody()),
+		record(2, hCommon.HistoryRecordTypeAssistant, "", "共 123456 行。"+bulkBody()),
+		record(3, hCommon.HistoryRecordTypeUser, "", "再看 config/agentdefault.json "+bulkBody()),
+		record(4, hCommon.HistoryRecordTypeAssistant, "", "共 987654 项。"+bulkBody()),
+		record(5, hCommon.HistoryRecordTypeUser, "", "继续"+bulkBody()),
+		record(6, hCommon.HistoryRecordTypeAssistant, "", "好"+bulkBody()),
+		record(7, hCommon.HistoryRecordTypeUser, "", "还有"+bulkBody()),
+		record(8, hCommon.HistoryRecordTypeAssistant, "", "明白"+bulkBody()),
+		record(9, hCommon.HistoryRecordTypeUser, "", "继续"+bulkBody()),
+		record(10, hCommon.HistoryRecordTypeAssistant, "", "好的"+bulkBody()),
 	}
 	fileName := writeRecords(t, writer, sessionId, records)
 	session := dataobject.TSession{SessionId: sessionId, ChatData: fileName}
@@ -332,7 +342,7 @@ func TestCompactThrottledAfterDegrade(t *testing.T) {
 
 	calls := 0
 	readBack, _ := GetMemoryFileWriter().Read(sessionId, fileName)
-	first, err := svc.Compact(context.Background(), session, readBack, 1, 6, dataobject.CompactionModeSafeguard,
+	first, err := svc.Compact(context.Background(), session, readBack, 1, 10, hCommon.CompactionModeSafeguard,
 		fakeSummarizer("几个文件已读完。", &calls)) // 刻意不含路径与编号 → 降级
 	if err != nil {
 		t.Fatalf("首次压缩失败: %v", err)
@@ -341,9 +351,10 @@ func TestCompactThrottledAfterDegrade(t *testing.T) {
 		t.Fatalf("首次应降级且只调用一次摘要器: %+v calls=%d", first, calls)
 	}
 
-	// 紧接着再压一次(模拟下一轮裁剪到更大区间):必须被节流,不再调用摘要器
+	// 紧接着再压同一区间(模拟下一轮):剩余未覆盖记录仍够门槛,必须被**节流**拦住,
+	// 否则"降级→后半原文下轮又被裁→再压缩"会退化成每轮一次 LLM 调用。
 	readBack, _ = GetMemoryFileWriter().Read(sessionId, fileName)
-	second, err := svc.Compact(context.Background(), session, readBack, 1, 8, dataobject.CompactionModeSafeguard,
+	second, err := svc.Compact(context.Background(), session, readBack, 1, 10, hCommon.CompactionModeSafeguard,
 		fakeSummarizer("第二次摘要。", &calls))
 	if err != nil {
 		t.Fatalf("二次压缩不应报错: %v", err)
@@ -362,7 +373,7 @@ func TestCompactDefaultSummarizesOnce(t *testing.T) {
 
 	var records []hCommon.MemoryRecord
 	for i := 1; i <= 60; i++ {
-		records = append(records, record(i, hCommon.HistoryRecordTypeUser, "", "内容"))
+		records = append(records, record(i, hCommon.HistoryRecordTypeUser, "", strings.Repeat("内容", 30)))
 	}
 	fileName := writeRecords(t, writer, sessionId, records)
 	session := dataobject.TSession{SessionId: sessionId, ChatData: fileName}
@@ -370,7 +381,7 @@ func TestCompactDefaultSummarizesOnce(t *testing.T) {
 
 	calls := 0
 	readBack, _ := GetMemoryFileWriter().Read(sessionId, fileName)
-	if _, err := svc.Compact(context.Background(), session, readBack, 1, 60, dataobject.CompactionModeDefault,
+	if _, err := svc.Compact(context.Background(), session, readBack, 1, 60, hCommon.CompactionModeDefault,
 		fakeSummarizer("内容", &calls)); err != nil {
 		t.Fatalf("Compact 失败: %v", err)
 	}
@@ -390,7 +401,7 @@ func TestSummaryIndexMonotonicAfterRestart(t *testing.T) {
 	svc := newCompactService()
 
 	readBack, _ := GetMemoryFileWriter().Read(sessionId, fileName)
-	if _, err := svc.Compact(context.Background(), session, readBack, 1, 8, dataobject.CompactionModeDefault,
+	if _, err := svc.Compact(context.Background(), session, readBack, 1, 8, hCommon.CompactionModeDefault,
 		fakeSummarizer("摘要", nil)); err != nil {
 		t.Fatalf("Compact 失败: %v", err)
 	}
@@ -438,7 +449,7 @@ func TestCompactSummarizerErrorPropagates(t *testing.T) {
 	svc := newCompactService()
 
 	readBack, _ := GetMemoryFileWriter().Read(sessionId, fileName)
-	_, err := svc.Compact(context.Background(), session, readBack, 1, 8, dataobject.CompactionModeDefault,
+	_, err := svc.Compact(context.Background(), session, readBack, 1, 8, hCommon.CompactionModeDefault,
 		func(ctx context.Context, sys, user string) (string, error) { return "", os.ErrDeadlineExceeded })
 	if err == nil {
 		t.Fatal("摘要器失败应返回错误")

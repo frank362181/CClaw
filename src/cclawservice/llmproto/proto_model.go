@@ -86,8 +86,9 @@ const (
 
 // ChatCompletionChoice 一条候选回复
 type ChatCompletionChoice struct {
-	Index   int         `json:"index"`
-	Message ChatMessage `json:"message"`
+	Index        int         `json:"index"`
+	Message      ChatMessage `json:"message"`
+	FinishReason *string     `json:"finish_reason,omitempty"`
 }
 
 // ChatCompletionUsage token 用量(可选,部分供应商流式返回时可能为空)

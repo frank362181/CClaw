@@ -91,6 +91,17 @@ func NewClient() *Client {
 // 用于"Agent 路由分类"等短输出场景;maxTokens 限制输出上限(<=0 时由供应商默认,仍受 context_window 约束)。
 func (c *Client) Complete(ctx context.Context, llmProvider dataobject.TLlm, system, user string, maxTokens int) (string, error) {
 	req := BuildChatCompletionRequestWithString(llmProvider, system, user, maxTokens, false)
+	content, _, err := c.doCompletion(ctx, llmProvider, req)
+	return content, err
+}
+
+// CompleteWithFinish 同 Complete,额外返回上游 finish_reason。
+//
+// 用于"内容完整性敏感"的场景(如历史压缩的摘要):同步路径不会因为 finish_reason=length
+// 而报错(内容非空就正常返回),若不把 finish_reason 透出来,摘要被 max_tokens 截断
+// 就会**静默变短** —— 落盘后再也看不出丢过内容。
+func (c *Client) CompleteWithFinish(ctx context.Context, llmProvider dataobject.TLlm, system, user string, maxTokens int) (string, string, error) {
+	req := BuildChatCompletionRequestWithString(llmProvider, system, user, maxTokens, false)
 	return c.doCompletion(ctx, llmProvider, req)
 }
 
@@ -101,7 +112,8 @@ func (c *Client) Complete(ctx context.Context, llmProvider dataobject.TLlm, syst
 // 错误语义:网络/HTTP/协议错误均包装后返回,由上层映射为业务错误。
 func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *request.ChatRequest) (string, error) {
 	req := BuildChatCompletionRequest(llmProvider, systemPrompt, chatReq, false)
-	return c.doCompletion(ctx, llmProvider, req)
+	content, _, err := c.doCompletion(ctx, llmProvider, req)
+	return content, err
 }
 
 // CompleteWithTools 执行一次同步 chat/completions(带工具),返回正式文本与工具调用(可能为空)。
@@ -148,7 +160,8 @@ func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobjec
 // BuildChatCompletionRequestWithTool,它会按整段消息估算输入)。
 func (c *Client) ChatCompletionMessages(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage) (string, error) {
 	req := BuildChatCompletionRequestWithTool(llmProvider, messages, nil, false)
-	return c.doCompletion(ctx, llmProvider, req)
+	content, _, err := c.doCompletion(ctx, llmProvider, req)
+	return content, err
 }
 
 // ChatCompletionStreamMessages 以**完整消息序列**做流式 chat/completions。
@@ -497,74 +510,82 @@ func (c *Client) retryWait(ctx context.Context, nextAttempt int, lastErr error) 
 	}
 }
 
-// doCompletion 执行一次同步 chat/completions 并解析回复文本(429/5xx/断流按指数退避重试)。
-func (c *Client) doCompletion(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (string, error) {
+// doCompletion 执行一次同步 chat/completions,返回回复文本与 finish_reason
+// (429/5xx/断流按指数退避重试)。
+func (c *Client) doCompletion(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (string, string, error) {
 	var lastErr error
+	var lastFinish string
 	for attempt := 1; attempt <= c.retryMaxAttempts; attempt++ {
 		if attempt > 1 {
 			if err := c.retryWait(ctx, attempt, lastErr); err != nil {
-				return "", err
+				return pCommon.BlankString, lastFinish, err
 			}
 		}
-		content, err := c.doCompletionOnce(ctx, llmProvider, req)
+		content, finishReason, err := c.doCompletionOnce(ctx, llmProvider, req)
 		if err == nil {
-			return content, nil
+			return content, finishReason, nil
 		}
-		lastErr = err
+		lastErr, lastFinish = err, finishReason
 		if !llmproto.IsRetryableLlmError(err) {
-			return pCommon.BlankString, err
+			return pCommon.BlankString, lastFinish, err
 		}
 	}
-	return pCommon.BlankString, lastErr
+	return pCommon.BlankString, lastFinish, lastErr
 }
 
 // doCompletionOnce 执行一次同步 chat/completions 请求并解析回复文本(同步/轻量调用共用,不含重试)。
-func (c *Client) doCompletionOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (string, error) {
+// 同时透出 finish_reason:调用方据此判断内容是否被上游截断(length)。
+func (c *Client) doCompletionOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (string, string, error) {
 	httpReq, err := c.prepareRequest(ctx, llmProvider, req)
 	if err != nil {
-		return pCommon.BlankString, err
+		return pCommon.BlankString, pCommon.BlankString, err
 	}
 
 	httpResp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
-			return pCommon.BlankString, llmproto.ErrRequestCanceled
+			return pCommon.BlankString, pCommon.BlankString, llmproto.ErrRequestCanceled
 		}
-		return pCommon.BlankString, llmproto.NewLlmResponseTransportError(err)
+		return pCommon.BlankString, pCommon.BlankString, llmproto.NewLlmResponseTransportError(err)
 	}
 	defer func(Body io.ReadCloser) {
 		_ = Body.Close()
 	}(httpResp.Body)
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return pCommon.BlankString, llmproto.ParseLlmResponseError(httpResp, hCommon.MaxResponseBytes)
+		return pCommon.BlankString, pCommon.BlankString, llmproto.ParseLlmResponseError(httpResp, hCommon.MaxResponseBytes)
 	}
 
 	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, hCommon.MaxResponseBytes))
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
-			return pCommon.BlankString, llmproto.ErrRequestCanceled
+			return pCommon.BlankString, pCommon.BlankString, llmproto.ErrRequestCanceled
 		}
-		return pCommon.BlankString, llmproto.NewLlmResponseTransportError(err)
+		return pCommon.BlankString, pCommon.BlankString, llmproto.NewLlmResponseTransportError(err)
 	}
 
 	var resp llmproto.ChatCompletionResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return pCommon.BlankString, myException.RuntimeClientErrEx2("runtime client: unmarshal response: %v", err)
+		return pCommon.BlankString, pCommon.BlankString, myException.RuntimeClientErrEx2("runtime client: unmarshal response: %v", err)
 	}
 	if llmproto.HasError(resp.Error) {
-		return pCommon.BlankString, llmproto.NewLlmResponseError(resp.Error)
+		return pCommon.BlankString, pCommon.BlankString, llmproto.NewLlmResponseError(resp.Error)
 	}
 	if len(resp.Choices) == 0 {
-		return pCommon.BlankString, myException.RuntimeClientErrEx("runtime client: empty completion choices")
+		return pCommon.BlankString, pCommon.BlankString, myException.RuntimeClientErrEx("runtime client: empty completion choices")
+	}
+
+	finishReason := pCommon.BlankString
+	if resp.Choices[0].FinishReason != nil {
+		finishReason = strings.TrimSpace(*resp.Choices[0].FinishReason)
 	}
 
 	content := strings.TrimSpace(resp.Choices[0].Message.Content)
 	if content == pCommon.BlankString {
-		return pCommon.BlankString, myException.RuntimeClientErrEx("runtime client: empty completion content")
+		return pCommon.BlankString, finishReason, myException.RuntimeClientErrEx("runtime client: empty completion content")
 	}
 
-	return content, nil
+	return content, finishReason, nil
 }
 
 // prepareRequest 校验入参并构造请求(不发起网络调用)。
