@@ -87,8 +87,16 @@ func EstimateInputTokens(messages []llmproto.ChatMessage) int {
 	return int(float64(total) * (1 + estimateSafetyFactor))
 }
 
-// NeedDistillNow 判断是否蒸馏
-func NeedDistillNow(turns int) bool {
+func NeedCompact(budgetExhausted bool, droppedFrom int, droppedRecords int) bool {
+	if budgetExhausted {
+		return false //budget=0,就没必要压缩了
+	}
+
+	return droppedFrom > 0 && droppedRecords > hCommon.CompactionMinRecords
+}
+
+// NeedDistill 判断是否蒸馏
+func NeedDistill(turns int) bool {
 	return turns >= hCommon.DistillMinTurns && turns%hCommon.DistillIntervalTurns == 0
 }
 

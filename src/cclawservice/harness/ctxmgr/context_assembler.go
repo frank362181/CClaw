@@ -209,13 +209,6 @@ func FitMessages(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, p
 	return fitted
 }
 
-func ShouldCompact(result AssembleResult) bool {
-	if result.BudgetExhausted {
-		return false
-	}
-	return result.DroppedFrom > 0 && result.DroppedRecordCount >= hCommon.CompactionMinRecords
-}
-
 // ============================== private functions & methods ==============================
 
 // normalizePolicy 补齐策略默认值。

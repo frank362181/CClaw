@@ -496,7 +496,7 @@ func (s *ChatService) triggerMemoryMaintenance(session dataobject.TSession, agen
 			session.SessionId)
 	}
 
-	needCompact := ctxmgr.ShouldCompact(assembled)
+	needCompact := ctxmgr.NeedCompact(assembled.BudgetExhausted, assembled.DroppedFrom, assembled.DroppedRecordCount)
 	// 冷却期内直接不起后台任务:省掉协程 + 一次全量读回(Compact 内部还会再判一次,以那里为准)
 	if needCompact && !mstorage.GetCompactionThrottle().Allow(session.SessionId, pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp) {
 		needCompact = false
@@ -508,7 +508,7 @@ func (s *ChatService) triggerMemoryMaintenance(session dataobject.TSession, agen
 	if turns <= 0 {
 		turns = s.memoryService.TurnCount(session.SessionId)
 	}
-	needDistill := ctxmgr.NeedDistillNow(turns)
+	needDistill := ctxmgr.NeedDistill(turns)
 	// 摘要总量超预算 → 合并最旧的一批摘要。装配结果里的 Summary 就是将要注入 system 的摘要正文,
 	// 直接量它的长度即可,不必为此多读一次历史文件。
 	// 预算耗尽时不做合并:摘要再小也装不下历史,问题在配置(与压缩被禁同一个理由)。
