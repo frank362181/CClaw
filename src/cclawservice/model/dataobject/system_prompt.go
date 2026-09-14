@@ -6,7 +6,11 @@
 
 package dataobject
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	hCommon "my.favorite/cclawservice/harness/common"
+)
 
 // SystemPromptSection 是 system prompt 的一个组成部分(标题 + 内容)
 type SystemPromptSection struct {
@@ -16,12 +20,12 @@ type SystemPromptSection struct {
 
 // SystemPrompt 是组装好的 system prompt
 type SystemPrompt struct {
-	AgentId   string                `json:"agentId"`
-	Workspace string                `json:"workspace"`
-	Scope     BootstrapScope        `json:"scope"`
-	Sections  []SystemPromptSection `json:"sections"`
-	Prompt    string                `json:"prompt"`
-	Length    int                   `json:"length"` // prompt 的字节长度
+	AgentId   string                 `json:"agentId"`
+	Workspace string                 `json:"workspace"`
+	Scope     hCommon.BootstrapScope `json:"scope"`
+	Sections  []SystemPromptSection  `json:"sections"`
+	Prompt    string                 `json:"prompt"`
+	Length    int                    `json:"length"` // prompt 的字节长度
 
 	Missing   []string `json:"missing,omitempty"`   // 必需启动文档缺失的清单
 	Truncated []string `json:"truncated,omitempty"` // 因预算被截断的文件清单

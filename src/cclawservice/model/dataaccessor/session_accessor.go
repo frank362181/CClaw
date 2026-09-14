@@ -113,7 +113,7 @@ func (g *SessionAccessor) GetSession(sessionId string) (*dataobject.TSession, er
 // ListSessions 列出某用户(服务端认证的用户名)的会话,按开始时间倒序。
 func (g *SessionAccessor) ListSessions(sender string, limit int) ([]dataobject.TSession, error) {
 	if limit <= 0 {
-		limit = common.DefaultSessionListLimit
+		limit = common.DefaultRecordsLimit
 	}
 
 	var list []dataobject.TSession

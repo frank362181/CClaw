@@ -283,7 +283,7 @@ func (r *AgentRouter) agentDocSummary(agent dataobject.TAgent) string {
 		return ""
 	}
 	for _, doc := range promptRepo.GetAllDocuments(agent.AgentId) {
-		if doc.Kind == dataobject.AgentDocAgent {
+		if doc.Kind == hCommon.AgentDocAgent {
 			return strings.TrimSpace(doc.FrontMatter.Summary)
 		}
 	}

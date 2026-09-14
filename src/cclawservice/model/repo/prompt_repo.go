@@ -258,7 +258,7 @@ func (repo *PromptRepository) Destroy() {
 //   - ok=true 且 doc.Missing=false:文档存在
 //   - ok=true 且 doc.Missing=true:必需文件缺失,content 为空,由组装层注入 [MISSING] 标记
 //   - ok=false:可选文件缺失,直接省略
-func (repo *PromptRepository) readAgentDocumentLocked(kind dataobject.AgentDocumentKind, workspaceRoot, fileName string, required bool) (*dataobject.AgentDocument, bool, error) {
+func (repo *PromptRepository) readAgentDocumentLocked(kind hCommon.AgentDocumentKind, workspaceRoot, fileName string, required bool) (*dataobject.AgentDocument, bool, error) {
 	filePath, err := cCommon.ResolveStartupPath(workspaceRoot, fileName)
 	if err != nil {
 		return nil, false, err

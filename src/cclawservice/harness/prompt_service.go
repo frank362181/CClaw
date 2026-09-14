@@ -51,12 +51,12 @@ func GetPromptService() *PromptService {
 //   - agent:       agent 对象
 //   - skillFiles:    需要载入元数据的 SKILL.md 文件列表(可为空)
 func (service *PromptService) BuildSystemPrompt(agent dataobject.TAgent, skillFiles []string) (*dataobject.SystemPrompt, error) {
-	return service.BuildSystemPromptEx(agent, skillFiles, dataobject.BootstrapScopeNormal)
+	return service.BuildSystemPromptEx(agent, skillFiles, hCommon.BootstrapScopeNormal)
 }
 
 // BuildSystemPromptEx 按指定会话范围组装 system prompt。
 // (文件未变零读盘),从而让长会话能看到工作区文件的编辑。
-func (service *PromptService) BuildSystemPromptEx(agent dataobject.TAgent, skillFiles []string, scope dataobject.BootstrapScope) (*dataobject.SystemPrompt, error) {
+func (service *PromptService) BuildSystemPromptEx(agent dataobject.TAgent, skillFiles []string, scope hCommon.BootstrapScope) (*dataobject.SystemPrompt, error) {
 	workspaceRoot, _ := cCommon.BuildAgentBootstrapRoot(agent)
 
 	// 1. 加载并缓存 agent 启动文档(指纹未变化时直接命中缓存)
@@ -83,7 +83,7 @@ func (service *PromptService) BuildSystemPromptEx(agent dataobject.TAgent, skill
 }
 
 // assembleSystemPrompt 按规范顺序组装,应用会话范围过滤、缺失标记与预算控制。
-func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, workspaceRoot string, scope dataobject.BootstrapScope) (*dataobject.SystemPrompt, error) {
+func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, workspaceRoot string, scope hCommon.BootstrapScope) (*dataobject.SystemPrompt, error) {
 	documents := service.promptRepo.GetAllDocuments(agent.AgentId) // 已按规范顺序加载
 	skills := service.promptRepo.GetAllSkills(agent.AgentId)
 
@@ -114,7 +114,7 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 
 		// 单文件预算:USER.md 独立 4K,其余 20K
 		budget := hCommon.MaxBootstrapFileChars
-		if doc.Kind == dataobject.AgentDocUser {
+		if doc.Kind == hCommon.AgentDocUser {
 			budget = hCommon.MaxUserDocChars
 		}
 		if runeLen := len([]rune(content)); runeLen > budget {
@@ -189,18 +189,18 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 //   - subagent: 仅 AGENTS.md(不继承父 agent 的人格/用户/记忆)
 //   - cron:     AGENTS/SOUL/IDENTITY/USER,不含 MEMORY.md
 //   - heartbeat: 不注入启动文件
-func isKindAllowedInScope(kind dataobject.AgentDocumentKind, scope dataobject.BootstrapScope) bool {
+func isKindAllowedInScope(kind hCommon.AgentDocumentKind, scope hCommon.BootstrapScope) bool {
 	switch scope {
-	case dataobject.BootstrapScopeSubagent:
-		return kind == dataobject.AgentDocAgent
-	case dataobject.BootstrapScopeCron:
+	case hCommon.BootstrapScopeSubagent:
+		return kind == hCommon.AgentDocAgent
+	case hCommon.BootstrapScopeCron:
 		switch kind {
-		case dataobject.AgentDocAgent, dataobject.AgentDocSoul,
-			dataobject.AgentDocIdentity, dataobject.AgentDocUser:
+		case hCommon.AgentDocAgent, hCommon.AgentDocSoul,
+			hCommon.AgentDocIdentity, hCommon.AgentDocUser:
 			return true
 		}
 		return false
-	case dataobject.BootstrapScopeHeartbeat:
+	case hCommon.BootstrapScopeHeartbeat:
 		return false
 	default:
 		return true

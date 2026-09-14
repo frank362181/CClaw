@@ -404,7 +404,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 
 	// 7. 基于 Agent 工作区启动文档组装 system prompt,并解析其 skill 中声明的可用工具
 	skillFiles, agentExtensionRoot := s.collectSkillFiles(comCode, agent)
-	systemPrompt, err := s.promptService.BuildSystemPromptEx(agent, skillFiles, dataobject.BootstrapScopeNormal)
+	systemPrompt, err := s.promptService.BuildSystemPromptEx(agent, skillFiles, hCommon.BootstrapScopeNormal)
 	if err != nil {
 		logging.LogErrorF("chat service: build system prompt error:%s", err.Error())
 		return nil, dataobject.TAgent{}, nil, dataobject.TLlm{}, nil, myException.ChatLLMKind.Newf("chat service: build system prompt error:%s", err.Error())

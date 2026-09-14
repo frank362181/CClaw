@@ -164,7 +164,7 @@ func (w *MemoryFileRWriter) Ensure(sessionId string, at *pCommon.DatetimeItem, h
 	}
 
 	var sb strings.Builder
-	_, _ = fmt.Fprintf(&sb, "# NewSession %s\n\n", sessionId)
+	_, _ = fmt.Fprintf(&sb, "# %s %s\n\n", hCommon.SessionDefaultName, sessionId)
 	for _, line := range headerLines {
 		line = strings.TrimSpace(line)
 		if line == pCommon.BlankString {

@@ -74,7 +74,7 @@ func ValidateSkill(sk dataobject.TSkill) error {
 	if strings.TrimSpace(sk.SkillDir) == "" {
 		return pException.ParameterEmptyErrorEx("skill dir is empty")
 	}
-	if sk.SkillScope < dataobject.SkillScopeSystem || sk.SkillScope > dataobject.SkillScopePlugin {
+	if sk.SkillScope < hCommon.SkillScopeSystem || sk.SkillScope > hCommon.SkillScopePlugin {
 		return pException.ParameterEmptyErrorEx("skill scope is invalid")
 	}
 	return nil

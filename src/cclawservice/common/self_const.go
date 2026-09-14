@@ -1,8 +1,14 @@
 package common
 
+// 注册用户类型
 const (
-	// DefaultSessionListLimit 未指定上限时的默认返回条数。(读数据库)
-	DefaultSessionListLimit = 30
+	AccountCatPlatform   = iota //平台用户
+	AccountCatPerson            // 个人用户
+	AccountCatEnterprise        //企业用户
+)
+
+const (
+	DefaultRecordsLimit = 30 // 从数据库读取记录时返回的条数
 
 	// ContextAuthenticatedUser is the gin.Context key for the server-verified user.
 	ContextAuthenticatedUser = "cclaw.authenticatedUser"
