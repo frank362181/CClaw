@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	cCommon "my.favorite/cclawservice/common"
+	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	pCommon "my.favorite/platformutility/common"
@@ -80,7 +81,7 @@ func TestSplitFrontMatter(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fm, body := cCommon.SplitFrontMatter([]byte(c.input))
+			fm, body := hCommon.SplitFrontMatter([]byte(c.input))
 			if c.hasFront && strings.TrimSpace(fm) != c.wantFM {
 				t.Errorf("front matter mismatch: got=%q want=%q", fm, c.wantFM)
 			}

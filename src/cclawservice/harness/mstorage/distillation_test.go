@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	myCommon "my.favorite/cclawservice/common"
-	"my.favorite/cclawservice/harness/common"
+	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 )
@@ -31,14 +31,14 @@ func newDistillAgent(t *testing.T, agentDir string) dataobject.TAgent {
 }
 
 // distillRecords 构造一段足够长的会话记录(测试辅助)。
-func distillRecords() []common.MemoryRecord {
-	return []common.MemoryRecord{
-		record(1, HistoryRecordUser, "", "以后所有报告都用中文,并且先给结论。"),
-		record(2, HistoryRecordAssistant, "", "好的,已记住你的偏好。"),
-		record(3, HistoryRecordUser, "", "项目路径是 /Volumes/Wisdom/MyIdea/CClaw/src"),
-		record(4, HistoryRecordAssistant, "", "明白。"),
-		record(5, HistoryRecordUser, "", "单位编码固定为 100001"),
-		record(6, HistoryRecordAssistant, "", "已记录。"),
+func distillRecords() []hCommon.MemoryRecord {
+	return []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", "以后所有报告都用中文,并且先给结论。"),
+		record(2, hCommon.HistoryRecordTypeAssistant, "", "好的,已记住你的偏好。"),
+		record(3, hCommon.HistoryRecordTypeUser, "", "项目路径是 /Volumes/Wisdom/MyIdea/CClaw/src"),
+		record(4, hCommon.HistoryRecordTypeAssistant, "", "明白。"),
+		record(5, hCommon.HistoryRecordTypeUser, "", "单位编码固定为 100001"),
+		record(6, hCommon.HistoryRecordTypeAssistant, "", "已记录。"),
 	}
 }
 

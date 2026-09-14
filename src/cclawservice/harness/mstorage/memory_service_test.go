@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	cCommon "my.favorite/cclawservice/common"
+	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
@@ -121,10 +122,10 @@ func TestChatSessionDoubleWrite(t *testing.T) {
 	if session.BeginTimestamp <= 0 || session.ChatType != req.ChatType || session.ChatChannel != req.ChatChannel {
 		t.Errorf("会话元数据错误: %+v", session)
 	}
-	if !strings.HasPrefix(session.ChatData, cCommon.ChatMemoryFilePrefix) || !strings.HasSuffix(session.ChatData, cCommon.ChatMemoryFileExt) {
+	if !strings.HasPrefix(session.ChatData, hCommon.ChatMemoryFilePrefix) || !strings.HasSuffix(session.ChatData, hCommon.ChatMemoryFileExt) {
 		t.Errorf("会话历史文件名不符合约定: %q", session.ChatData)
 	}
-	if session.SessionName == "" || len([]rune(session.SessionName)) > cCommon.SessionNameMaxLen {
+	if session.SessionName == "" || len([]rune(session.SessionName)) > hCommon.SessionNameMaxLen {
 		t.Errorf("会话名称生成异常: %q", session.SessionName)
 	}
 

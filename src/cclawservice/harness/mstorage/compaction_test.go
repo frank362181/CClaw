@@ -7,13 +7,13 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"my.favorite/cclawservice/harness/common"
+	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 )
 
 // record 构造一条历史记录(测试辅助)
-func record(index int, recordType, title, content string) common.MemoryRecord {
-	return common.MemoryRecord{Index: index, RecordType: recordType, Title: title, Content: content}
+func record(index int, recordType, title, content string) hCommon.MemoryRecord {
+	return hCommon.MemoryRecord{Index: index, RecordType: recordType, Title: title, Content: content}
 }
 
 // fakeSummarizer 返回固定摘要(测试辅助),同时统计调用次数。
@@ -27,13 +27,13 @@ func fakeSummarizer(text string, calls *int) Summarizer {
 }
 
 // compactRecords 构造 12 条普通记录(测试辅助):6 轮问答。
-func compactRecords() []common.MemoryRecord {
-	var records []common.MemoryRecord
+func compactRecords() []hCommon.MemoryRecord {
+	var records []hCommon.MemoryRecord
 	index := 1
 	for i := 0; i < 6; i++ {
 		records = append(records,
-			record(index, HistoryRecordUser, "", "问题"+string(rune('1'+i))),
-			record(index+1, HistoryRecordAssistant, "", "回答"+string(rune('1'+i))),
+			record(index, hCommon.HistoryRecordTypeUser, "", "问题"+string(rune('1'+i))),
+			record(index+1, hCommon.HistoryRecordTypeAssistant, "", "回答"+string(rune('1'+i))),
 		)
 		index += 2
 	}
@@ -41,7 +41,7 @@ func compactRecords() []common.MemoryRecord {
 }
 
 // writeRecords 把记录写入历史文件(测试辅助),返回文件名。
-func writeRecords(t *testing.T, writer *MemoryFileRWriter, sessionId string, records []common.MemoryRecord) string {
+func writeRecords(t *testing.T, writer *MemoryFileRWriter, sessionId string, records []hCommon.MemoryRecord) string {
 	t.Helper()
 
 	fileName, err := writer.Ensure(sessionId, nil, nil)
@@ -170,13 +170,13 @@ func TestCompactSkipsTooSmallRange(t *testing.T) {
 // 必须降级(缩小覆盖区间),让较新的原文继续可回放。
 func TestCompactSafeguardDegradesWhenKeysLost(t *testing.T) {
 	writer, sessionId := newHistoryTestWriter(t)
-	records := []common.MemoryRecord{
-		record(1, HistoryRecordUser, "", "帮我看 /Volumes/Wisdom/MyIdea/CClaw/src/data/ddl_sqlite3.sql"),
-		record(2, HistoryRecordAssistant, "", "该文件共 123456 行,已阅读完成。"),
-		record(3, HistoryRecordUser, "", "再看 agentService/config/agentdefault.json"),
-		record(4, HistoryRecordAssistant, "", "已阅读完毕,包含 987654 个字段配置。"),
-		record(5, HistoryRecordUser, "", "继续分析 memory_service.go"),
-		record(6, HistoryRecordAssistant, "", "分析完成。"),
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", "帮我看 /Volumes/Wisdom/MyIdea/CClaw/src/data/ddl_sqlite3.sql"),
+		record(2, hCommon.HistoryRecordTypeAssistant, "", "该文件共 123456 行,已阅读完成。"),
+		record(3, hCommon.HistoryRecordTypeUser, "", "再看 agentService/config/agentdefault.json"),
+		record(4, hCommon.HistoryRecordTypeAssistant, "", "已阅读完毕,包含 987654 个字段配置。"),
+		record(5, hCommon.HistoryRecordTypeUser, "", "继续分析 memory_service.go"),
+		record(6, hCommon.HistoryRecordTypeAssistant, "", "分析完成。"),
 	}
 	fileName := writeRecords(t, writer, sessionId, records)
 	session := dataobject.TSession{SessionId: sessionId, ChatData: fileName}
@@ -202,11 +202,11 @@ func TestCompactSafeguardDegradesWhenKeysLost(t *testing.T) {
 // TestCompactSafeguardKeepsWhenKeysRetained 关键信息被保留时不降级。
 func TestCompactSafeguardKeepsWhenKeysRetained(t *testing.T) {
 	writer, sessionId := newHistoryTestWriter(t)
-	records := []common.MemoryRecord{
-		record(1, HistoryRecordUser, "", "查看 /Volumes/Wisdom/MyIdea/CClaw/src/data/ddl_sqlite3.sql"),
-		record(2, HistoryRecordAssistant, "", "该文件定义 123456 条约束。"),
-		record(3, HistoryRecordUser, "", "还有 config/agentdefault.json 呢"),
-		record(4, HistoryRecordAssistant, "", "含 987654 个配置项。"),
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", "查看 /Volumes/Wisdom/MyIdea/CClaw/src/data/ddl_sqlite3.sql"),
+		record(2, hCommon.HistoryRecordTypeAssistant, "", "该文件定义 123456 条约束。"),
+		record(3, hCommon.HistoryRecordTypeUser, "", "还有 config/agentdefault.json 呢"),
+		record(4, hCommon.HistoryRecordTypeAssistant, "", "含 987654 个配置项。"),
 	}
 	fileName := writeRecords(t, writer, sessionId, records)
 	session := dataobject.TSession{SessionId: sessionId, ChatData: fileName}
@@ -232,11 +232,11 @@ func TestCompactSafeguardKeepsWhenKeysRetained(t *testing.T) {
 func TestCompactSafeguardSummarizesInBlocks(t *testing.T) {
 	writer, sessionId := newHistoryTestWriter(t)
 
-	var records []common.MemoryRecord
+	var records []hCommon.MemoryRecord
 	for i := 1; i <= 60; i++ {
-		kind := HistoryRecordUser
+		kind := hCommon.HistoryRecordTypeUser
 		if i%2 == 0 {
-			kind = HistoryRecordAssistant
+			kind = hCommon.HistoryRecordTypeAssistant
 		}
 		records = append(records, record(i, kind, "", "内容"))
 	}
@@ -273,13 +273,13 @@ func TestCompactionModeName(t *testing.T) {
 // 旧实现用未截断的完整摘要做校验 → 关键信息在落盘时被截掉也能"校验通过" → 静默丢要点。
 func TestCompactTruncatesBeforeVerify(t *testing.T) {
 	writer, sessionId := newHistoryTestWriter(t)
-	records := []common.MemoryRecord{
-		record(1, HistoryRecordUser, "", "配置文件是 config/agentdefault.json,单位编码 100001"),
-		record(2, HistoryRecordAssistant, "", "已记录。"),
-		record(3, HistoryRecordUser, "", "继续。"),
-		record(4, HistoryRecordAssistant, "", "好的。"),
-		record(5, HistoryRecordUser, "", "还有别的吗。"),
-		record(6, HistoryRecordAssistant, "", "暂时没有。"),
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", "配置文件是 config/agentdefault.json,单位编码 100001"),
+		record(2, hCommon.HistoryRecordTypeAssistant, "", "已记录。"),
+		record(3, hCommon.HistoryRecordTypeUser, "", "继续。"),
+		record(4, hCommon.HistoryRecordTypeAssistant, "", "好的。"),
+		record(5, hCommon.HistoryRecordTypeUser, "", "还有别的吗。"),
+		record(6, hCommon.HistoryRecordTypeAssistant, "", "暂时没有。"),
 	}
 	fileName := writeRecords(t, writer, sessionId, records)
 	session := dataobject.TSession{SessionId: sessionId, ChatData: fileName}
@@ -287,7 +287,7 @@ func TestCompactTruncatesBeforeVerify(t *testing.T) {
 	GetCompactionThrottle().Reset(sessionId)
 
 	// 超长摘要:关键信息只出现在会被截断的尾部
-	long := strings.Repeat("填充。", MaxSummaryRunes/3+200) // 约 4600 字符 > MaxSummaryRunes
+	long := strings.Repeat("填充。", hCommon.MaxSummaryRunes/3+200) // 约 4600 字符 > hCommon.MaxSummaryRunes
 	summary := long + "配置为 config/agentdefault.json,单位编码 100001"
 
 	readBack, _ := GetMemoryFileWriter().Read(sessionId, fileName)
@@ -305,7 +305,7 @@ func TestCompactTruncatesBeforeVerify(t *testing.T) {
 	if !last.IsSummary() {
 		t.Fatalf("末条应为摘要记录: %+v", last)
 	}
-	if got := utf8.RuneCountInString(last.Content); got > MaxSummaryRunes+1 { // +1 为截断省略号标记
+	if got := utf8.RuneCountInString(last.Content); got > hCommon.MaxSummaryRunes+1 { // +1 为截断省略号标记
 		t.Errorf("落盘摘要超出上限: %d", got)
 	}
 	if strings.Contains(last.Content, "agentdefault.json") || strings.Contains(last.Content, "100001") {
@@ -317,13 +317,13 @@ func TestCompactTruncatesBeforeVerify(t *testing.T) {
 // 否则"降级→后半原文下轮又被裁→再压缩"会退化成**每轮一次** LLM 调用。
 func TestCompactThrottledAfterDegrade(t *testing.T) {
 	writer, sessionId := newHistoryTestWriter(t)
-	records := []common.MemoryRecord{
-		record(1, HistoryRecordUser, "", "看 /Volumes/Wisdom/MyIdea/CClaw/src/data/ddl_sqlite3.sql"),
-		record(2, HistoryRecordAssistant, "", "共 123456 行。"),
-		record(3, HistoryRecordUser, "", "再看 config/agentdefault.json"),
-		record(4, HistoryRecordAssistant, "", "共 987654 项。"),
-		record(5, HistoryRecordUser, "", "继续"),
-		record(6, HistoryRecordAssistant, "", "好"),
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", "看 /Volumes/Wisdom/MyIdea/CClaw/src/data/ddl_sqlite3.sql"),
+		record(2, hCommon.HistoryRecordTypeAssistant, "", "共 123456 行。"),
+		record(3, hCommon.HistoryRecordTypeUser, "", "再看 config/agentdefault.json"),
+		record(4, hCommon.HistoryRecordTypeAssistant, "", "共 987654 项。"),
+		record(5, hCommon.HistoryRecordTypeUser, "", "继续"),
+		record(6, hCommon.HistoryRecordTypeAssistant, "", "好"),
 	}
 	fileName := writeRecords(t, writer, sessionId, records)
 	session := dataobject.TSession{SessionId: sessionId, ChatData: fileName}
@@ -360,9 +360,9 @@ func TestCompactThrottledAfterDegrade(t *testing.T) {
 func TestCompactDefaultSummarizesOnce(t *testing.T) {
 	writer, sessionId := newHistoryTestWriter(t)
 
-	var records []common.MemoryRecord
+	var records []hCommon.MemoryRecord
 	for i := 1; i <= 60; i++ {
-		records = append(records, record(i, HistoryRecordUser, "", "内容"))
+		records = append(records, record(i, hCommon.HistoryRecordTypeUser, "", "内容"))
 	}
 	fileName := writeRecords(t, writer, sessionId, records)
 	session := dataobject.TSession{SessionId: sessionId, ChatData: fileName}
@@ -397,7 +397,7 @@ func TestSummaryIndexMonotonicAfterRestart(t *testing.T) {
 
 	// 模拟进程重启:全新写入器,无缓存;DB 只知道 resp_index 最大为 12
 	restarted := &MemoryFileRWriter{nextIndex: make(map[string]int)}
-	index, err := restarted.Append(sessionId, fileName, HistoryRecordUser, "", "重启后的新问题", "", 13)
+	index, err := restarted.Append(sessionId, fileName, hCommon.HistoryRecordTypeUser, "", "重启后的新问题", "", 13)
 	if err != nil {
 		t.Fatalf("重启后 Append 失败: %v", err)
 	}
@@ -452,8 +452,8 @@ func TestCompactSummarizerErrorPropagates(t *testing.T) {
 
 // TestKeyRetentionRatio 关键信息采样:路径/长数字/文件名即"不能丢"的信息。
 func TestKeyRetentionRatio(t *testing.T) {
-	records := []common.MemoryRecord{
-		record(1, HistoryRecordUser, "", "看 /a/b/c.go 与 config/x.json,共 123456 行"),
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", "看 /a/b/c.go 与 config/x.json,共 123456 行"),
 	}
 
 	ratio, missed := keyRetentionRatio(records, "已查看 /a/b/c.go,包含 123456 行")
@@ -467,7 +467,7 @@ func TestKeyRetentionRatio(t *testing.T) {
 	if ratio, _ := keyRetentionRatio(records, "已查看 /a/b/c.go 与 config/x.json,共 123456 行"); ratio != 1 {
 		t.Errorf("全部保留时 ratio 应为 1: %v", ratio)
 	}
-	if ratio, _ := keyRetentionRatio([]common.MemoryRecord{record(1, HistoryRecordUser, "", "没有关键标记")}, "任意"); ratio != 1 {
+	if ratio, _ := keyRetentionRatio([]hCommon.MemoryRecord{record(1, hCommon.HistoryRecordTypeUser, "", "没有关键标记")}, "任意"); ratio != 1 {
 		t.Errorf("无关键标记时不应误判丢失: %v", ratio)
 	}
 }

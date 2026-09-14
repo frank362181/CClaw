@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	myCommon "my.favorite/cclawservice/common"
+	hCommon "my.favorite/cclawservice/harness/common"
 )
 
 // newHistoryTestWriter 构造一个独立的写入器 + 唯一会话标识,并在用例结束后清理落盘目录。
@@ -35,7 +36,7 @@ func TestHistoryFileEnsureCreatesFile(t *testing.T) {
 		t.Fatalf("Ensure 失败: %v", err)
 	}
 
-	if !strings.HasPrefix(fileName, myCommon.ChatMemoryFilePrefix) || !strings.HasSuffix(fileName, myCommon.ChatMemoryFileExt) {
+	if !strings.HasPrefix(fileName, hCommon.ChatMemoryFilePrefix) || !strings.HasSuffix(fileName, hCommon.ChatMemoryFileExt) {
 		t.Fatalf("历史文件名不符合 memory_{datetime}.md 约定: %q", fileName)
 	}
 
@@ -63,7 +64,7 @@ func TestHistoryFileEnsureIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("第一次 Ensure 失败: %v", err)
 	}
-	if _, err = writer.Append(sessionId, first, HistoryRecordUser, "", "你好", "", 0); err != nil {
+	if _, err = writer.Append(sessionId, first, hCommon.HistoryRecordTypeUser, "", "你好", "", 0); err != nil {
 		t.Fatalf("Append 失败: %v", err)
 	}
 
@@ -98,9 +99,9 @@ func TestHistoryFileAppendIndexSequence(t *testing.T) {
 		title      string
 		content    string
 	}{
-		{HistoryRecordUser, "", "今天天气怎么样"},
-		{HistoryRecordTool, "get_weather", `{"temp": 26}`},
-		{HistoryRecordAssistant, "", "今天 26 度"},
+		{hCommon.HistoryRecordTypeUser, "", "今天天气怎么样"},
+		{hCommon.HistoryRecordTypeTool, "get_weather", `{"temp": 26}`},
+		{hCommon.HistoryRecordTypeAssistant, "", "今天 26 度"},
 	}
 
 	for i, record := range records {
@@ -137,14 +138,14 @@ func TestHistoryFileIndexRecovery(t *testing.T) {
 		t.Fatalf("Ensure 失败: %v", err)
 	}
 	for i := 0; i < 3; i++ {
-		if _, err = writer.Append(sessionId, fileName, HistoryRecordUser, "", "内容", "", 0); err != nil {
+		if _, err = writer.Append(sessionId, fileName, hCommon.HistoryRecordTypeUser, "", "内容", "", 0); err != nil {
 			t.Fatalf("Append 失败: %v", err)
 		}
 	}
 
 	// 全新写入器(等价于进程重启后的空缓存)
 	restarted := &MemoryFileRWriter{nextIndex: make(map[string]int)}
-	index, err := restarted.Append(sessionId, fileName, HistoryRecordAssistant, "", "回复", "", 0)
+	index, err := restarted.Append(sessionId, fileName, hCommon.HistoryRecordTypeAssistant, "", "回复", "", 0)
 	if err != nil {
 		t.Fatalf("重启后 Append 失败: %v", err)
 	}
@@ -172,10 +173,10 @@ func TestHistoryDirRejectsUnsafeSessionId(t *testing.T) {
 func TestHistoryResolvePathRejectsNestedFileName(t *testing.T) {
 	writer := &MemoryFileRWriter{nextIndex: make(map[string]int)}
 
-	if _, err := writer.Append("safesession", "../escape.md", HistoryRecordUser, "", "x", "", 0); err == nil {
+	if _, err := writer.Append("safesession", "../escape.md", hCommon.HistoryRecordTypeUser, "", "x", "", 0); err == nil {
 		t.Error("带目录的历史文件名应被拒绝")
 	}
-	if _, err := writer.Append("safesession", "", HistoryRecordUser, "", "x", "", 0); err == nil {
+	if _, err := writer.Append("safesession", "", hCommon.HistoryRecordTypeUser, "", "x", "", 0); err == nil {
 		t.Error("空历史文件名应被拒绝")
 	}
 }
@@ -191,7 +192,7 @@ func TestHistoryAppendHintWinsWhenLarger(t *testing.T) {
 	}
 
 	// 第一条:本地缓存为空,采用 hint 100
-	index, err := writer.Append(sessionId, fileName, HistoryRecordUser, "", "问题", "", 100)
+	index, err := writer.Append(sessionId, fileName, hCommon.HistoryRecordTypeUser, "", "问题", "", 100)
 	if err != nil {
 		t.Fatalf("Append 失败: %v", err)
 	}
@@ -200,7 +201,7 @@ func TestHistoryAppendHintWinsWhenLarger(t *testing.T) {
 	}
 
 	// 第二条不给 hint:应接着 101,而不是回到 1
-	index, err = writer.Append(sessionId, fileName, HistoryRecordAssistant, "", "回复", "", 0)
+	index, err = writer.Append(sessionId, fileName, hCommon.HistoryRecordTypeAssistant, "", "回复", "", 0)
 	if err != nil {
 		t.Fatalf("Append 失败: %v", err)
 	}
@@ -221,13 +222,13 @@ func TestHistoryAppendIndexNeverRegresses(t *testing.T) {
 	}
 
 	for i := 1; i <= 5; i++ {
-		if _, err = writer.Append(sessionId, fileName, HistoryRecordUser, "", "内容", "", 0); err != nil {
+		if _, err = writer.Append(sessionId, fileName, hCommon.HistoryRecordTypeUser, "", "内容", "", 0); err != nil {
 			t.Fatalf("第 %d 条 Append 失败: %v", i, err)
 		}
 	}
 
 	// 倒退的 hint 必须被忽略
-	index, err := writer.Append(sessionId, fileName, HistoryRecordAssistant, "", "回复", "", 1)
+	index, err := writer.Append(sessionId, fileName, hCommon.HistoryRecordTypeAssistant, "", "回复", "", 1)
 	if err != nil {
 		t.Fatalf("Append 失败: %v", err)
 	}
@@ -245,19 +246,19 @@ func TestHistoryTailScanHandlesLargeLastRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ensure 失败: %v", err)
 	}
-	if _, err = writer.Append(sessionId, fileName, HistoryRecordUser, "", "问题", "", 0); err != nil {
+	if _, err = writer.Append(sessionId, fileName, hCommon.HistoryRecordTypeUser, "", "问题", "", 0); err != nil {
 		t.Fatalf("Append 失败: %v", err)
 	}
 
 	// 正文远大于 defaultTailScanChunkBytes:最后一个记录头距文件末尾超过一个初始块
 	huge := strings.Repeat("x", defaultTailScanChunkBytes+1024)
-	if _, err = writer.Append(sessionId, fileName, HistoryRecordAssistant, "", huge, "", 0); err != nil {
+	if _, err = writer.Append(sessionId, fileName, hCommon.HistoryRecordTypeAssistant, "", huge, "", 0); err != nil {
 		t.Fatalf("Append 失败: %v", err)
 	}
 
 	// 模拟进程重启:缓存为空且不给 hint,只能靠尾部扫描恢复
 	restarted := &MemoryFileRWriter{nextIndex: make(map[string]int)}
-	index, err := restarted.Append(sessionId, fileName, HistoryRecordUser, "", "第三个问题", "", 0)
+	index, err := restarted.Append(sessionId, fileName, hCommon.HistoryRecordTypeUser, "", "第三个问题", "", 0)
 	if err != nil {
 		t.Fatalf("重启后 Append 失败: %v", err)
 	}

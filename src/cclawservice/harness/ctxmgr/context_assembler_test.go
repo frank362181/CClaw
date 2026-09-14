@@ -4,20 +4,20 @@ import (
 	"strings"
 	"testing"
 
-	"my.favorite/cclawservice/harness/common"
-	"my.favorite/cclawservice/harness/mstorage"
+	hCommon "my.favorite/cclawservice/harness/common"
+
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 )
 
 // record 构造一条历史记录(测试辅助)
-func record(index int, recordType, title, content string) common.MemoryRecord {
-	return common.MemoryRecord{Index: index, RecordType: recordType, Title: title, Content: content}
+func record(index int, recordType, title, content string) hCommon.MemoryRecord {
+	return hCommon.MemoryRecord{Index: index, RecordType: recordType, Title: title, Content: content}
 }
 
 // summaryRecord 构造一条摘要记录(测试辅助)
-func summaryRecord(index, from, to int, content string) common.MemoryRecord {
-	return common.MemoryRecord{Index: index, RecordType: mstorage.MemoryRecordSummary, Content: content, CoversFrom: from, CoversTo: to}
+func summaryRecord(index, from, to int, content string) hCommon.MemoryRecord {
+	return hCommon.MemoryRecord{Index: index, RecordType: hCommon.HistoryRecordTypeSummary, Content: content, CoversFrom: from, CoversTo: to}
 }
 
 // roles 提取消息角色序列(测试辅助)
@@ -49,11 +49,11 @@ func TestAssembleContextWithoutHistory(t *testing.T) {
 
 // TestAssembleContextHistoryOrder 历史按序回放,且以本轮问题结尾(不重复上一轮的提问)。
 func TestAssembleContextHistoryOrder(t *testing.T) {
-	records := []common.MemoryRecord{
-		record(1, mstorage.HistoryRecordUser, "", "第一个问题"),
-		record(2, mstorage.HistoryRecordAssistant, "", "第一个回答"),
-		record(3, mstorage.HistoryRecordUser, "", "第二个问题"),
-		record(4, mstorage.HistoryRecordAssistant, "", "第二个回答"),
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", "第一个问题"),
+		record(2, hCommon.HistoryRecordTypeAssistant, "", "第一个回答"),
+		record(3, hCommon.HistoryRecordTypeUser, "", "第二个问题"),
+		record(4, hCommon.HistoryRecordTypeAssistant, "", "第二个回答"),
 	}
 
 	result := AssembleContext("SYS", records, "第三个问题", DefaultContextPolicy())
@@ -69,21 +69,21 @@ func TestAssembleContextHistoryOrder(t *testing.T) {
 // TestAssembleContextToolResultsFoldedIntoAssistant 工具结果必须折叠进同轮助手消息,
 // 且不产生 role=tool 的孤立消息(避免合成 tool_call_id 破坏协议)。
 func TestAssembleContextToolResultsFoldedIntoAssistant(t *testing.T) {
-	records := []common.MemoryRecord{
-		record(1, mstorage.HistoryRecordUser, "", "杭州天气？"),
-		record(2, mstorage.HistoryRecordTool, "get_weather", `{"city":"杭州","weather":"晴"}`),
-		record(3, mstorage.HistoryRecordAssistant, "", "杭州明天晴。"),
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", "杭州天气？"),
+		record(2, hCommon.HistoryRecordTypeTool, "get_weather", `{"city":"杭州","weather":"晴"}`),
+		record(3, hCommon.HistoryRecordTypeAssistant, "", "杭州明天晴。"),
 	}
 
 	result := AssembleContext("SYS", records, "那后天呢", DefaultContextPolicy())
 
 	for _, msg := range result.Messages {
-		if msg.Role == RoleTool {
+		if msg.Role == hCommon.RoleTool {
 			t.Fatalf("不应产生 role=tool 消息: %+v", result.Messages)
 		}
 	}
 	assistant := result.Messages[2]
-	if assistant.Role != RoleAssistant {
+	if assistant.Role != hCommon.RoleAssistant {
 		t.Fatalf("第 3 条应为 assistant: %+v", result.Messages)
 	}
 	if !strings.Contains(assistant.Content, "杭州明天晴。") {
@@ -99,10 +99,10 @@ func TestAssembleContextToolResultsFoldedIntoAssistant(t *testing.T) {
 // TestAssembleContextToolResultTruncated 单条工具结果超长时必须按字符截断(完整内容仍在历史文件里)。
 func TestAssembleContextToolResultTruncated(t *testing.T) {
 	long := strings.Repeat("测", 5000)
-	records := []common.MemoryRecord{
-		record(1, mstorage.HistoryRecordUser, "", "问"),
-		record(2, mstorage.HistoryRecordTool, "t", long),
-		record(3, mstorage.HistoryRecordAssistant, "", "答"),
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", "问"),
+		record(2, hCommon.HistoryRecordTypeTool, "t", long),
+		record(3, hCommon.HistoryRecordTypeAssistant, "", "答"),
 	}
 
 	policy := DefaultContextPolicy()
@@ -124,9 +124,9 @@ func TestAssembleContextToolResultTruncated(t *testing.T) {
 // TestAssembleContextLeftoverToolWithoutAssistant 被中断的轮次(只有工具结果、没有助手回复)
 // 也必须保留工具产出,但不得生成孤立的 tool 消息。
 func TestAssembleContextLeftoverToolWithoutAssistant(t *testing.T) {
-	records := []common.MemoryRecord{
-		record(1, mstorage.HistoryRecordUser, "", "查一下"),
-		record(2, mstorage.HistoryRecordTool, "get_weather", `{"weather":"雨"}`),
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", "查一下"),
+		record(2, hCommon.HistoryRecordTypeTool, "get_weather", `{"weather":"雨"}`),
 	}
 
 	result := AssembleContext("SYS", records, "在吗", DefaultContextPolicy())
@@ -141,15 +141,15 @@ func TestAssembleContextLeftoverToolWithoutAssistant(t *testing.T) {
 
 // TestAssembleContextInterruptedAssistantReplayed 被中断的助手回复(部分内容)按普通助手消息回放。
 func TestAssembleContextInterruptedAssistantReplayed(t *testing.T) {
-	interrupted := record(2, mstorage.HistoryRecordAssistant, mstorage.MemoryRecordInterrupted, "回答到一半")
+	interrupted := record(2, hCommon.HistoryRecordTypeAssistant, hCommon.HistoryRecordTypeInterrupted, "回答到一半")
 	interrupted.TimeText = "2026-09-13 01:00:00"
-	records := []common.MemoryRecord{
-		record(1, mstorage.HistoryRecordUser, "", "问题"),
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", "问题"),
 		interrupted,
 	}
 
 	result := AssembleContext("SYS", records, "继续", DefaultContextPolicy())
-	if result.Messages[2].Role != RoleAssistant || result.Messages[2].Content != "回答到一半" {
+	if result.Messages[2].Role != hCommon.RoleAssistant || result.Messages[2].Content != "回答到一半" {
 		t.Fatalf("中断的部分回复应回放: %+v", result.Messages)
 	}
 }
@@ -157,14 +157,14 @@ func TestAssembleContextInterruptedAssistantReplayed(t *testing.T) {
 // TestAssembleContextSummaryReplacesCoveredRecords 摘要记录折叠进 system,
 // 且它 covers 的旧记录不再回放(避免同段历史既摘要又原文)。
 func TestAssembleContextSummaryReplacesCoveredRecords(t *testing.T) {
-	records := []common.MemoryRecord{
-		record(1, mstorage.HistoryRecordUser, "", "老问题一"),
-		record(2, mstorage.HistoryRecordAssistant, "", "老回答一"),
-		record(3, mstorage.HistoryRecordUser, "", "老问题二"),
-		record(4, mstorage.HistoryRecordAssistant, "", "老回答二"),
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", "老问题一"),
+		record(2, hCommon.HistoryRecordTypeAssistant, "", "老回答一"),
+		record(3, hCommon.HistoryRecordTypeUser, "", "老问题二"),
+		record(4, hCommon.HistoryRecordTypeAssistant, "", "老回答二"),
 		summaryRecord(100, 1, 4, "用户先问了两个老问题,已分别回答。"),
-		record(101, mstorage.HistoryRecordUser, "", "新问题"),
-		record(102, mstorage.HistoryRecordAssistant, "", "新回答"),
+		record(101, hCommon.HistoryRecordTypeUser, "", "新问题"),
+		record(102, hCommon.HistoryRecordTypeAssistant, "", "新回答"),
 	}
 
 	result := AssembleContext("SYS", records, "当前问题", DefaultContextPolicy())
@@ -191,11 +191,11 @@ func TestAssembleContextSummaryReplacesCoveredRecords(t *testing.T) {
 // TestAssembleContextSkipsEmptyAssistant 空助手记录不回放(模型只输出思考内容时会写空回复),
 // 否则会白占预算并让消息序列出现无信息量的空洞。
 func TestAssembleContextSkipsEmptyAssistant(t *testing.T) {
-	records := []common.MemoryRecord{
-		record(1, mstorage.HistoryRecordUser, "", "第一个问题"),
-		record(2, mstorage.HistoryRecordAssistant, "", "   "), // 空回复
-		record(3, mstorage.HistoryRecordUser, "", "第二个问题"),
-		record(4, mstorage.HistoryRecordAssistant, "", "第二个回答"),
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", "第一个问题"),
+		record(2, hCommon.HistoryRecordTypeAssistant, "", "   "), // 空回复
+		record(3, hCommon.HistoryRecordTypeUser, "", "第二个问题"),
+		record(4, hCommon.HistoryRecordTypeAssistant, "", "第二个回答"),
 	}
 
 	result := AssembleContext("SYS", records, "第三个问题", DefaultContextPolicy())
@@ -207,10 +207,10 @@ func TestAssembleContextSkipsEmptyAssistant(t *testing.T) {
 // TestAssembleContextKeepsToolOutputWhenReplyEmpty 回复为空但已执行过工具时,
 // 工具产出必须保留(单独成一条助手消息),不得随空助手记录一起被丢掉。
 func TestAssembleContextKeepsToolOutputWhenReplyEmpty(t *testing.T) {
-	records := []common.MemoryRecord{
-		record(1, mstorage.HistoryRecordUser, "", "杭州天气"),
-		record(2, mstorage.HistoryRecordTool, "get_weather", `{"weather":"晴"}`),
-		record(3, mstorage.HistoryRecordAssistant, "", ""), // 空回复
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", "杭州天气"),
+		record(2, hCommon.HistoryRecordTypeTool, "get_weather", `{"weather":"晴"}`),
+		record(3, hCommon.HistoryRecordTypeAssistant, "", ""), // 空回复
 	}
 
 	result := AssembleContext("SYS", records, "在吗", DefaultContextPolicy())
@@ -227,12 +227,12 @@ func TestAssembleContextKeepsToolOutputWhenReplyEmpty(t *testing.T) {
 func TestAssembleContextBudgetTrimsOldestGroups(t *testing.T) {
 	// 用较长的 ASCII 内容放大 token 估算,便于用较小的窗口触达裁剪
 	long := strings.Repeat("history detail ", 40)
-	var records []common.MemoryRecord
+	var records []hCommon.MemoryRecord
 	index := 1
 	for i := 0; i < 6; i++ {
 		records = append(records,
-			record(index, mstorage.HistoryRecordUser, "", long),
-			record(index+1, mstorage.HistoryRecordAssistant, "", long),
+			record(index, hCommon.HistoryRecordTypeUser, "", long),
+			record(index+1, hCommon.HistoryRecordTypeAssistant, "", long),
 		)
 		index += 2
 	}
@@ -255,7 +255,7 @@ func TestAssembleContextBudgetTrimsOldestGroups(t *testing.T) {
 	if len(result.Messages) >= len(records)+2 {
 		t.Errorf("应确实裁掉了一些历史: messages=%d", len(result.Messages))
 	}
-	if result.Messages[1].Role != RoleUser {
+	if result.Messages[1].Role != hCommon.RoleUser {
 		t.Errorf("保留区必须以 user 消息开头,实际 %q", result.Messages[1].Role)
 	}
 	// 最新的历史与本轮问题必须保留
@@ -272,9 +272,9 @@ func TestAssembleContextBudgetTrimsOldestGroups(t *testing.T) {
 // TestAssembleContextNoTrimWithoutWindow 未配置上下文窗口时不裁剪(保持阶段1行为)。
 func TestAssembleContextNoTrimWithoutWindow(t *testing.T) {
 	long := strings.Repeat("x", 40000)
-	records := []common.MemoryRecord{
-		record(1, mstorage.HistoryRecordUser, "", long),
-		record(2, mstorage.HistoryRecordAssistant, "", long),
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", long),
+		record(2, hCommon.HistoryRecordTypeAssistant, "", long),
 	}
 
 	result := AssembleContext("SYS", records, "问题", DefaultContextPolicy())
@@ -292,11 +292,11 @@ func TestAssembleContextNoTrimWithoutWindow(t *testing.T) {
 //   - 因此 floor 越大,窗口不够时**越早丢历史**,系统提示始终优先。
 func TestAssembleContextSystemFloorReservesPromptSpace(t *testing.T) {
 	long := strings.Repeat("y", 400)
-	records := []common.MemoryRecord{
-		record(1, mstorage.HistoryRecordUser, "", long),
-		record(2, mstorage.HistoryRecordAssistant, "", long),
-		record(3, mstorage.HistoryRecordUser, "", long),
-		record(4, mstorage.HistoryRecordAssistant, "", long),
+	records := []hCommon.MemoryRecord{
+		record(1, hCommon.HistoryRecordTypeUser, "", long),
+		record(2, hCommon.HistoryRecordTypeAssistant, "", long),
+		record(3, hCommon.HistoryRecordTypeUser, "", long),
+		record(4, hCommon.HistoryRecordTypeAssistant, "", long),
 	}
 
 	// 预留额度超过整个窗口 → 历史预算为 0 → 不带历史(请求仍合法),系统提示优先
@@ -316,11 +316,11 @@ func TestAssembleContextSystemFloorReservesPromptSpace(t *testing.T) {
 	// 预留额度越大,历史能占的越少(同样窗口下更早丢历史)。
 	// 用短消息(约 25 tokens/条)让窗口内能放下多组,这样预算差异才会体现在回放量上。
 	short := strings.Repeat("z", 100)
-	var many []common.MemoryRecord
+	var many []hCommon.MemoryRecord
 	for i := 1; i <= 8; i++ {
-		kind := mstorage.HistoryRecordUser
+		kind := hCommon.HistoryRecordTypeUser
 		if i%2 == 0 {
-			kind = mstorage.HistoryRecordAssistant
+			kind = hCommon.HistoryRecordTypeAssistant
 		}
 		many = append(many, record(i, kind, "", short))
 	}
@@ -337,7 +337,7 @@ func TestAssembleContextSystemFloorReservesPromptSpace(t *testing.T) {
 
 // TestSystemReserveTokens 系统提示预留额度取 max(实际估算, floor)。
 func TestSystemReserveTokens(t *testing.T) {
-	system := llmproto.ChatMessage{Role: RoleSystem, Content: strings.Repeat("a", 400)} // 约 100 tokens
+	system := llmproto.ChatMessage{Role: hCommon.RoleSystem, Content: strings.Repeat("a", 400)} // 约 100 tokens
 
 	if got := systemReserveTokens(ContextPolicy{}, system); got != EstimateInputTokens([]llmproto.ChatMessage{system}) {
 		t.Errorf("未配置 floor 时应用实际估算: %d", got)
@@ -353,9 +353,9 @@ func TestSystemReserveTokens(t *testing.T) {
 // TestFitMessagesWithoutWindow 未配置窗口时不改动消息序列。
 func TestFitMessagesWithoutWindow(t *testing.T) {
 	messages := []llmproto.ChatMessage{
-		{Role: RoleSystem, Content: "SYS"},
-		{Role: RoleUser, Content: "q1"},
-		{Role: RoleAssistant, Content: "a1"},
+		{Role: hCommon.RoleSystem, Content: "SYS"},
+		{Role: hCommon.RoleUser, Content: "q1"},
+		{Role: hCommon.RoleAssistant, Content: "a1"},
 	}
 	got := FitMessages(dataobject.TLlm{}, messages, DefaultContextPolicy())
 	if len(got) != len(messages) {
@@ -368,37 +368,37 @@ func TestFitMessagesWithoutWindow(t *testing.T) {
 func TestFitMessagesKeepsLastGroupAndPairs(t *testing.T) {
 	long := strings.Repeat("z", 400)
 	messages := []llmproto.ChatMessage{
-		{Role: RoleSystem, Content: "SYS"},
+		{Role: hCommon.RoleSystem, Content: "SYS"},
 	}
 	for i := 0; i < 5; i++ { // 历史若干轮
 		messages = append(messages,
-			llmproto.ChatMessage{Role: RoleUser, Content: long},
-			llmproto.ChatMessage{Role: RoleAssistant, Content: long},
+			llmproto.ChatMessage{Role: hCommon.RoleUser, Content: long},
+			llmproto.ChatMessage{Role: hCommon.RoleAssistant, Content: long},
 		)
 	}
 	// 本轮:用户问题 + 工具调用 + 工具结果
 	messages = append(messages,
-		llmproto.ChatMessage{Role: RoleUser, Content: "本轮问题"},
-		llmproto.ChatMessage{Role: RoleAssistant, ToolCalls: []llmproto.ToolCall{{ID: "c1"}}},
-		llmproto.ChatMessage{Role: RoleTool, ToolCallID: "c1", Content: "工具结果"},
+		llmproto.ChatMessage{Role: hCommon.RoleUser, Content: "本轮问题"},
+		llmproto.ChatMessage{Role: hCommon.RoleAssistant, ToolCalls: []llmproto.ToolCall{{ID: "c1"}}},
+		llmproto.ChatMessage{Role: hCommon.RoleTool, ToolCallID: "c1", Content: "工具结果"},
 	)
 
 	policy := DefaultContextPolicy()
 	policy.ContextWindow = 700
 	got := FitMessages(dataobject.TLlm{ContextWindow: 0}, messages, policy)
 
-	if got[0].Role != RoleSystem {
+	if got[0].Role != hCommon.RoleSystem {
 		t.Fatalf("system 必须固定在首位: %+v", got)
 	}
-	if got[1].Role != RoleUser {
+	if got[1].Role != hCommon.RoleUser {
 		t.Errorf("裁剪后必须以 user 消息开头(不得 orphan): %q", got[1].Role)
 	}
 	// 末组完整保留:assistant(tool_calls) 之后必须紧跟对应 tool 结果
 	last := got[len(got)-1]
-	if last.Role != RoleTool || last.ToolCallID != "c1" {
+	if last.Role != hCommon.RoleTool || last.ToolCallID != "c1" {
 		t.Fatalf("末组的工具调用链必须完整保留: %+v", got[len(got)-3:])
 	}
-	if got[len(got)-2].Role != RoleAssistant || len(got[len(got)-2].ToolCalls) == 0 {
+	if got[len(got)-2].Role != hCommon.RoleAssistant || len(got[len(got)-2].ToolCalls) == 0 {
 		t.Errorf("tool 结果之前必须保留其 assistant(tool_calls) 消息: %+v", got)
 	}
 	if len(got) >= len(messages) {

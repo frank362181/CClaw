@@ -55,7 +55,6 @@ func (service *PromptService) BuildSystemPrompt(agent dataobject.TAgent, skillFi
 }
 
 // BuildSystemPromptEx 按指定会话范围组装 system prompt。
-// 使用时机与 OpenClaw 一致:新会话首轮注入完整启动文档,后续每轮按指纹复用缓存
 // (文件未变零读盘),从而让长会话能看到工作区文件的编辑。
 func (service *PromptService) BuildSystemPromptEx(agent dataobject.TAgent, skillFiles []string, scope dataobject.BootstrapScope) (*dataobject.SystemPrompt, error) {
 	workspaceRoot, _ := cCommon.BuildAgentBootstrapRoot(agent)

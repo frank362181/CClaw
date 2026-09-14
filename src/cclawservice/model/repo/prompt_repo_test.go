@@ -13,7 +13,7 @@ import (
 	"runtime"
 	"testing"
 
-	cCommon "my.favorite/cclawservice/common"
+	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/platformutility/exception"
 )
@@ -33,18 +33,18 @@ func TestGetStartupFiles(t *testing.T) {
 	root := t.TempDir()
 
 	// 仅创建 AGENTS.md 与 SOUL.md,其余启动文件缺失
-	writeRepoFile(t, filepath.Join(root, cCommon.AgentDocFileName), "# Rules\n")
-	writeRepoFile(t, filepath.Join(root, cCommon.SoulDocFileName), "# Soul\n")
+	writeRepoFile(t, filepath.Join(root, hCommon.AgentDocFileName), "# Rules\n")
+	writeRepoFile(t, filepath.Join(root, hCommon.SoulDocFileName), "# Soul\n")
 
 	repo := GetAgentFileRepository()
 	list := repo.GetStartupFiles(root)
 
-	if len(list) != len(cCommon.StartupDocFiles) {
-		t.Fatalf("startup file count mismatch: got=%d want=%d", len(list), len(cCommon.StartupDocFiles))
+	if len(list) != len(hCommon.StartupDocFiles) {
+		t.Fatalf("startup file count mismatch: got=%d want=%d", len(list), len(hCommon.StartupDocFiles))
 	}
 
 	// 顺序与白名单一致,且 AGENTS/SOUL 存在、其余缺失
-	for i, item := range cCommon.StartupDocFiles {
+	for i, item := range hCommon.StartupDocFiles {
 		if list[i].FileName != item.Name || list[i].Kind != item.Kind || list[i].Required != item.Required {
 			t.Fatalf("index %d mismatch: got=%+v want=(%s,%v,%v)", i, list[i], item.Name, item.Kind, item.Required)
 		}
@@ -60,10 +60,10 @@ func TestGetStartupFiles(t *testing.T) {
 			t.Errorf("file %s should have positive byteSize", doc.FileName)
 		}
 	}
-	if !existFlags[cCommon.AgentDocFileName] || !existFlags[cCommon.SoulDocFileName] {
+	if !existFlags[hCommon.AgentDocFileName] || !existFlags[hCommon.SoulDocFileName] {
 		t.Errorf("AGENTS.md/SOUL.md should exist: %+v", existFlags)
 	}
-	if existFlags[cCommon.ToolsDocFileName] || existFlags[cCommon.IdentityDocFileName] {
+	if existFlags[hCommon.ToolsDocFileName] || existFlags[hCommon.IdentityDocFileName] {
 		t.Errorf("TOOLS.md/IDENTITY.md should be missing: %+v", existFlags)
 	}
 }
@@ -71,10 +71,10 @@ func TestGetStartupFiles(t *testing.T) {
 func TestGetStartupFile(t *testing.T) {
 	root := t.TempDir()
 	content := "---\nsummary: \"rules\"\n---\n# Rules\n- Read before edit.\n"
-	writeRepoFile(t, filepath.Join(root, cCommon.AgentDocFileName), content)
+	writeRepoFile(t, filepath.Join(root, hCommon.AgentDocFileName), content)
 
 	repo := GetAgentFileRepository()
-	file, err := repo.GetStartupFile(root, cCommon.AgentDocFileName)
+	file, err := repo.GetStartupFile(root, hCommon.AgentDocFileName)
 	if err != nil {
 		t.Fatalf("GetStartupFile error:%s", err.Error())
 	}
@@ -95,10 +95,10 @@ func TestGetStartupFile(t *testing.T) {
 
 func TestGetStartupFileMissing(t *testing.T) {
 	root := t.TempDir()
-	writeRepoFile(t, filepath.Join(root, cCommon.AgentDocFileName), "# Rules\n")
+	writeRepoFile(t, filepath.Join(root, hCommon.AgentDocFileName), "# Rules\n")
 
 	repo := GetAgentFileRepository()
-	file, err := repo.GetStartupFile(root, cCommon.ToolsDocFileName) // 可选文件缺失
+	file, err := repo.GetStartupFile(root, hCommon.ToolsDocFileName) // 可选文件缺失
 	if err != nil {
 		t.Fatalf("GetStartupFile error:%s", err.Error())
 	}
@@ -138,23 +138,23 @@ func TestGetStartupFileRejectsTraversal(t *testing.T) {
 func TestGetStartupFileRejectsOversize(t *testing.T) {
 	root := t.TempDir()
 
-	big := make([]byte, cCommon.MaxAgentDocSize+1)
-	writeRepoFile(t, filepath.Join(root, cCommon.AgentDocFileName), string(big))
+	big := make([]byte, hCommon.MaxAgentDocSize+1)
+	writeRepoFile(t, filepath.Join(root, hCommon.AgentDocFileName), string(big))
 
 	repo := GetAgentFileRepository()
-	if _, err := repo.GetStartupFile(root, cCommon.AgentDocFileName); err == nil {
+	if _, err := repo.GetStartupFile(root, hCommon.AgentDocFileName); err == nil {
 		t.Fatal("expected error for oversize file")
 	}
 }
 
 func TestGetStartupFileCacheDetectsChange(t *testing.T) {
 	root := t.TempDir()
-	path := filepath.Join(root, cCommon.AgentDocFileName)
+	path := filepath.Join(root, hCommon.AgentDocFileName)
 	writeRepoFile(t, path, "v1")
 
 	repo := GetAgentFileRepository()
 
-	file, err := repo.GetStartupFile(root, cCommon.AgentDocFileName)
+	file, err := repo.GetStartupFile(root, hCommon.AgentDocFileName)
 	if err != nil || file.Content != "v1" {
 		t.Fatalf("first read: content=%q err=%v", file.Content, err)
 	}
@@ -164,7 +164,7 @@ func TestGetStartupFileCacheDetectsChange(t *testing.T) {
 		t.Fatalf("write error:%s", err.Error())
 	}
 
-	file2, err := repo.GetStartupFile(root, cCommon.AgentDocFileName)
+	file2, err := repo.GetStartupFile(root, hCommon.AgentDocFileName)
 	if err != nil || file2.Content != "v2-longer-content" {
 		t.Fatalf("second read after change: content=%q err=%v", file2.Content, err)
 	}
@@ -178,7 +178,7 @@ func TestGetStartupFileRejectsSymlink(t *testing.T) {
 	root := t.TempDir()
 	// 工作区内真实文件 + 指向它的符号链接
 	writeRepoFile(t, filepath.Join(root, "real_agents.md"), "secret-content")
-	if err := os.Symlink(filepath.Join(root, "real_agents.md"), filepath.Join(root, cCommon.AgentDocFileName)); err != nil {
+	if err := os.Symlink(filepath.Join(root, "real_agents.md"), filepath.Join(root, hCommon.AgentDocFileName)); err != nil {
 		t.Fatalf("symlink error:%s", err.Error())
 	}
 
@@ -186,13 +186,13 @@ func TestGetStartupFileRejectsSymlink(t *testing.T) {
 
 	// 符号链接在列表中被视为缺失(与正文读取的 O_NOFOLLOW 语义一致)
 	for _, doc := range repo.GetStartupFiles(root) {
-		if doc.FileName == cCommon.AgentDocFileName && !doc.Missing {
+		if doc.FileName == hCommon.AgentDocFileName && !doc.Missing {
 			t.Errorf("symlink AGENTS.md should be missing in list")
 		}
 	}
 
 	// 符号链接在正文读取(O_NOFOLLOW)中也被视为缺失,不泄漏目标内容
-	file, err := repo.GetStartupFile(root, cCommon.AgentDocFileName)
+	file, err := repo.GetStartupFile(root, hCommon.AgentDocFileName)
 	if err != nil {
 		t.Fatalf("GetStartupFile error:%s", err.Error())
 	}
