@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	myCommon "my.favorite/cclawservice/common"
+	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
@@ -51,9 +51,9 @@ var agentRouter = common.GetSingleton(func() *AgentRouter {
 		agentRepo:     nil,
 		llmClient:     NewClient(),
 		sessionAgents: ctxmgr.GetChatSessionAgentMgr(),
-		llmRoutingOn:  myCommon.AgentRoutingLLMEnabled,
-		llmTimeout:    time.Duration(myCommon.AgentRoutingLLMTimeoutSeconds) * time.Second,
-		llmMaxTokens:  myCommon.AgentRoutingLLMMaxTokens,
+		llmRoutingOn:  hCommon.AgentRoutingLLMEnabled,
+		llmTimeout:    time.Duration(hCommon.AgentRoutingLLMTimeoutSeconds) * time.Second,
+		llmMaxTokens:  hCommon.AgentRoutingLLMMaxTokens,
 	}
 }).Instance()
 

@@ -21,7 +21,7 @@ package ctxmgr
 import (
 	"sync"
 
-	myCommon "my.favorite/cclawservice/common"
+	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/platformutility/common"
 )
 
@@ -46,7 +46,7 @@ const defaultSessionBindingMaxEntries = 100000
 var chatSessionAgentMgr = common.GetSingleton(func() *ChatSessionAgentRegistry {
 	return &ChatSessionAgentRegistry{
 		bindings:   make(map[string]sessionAgentBinding),
-		ttlSeconds: myCommon.SessionAgentBindingTTLSeconds,
+		ttlSeconds: hCommon.SessionAgentBindingTTLSeconds,
 		maxEntries: defaultSessionBindingMaxEntries,
 	}
 }).Instance()

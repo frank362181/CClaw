@@ -19,6 +19,7 @@ import (
 
 	"gopkg.in/yaml.v2"
 	cCommon "my.favorite/cclawservice/common"
+	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/exception"
@@ -81,7 +82,7 @@ func (repo *PromptRepository) LoadAgentBootstrap(agent dataobject.TAgent) error 
 	defer repo.mu.Unlock()
 
 	var fileNames []string
-	for _, item := range cCommon.StartupDocFiles {
+	for _, item := range hCommon.StartupDocFiles {
 		fileNames = append(fileNames, item.Name)
 	}
 
@@ -108,7 +109,7 @@ func (repo *PromptRepository) LoadAgentBootstrap(agent dataobject.TAgent) error 
 		}
 	}
 
-	for _, item := range cCommon.StartupDocFiles {
+	for _, item := range hCommon.StartupDocFiles {
 		doc, ok, err := repo.readAgentDocumentLocked(item.Kind, agentBootstrapRoot, item.Name, item.Required)
 		if err != nil {
 			logging.LogWarnF("prompt repo: load %s error:%s", item.Name, err.Error())
@@ -151,12 +152,12 @@ func (repo *PromptRepository) AddSkill(agentId, skillId, skillFile string) error
 		return nil
 	}
 
-	data, size, err := pCommon.ReadFile(filePath, cCommon.MaxSkillDocSize)
+	data, size, err := pCommon.ReadFile(filePath, hCommon.MaxSkillDocSize)
 	if err != nil {
 		return err
 	}
 
-	frontMatter, content := cCommon.SplitFrontMatter(data)
+	frontMatter, content := hCommon.SplitFrontMatter(data)
 
 	doc := &dataobject.SkillDocument{
 		SkillId:   skillId,
@@ -277,12 +278,12 @@ func (repo *PromptRepository) readAgentDocumentLocked(kind dataobject.AgentDocum
 		return nil, false, nil // 可选文件缺失:省略
 	}
 
-	data, size, err := pCommon.ReadFile(filePath, cCommon.MaxAgentDocSize)
+	data, size, err := pCommon.ReadFile(filePath, hCommon.MaxAgentDocSize)
 	if err != nil {
 		return nil, false, err
 	}
 
-	frontMatter, content := cCommon.SplitFrontMatter(data)
+	frontMatter, content := hCommon.SplitFrontMatter(data)
 
 	base.Content = content
 	base.ByteSize = size
@@ -304,7 +305,7 @@ func (repo *PromptRepository) resolveSkillPathLocked(workspaceRoot, skillFile st
 	if len(skillFile) == 0 {
 		return "", exception.ParameterEmptyErrorEx("prompt repo: skill file is empty")
 	}
-	if filepath.Base(skillFile) != cCommon.SkillDocFileName {
+	if filepath.Base(skillFile) != hCommon.SkillDocFileName {
 		return "", exception.FilePathErrorEx("prompt repo: skill file must be SKILL.md: " + skillFile)
 	}
 

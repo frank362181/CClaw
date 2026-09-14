@@ -24,7 +24,7 @@ import (
 	"sync"
 
 	"gopkg.in/yaml.v2"
-	cCommon "my.favorite/cclawservice/common"
+	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/scriptrunner"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
@@ -51,7 +51,7 @@ func LoadToolSet(extensionRoot string, skillFiles []string) *ToolSet {
 	}
 
 	for _, skillFile := range skillFiles {
-		if filepath.Base(skillFile) != cCommon.SkillDocFileName {
+		if filepath.Base(skillFile) != hCommon.SkillDocFileName {
 			continue
 		}
 		for _, pt := range getSkillToolsCached(rootClean, skillFile) {
@@ -179,11 +179,11 @@ func parseSkillTools(rootClean, skillFile string) []parsedTool {
 
 // loadSkillDoc 读取并解析单个 SKILL.md(front matter 强类型,复用 dataobject.SkillFrontMatter)。
 func loadSkillDoc(skillFile string) (*dataobject.SkillDocument, bool) {
-	data, _, err := pCommon.ReadFile(skillFile, cCommon.MaxSkillDocSize)
+	data, _, err := pCommon.ReadFile(skillFile, hCommon.MaxSkillDocSize)
 	if err != nil {
 		return nil, false
 	}
-	frontMatter, _ := cCommon.SplitFrontMatter(data)
+	frontMatter, _ := hCommon.SplitFrontMatter(data)
 	doc := &dataobject.SkillDocument{SkillFile: skillFile}
 	if len(frontMatter) > 0 {
 		if err := yaml.Unmarshal([]byte(frontMatter), &doc.FrontMatter); err != nil {

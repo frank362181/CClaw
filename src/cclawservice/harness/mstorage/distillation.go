@@ -32,22 +32,6 @@ import (
 	pCommon "my.favorite/platformutility/common"
 )
 
-// 蒸馏参数
-const (
-	// DistillMinRecords 触发蒸馏的最小记录数(太短的对话没有长期价值)
-	DistillMinRecords = 6
-	// DistillMaxFacts 单次蒸馏最多写入的条目数(避免一次会话灌满长期记忆)
-	DistillMaxFacts = 8
-	// DistillMaxFactRunes 单条事实的最大字符数
-	DistillMaxFactRunes = 200
-	// DistillMaxInputChars 送入模型的源文本字符上限
-	DistillMaxInputChars = 12000
-	// distillSectionTimeLayout 小节标题的时间格式
-	distillSectionTimeLayout = "2006-01-02 15:04:05"
-	// distillNoneMark 模型判定"没有值得长期记住的内容"时的输出
-	distillNoneMark = "NONE"
-)
-
 // 蒸馏提示词
 const (
 	distillSystemPrompt = "你负责从对话中提炼**长期有效**的记忆,写入智能体的长期记忆文件。\n" +
@@ -60,7 +44,7 @@ const (
 		"1. 每条一行,以 \"- \" 开头,一句话说清,不写理由过程;\n" +
 		"2. 不要记录一次性的内容(本次问答、临时计算结果、寒暄);\n" +
 		"3. 不得推测或补造,只依据给定对话;\n" +
-		"4. 没有任何值得长期记住的内容时,只输出 " + distillNoneMark + "。"
+		"4. 没有任何值得长期记住的内容时,只输出 " + hCommon.DistillNoneMark + "。"
 
 	distillUserHeader = "以下是一段对话记录(记录序号 %d-%d),请提炼长期记忆:\n\n"
 )
@@ -76,20 +60,18 @@ type DistillResult struct {
 	Pruned  int      // 因超预算被裁剪掉的旧小节数
 }
 
-// MemoryDocPath 返回某 Agent 的长期记忆文件路径
-func MemoryDocPath(agent dataobject.TAgent) (string, bool) {
+// memoryDocPath 返回某 Agent 的长期记忆文件路径
+func memoryDocPath(agent dataobject.TAgent) (string, bool) {
 	root, ok := cCommon.BuildAgentBootstrapRoot(agent)
 	if !ok {
 		return pCommon.BlankString, false
 	}
-	return filepath.Join(root, cCommon.MemoryDocFileName), true
+	return filepath.Join(root, hCommon.MemoryDocFileName), true
 }
 
-// ============================== private functions & methods ==============================
-
 // plainRecords 过滤掉摘要记录(摘要是压缩产物,不是原始对话事实)。
-func plainRecords(records []MemoryRecord) []MemoryRecord {
-	kept := make([]MemoryRecord, 0, len(records))
+func plainRecords(records []hCommon.MemoryRecord) []hCommon.MemoryRecord {
+	kept := make([]hCommon.MemoryRecord, 0, len(records))
 	for _, rec := range records {
 		if !rec.IsSummary() {
 			kept = append(kept, rec)
@@ -99,15 +81,15 @@ func plainRecords(records []MemoryRecord) []MemoryRecord {
 }
 
 // buildDistillUserPrompt 渲染蒸馏的输入(逐条限长 + 总量上限)。
-func buildDistillUserPrompt(records []MemoryRecord) string {
+func buildDistillUserPrompt(records []hCommon.MemoryRecord) string {
 	var sb strings.Builder
 	_, _ = fmt.Fprintf(&sb, distillUserHeader, records[0].Index, records[len(records)-1].Index)
 
 	total := 0
 	for _, rec := range records {
-		body := pCommon.TruncateRunes(strings.TrimSpace(rec.Content), compactionRecordExcerptRunes, truncateMarker)
+		body := pCommon.TruncateRunes(strings.TrimSpace(rec.Content), hCommon.CompactionRecordExcerptRunes, hCommon.TruncatedMarker)
 		line := fmt.Sprintf("[%d] %s: %s\n", rec.Index, recordLabel(rec), body)
-		if total+utf8.RuneCountInString(line) > DistillMaxInputChars {
+		if total+utf8.RuneCountInString(line) > hCommon.DistillMaxInputChars {
 			sb.WriteString("\n(更早的内容已略去)\n")
 			break
 		}
@@ -121,14 +103,14 @@ func buildDistillUserPrompt(records []MemoryRecord) string {
 // 若模型完全没用列表(一条都没有),则回退为"非空、非标题、非 NONE"的行,兼容不听话的输出。
 func parseDistilledFacts(text string) []string {
 	text = strings.TrimSpace(text)
-	if text == pCommon.BlankString || strings.EqualFold(text, distillNoneMark) {
+	if text == pCommon.BlankString || strings.EqualFold(text, hCommon.DistillNoneMark) {
 		return nil
 	}
 
 	var bulleted, plain []string
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
-		if line == pCommon.BlankString || strings.EqualFold(line, distillNoneMark) || strings.HasPrefix(line, "#") {
+		if line == pCommon.BlankString || strings.EqualFold(line, hCommon.DistillNoneMark) || strings.HasPrefix(line, "#") {
 			continue
 		}
 
@@ -151,8 +133,8 @@ func parseDistilledFacts(text string) []string {
 
 	facts := make([]string, 0, len(items))
 	for _, item := range items {
-		facts = append(facts, pCommon.TruncateRunes(item, DistillMaxFactRunes, truncateMarker))
-		if len(facts) >= DistillMaxFacts {
+		facts = append(facts, pCommon.TruncateRunes(item, hCommon.DistillMaxFactRunes, hCommon.TruncatedMarker))
+		if len(facts) >= hCommon.DistillMaxFacts {
 			break
 		}
 	}
@@ -205,7 +187,7 @@ func appendFactsToMemoryDoc(path string, facts []string, sessionId string, maxCh
 
 // buildDistillSection 构造一个小节:"## <时间> | session <id>" + 条目行。
 func buildDistillSection(now *pCommon.DatetimeItem, sessionId string, facts []string) string {
-	timeText := time.Now().Format(distillSectionTimeLayout)
+	timeText := time.Now().Format(hCommon.DistillSectionTimeLayout)
 	if now != nil {
 		timeText = fmt.Sprintf("%04d-%02d-%02d %02d:%02d:%02d", now.Year, now.Month, now.Day, now.Hour, now.Minute, now.Second)
 	}

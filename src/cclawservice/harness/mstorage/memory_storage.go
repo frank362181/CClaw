@@ -6,7 +6,10 @@
 
 package mstorage
 
-import pCommon "my.favorite/platformutility/common"
+import (
+	"my.favorite/cclawservice/harness/common"
+	pCommon "my.favorite/platformutility/common"
+)
 
 type MemoryStorageType int
 
@@ -25,7 +28,7 @@ type IMemoryStorage interface {
 
 	// Read 读回某会话历史文件的全部记录(按序号升序);文件不存在返回 (nil, nil)。
 	// 返回的切片是内部缓存,调用方只读。
-	Read(sessionId, fileName string) ([]MemoryRecord, error)
+	Read(sessionId, fileName string) ([]common.MemoryRecord, error)
 }
 
 type MemoryStorage struct {

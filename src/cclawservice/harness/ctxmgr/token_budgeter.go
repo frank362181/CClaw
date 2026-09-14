@@ -1,5 +1,5 @@
 /**
-* prompt 计算器剩余
+* LLM token budgeter
 *
 * context_window预算，在service/runtime/message_builder.go中构建请求时实现：
 *	BuildChatCompletionRequest/BuildChatCompletionRequestWithTool 每次请求时调用 DynamicMaxTokens

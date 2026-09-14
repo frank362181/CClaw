@@ -31,18 +31,10 @@ import (
 	"fmt"
 	"strings"
 
-	"my.favorite/cclawservice/harness/mstorage"
+	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
-)
-
-// 消息角色
-const (
-	RoleSystem    = "system"
-	RoleUser      = "user"
-	RoleAssistant = "assistant"
-	RoleTool      = "tool"
 )
 
 // 装配默认参数
@@ -113,14 +105,14 @@ type historyItem struct {
 //   - policy:         装配策略
 //
 // 返回的消息序列永远以 system 开头、以本轮用户消息结尾。
-func AssembleContext(systemPrompt string, records []mstorage.MemoryRecord, currentUserMsg string, policy ContextPolicy) AssembleResult {
+func AssembleContext(systemPrompt string, records []hCommon.MemoryRecord, currentUserMsg string, policy ContextPolicy) AssembleResult {
 	policy = normalizePolicy(policy)
 
 	summaryText, active := splitSummaryAndActive(records)
 	items := buildHistoryItems(active, policy.ToolReplayMaxRunes)
 
 	system := composeSystemMessage(systemPrompt, summaryText)
-	current := llmproto.ChatMessage{Role: RoleUser, Content: currentUserMsg}
+	current := llmproto.ChatMessage{Role: hCommon.RoleUser, Content: currentUserMsg}
 
 	result := AssembleResult{Summary: summaryText}
 
@@ -214,14 +206,7 @@ func FitMessages(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, p
 }
 
 // ShouldCompact 判断装配结果是否触发压缩 —— **与模式无关**:default/safeguard 都触发,
-// 模式只决定"怎么压"(摘要怎么生成、要不要保全校验),不决定"压不压"。
-//
-// 触发条件只有一个:装配阶段确实因预算裁剪掉了一段历史。
-//   - default  (t_agent.compaction_mode=0):被裁区间 → 一条整体摘要;
-//   - safeguard(compaction_mode=1)         :被裁区间 → 分块摘要 + 保全校验(校验不过则收窄区间)。
-//
-// 模式细节集中在 mstorage/compaction.go(文件头有模式差异表);agent 入参当前不参与判定,
-// 保留它是为将来可能出现的"关闭压缩"类策略留位。
+// 如何压缩交给compaction mode来决定
 func ShouldCompact(agent dataobject.TAgent, result AssembleResult) bool {
 	return result.NeedCompaction && result.DroppedFrom > 0 && result.DroppedTo >= result.DroppedFrom
 }
@@ -251,15 +236,15 @@ func composeSystemMessage(systemPrompt, summaryText string) llmproto.ChatMessage
 	if summary := strings.TrimSpace(summaryText); summary != "" {
 		content = strings.TrimSpace(content + "\n\n" + historySummaryTitle + "\n" + summary)
 	}
-	return llmproto.ChatMessage{Role: RoleSystem, Content: content}
+	return llmproto.ChatMessage{Role: hCommon.RoleSystem, Content: content}
 }
 
 // splitSummaryAndActive 拆出"摘要文本"与"仍需回放的记录"。
 //
 // 摘要记录(covers: from-to)取代了区间内的原始记录:被取代的记录不再回放,
 // 否则同一段历史会既以摘要、又以原文出现,既浪费预算也干扰模型判断。
-func splitSummaryAndActive(records []mstorage.MemoryRecord) (summaryText string, active []mstorage.MemoryRecord) {
-	var summaries []mstorage.MemoryRecord
+func splitSummaryAndActive(records []hCommon.MemoryRecord) (summaryText string, active []hCommon.MemoryRecord) {
+	var summaries []hCommon.MemoryRecord
 	covered := make(map[int]bool)
 
 	for _, rec := range records {
@@ -299,11 +284,11 @@ func splitSummaryAndActive(records []mstorage.MemoryRecord) (summaryText string,
 }
 
 // filterCovered 过滤掉已被摘要取代的记录。
-func filterCovered(records []mstorage.MemoryRecord, covered map[int]bool) []mstorage.MemoryRecord {
+func filterCovered(records []hCommon.MemoryRecord, covered map[int]bool) []hCommon.MemoryRecord {
 	if len(covered) == 0 {
 		return records
 	}
-	kept := make([]mstorage.MemoryRecord, 0, len(records))
+	kept := make([]hCommon.MemoryRecord, 0, len(records))
 	for _, rec := range records {
 		if !covered[rec.Index] {
 			kept = append(kept, rec)
@@ -313,9 +298,9 @@ func filterCovered(records []mstorage.MemoryRecord, covered map[int]bool) []msto
 }
 
 // buildHistoryItems 把记录映射为历史消息(工具记录折叠进同轮助手消息)。
-func buildHistoryItems(records []mstorage.MemoryRecord, toolMaxRunes int) []historyItem {
+func buildHistoryItems(records []hCommon.MemoryRecord, toolMaxRunes int) []historyItem {
 	items := make([]historyItem, 0, len(records))
-	var pending []mstorage.MemoryRecord
+	var pending []hCommon.MemoryRecord
 
 	flush := func(target *historyItem, anchor int) {
 		if len(pending) == 0 {
@@ -326,30 +311,30 @@ func buildHistoryItems(records []mstorage.MemoryRecord, toolMaxRunes int) []hist
 			target.msg.Content = strings.TrimSpace(target.msg.Content + "\n\n" + block)
 		} else {
 			// 该轮没有助手回复(如被中断):工具结果仍要保留,单独作为一条助手消息回放
-			items = append(items, historyItem{index: anchor, msg: llmproto.ChatMessage{Role: RoleAssistant, Content: block}})
+			items = append(items, historyItem{index: anchor, msg: llmproto.ChatMessage{Role: hCommon.RoleAssistant, Content: block}})
 		}
 		pending = nil
 	}
 
 	for _, rec := range records {
 		switch rec.RecordType {
-		case mstorage.HistoryRecordUser:
+		case hCommon.HistoryRecordTypeUser: //mstorage.HistoryRecordUser:
 			// 上一条用户消息之前残留的工具记录(异常结构)不再挂到新问题上
 			flush(nil, rec.Index)
 			if strings.TrimSpace(rec.Content) == "" {
 				continue // 空提问无信息量(异常数据),不回放
 			}
-			items = append(items, historyItem{index: rec.Index, msg: llmproto.ChatMessage{Role: RoleUser, Content: rec.Content}})
-		case mstorage.HistoryRecordTool:
+			items = append(items, historyItem{index: rec.Index, msg: llmproto.ChatMessage{Role: hCommon.RoleUser, Content: rec.Content}})
+		case hCommon.HistoryRecordTypeTool: //mstorage.HistoryRecordTool:
 			pending = append(pending, rec)
-		case mstorage.HistoryRecordAssistant:
+		case hCommon.HistoryRecordTypeAssistant: //mstorage.HistoryRecordAssistant:
 			// 空助手消息(模型只输出思考内容、或内容被安全策略拦下)不回放:
 			// 它不携带任何信息,却会占用预算并干扰模型对消息序列的判断。
 			// 若本轮还有工具结果,下面 flush 会单独成一条助手消息,工具产出不会丢。
 			if strings.TrimSpace(rec.Content) == "" {
 				continue
 			}
-			item := historyItem{index: rec.Index, msg: llmproto.ChatMessage{Role: RoleAssistant, Content: rec.Content}}
+			item := historyItem{index: rec.Index, msg: llmproto.ChatMessage{Role: hCommon.RoleAssistant, Content: rec.Content}}
 			flush(&item, rec.Index)
 			items = append(items, item)
 		}
@@ -361,7 +346,7 @@ func buildHistoryItems(records []mstorage.MemoryRecord, toolMaxRunes int) []hist
 }
 
 // renderToolBlock 把同轮工具结果渲染为一个文本块(控制单条长度,完整内容仍在历史文件里)。
-func renderToolBlock(tools []mstorage.MemoryRecord, maxRunes int) string {
+func renderToolBlock(tools []hCommon.MemoryRecord, maxRunes int) string {
 	var sb strings.Builder
 	sb.WriteString(historyToolBlockOpen)
 	for _, tool := range tools {
@@ -369,15 +354,12 @@ func renderToolBlock(tools []mstorage.MemoryRecord, maxRunes int) string {
 		if name == "" {
 			name = "tool"
 		}
-		_, _ = fmt.Fprintf(&sb, "\n- %s: %s", name, pCommon.TruncateRunes(strings.TrimSpace(tool.Content), maxRunes, truncateMarker))
+		_, _ = fmt.Fprintf(&sb, "\n- %s: %s", name, pCommon.TruncateRunes(strings.TrimSpace(tool.Content), maxRunes, hCommon.TruncatedMarker))
 	}
 	sb.WriteString("\n")
 	sb.WriteString(historyToolBlockClose)
 	return sb.String()
 }
-
-// truncateMarker 截断标记:工具/历史的截断处显式标出省略号。
-const truncateMarker = "…"
 
 // systemReserveTokens 计算系统提示应占用的 token 额度。
 //
@@ -420,12 +402,12 @@ func trimHistoryItems(items []historyItem, budgetTokens int) (kept, dropped []hi
 	}
 
 	// 对齐到组边界:保留区必须以 user 消息开头
-	for cut < len(items) && items[cut].msg.Role != RoleUser {
+	for cut < len(items) && items[cut].msg.Role != hCommon.RoleUser {
 		cut++
 	}
 	if cut >= len(items) { // 极端情况:预算连一条消息都放不下 → 至少保留最新一条 user 消息
 		for i := len(items) - 1; i >= 0; i-- {
-			if items[i].msg.Role == RoleUser {
+			if items[i].msg.Role == hCommon.RoleUser {
 				cut = i
 				break
 			}
@@ -442,7 +424,7 @@ func trimHistoryItems(items []historyItem, budgetTokens int) (kept, dropped []hi
 func groupMessages(messages []llmproto.ChatMessage) [][]llmproto.ChatMessage {
 	var groups [][]llmproto.ChatMessage
 	for _, msg := range messages {
-		if len(groups) == 0 || msg.Role == RoleUser {
+		if len(groups) == 0 || msg.Role == hCommon.RoleUser {
 			groups = append(groups, []llmproto.ChatMessage{msg})
 			continue
 		}

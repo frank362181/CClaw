@@ -26,6 +26,7 @@ import (
 	"sync"
 
 	cCommon "my.favorite/cclawservice/common"
+	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/exception"
@@ -100,7 +101,7 @@ func (repo *AgentFileRepository) GetStartupFiles(agentBootstrapRoot string) []da
 
 	entry := cache.entry(agentBootstrapRoot)
 	now := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
-	if entry.list != nil && now-entry.loadedAt < cCommon.StartupFileCacheTTLSeconds {
+	if entry.list != nil && now-entry.loadedAt < hCommon.StartupFileCacheTTLSeconds {
 		return entry.list
 	}
 
@@ -150,7 +151,7 @@ func (repo *AgentFileRepository) GetStartupFile(agentBootstrapRoot, fileName str
 	if stat.IsDir() {
 		return doc, nil // 目录按缺失
 	}
-	if stat.Size() > cCommon.MaxAgentDocSize {
+	if stat.Size() > hCommon.MaxAgentDocSize {
 		return nil, errors.New("startup file too large: " + fileName)
 	}
 
@@ -169,11 +170,11 @@ func (repo *AgentFileRepository) GetStartupFile(agentBootstrapRoot, fileName str
 	}
 
 	// 从已打开句柄按上限读取(即使文件在 fstat 后增长也不会超限)
-	data, readErr := io.ReadAll(io.LimitReader(f, cCommon.MaxAgentDocSize+1))
+	data, readErr := io.ReadAll(io.LimitReader(f, hCommon.MaxAgentDocSize+1))
 	if readErr != nil {
 		return nil, readErr
 	}
-	if int64(len(data)) > cCommon.MaxAgentDocSize {
+	if int64(len(data)) > hCommon.MaxAgentDocSize {
 		return nil, errors.New("startup file too large: " + fileName)
 	}
 
@@ -201,8 +202,8 @@ func (repo *AgentFileRepository) buildStartupFilesList(agentBootstrapRoot string
 	}
 	realRoot := pCommon.ResolveRealPath(filepath.Clean(rootAbs))
 
-	list := make([]dataobject.AgentDocument, 0, len(cCommon.StartupDocFiles))
-	for _, item := range cCommon.StartupDocFiles {
+	list := make([]dataobject.AgentDocument, 0, len(hCommon.StartupDocFiles))
+	for _, item := range hCommon.StartupDocFiles {
 		doc := dataobject.AgentDocument{
 			Kind:     item.Kind,
 			FileName: item.Name,

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	myCommon "my.favorite/cclawservice/common"
+	"my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 )
@@ -30,8 +31,8 @@ func newDistillAgent(t *testing.T, agentDir string) dataobject.TAgent {
 }
 
 // distillRecords 构造一段足够长的会话记录(测试辅助)。
-func distillRecords() []MemoryRecord {
-	return []MemoryRecord{
+func distillRecords() []common.MemoryRecord {
+	return []common.MemoryRecord{
 		record(1, HistoryRecordUser, "", "以后所有报告都用中文,并且先给结论。"),
 		record(2, HistoryRecordAssistant, "", "好的,已记住你的偏好。"),
 		record(3, HistoryRecordUser, "", "项目路径是 /Volumes/Wisdom/MyIdea/CClaw/src"),
@@ -56,7 +57,7 @@ func TestDistillWritesFactsToMemoryDoc(t *testing.T) {
 		t.Fatalf("应写入 3 条事实: %+v", result)
 	}
 
-	path, ok := MemoryDocPath(agent)
+	path, ok := memoryDocPath(agent)
 	if !ok {
 		t.Fatal("应能解析 MEMORY.md 路径")
 	}
@@ -103,7 +104,7 @@ func TestDistillDeduplicatesFacts(t *testing.T) {
 		t.Errorf("重复事实应被跳过: %+v", second)
 	}
 
-	path, _ := MemoryDocPath(agent)
+	path, _ := memoryDocPath(agent)
 	content, _ := os.ReadFile(path)
 	if strings.Contains(string(content), "session s2") {
 		t.Errorf("重复事实不应新建小节: %s", content)
@@ -123,7 +124,7 @@ func TestDistillNoneOutputWritesNothing(t *testing.T) {
 	if len(result.Facts) != 0 {
 		t.Errorf("NONE 不应写入任何事实: %+v", result)
 	}
-	path, _ := MemoryDocPath(agent)
+	path, _ := memoryDocPath(agent)
 	if _, err := os.Stat(path); err == nil {
 		t.Errorf("无事实时不应创建 MEMORY.md")
 	}
@@ -164,7 +165,7 @@ func TestDistillSkipsMissingWorkspace(t *testing.T) {
 // TestDistillPrunesOldestSections 超出预算时从最旧的小节开始裁剪,最新小节必须保留。
 func TestDistillPrunesOldestSections(t *testing.T) {
 	agent := newDistillAgent(t, "distill_prune")
-	path, _ := MemoryDocPath(agent)
+	path, _ := memoryDocPath(agent)
 
 	// 预置多个旧小节,总量已明显超过注入预算
 	var sb strings.Builder

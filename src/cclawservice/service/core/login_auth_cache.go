@@ -64,7 +64,7 @@ func (f *flightTracker) begin(key string) (<-chan struct{}, bool) {
 	if c, ok := f.m[key]; ok {
 		return c.done, false
 	}
-	c := &flightCall{done: make(chan struct{})}
+	c := &flightCall{done: make(chan struct{})} //当前的请求就是leader
 	f.m[key] = c
 	return c.done, true
 }
@@ -132,7 +132,7 @@ func (a *AuthCache) TokenGet(token string) (*request.LoginSession, bool) {
 	if !ok {
 		return nil, false
 	}
-	now := time.Now().Unix()
+	now := common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp //time.Now().Unix()
 	if now >= e.expiresAt || now >= e.absoluteExpireAt {
 		a.tokenMu.Lock()
 		if cur, curOK := a.tokens[token]; curOK && (now >= cur.expiresAt || now >= cur.absoluteExpireAt) {

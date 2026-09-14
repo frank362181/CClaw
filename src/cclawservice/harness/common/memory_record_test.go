@@ -1,10 +1,12 @@
-package mstorage
+package common
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"my.favorite/cclawservice/harness/mstorage"
 )
 
 // TestParseMemoryRecordsBasic 解析:头部前导 + 元数据行 + 分隔线 + 三类记录。
@@ -124,7 +126,7 @@ func TestParseMemoryRecordsIgnoresUnrelatedText(t *testing.T) {
 
 // TestHistoryFileReadAppendRoundTrip 写一条读一条:序号、类型、标题、正文、时间全部一致。
 func TestHistoryFileReadAppendRoundTrip(t *testing.T) {
-	writer, sessionId := newHistoryTestWriter(t)
+	writer, sessionId := mstorage.newHistoryTestWriter(t)
 
 	fileName, err := writer.Ensure(sessionId, nil, []string{"session_id: " + sessionId})
 	if err != nil {
@@ -170,7 +172,7 @@ func TestHistoryFileReadAppendRoundTrip(t *testing.T) {
 
 // TestHistoryFileReadIncremental 追加后再次读回:只增量解析新增字节,记录累积且不重复。
 func TestHistoryFileReadIncremental(t *testing.T) {
-	writer, sessionId := newHistoryTestWriter(t)
+	writer, sessionId := mstorage.newHistoryTestWriter(t)
 
 	fileName, _ := writer.Ensure(sessionId, nil, nil)
 	if _, err := writer.Append(sessionId, fileName, HistoryRecordUser, "", "第一问", "", 1); err != nil {
@@ -224,7 +226,7 @@ func TestHistoryFileReadIncremental(t *testing.T) {
 // TestHistoryFileReadDetectsExternalRewrite 文件被外部改写(非追加)时,
 // 头部指纹不一致,必须回退全量解析,不返回陈旧记录。
 func TestHistoryFileReadDetectsExternalRewrite(t *testing.T) {
-	writer, sessionId := newHistoryTestWriter(t)
+	writer, sessionId := mstorage.newHistoryTestWriter(t)
 
 	fileName, _ := writer.Ensure(sessionId, nil, nil)
 	if _, err := writer.Append(sessionId, fileName, HistoryRecordUser, "", "原始内容", "", 1); err != nil {
@@ -254,7 +256,7 @@ func TestHistoryFileReadDetectsExternalRewrite(t *testing.T) {
 
 // TestHistoryFileReadMissingFile 会话尚未写入历史时,读回应返回空且无错误。
 func TestHistoryFileReadMissingFile(t *testing.T) {
-	writer, sessionId := newHistoryTestWriter(t)
+	writer, sessionId := mstorage.newHistoryTestWriter(t)
 
 	records, err := writer.Read(sessionId, "memory_20260913000000.md")
 	if err != nil {
@@ -267,7 +269,7 @@ func TestHistoryFileReadMissingFile(t *testing.T) {
 
 // TestHistoryFileReadRejectsIllegalName 读路径同样必须拒绝非法文件名与非法会话标识(防目录穿越)。
 func TestHistoryFileReadRejectsIllegalName(t *testing.T) {
-	writer, sessionId := newHistoryTestWriter(t)
+	writer, sessionId := mstorage.newHistoryTestWriter(t)
 
 	if _, err := writer.Read(sessionId, "../../etc/passwd"); err == nil {
 		t.Errorf("非法文件名应被拒绝")
@@ -279,7 +281,7 @@ func TestHistoryFileReadRejectsIllegalName(t *testing.T) {
 
 // TestHistoryFileReadDoesNotCreateDir 读路径不应产生副作用(不建目录)。
 func TestHistoryFileReadDoesNotCreateDir(t *testing.T) {
-	writer, sessionId := newHistoryTestWriter(t)
+	writer, sessionId := mstorage.newHistoryTestWriter(t)
 
 	if _, err := writer.Read(sessionId, "memory_20260913000000.md"); err != nil {
 		t.Fatalf("读回失败: %v", err)
@@ -293,14 +295,14 @@ func TestHistoryFileReadDoesNotCreateDir(t *testing.T) {
 // TestHistoryFileReadIncrementalAcrossProcess 模拟进程重启(新写入器,无缓存):
 // 新实例必须能从文件中恢复出全部历史记录。
 func TestHistoryFileReadIncrementalAcrossProcess(t *testing.T) {
-	writer, sessionId := newHistoryTestWriter(t)
+	writer, sessionId := mstorage.newHistoryTestWriter(t)
 
 	fileName, _ := writer.Ensure(sessionId, nil, nil)
 	if _, err := writer.Append(sessionId, fileName, HistoryRecordUser, "", "重启前的问", "", 1); err != nil {
 		t.Fatalf("Append 失败: %v", err)
 	}
 
-	restarted := &MemoryFileRWriter{nextIndex: make(map[string]int)}
+	restarted := &mstorage.MemoryFileRWriter{nextIndex: make(map[string]int)}
 	records, err := restarted.Read(sessionId, fileName)
 	if err != nil {
 		t.Fatalf("重启后读回失败: %v", err)

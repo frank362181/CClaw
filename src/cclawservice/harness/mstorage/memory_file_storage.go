@@ -67,12 +67,12 @@ import (
 	pException "my.favorite/platformutility/exception"
 )
 
-// 历史记录类型(写入 markdown 的记录头)
-const (
-	HistoryRecordUser      = "user"      // 用户问题
-	HistoryRecordAssistant = "assistant" // 助手回复
-	HistoryRecordTool      = "tool"      // 工具调用
-)
+//// 历史记录类型(写入 markdown 的记录头)
+//const (
+//	HistoryRecordUser      = "user"      // 用户问题
+//	HistoryRecordAssistant = "assistant" // 助手回复
+//	HistoryRecordTool      = "tool"      // 工具调用
+//)
 
 // 写入器默认配置
 const (
@@ -113,7 +113,7 @@ type memoryFileSnapshot struct {
 	parsedOffset    int64  // 已解析到的字节偏移
 	size            int64  // 解析时的文件大小
 	truncated       bool   // 是否为"只读尾部"的降级结果
-	records         []MemoryRecord
+	records         []hCommon.MemoryRecord
 }
 
 var memoryFileRWriter = pCommon.GetSingleton(func() *MemoryFileRWriter {
@@ -142,7 +142,7 @@ func (w *MemoryFileRWriter) MemoryDir(sessionId string) (string, error) {
 	if !pCommon.IsSafeDir(sessionId) || strings.ContainsAny(sessionId, `/\`) {
 		return pCommon.BlankString, pException.FilePathErrorEx("illegal session id for history dir: " + sessionId)
 	}
-	return filepath.Join(pCommon.GetExecutableDir(), myCommon.AgentBootstrapDir, myCommon.ChatMemoryDirName, sessionId), nil
+	return filepath.Join(pCommon.GetExecutableDir(), myCommon.AgentBootstrapDir, hCommon.ChatMemoryDirName, sessionId), nil
 }
 
 // Ensure 确保会话历史文件存在并返回其文件名(不含目录)。
@@ -233,7 +233,7 @@ func (w *MemoryFileRWriter) Append(sessionId, fileName, recordType, title, conte
 //   - 文件不存在时返回 (nil, nil):会话尚未写入历史属正常状态,不是错误;
 //   - 返回的切片是缓存内部数据,**调用方只读、不得修改**;
 //   - 半条记录(写入中断)不会被解析进来,下次读回会自动补上。
-func (w *MemoryFileRWriter) Read(sessionId, fileName string) ([]MemoryRecord, error) {
+func (w *MemoryFileRWriter) Read(sessionId, fileName string) ([]hCommon.MemoryRecord, error) {
 	path, err := w.resolvePathEx(sessionId, fileName, false)
 	if err != nil {
 		return nil, err
@@ -370,7 +370,7 @@ func (w *MemoryFileRWriter) readFull(path string, size int64) (*memoryFileSnapsh
 		}
 	}
 
-	records, consumed := ParseMemoryRecords(text)
+	records, consumed := hCommon.ParseMemoryRecords(text)
 	return &memoryFileSnapshot{
 		headFingerprint: pCommon.ComputeStringFingerprint(text, historyHeadFingerprintBytes), //headFingerprint(text),
 		parsedOffset:    start + int64(consumed),
@@ -387,10 +387,10 @@ func (w *MemoryFileRWriter) readIncremental(path string, cached *memoryFileSnaps
 		return nil, err
 	}
 
-	records, consumed := ParseMemoryRecords(delta)
+	records, consumed := hCommon.ParseMemoryRecords(delta)
 	merged := cached.records
 	if len(records) > 0 {
-		merged = make([]MemoryRecord, 0, len(cached.records)+len(records))
+		merged = make([]hCommon.MemoryRecord, 0, len(cached.records)+len(records))
 		merged = append(merged, cached.records...)
 		merged = append(merged, records...)
 	}

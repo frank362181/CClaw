@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	cCommon "my.favorite/cclawservice/common"
+	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	common2 "my.favorite/platformutility/common"
@@ -101,7 +102,7 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 		if doc.Missing {
 			sections = append(sections, dataobject.SystemPromptSection{
 				Title:   doc.FileName,
-				Content: cCommon.MissingFileMarker + " Expected at: " + filepath.Join(workspaceRoot, doc.FileName),
+				Content: hCommon.MissingFileMarker + " Expected at: " + filepath.Join(workspaceRoot, doc.FileName),
 			})
 			missing = append(missing, doc.FileName)
 			continue
@@ -113,9 +114,9 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 		}
 
 		// 单文件预算:USER.md 独立 4K,其余 20K
-		budget := cCommon.MaxBootstrapFileChars
+		budget := hCommon.MaxBootstrapFileChars
 		if doc.Kind == dataobject.AgentDocUser {
-			budget = cCommon.MaxUserDocChars
+			budget = hCommon.MaxUserDocChars
 		}
 		if runeLen := len([]rune(content)); runeLen > budget {
 			content = common2.TruncateRunes(content, budget, common2.BlankString)
@@ -272,8 +273,8 @@ func renderSkillsCatalog(skills []dataobject.SkillDocument) (string, bool) {
 	})
 
 	// 数量上限
-	if len(catalog) > cCommon.MaxSkillsInPrompt {
-		catalog = catalog[:cCommon.MaxSkillsInPrompt]
+	if len(catalog) > hCommon.MaxSkillsInPrompt {
+		catalog = catalog[:hCommon.MaxSkillsInPrompt]
 	}
 
 	render := func(list []dataobject.SkillDocument, descMax int) string {
@@ -305,13 +306,13 @@ func renderSkillsCatalog(skills []dataobject.SkillDocument) (string, bool) {
 	const maxDesc = 120
 
 	// 完整描述若可容纳,直接使用
-	if full := render(catalog, 0); len(full) <= cCommon.MaxSkillsPromptChars {
+	if full := render(catalog, 0); len(full) <= hCommon.MaxSkillsPromptChars {
 		return full, false
 	}
 
 	// 二分查找能容纳全部 skill 的最大描述长度
 	fits := func(descMax int) bool {
-		return len(render(catalog, descMax)) <= cCommon.MaxSkillsPromptChars
+		return len(render(catalog, descMax)) <= hCommon.MaxSkillsPromptChars
 	}
 
 	lo, hi := minDesc, maxDesc
@@ -332,7 +333,7 @@ func renderSkillsCatalog(skills []dataobject.SkillDocument) (string, bool) {
 	keep := make([]dataobject.SkillDocument, 0, len(catalog))
 	for i := range catalog {
 		candidate := append(keep, catalog[i])
-		if len(render(candidate, lo)) > cCommon.MaxSkillsPromptChars {
+		if len(render(candidate, lo)) > hCommon.MaxSkillsPromptChars {
 			break
 		}
 		keep = candidate

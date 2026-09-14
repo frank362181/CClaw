@@ -221,7 +221,7 @@ func (s *MemoryService) AppendInterruptedTurn(sess dataobject.TSession, req *req
 // 语义:
 //   - 旁路读:任何失败都按"无历史"处理,由调用方决定是否降级,绝不阻断本轮对话;
 //   - 会话尚未建档(chat_data 为空)时返回空,不是错误。
-func (s *MemoryService) ReadRecords(session dataobject.TSession) ([]MemoryRecord, error) {
+func (s *MemoryService) ReadRecords(session dataobject.TSession) ([]hCommon.MemoryRecord, error) {
 	if !s.fileStorageUsable() {
 		return nil, nil
 	}
@@ -276,21 +276,21 @@ func (s *MemoryService) EndSession(sessionId string, reason int) error {
 //   - summarize: 摘要生成器(注入 LLM 调用)
 //
 // 返回值:压缩结果;未执行压缩时 SummaryIndex 为 0 且 err 为 nil(属正常情况,非错误)。
-func (s *MemoryService) Compact(ctx context.Context, session dataobject.TSession, records []MemoryRecord,
+func (s *MemoryService) Compact(ctx context.Context, session dataobject.TSession, records []hCommon.MemoryRecord,
 	from, to, mode int, summarize Summarizer) (CompactionResult, error) {
 	result := CompactionResult{Mode: mode}
 	if !s.fileStorageUsable() || summarize == nil {
 		return result, nil
 	}
 
-	fileName := strings.TrimSpace(session.ChatData)
+	fileName := strings.TrimSpace(session.ChatData) //聊天记录的文件
 	if fileName == pCommon.BlankString || from <= 0 || to < from {
 		return result, nil
 	}
 
 	// 目标记录:区间内、且尚未被任何已有摘要覆盖的普通记录
 	targets := compactionTargets(records, from, to)
-	if len(targets) < CompactionMinRecords {
+	if len(targets) < hCommon.CompactionMinRecords {
 		return result, nil
 	}
 
@@ -300,7 +300,7 @@ func (s *MemoryService) Compact(ctx context.Context, session dataobject.TSession
 	defer unlock()
 
 	// 二次确认:等锁期间可能已有别的协程完成了同区间压缩
-	if len(compactionTargets(records, from, to)) < CompactionMinRecords {
+	if len(compactionTargets(records, from, to)) < hCommon.CompactionMinRecords {
 		return result, nil
 	}
 
@@ -325,7 +325,7 @@ func (s *MemoryService) Compact(ctx context.Context, session dataobject.TSession
 	// 先按**落盘上限**截断,再做保全校验。
 	// 必须这个顺序:校验的应当是真正写进去的那段文本 —— 否则会出现
 	// "校验通过、截断后关键信息丢了"的假通过(保全校验就失去意义)。
-	summaryText = pCommon.TruncateRunes(strings.TrimSpace(summaryText), MaxSummaryRunes, truncateMarker)
+	summaryText = pCommon.TruncateRunes(strings.TrimSpace(summaryText), hCommon.MaxSummaryRunes, hCommon.TruncatedMarker)
 	if summaryText == pCommon.BlankString {
 		GetCompactionThrottle().RecordFailure(session.SessionId, now) // 调用已发生,同样计入冷却
 		return result, nil
@@ -334,7 +334,7 @@ func (s *MemoryService) Compact(ctx context.Context, session dataobject.TSession
 	// 【模式差异 2/3 + 3/3】保全校验与覆盖区间调整 —— **safeguard 专属**(default 恒为 [from,to])
 	// 校验不过时不扩大覆盖区间:收窄到区间前半,较新的原文继续以原文回放(宁可多留,不可丢失)。
 	if mode == dataobject.CompactionModeSafeguard {
-		if ratio, missed := keyRetentionRatio(targets, summaryText); ratio < safeguardMinKeyRetention {
+		if ratio, missed := keyRetentionRatio(targets, summaryText); ratio < hCommon.SafeguardMinKeyRetention {
 			result.Degraded = true
 			coverTo = degradeCoverTo(targets, coverFrom, coverTo)
 			logging.LogWarnF("chat memory compact: mode=safeguard key retention %.2f below floor, degrade covers to %d-%d (missed %v)",
@@ -343,7 +343,7 @@ func (s *MemoryService) Compact(ctx context.Context, session dataobject.TSession
 	}
 
 	content := buildSummaryRecordContent(coverFrom, coverTo, summaryText)
-	index, err := GetMemoryFileWriter().Append(session.SessionId, fileName, MemoryRecordSummary, pCommon.BlankString,
+	index, err := GetMemoryFileWriter().Append(session.SessionId, fileName, hCommon.HistoryRecordTypeSummary, pCommon.BlankString,
 		content, pCommon.BlankString, 0)
 	if err != nil {
 		GetCompactionThrottle().RecordFailure(session.SessionId, now)
@@ -353,14 +353,14 @@ func (s *MemoryService) Compact(ctx context.Context, session dataobject.TSession
 	GetCompactionThrottle().RecordSuccess(session.SessionId, now, result.Degraded)
 	result.SummaryIndex, result.CoversFrom, result.CoversTo, result.Summary = index, coverFrom, coverTo, summaryText
 	logging.LogInfoF("chat memory compact: session=%s summary_index=%d covers=%d-%d mode=%d(%s) degraded=%v %s",
-		session.SessionId, index, coverFrom, coverTo, mode, dataobject.CompactionModeName(mode), result.Degraded, CompactionStat(targets))
+		session.SessionId, index, coverFrom, coverTo, mode, dataobject.CompactionModeName(mode), result.Degraded, hCommon.CompactionStat(targets))
 	return result, nil
 }
 
 // Distill 把会话记录蒸馏为长期记忆并写入 Agent 工作区的 MEMORY.md。
 //
 // 返回:蒸馏结果;未执行(记录太少/无工作区/无新事实)时返回零值且 err 为 nil。
-func (s *MemoryService) Distill(ctx context.Context, session dataobject.TSession, records []MemoryRecord,
+func (s *MemoryService) Distill(ctx context.Context, session dataobject.TSession, records []hCommon.MemoryRecord,
 	agent dataobject.TAgent, summarize Summarizer) (DistillResult, error) {
 	var result DistillResult
 	if summarize == nil || agent.AgentId == pCommon.BlankString {
@@ -371,11 +371,11 @@ func (s *MemoryService) Distill(ctx context.Context, session dataobject.TSession
 	}
 
 	plain := plainRecords(records)
-	if len(plain) < DistillMinRecords {
+	if len(plain) < hCommon.DistillMinRecords {
 		return result, nil
 	}
 
-	path, ok := MemoryDocPath(agent)
+	path, ok := memoryDocPath(agent)
 	if !ok {
 		logging.LogWarnF("chat memory distill: agent %s workspace not found, skip", agent.AgentId)
 		return result, nil
@@ -393,7 +393,7 @@ func (s *MemoryService) Distill(ctx context.Context, session dataobject.TSession
 	}
 
 	result.Path = path
-	written, skipped, pruned, err := appendFactsToMemoryDoc(path, facts, session.SessionId, cCommon.MaxBootstrapFileChars)
+	written, skipped, pruned, err := appendFactsToMemoryDoc(path, facts, session.SessionId, hCommon.MaxBootstrapFileChars)
 	if err != nil {
 		return result, err
 	}
@@ -510,10 +510,10 @@ func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRe
 	//    写入器会取"DB 序号与本进程缓存"的最大值,保证序号只增不减(见写入器的序号契约)。
 	chatIndex := 0
 	if fileName != "" {
-		if idx, err := writer.Append(sessionId, fileName, HistoryRecordUser, "", req.ReqMsg, pCommon.TimestampText(chatTime), nextIndex); err == nil {
+		if idx, err := writer.Append(sessionId, fileName, hCommon.HistoryRecordTypeUser, "", req.ReqMsg, pCommon.TimestampText(chatTime), nextIndex); err == nil {
 			chatIndex = idx
 		} else {
-			logging.LogWarnF("chat session service: append user record error:%s", err.Error())
+			logging.LogWarnF("memory session service: append user record error:%s", err.Error())
 		}
 	}
 
@@ -524,12 +524,12 @@ func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRe
 			ToolCalled: true,
 			CallTime:   tool.CallTime,
 			ToolName:   tool.ToolName,
-			ToolResp:   pCommon.TruncateRunes(strings.TrimSpace(tool.Result), cCommon.TurnToolRespMaxLen, pCommon.BlankString),
+			ToolResp:   pCommon.TruncateRunes(strings.TrimSpace(tool.Result), hCommon.TurnToolRespMaxLen, pCommon.BlankString),
 			RespTime:   tool.RespTime,
 		})
 		if fileName != "" {
-			if _, err := writer.Append(sessionId, fileName, HistoryRecordTool, tool.ToolName, tool.Result, pCommon.TimestampText(tool.CallTime), nextIndex+1+i); err != nil {
-				logging.LogWarnF("chat session service: append tool record error:%s", err.Error())
+			if _, err := writer.Append(sessionId, fileName, hCommon.HistoryRecordTypeTool, tool.ToolName, tool.Result, pCommon.TimestampText(tool.CallTime), nextIndex+1+i); err != nil {
+				logging.LogWarnF("memory session service: append tool record error:%s", err.Error())
 			}
 		}
 	}
@@ -537,14 +537,14 @@ func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRe
 	respIndex := 0
 	assistantTitle := pCommon.BlankString
 	if interrupted {
-		assistantTitle = MemoryRecordInterrupted
+		assistantTitle = hCommon.HistoryRecordTypeInterrupted
 	}
 	// 中断且没有任何产出时不写助手记录:空记录无信息量,徒增噪声(resp_index 保持 0)
 	if fileName != "" && (!interrupted || strings.TrimSpace(reply) != pCommon.BlankString) {
-		if idx, err := writer.Append(sessionId, fileName, HistoryRecordAssistant, assistantTitle, reply, pCommon.TimestampText(now.Timestamp), nextIndex+1+len(tools)); err == nil {
+		if idx, err := writer.Append(sessionId, fileName, hCommon.HistoryRecordTypeAssistant, assistantTitle, reply, pCommon.TimestampText(now.Timestamp), nextIndex+1+len(tools)); err == nil {
 			respIndex = idx
 		} else {
-			logging.LogWarnF("chat session service: append assistant record error:%s", err.Error())
+			logging.LogWarnF("memory session service: append assistant record error:%s", err.Error())
 		}
 	}
 
@@ -592,7 +592,7 @@ func (s *MemoryService) memoryFileHeaderLines(session dataobject.TSession, now *
 //
 //	default   (CompactionModeDefault  , 0):整段区间一次调用;
 //	safeguard (CompactionModeSafeguard, 1):区间超过 safeguardBlockRecords 时分块多次调用后拼接。
-func (s *MemoryService) buildSummaryByMode(ctx context.Context, targets []MemoryRecord, from, to, mode int, summarize Summarizer) (string, error) {
+func (s *MemoryService) buildSummaryByMode(ctx context.Context, targets []hCommon.MemoryRecord, from, to, mode int, summarize Summarizer) (string, error) {
 	switch mode {
 	case dataobject.CompactionModeSafeguard: //safeguard
 		return summarizeInBlocks(ctx, targets, summarize)

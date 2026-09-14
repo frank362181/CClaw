@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
@@ -13,15 +14,15 @@ import (
 // BuildSimpleChatMessage 以system/user 文本构建简单的prompt
 func BuildSimpleChatMessage(sysMsg, userMsg string) []llmproto.ChatMessage {
 	return []llmproto.ChatMessage{
-		{Role: "system", Content: sysMsg},
-		{Role: "user", Content: userMsg},
+		{Role: hCommon.RoleSystem, Content: sysMsg},
+		{Role: hCommon.RoleUser, Content: userMsg},
 	}
 }
 
 func BuildChatMessage(systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest) []llmproto.ChatMessage {
 	return []llmproto.ChatMessage{
-		{Role: "system", Content: systemPrompt.Prompt},
-		{Role: "user", Content: req.ReqMsg},
+		{Role: hCommon.RoleSystem, Content: systemPrompt.Prompt},
+		{Role: hCommon.RoleUser, Content: req.ReqMsg},
 	}
 
 }
@@ -116,7 +117,7 @@ func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []
 // 模型可能在一轮里既输出文本又请求工具(OpenAI 规范允许 content 与 tool_calls 并存),
 // 文本须一并回填,否则下一轮 LLM 看不到自己刚说的话(上下文缺失)。
 func BuildToolCallWithContentMessage(content string, calls []llmproto.ToolCall) llmproto.ChatMessage {
-	return llmproto.ChatMessage{Role: "assistant", Content: content, ToolCalls: calls}
+	return llmproto.ChatMessage{Role: hCommon.RoleAssistant, Content: content, ToolCalls: calls}
 }
 
 // BuildToolCallMessage 构造纯工具调用(无文本)的 assistant 消息(向后兼容入口)。
@@ -126,5 +127,5 @@ func BuildToolCallMessage(calls []llmproto.ToolCall) llmproto.ChatMessage {
 
 // BuildToolResultMessage 构造工具执行结果消息(role=tool,按 tool_call_id 关联)。
 func BuildToolResultMessage(toolCallID, content string) llmproto.ChatMessage {
-	return llmproto.ChatMessage{Role: "tool", ToolCallID: toolCallID, Content: content}
+	return llmproto.ChatMessage{Role: hCommon.RoleTool, ToolCallID: toolCallID, Content: content}
 }

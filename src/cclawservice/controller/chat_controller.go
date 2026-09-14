@@ -11,6 +11,7 @@ import (
 	"my.favorite/cclawservice/apperr"
 	cclawcommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
+	hCommon "my.favorite/cclawservice/harness/common"
 	model "my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service"
 	"my.favorite/cclawservice/service/core"
@@ -194,7 +195,7 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 	}()
 	go func() {
 		defer close(heartbeatDone)
-		interval := time.Duration(cclawcommon.ChatStreamHeartbeatSecs) * time.Second
+		interval := time.Duration(hCommon.SSEStreamHeartbeatSecs) * time.Second
 		if interval <= 0 {
 			return
 		}

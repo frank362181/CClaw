@@ -13,16 +13,6 @@
 *  3. **不阻塞用户回复**。压缩由调用方在回复产出后异步触发,失败只记日志:
 *     记忆是增强能力,不能成为聊天链路的故障点。
 *  4. **两种模式**(t_agent.compaction_mode,由调用方传入,本文件内只影响下面三处):
-*
-*	┌───────┬──────────────────────────┬───────────────────────────────────────────┐
-*	│       │ default (mode=0)         │ safeguard (mode=1)                        │
-*	├───────┼──────────────────────────┼───────────────────────────────────────────┤
-*	│ 1.摘要│ 整段区间一次 LLM 调用       │ 区间 > safeguardBlockRecords 时分块多次     ｜
-*	│ 2.校验│ 无                        │ 关键标记保有率 < 0.5 → Degraded              │
-*	│ 3.区间│ 恒为 [from,to]            │ 校验不过时收窄到区间前半(原文继续可回放)         │
-*	└───────┴──────────────────────────┴───────────────────────────────────────────┘
-*
-*	代码中所有模式分叉都标了【模式差异 N/3】/【safeguard 专属】,其余流程两模式完全共用。
 *  5. **幂等**。压缩前先确认目标区间尚未被已有摘要覆盖;同一会话的压缩串行化(专用锁键)。
 **/
 
@@ -35,32 +25,13 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	hCommon "my.favorite/cclawservice/harness/common"
 	pCommon "my.favorite/platformutility/common"
 )
 
 // Summarizer 摘要生成器:由调用方注入(service 层包装 LLM 客户端)。
 // 用函数类型而非接口,是为了让 mstorage 不反向依赖 harness(否则会形成 import cycle)。
 type Summarizer func(ctx context.Context, systemPrompt, userPrompt string) (string, error)
-
-// 压缩参数
-const (
-	// CompactionMinRecords 触发压缩的最小记录数(区间太小不值得一次 LLM 调用)
-	CompactionMinRecords = 4
-	// MaxCompactionInputChars 送入摘要模型的源文本字符上限(超出按序号从新到旧舍弃)
-	MaxCompactionInputChars = 24000
-	// MaxSummaryRunes 摘要记录正文的字符上限(摘要自身也要有预算)
-	MaxSummaryRunes = 4000
-	// compactionRecordExcerptRunes 单条记录送入模型时的最大字符数
-	compactionRecordExcerptRunes = 2000
-)
-
-// safeguard(保全模式,mode=1)**专属**参数
-const (
-	// safeguardBlockRecords 分块大小(每块单独摘要后拼接)
-	safeguardBlockRecords = 20
-	// safeguardMinKeyRetention 关键信息保有率下限
-	safeguardMinKeyRetention = 0.5
-)
 
 // 压缩提示词
 const (
@@ -93,15 +64,15 @@ type CompactionResult struct {
 // ============================== private functions & methods ==============================
 
 // compactionTargets 取出区间内尚未被摘要覆盖的普通记录(按序号升序)。
-func compactionTargets(records []MemoryRecord, from, to int) []MemoryRecord {
-	var covered []MemoryRecord
+func compactionTargets(records []hCommon.MemoryRecord, from, to int) []hCommon.MemoryRecord {
+	var covered []hCommon.MemoryRecord
 	for _, rec := range records {
 		if rec.IsSummary() {
 			covered = append(covered, rec)
 		}
 	}
 
-	targets := make([]MemoryRecord, 0, to-from+1)
+	targets := make([]hCommon.MemoryRecord, 0, to-from+1)
 	for _, rec := range records {
 		if rec.IsSummary() || rec.Index < from || rec.Index > to {
 			continue
@@ -121,21 +92,21 @@ func compactionTargets(records []MemoryRecord, from, to int) []MemoryRecord {
 }
 
 // summarizeOnce —— default 模式:整段区间一次摘要。
-func summarizeOnce(ctx context.Context, targets []MemoryRecord, from, to int, summarize Summarizer) (string, error) {
+func summarizeOnce(ctx context.Context, targets []hCommon.MemoryRecord, from, to int, summarize Summarizer) (string, error) {
 	return summarize(ctx, compactionSystemPrompt, buildCompactionUserPrompt(targets, from, to))
 }
 
 // summarizeInBlocks —— safeguard 模式:分块摘要后拼接。
 // 块内条目少,模型更不容易在长输入里丢要点(代价:调用次数多、摘要更长)。
-func summarizeInBlocks(ctx context.Context, targets []MemoryRecord, summarize Summarizer) (string, error) {
-	if len(targets) <= safeguardBlockRecords {
+func summarizeInBlocks(ctx context.Context, targets []hCommon.MemoryRecord, summarize Summarizer) (string, error) {
+	if len(targets) <= hCommon.SafeguardBlockRecords {
 		chunk := targets
 		return summarize(ctx, compactionSystemPrompt, buildCompactionUserPrompt(chunk, chunk[0].Index, chunk[len(chunk)-1].Index))
 	}
 
 	var blocks []string
-	for start := 0; start < len(targets); start += safeguardBlockRecords {
-		end := start + safeguardBlockRecords
+	for start := 0; start < len(targets); start += hCommon.SafeguardBlockRecords {
+		end := start + hCommon.SafeguardBlockRecords
 		if end > len(targets) {
 			end = len(targets)
 		}
@@ -152,17 +123,17 @@ func summarizeInBlocks(ctx context.Context, targets []MemoryRecord, summarize Su
 }
 
 // buildCompactionUserPrompt 渲染送入模型的源文本(逐条限长 + 总量上限)。
-func buildCompactionUserPrompt(records []MemoryRecord, from, to int) string {
+func buildCompactionUserPrompt(records []hCommon.MemoryRecord, from, to int) string {
 	var sb strings.Builder
 	_, _ = fmt.Fprintf(&sb, compactionUserHeader, from, to)
 
 	total := 0
 	for _, rec := range records {
-		body := pCommon.TruncateRunes(strings.TrimSpace(rec.Content), compactionRecordExcerptRunes, truncateMarker)
+		body := pCommon.TruncateRunes(strings.TrimSpace(rec.Content), hCommon.CompactionRecordExcerptRunes, hCommon.TruncatedMarker)
 		line := fmt.Sprintf("[%d] %s: %s\n", rec.Index, recordLabel(rec), body)
 
 		// 超预算则停止追加:装配/压缩都以"序号小的先丢"为原则,这里同样优先保留较新的内容
-		if total+utf8.RuneCountInString(line) > MaxCompactionInputChars {
+		if total+utf8.RuneCountInString(line) > hCommon.MaxCompactionInputChars {
 			sb.WriteString("\n(更早的内容已略去)\n")
 			break
 		}
@@ -173,14 +144,14 @@ func buildCompactionUserPrompt(records []MemoryRecord, from, to int) string {
 }
 
 // recordLabel 记录的角色标签。
-func recordLabel(rec MemoryRecord) string {
+func recordLabel(rec hCommon.MemoryRecord) string {
 	switch rec.RecordType {
-	case HistoryRecordTool:
+	case hCommon.HistoryRecordTypeTool: //HistoryRecordTool:
 		if name := strings.TrimSpace(rec.Title); name != "" {
 			return "tool:" + name
 		}
 		return "tool"
-	case HistoryRecordAssistant:
+	case hCommon.HistoryRecordTypeAssistant: //HistoryRecordAssistant:
 		if rec.IsInterrupted() {
 			return "assistant(被中断)"
 		}
@@ -195,12 +166,12 @@ func recordLabel(rec MemoryRecord) string {
 // 正文按 MaxSummaryRunes 截断:调用方(Compact)**已先截断再做保全校验**,
 // 此处是幂等的兜底,确保"校验过的文本"与"落盘的文本"始终一致。
 func buildSummaryRecordContent(from, to int, summary string) string {
-	return fmt.Sprintf("covers: %d-%d\n\n%s", from, to, pCommon.TruncateRunes(summary, MaxSummaryRunes, truncateMarker))
+	return fmt.Sprintf("covers: %d-%d\n\n%s", from, to, pCommon.TruncateRunes(summary, hCommon.MaxSummaryRunes, hCommon.TruncatedMarker))
 }
 
 // 【safeguard 专属】keyRetentionRatio 计算"关键信息保有率":源记录中出现的关键标记(path/编号/文件名)
 // 有多少同样出现在摘要里。返回保有率与未命中的样例(供日志排查)。
-func keyRetentionRatio(records []MemoryRecord, summary string) (float64, []string) {
+func keyRetentionRatio(records []hCommon.MemoryRecord, summary string) (float64, []string) {
 	seen := make(map[string]bool)
 	var keys []string
 	for _, rec := range records {
@@ -231,7 +202,7 @@ func keyRetentionRatio(records []MemoryRecord, summary string) (float64, []strin
 }
 
 // 【safeguard 专属】degradeCoverTo 保全校验失败时的降级:只覆盖较老的一半,让较新的原文继续可回放。
-func degradeCoverTo(targets []MemoryRecord, from, to int) int {
+func degradeCoverTo(targets []hCommon.MemoryRecord, from, to int) int {
 	if len(targets) < 2 {
 		return to
 	}
@@ -245,7 +216,3 @@ func degradeCoverTo(targets []MemoryRecord, from, to int) int {
 	}
 	return candidate
 }
-
-// truncateMarker 截断标记:统一用省略号,让"此处被截断"在 prompt/记录里可见
-// (带 marker 的截断结果比 max 多 1 个 rune,断言上限时需计入)。
-const truncateMarker = "…"

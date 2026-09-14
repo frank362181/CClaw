@@ -7,12 +7,13 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 )
 
 // record 构造一条历史记录(测试辅助)
-func record(index int, recordType, title, content string) MemoryRecord {
-	return MemoryRecord{Index: index, RecordType: recordType, Title: title, Content: content}
+func record(index int, recordType, title, content string) common.MemoryRecord {
+	return common.MemoryRecord{Index: index, RecordType: recordType, Title: title, Content: content}
 }
 
 // fakeSummarizer 返回固定摘要(测试辅助),同时统计调用次数。
@@ -26,8 +27,8 @@ func fakeSummarizer(text string, calls *int) Summarizer {
 }
 
 // compactRecords 构造 12 条普通记录(测试辅助):6 轮问答。
-func compactRecords() []MemoryRecord {
-	var records []MemoryRecord
+func compactRecords() []common.MemoryRecord {
+	var records []common.MemoryRecord
 	index := 1
 	for i := 0; i < 6; i++ {
 		records = append(records,
@@ -40,7 +41,7 @@ func compactRecords() []MemoryRecord {
 }
 
 // writeRecords 把记录写入历史文件(测试辅助),返回文件名。
-func writeRecords(t *testing.T, writer *MemoryFileRWriter, sessionId string, records []MemoryRecord) string {
+func writeRecords(t *testing.T, writer *MemoryFileRWriter, sessionId string, records []common.MemoryRecord) string {
 	t.Helper()
 
 	fileName, err := writer.Ensure(sessionId, nil, nil)
@@ -169,7 +170,7 @@ func TestCompactSkipsTooSmallRange(t *testing.T) {
 // 必须降级(缩小覆盖区间),让较新的原文继续可回放。
 func TestCompactSafeguardDegradesWhenKeysLost(t *testing.T) {
 	writer, sessionId := newHistoryTestWriter(t)
-	records := []MemoryRecord{
+	records := []common.MemoryRecord{
 		record(1, HistoryRecordUser, "", "帮我看 /Volumes/Wisdom/MyIdea/CClaw/src/data/ddl_sqlite3.sql"),
 		record(2, HistoryRecordAssistant, "", "该文件共 123456 行,已阅读完成。"),
 		record(3, HistoryRecordUser, "", "再看 agentService/config/agentdefault.json"),
@@ -201,7 +202,7 @@ func TestCompactSafeguardDegradesWhenKeysLost(t *testing.T) {
 // TestCompactSafeguardKeepsWhenKeysRetained 关键信息被保留时不降级。
 func TestCompactSafeguardKeepsWhenKeysRetained(t *testing.T) {
 	writer, sessionId := newHistoryTestWriter(t)
-	records := []MemoryRecord{
+	records := []common.MemoryRecord{
 		record(1, HistoryRecordUser, "", "查看 /Volumes/Wisdom/MyIdea/CClaw/src/data/ddl_sqlite3.sql"),
 		record(2, HistoryRecordAssistant, "", "该文件定义 123456 条约束。"),
 		record(3, HistoryRecordUser, "", "还有 config/agentdefault.json 呢"),
@@ -231,7 +232,7 @@ func TestCompactSafeguardKeepsWhenKeysRetained(t *testing.T) {
 func TestCompactSafeguardSummarizesInBlocks(t *testing.T) {
 	writer, sessionId := newHistoryTestWriter(t)
 
-	var records []MemoryRecord
+	var records []common.MemoryRecord
 	for i := 1; i <= 60; i++ {
 		kind := HistoryRecordUser
 		if i%2 == 0 {
@@ -272,7 +273,7 @@ func TestCompactionModeName(t *testing.T) {
 // 旧实现用未截断的完整摘要做校验 → 关键信息在落盘时被截掉也能"校验通过" → 静默丢要点。
 func TestCompactTruncatesBeforeVerify(t *testing.T) {
 	writer, sessionId := newHistoryTestWriter(t)
-	records := []MemoryRecord{
+	records := []common.MemoryRecord{
 		record(1, HistoryRecordUser, "", "配置文件是 config/agentdefault.json,单位编码 100001"),
 		record(2, HistoryRecordAssistant, "", "已记录。"),
 		record(3, HistoryRecordUser, "", "继续。"),
@@ -316,7 +317,7 @@ func TestCompactTruncatesBeforeVerify(t *testing.T) {
 // 否则"降级→后半原文下轮又被裁→再压缩"会退化成**每轮一次** LLM 调用。
 func TestCompactThrottledAfterDegrade(t *testing.T) {
 	writer, sessionId := newHistoryTestWriter(t)
-	records := []MemoryRecord{
+	records := []common.MemoryRecord{
 		record(1, HistoryRecordUser, "", "看 /Volumes/Wisdom/MyIdea/CClaw/src/data/ddl_sqlite3.sql"),
 		record(2, HistoryRecordAssistant, "", "共 123456 行。"),
 		record(3, HistoryRecordUser, "", "再看 config/agentdefault.json"),
@@ -359,7 +360,7 @@ func TestCompactThrottledAfterDegrade(t *testing.T) {
 func TestCompactDefaultSummarizesOnce(t *testing.T) {
 	writer, sessionId := newHistoryTestWriter(t)
 
-	var records []MemoryRecord
+	var records []common.MemoryRecord
 	for i := 1; i <= 60; i++ {
 		records = append(records, record(i, HistoryRecordUser, "", "内容"))
 	}
@@ -451,7 +452,7 @@ func TestCompactSummarizerErrorPropagates(t *testing.T) {
 
 // TestKeyRetentionRatio 关键信息采样:路径/长数字/文件名即"不能丢"的信息。
 func TestKeyRetentionRatio(t *testing.T) {
-	records := []MemoryRecord{
+	records := []common.MemoryRecord{
 		record(1, HistoryRecordUser, "", "看 /a/b/c.go 与 config/x.json,共 123456 行"),
 	}
 
@@ -466,7 +467,7 @@ func TestKeyRetentionRatio(t *testing.T) {
 	if ratio, _ := keyRetentionRatio(records, "已查看 /a/b/c.go 与 config/x.json,共 123456 行"); ratio != 1 {
 		t.Errorf("全部保留时 ratio 应为 1: %v", ratio)
 	}
-	if ratio, _ := keyRetentionRatio([]MemoryRecord{record(1, HistoryRecordUser, "", "没有关键标记")}, "任意"); ratio != 1 {
+	if ratio, _ := keyRetentionRatio([]common.MemoryRecord{record(1, HistoryRecordUser, "", "没有关键标记")}, "任意"); ratio != 1 {
 		t.Errorf("无关键标记时不应误判丢失: %v", ratio)
 	}
 }

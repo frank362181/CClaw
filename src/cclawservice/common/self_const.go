@@ -1,11 +1,5 @@
 package common
 
-import (
-	"time"
-
-	"my.favorite/cclawservice/model/dataobject"
-)
-
 const (
 	// DefaultSessionListLimit 未指定上限时的默认返回条数。(读数据库)
 	DefaultSessionListLimit = 30
@@ -26,19 +20,7 @@ const (
 )
 
 // ==================== agent 根据内容意图识别确定agent ====================
-
 const (
-	// AgentRoutingLLMEnabled 是否启用 LLM 智能分类路由(关键词未命中时的兜底路由方式)。
-	AgentRoutingLLMEnabled = true
-	// AgentRoutingLLMTimeoutSeconds LLM 分类调用超时(秒),避免拖慢主聊天流程。
-	AgentRoutingLLMTimeoutSeconds = 5
-	// AgentRoutingLLMMaxTokens LLM 分类输出 token 上限(分类只需返回一个短 AgentId)。
-	AgentRoutingLLMMaxTokens = 1024
-	// SessionAgentBindingTTLSeconds 会话→Agent 内存绑定的有效期(秒),过期后重新路由。
-	SessionAgentBindingTTLSeconds = 3600
-	// AgentToolLoopMax function-calling 工具循环的最大迭代次数(防止模型反复请求工具导致死循环/超时)。
-	AgentToolLoopMax = 30
-
 	// DefaultMaxChatConcurrency 全局聊天并发闸默认上限:每实例同时在聊天请求数(同步+流式)。
 	DefaultMaxChatConcurrency = 1000
 
@@ -49,77 +31,6 @@ const (
 	DefaultAgentConcurrency = 8
 	// AgentGateWaitTimeout 获取每 Agent 并发许可的最长等待;超时返回 "Agent 忙"。
 	AgentGateWaitTimeout = 30
-)
-
-// ==================== agent 启动文档与 skill 文档 ====================
-
-// MissingFileMarker 缺失文件标记(OpenClaw context-file: [MISSING] Expected at: <path>)
-const MissingFileMarker = "[MISSING]"
-
-const (
-	AgentDocFileName     = "AGENTS.md"    //agent.md:运行规则(必需)
-	SoulDocFileName      = "SOUL.md"      //soul.md:人格/语气/边界(可选)
-	IdentityDocFileName  = "IDENTITY.md"  //身份:名称/形象/emoji(可选)
-	UserDocFileName      = "USER.md"      //用户模型:偏好/沟通风格(可选)
-	ToolsDocFileName     = "TOOLS.md"     //tools.md:工具使用指引(可选)
-	BootstrapDocFileName = "BOOTSTRAP.md" //首次运行的引导仪式(仅新工作区)
-	MemoryDocFileName    = "MEMORY.md"    //长期记忆文件(存在才注入)
-)
-
-// StartupDocSpec 启动文档清单中的一项(文件名/种类/是否必需)
-type StartupDocSpec struct {
-	Kind     dataobject.AgentDocumentKind
-	Name     string
-	Required bool
-}
-
-// StartupDocFiles 启动文档清单,按固定顺序加载。
-// required=true 的必需文件缺失时,仍会生成带 Missing 标记的文档,由 prompt 组装层注入 [MISSING] 提示;
-// required=false 的可选文件缺失时直接省略。
-var StartupDocFiles = []StartupDocSpec{
-	{dataobject.AgentDocAgent, AgentDocFileName, true},
-	{dataobject.AgentDocSoul, SoulDocFileName, false},
-	{dataobject.AgentDocIdentity, IdentityDocFileName, false},
-	{dataobject.AgentDocUser, UserDocFileName, false},
-	{dataobject.AgentDocTools, ToolsDocFileName, false},
-	{dataobject.AgentDocBootstrap, BootstrapDocFileName, false},
-	{dataobject.AgentDocMemory, MemoryDocFileName, false},
-}
-
-// 启动文档注入预算(安全/性能,参考 OpenClaw bootstrap-budget)
-const (
-	// StartupFileCacheTTLSeconds 启动文件列表缓存的 TTL(秒):管理界面可接受短暂延迟,换取高并发下免重复磁盘 IO
-	StartupFileCacheTTLSeconds = 30
-
-	MaxAgentDocSize        = 256 * 1024 //agent 启动文档单文件读取上限:256KB
-	MaxSkillDocSize        = 256 * 1024 //skill 文档单文件读取上限:256KB
-	MaxBootstrapFileChars  = 20000      //单个启动文档注入上限(OpenClaw bootstrapMaxChars 默认值)
-	MaxBootstrapTotalChars = 60000      //启动文档注入总上限(OpenClaw bootstrapTotalMaxChars 默认值)
-	MaxUserDocChars        = 4000       //USER.md 单独的字符上限
-)
-
-// skill 元数据目录预算
-
-const (
-	SkillDocFileName     = "SKILL.md" //skill.md:技能定义
-	MaxSkillsInPrompt    = 150        //注入 prompt 的 skill 数量上限
-	MaxSkillsPromptChars = 18000      //skill 元数据目录的字符上限
-)
-
-// system prompt的大小限制
-
-const (
-	MaxPromptSectionLen = 32 * 1024 //system prompt 单个 section 的最大 rune 数
-)
-
-// LLM 调用重试 / 流式空闲超时 / SSE 心跳相关配置(秒或毫秒;<=0 表示禁用)。
-const (
-	LlmRetryMaxAttempts      = 3    // 可重试错误(429/5xx/断流)的最大尝试次数(含首次)
-	LlmRetryBaseDelayMs      = 500  // 指数退避基准(毫秒):500 → 1000 → 2000 …
-	LlmRetryMaxDelayMs       = 4000 // 单次退避上限(毫秒)
-	LlmRetryJitterRatio      = 0.2  // 退避抖动比例(±20%):打散并发重试,避免惊群
-	LlmStreamIdleTimeoutSecs = 60   // 流式读取空闲上限(秒):超过无任何数据则判定断流并中止
-	ChatStreamHeartbeatSecs  = 15   // SSE 空闲心跳间隔(秒):静默超时向浏览器发送心跳保活
 )
 
 const (
@@ -166,28 +77,6 @@ const (
 	ChatChannelDingTalk = 4 //钉钉端
 )
 
-// ==================== 会话管理模块(阶段1:双写落库 + 历史文件) ====================
-// 对应 data/ddl_sqlite3.sql 的 t_session / t_turn / t_turn_tool 三张表。
-// 设计:会话内容写入 memory_{yyyyMMddHHmmss}.md,t_session.chat_data 只保存该文件名,
-// 文件目录由 session_id 推导为 <exeDir>/cclaw/chat_history/<session_id>/。
-const (
-	// ChatMemoryDirName 会话历史文件根目录名(与 AgentBootstrapDir 同级)。
-	ChatMemoryDirName = "chat_history"
-	// ChatMemoryFilePrefix 历史文件名前缀:memory_{yyyyMMddHHmmss}.md
-	ChatMemoryFilePrefix = "memory_"
-	// ChatMemoryFileExt 历史文件扩展名。
-	ChatMemoryFileExt = ".md"
-
-	// SessionNameMaxLen 会话名称长度上限(对齐 t_session.session_name VARCHAR(64))。
-	SessionNameMaxLen = 64
-	// SessionDefaultName 无可用标题时的会话名称(首条消息为空时兜底)。
-	SessionDefaultName = "NewSession"
-
-	// TurnToolRespMaxLen 工具返回值写入 t_turn_tool.tool_resp(VARCHAR(256))时的截断长度。
-	// 完整工具输出落在历史文件里,DB 只留可读摘要。
-	TurnToolRespMaxLen = 256
-)
-
 // ==================== chat 流式状态 ====================
 // 流式接口在返回内容前,用 status 事件向 UI 报告 Agent 当前所处阶段(如拆解任务/思考/推理)。
 const (
@@ -200,17 +89,6 @@ const (
 	ChatToolEventProgress = "progress" // 执行过程输出
 	ChatToolEventDone     = "done"     // 执行成功
 	ChatToolEventError    = "error"    // 执行失败
-)
-
-// LLM 调用关联的constants
-const (
-	// MaxResponseBytes 单次应答读取上限(8MB),防止超大响应耗尽内存。
-	MaxResponseBytes = 8 << 20
-
-	// DefaultTimeout 单次 LLM 请求的默认超时。
-	// 真实模型推理(大上下文 + 大 max_tokens)可能耗时较长,10s 过短会在读响应时因
-	// 上下文被取消(客户端断开/超时)而中断;这里放宽到 60s(需与服务端 writeTimeout、前端超时对齐)。
-	DefaultTimeout = 60 * time.Second
 )
 
 // 以独立 notice 事件下发,前端单独展示为警示行,不覆盖回答正文。

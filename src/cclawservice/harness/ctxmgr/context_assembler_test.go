@@ -4,19 +4,20 @@ import (
 	"strings"
 	"testing"
 
+	"my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/mstorage"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 )
 
 // record 构造一条历史记录(测试辅助)
-func record(index int, recordType, title, content string) mstorage.MemoryRecord {
-	return mstorage.MemoryRecord{Index: index, RecordType: recordType, Title: title, Content: content}
+func record(index int, recordType, title, content string) common.MemoryRecord {
+	return common.MemoryRecord{Index: index, RecordType: recordType, Title: title, Content: content}
 }
 
 // summaryRecord 构造一条摘要记录(测试辅助)
-func summaryRecord(index, from, to int, content string) mstorage.MemoryRecord {
-	return mstorage.MemoryRecord{Index: index, RecordType: mstorage.MemoryRecordSummary, Content: content, CoversFrom: from, CoversTo: to}
+func summaryRecord(index, from, to int, content string) common.MemoryRecord {
+	return common.MemoryRecord{Index: index, RecordType: mstorage.MemoryRecordSummary, Content: content, CoversFrom: from, CoversTo: to}
 }
 
 // roles 提取消息角色序列(测试辅助)
@@ -48,7 +49,7 @@ func TestAssembleContextWithoutHistory(t *testing.T) {
 
 // TestAssembleContextHistoryOrder 历史按序回放,且以本轮问题结尾(不重复上一轮的提问)。
 func TestAssembleContextHistoryOrder(t *testing.T) {
-	records := []mstorage.MemoryRecord{
+	records := []common.MemoryRecord{
 		record(1, mstorage.HistoryRecordUser, "", "第一个问题"),
 		record(2, mstorage.HistoryRecordAssistant, "", "第一个回答"),
 		record(3, mstorage.HistoryRecordUser, "", "第二个问题"),
@@ -68,7 +69,7 @@ func TestAssembleContextHistoryOrder(t *testing.T) {
 // TestAssembleContextToolResultsFoldedIntoAssistant 工具结果必须折叠进同轮助手消息,
 // 且不产生 role=tool 的孤立消息(避免合成 tool_call_id 破坏协议)。
 func TestAssembleContextToolResultsFoldedIntoAssistant(t *testing.T) {
-	records := []mstorage.MemoryRecord{
+	records := []common.MemoryRecord{
 		record(1, mstorage.HistoryRecordUser, "", "杭州天气？"),
 		record(2, mstorage.HistoryRecordTool, "get_weather", `{"city":"杭州","weather":"晴"}`),
 		record(3, mstorage.HistoryRecordAssistant, "", "杭州明天晴。"),
@@ -98,7 +99,7 @@ func TestAssembleContextToolResultsFoldedIntoAssistant(t *testing.T) {
 // TestAssembleContextToolResultTruncated 单条工具结果超长时必须按字符截断(完整内容仍在历史文件里)。
 func TestAssembleContextToolResultTruncated(t *testing.T) {
 	long := strings.Repeat("测", 5000)
-	records := []mstorage.MemoryRecord{
+	records := []common.MemoryRecord{
 		record(1, mstorage.HistoryRecordUser, "", "问"),
 		record(2, mstorage.HistoryRecordTool, "t", long),
 		record(3, mstorage.HistoryRecordAssistant, "", "答"),
@@ -123,7 +124,7 @@ func TestAssembleContextToolResultTruncated(t *testing.T) {
 // TestAssembleContextLeftoverToolWithoutAssistant 被中断的轮次(只有工具结果、没有助手回复)
 // 也必须保留工具产出,但不得生成孤立的 tool 消息。
 func TestAssembleContextLeftoverToolWithoutAssistant(t *testing.T) {
-	records := []mstorage.MemoryRecord{
+	records := []common.MemoryRecord{
 		record(1, mstorage.HistoryRecordUser, "", "查一下"),
 		record(2, mstorage.HistoryRecordTool, "get_weather", `{"weather":"雨"}`),
 	}
@@ -142,7 +143,7 @@ func TestAssembleContextLeftoverToolWithoutAssistant(t *testing.T) {
 func TestAssembleContextInterruptedAssistantReplayed(t *testing.T) {
 	interrupted := record(2, mstorage.HistoryRecordAssistant, mstorage.MemoryRecordInterrupted, "回答到一半")
 	interrupted.TimeText = "2026-09-13 01:00:00"
-	records := []mstorage.MemoryRecord{
+	records := []common.MemoryRecord{
 		record(1, mstorage.HistoryRecordUser, "", "问题"),
 		interrupted,
 	}
@@ -156,7 +157,7 @@ func TestAssembleContextInterruptedAssistantReplayed(t *testing.T) {
 // TestAssembleContextSummaryReplacesCoveredRecords 摘要记录折叠进 system,
 // 且它 covers 的旧记录不再回放(避免同段历史既摘要又原文)。
 func TestAssembleContextSummaryReplacesCoveredRecords(t *testing.T) {
-	records := []mstorage.MemoryRecord{
+	records := []common.MemoryRecord{
 		record(1, mstorage.HistoryRecordUser, "", "老问题一"),
 		record(2, mstorage.HistoryRecordAssistant, "", "老回答一"),
 		record(3, mstorage.HistoryRecordUser, "", "老问题二"),
@@ -190,7 +191,7 @@ func TestAssembleContextSummaryReplacesCoveredRecords(t *testing.T) {
 // TestAssembleContextSkipsEmptyAssistant 空助手记录不回放(模型只输出思考内容时会写空回复),
 // 否则会白占预算并让消息序列出现无信息量的空洞。
 func TestAssembleContextSkipsEmptyAssistant(t *testing.T) {
-	records := []mstorage.MemoryRecord{
+	records := []common.MemoryRecord{
 		record(1, mstorage.HistoryRecordUser, "", "第一个问题"),
 		record(2, mstorage.HistoryRecordAssistant, "", "   "), // 空回复
 		record(3, mstorage.HistoryRecordUser, "", "第二个问题"),
@@ -206,7 +207,7 @@ func TestAssembleContextSkipsEmptyAssistant(t *testing.T) {
 // TestAssembleContextKeepsToolOutputWhenReplyEmpty 回复为空但已执行过工具时,
 // 工具产出必须保留(单独成一条助手消息),不得随空助手记录一起被丢掉。
 func TestAssembleContextKeepsToolOutputWhenReplyEmpty(t *testing.T) {
-	records := []mstorage.MemoryRecord{
+	records := []common.MemoryRecord{
 		record(1, mstorage.HistoryRecordUser, "", "杭州天气"),
 		record(2, mstorage.HistoryRecordTool, "get_weather", `{"weather":"晴"}`),
 		record(3, mstorage.HistoryRecordAssistant, "", ""), // 空回复
@@ -226,7 +227,7 @@ func TestAssembleContextKeepsToolOutputWhenReplyEmpty(t *testing.T) {
 func TestAssembleContextBudgetTrimsOldestGroups(t *testing.T) {
 	// 用较长的 ASCII 内容放大 token 估算,便于用较小的窗口触达裁剪
 	long := strings.Repeat("history detail ", 40)
-	var records []mstorage.MemoryRecord
+	var records []common.MemoryRecord
 	index := 1
 	for i := 0; i < 6; i++ {
 		records = append(records,
@@ -271,7 +272,7 @@ func TestAssembleContextBudgetTrimsOldestGroups(t *testing.T) {
 // TestAssembleContextNoTrimWithoutWindow 未配置上下文窗口时不裁剪(保持阶段1行为)。
 func TestAssembleContextNoTrimWithoutWindow(t *testing.T) {
 	long := strings.Repeat("x", 40000)
-	records := []mstorage.MemoryRecord{
+	records := []common.MemoryRecord{
 		record(1, mstorage.HistoryRecordUser, "", long),
 		record(2, mstorage.HistoryRecordAssistant, "", long),
 	}
@@ -291,7 +292,7 @@ func TestAssembleContextNoTrimWithoutWindow(t *testing.T) {
 //   - 因此 floor 越大,窗口不够时**越早丢历史**,系统提示始终优先。
 func TestAssembleContextSystemFloorReservesPromptSpace(t *testing.T) {
 	long := strings.Repeat("y", 400)
-	records := []mstorage.MemoryRecord{
+	records := []common.MemoryRecord{
 		record(1, mstorage.HistoryRecordUser, "", long),
 		record(2, mstorage.HistoryRecordAssistant, "", long),
 		record(3, mstorage.HistoryRecordUser, "", long),
@@ -315,7 +316,7 @@ func TestAssembleContextSystemFloorReservesPromptSpace(t *testing.T) {
 	// 预留额度越大,历史能占的越少(同样窗口下更早丢历史)。
 	// 用短消息(约 25 tokens/条)让窗口内能放下多组,这样预算差异才会体现在回放量上。
 	short := strings.Repeat("z", 100)
-	var many []mstorage.MemoryRecord
+	var many []common.MemoryRecord
 	for i := 1; i <= 8; i++ {
 		kind := mstorage.HistoryRecordUser
 		if i%2 == 0 {

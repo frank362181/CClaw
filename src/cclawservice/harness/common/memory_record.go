@@ -16,7 +16,7 @@
 * 解析是纯函数(只读、无副作用、不触发 IO),便于单测与复用。
 **/
 
-package mstorage
+package common
 
 import (
 	"fmt"
@@ -26,14 +26,6 @@ import (
 	"unicode/utf8"
 
 	pCommon "my.favorite/platformutility/common"
-)
-
-// 记录类型 / 标记(与写入端常量保持一致,此处补充阶段2新增的语义)
-const (
-	// MemoryRecordSummary 压缩摘要记录:取代一段旧记录,自身占用一个更大的新序号。
-	MemoryRecordSummary = "summary"
-	// MemoryRecordInterrupted assistant 记录的中断标记(记录头形如 "## [7] assistant:interrupted | ...")
-	MemoryRecordInterrupted = "interrupted"
 )
 
 // coversPattern 摘要记录的覆盖区间标注:`covers: 1-999`(独占一行)
@@ -52,11 +44,11 @@ type MemoryRecord struct {
 }
 
 // IsSummary 是否为压缩摘要记录。
-func (r MemoryRecord) IsSummary() bool { return r.RecordType == MemoryRecordSummary }
+func (r MemoryRecord) IsSummary() bool { return r.RecordType == HistoryRecordTypeSummary }
 
 // IsInterrupted 是否为被中断的助手回复(内容为中断时已产出的部分)。
 func (r MemoryRecord) IsInterrupted() bool {
-	return r.RecordType == HistoryRecordAssistant && r.Title == MemoryRecordInterrupted
+	return r.RecordType == HistoryRecordTypeAssistant && r.Title == HistoryRecordTypeInterrupted
 }
 
 // Covers 判断本摘要记录是否取代了序号 index 的记录。

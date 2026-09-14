@@ -30,6 +30,7 @@ import (
 	cCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/harness"
+	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/harness/mstorage"
 	"my.favorite/cclawservice/llmproto"
@@ -47,31 +48,6 @@ import (
 // MaxChatMessageLen 单条聊天消息的字符上限(防超大请求体滥用)
 const MaxChatMessageLen = 4096
 
-// ToolCallingHeartbeatInterval 工具执行静默心跳间隔:脚本超过该时长无新输出时,对于长执行的tool
-// 向用户推送心跳 progress 行,用于区分"仍在运行"与"挂起"(对长任务工具体验友好)。
-const ToolCallingHeartbeatInterval = 3 * time.Second
-
-// AgentRunTimeoutSecs 单次聊天任务(工具循环 + LLM 生成整段)的应用级最长时长(秒)。
-// 它与传输层 writeTimeout 解耦:任务能跑多久由这里(而非 http.Server 的写超时)界定,
-// 超时返回可读的"任务执行超时",不会再把长任务误报成"request canceled by client"。
-// 可用环境变量 CCLAW_CHAT_RUN_TIMEOUT_SEC(秒)覆盖。
-const AgentRunTimeoutSecs = 600
-
-// CompactionRunTimeoutSecs 后台记忆压缩的最长时长(秒)。
-// 压缩是旁路任务:超时即放弃本轮压缩(下一轮会重新触发),不允许长期占用后台协程。
-const CompactionRunTimeoutSecs = 120
-
-// SummaryMaxTokens 摘要生成的最大输出 token 数(摘要自身也要有预算)。
-const SummaryMaxTokens = 2048
-
-// 记忆蒸馏的节流参数(长期记忆不必每轮都提炼)。
-const (
-	// DistillMinTurns 触发蒸馏的最少轮次数(太短的会话没有长期价值)
-	DistillMinTurns = 6
-	// DistillIntervalTurns 蒸馏间隔(轮次):每跨过这么多个轮次蒸馏一次
-	DistillIntervalTurns = 10
-)
-
 // chatRunTimeout 返回应用级运行超时:优先取环境变量 CCLAW_CHAT_RUN_TIMEOUT_SEC,
 // 否则用 AgentRunTimeoutSecs 默认值。
 func chatRunTimeout() time.Duration {
@@ -80,7 +56,7 @@ func chatRunTimeout() time.Duration {
 			return time.Duration(sec) * time.Second
 		}
 	}
-	return AgentRunTimeoutSecs * time.Second
+	return hCommon.AgentRunTimeout * time.Second
 }
 
 // ChatService 处理聊天消息:校验 → 解析 Agent/Provider → 组装 prompt → 调用 LLM。
@@ -92,9 +68,9 @@ type ChatService struct {
 	llmClient     *harness.Client
 	agentRouter   *harness.AgentRouter
 
-	// sessionService 会话管理(阶段1双写:只写不读的旁路)。
+	// memoryService 会话管理(阶段1双写:只写不读的旁路)。
 	// 为 nil 或未启用时全部记录动作静默跳过,不影响聊天主流程。
-	sessionService *mstorage.MemoryService
+	memoryService *mstorage.MemoryService
 
 	functionCalling bool // 是否启用 function-calling(由 ini [sandBox] functionCalling 控制)
 }
@@ -120,7 +96,7 @@ func GetChatService(db core.IBaseDatabase, functionCalling bool, sessionRecord b
 	chatService.agentRepo = repo.GetAgentRepository(db)
 	chatService.agentRouter = harness.GetAgentRouter(chatService.agentRepo)
 	chatService.functionCalling = functionCalling
-	chatService.sessionService = mstorage.GetMemoryService(db, sessionRecord)
+	chatService.memoryService = mstorage.GetMemoryService(db, sessionRecord)
 
 	return chatService
 }
@@ -155,7 +131,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 	defer release()
 
 	// 会话建档(阶段1双写:旁路,只写不读;失败不影响聊天)
-	session, recorded := s.sessionService.Begin(sender, agent, req)
+	session, recorded := s.memoryService.Begin(sender, agent, req)
 
 	// 上下文读回装配
 	// (从历史文件读回本会话既有内容,拼成 system + 历史 + 本轮用户消息)
@@ -168,14 +144,14 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 		// 中断轮次记录(旁路):同步路径没有向客户端输出内容,
 		// 因此只在"本次失败确属中断/超时"时留痕(提问已发生,审计需要)。
 		if recorded && isInterrupted(ctx, err) {
-			s.sessionService.AppendInterruptedTurn(session, req, pCommon.BlankString, recorder.Snapshot(), interruptionReason(ctx, err))
+			s.memoryService.AppendInterruptedTurn(session, req, pCommon.BlankString, recorder.Snapshot(), interruptionReason(ctx, err))
 		}
 		return nil, myException.LlmError(err, "chat service: runtime call chat")
 	}
 
 	// 轮次落库:问题/工具/回复写入历史文件并登记 t_turn / t_turn_tool
 	if recorded {
-		s.sessionService.AppendTurn(session, req, reply, recorder.Snapshot())
+		s.memoryService.AppendTurn(session, req, reply, recorder.Snapshot())
 	}
 
 	// 记忆维护(旁路、异步):按需压缩历史、按需蒸馏长期记忆
@@ -235,7 +211,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	}
 
 	// 会话建档(阶段1双写:旁路,只写不读;失败不影响聊天)
-	session, recorded := s.sessionService.Begin(sender, agent, req)
+	session, recorded := s.memoryService.Begin(sender, agent, req)
 
 	// 上下文读回装配(与同步路径共用同一入口,保证两条路径上下文一致)
 	assembled := s.assembleChatContext(session, agent, llmProvider, systemPrompt, req)
@@ -264,7 +240,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	if err != nil {
 		// 中断轮次记录(旁路):已产出部分内容,或本次失败属中断/超时,都要留痕
 		if recorded && (strings.TrimSpace(streamed.String()) != pCommon.BlankString || isInterrupted(runCtx, err)) {
-			s.sessionService.AppendInterruptedTurn(session, req, streamed.String(), recorder.Snapshot(), interruptionReason(runCtx, err))
+			s.memoryService.AppendInterruptedTurn(session, req, streamed.String(), recorder.Snapshot(), interruptionReason(runCtx, err))
 		}
 
 		// 应用级运行超时:给可读错误,而不是笼统的 "request canceled by client"
@@ -287,7 +263,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 
 	// 轮次落库(阶段1双写:旁路,只写不读;失败不影响回复)
 	if recorded {
-		s.sessionService.AppendTurn(session, req, reply, recorder.Snapshot())
+		s.memoryService.AppendTurn(session, req, reply, recorder.Snapshot())
 	}
 
 	// 记忆维护(旁路、异步):与同步路径共用同一触发条件
@@ -331,8 +307,6 @@ func (s *ChatService) normalizeRequest(comCode, sender string, req *request.Chat
 	} else {
 		// 幂等:客户端**回传服务端签发的 session_id**时不能重复叠加单位前缀。
 		// 否则 comCode + (comCode + uuid) 会算出另一个 session_id(且超长被截断),
-		// 结果是:续写/恢复会话时被拆成新会话,历史永远接不上。
-		// 触发场景:Phase2 的"会话列表/恢复会话"、飞书/微信等渠道适配器回传会话标识。
 		prefix := cCommon.NormalizeCompactId(comCode)
 		clientSessionId = strings.TrimPrefix(clientSessionId, prefix)
 		req.SessionId = cCommon.NormalizeCompactId(comCode + clientSessionId)
@@ -529,7 +503,7 @@ func (s *ChatService) collectSkillFiles(comCode string, agent dataobject.TAgent)
 //     同时给它明确上限:不允许旁路任务长期占用协程;
 //   - 记忆是增强能力,失败只记日志,不能成为聊天链路的故障点(与阶段1双写同一原则)。
 func (s *ChatService) triggerMemoryMaintenance(session dataobject.TSession, agent dataobject.TAgent, llmProvider dataobject.TLlm, assembled ctxmgr.AssembleResult) {
-	if s.sessionService == nil || !s.sessionService.Enabled() {
+	if s.memoryService == nil || !s.memoryService.Enabled() {
 		return
 	}
 	if strings.TrimSpace(session.ChatData) == pCommon.BlankString {
@@ -541,8 +515,8 @@ func (s *ChatService) triggerMemoryMaintenance(session dataobject.TSession, agen
 	if needCompact && !mstorage.GetCompactionThrottle().Allow(session.SessionId, pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp) {
 		needCompact = false
 	}
-	turns := s.sessionService.TurnCount(session.SessionId)
-	needDistill := turns >= DistillMinTurns && turns%DistillIntervalTurns == 0
+	turns := s.memoryService.TurnCount(session.SessionId)
+	needDistill := turns >= hCommon.DistillMinTurns && turns%hCommon.DistillIntervalTurns == 0
 	if !needCompact && !needDistill {
 		return
 	}
@@ -557,23 +531,23 @@ func (s *ChatService) triggerMemoryMaintenance(session dataobject.TSession, agen
 			}
 		}()
 
-		ctx, cancel := context.WithTimeout(context.Background(), CompactionRunTimeoutSecs*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), hCommon.CompactionRunTimeout*time.Second)
 		defer cancel()
 
-		records, err := s.sessionService.ReadRecords(session)
+		records, err := s.memoryService.ReadRecords(session)
 		if err != nil {
 			logging.LogWarnF("chat service: read records for memory maintenance error:%s", err.Error())
 			return
 		}
 
 		if needCompact {
-			if _, err = s.sessionService.Compact(ctx, session, records, from, to, mode, s.summarizer(llmProvider)); err != nil {
+			if _, err = s.memoryService.Compact(ctx, session, records, from, to, mode, s.summarizer(llmProvider)); err != nil {
 				logging.LogWarnF("chat service: compact history of %s error:%s", session.SessionId, err.Error())
 			}
 		}
 		if needDistill {
 			// 蒸馏只取原始记录(Distill 内部会过滤摘要记录),因此压缩后无需重读
-			if _, err = s.sessionService.Distill(ctx, session, records, agent, s.summarizer(llmProvider)); err != nil {
+			if _, err = s.memoryService.Distill(ctx, session, records, agent, s.summarizer(llmProvider)); err != nil {
 				logging.LogWarnF("chat service: distill memory of %s error:%s", session.SessionId, err.Error())
 			}
 		}
@@ -585,7 +559,7 @@ func (s *ChatService) triggerMemoryMaintenance(session dataobject.TSession, agen
 // 反向依赖会形成 import cycle;注入后单测也能用假摘要器替换真实模型。
 func (s *ChatService) summarizer(llmProvider dataobject.TLlm) mstorage.Summarizer {
 	return func(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
-		return s.llmClient.Complete(ctx, llmProvider, systemPrompt, userPrompt, SummaryMaxTokens)
+		return s.llmClient.Complete(ctx, llmProvider, systemPrompt, userPrompt, hCommon.SummaryMaxTokens)
 	}
 }
 
@@ -629,7 +603,7 @@ func (s *ChatService) assembleChatContext(session dataobject.TSession, agent dat
 		systemText = systemPrompt.Prompt
 	}
 
-	records, err := s.sessionService.ReadRecords(session)
+	records, err := s.memoryService.ReadRecords(session) //读取历史记录
 	if err != nil {
 		logging.LogWarnF("chat service: read memory records of %s error:%s", session.SessionId, err.Error())
 		records = nil
@@ -654,7 +628,7 @@ func (s *ChatService) completeChat(ctx context.Context, llmProvider dataobject.T
 // 长工具链必须随时把最老的历史裁掉,否则会遇到上游"超窗口"报错。
 func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet, recorder *mstorage.TurnRecorder) (string, error) {
 	policy := ctxmgr.ContextPolicy{ContextWindow: int(llmProvider.ContextWindow)}
-	for i := 0; i < cCommon.AgentToolLoopMax; i++ {
+	for i := 0; i < hCommon.AgentToolLoopMax; i++ {
 		content, calls, err := s.llmClient.CompleteWithTools(ctx, llmProvider, ctxmgr.FitMessages(llmProvider, messages, policy), toolSet.LLMTools())
 		if err != nil {
 			return "", myException.LlmError(err, "chat service: runtime tool call chat")
@@ -674,7 +648,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 			messages = append(messages, harness.BuildToolResultMessage(call.ID, result))
 		}
 	}
-	return "", myException.ChatToolLoopKind.Newf("chat service: tool loop exceeded max iterations(%d)", cCommon.AgentToolLoopMax)
+	return "", myException.ChatToolLoopKind.Newf("chat service: tool loop exceeded max iterations(%d)", hCommon.AgentToolLoopMax)
 }
 
 // streamToolLoop 流式路径的工具调用循环:
@@ -684,7 +658,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent), recorder *mstorage.TurnRecorder) (string, string, error) {
 	seq := 0 // 本回合工具调用序号(跨轮自增,前端按 seq 追踪同一工具调用)
 	policy := ctxmgr.ContextPolicy{ContextWindow: int(llmProvider.ContextWindow)}
-	for i := 0; i < cCommon.AgentToolLoopMax; i++ {
+	for i := 0; i < hCommon.AgentToolLoopMax; i++ {
 		if i > 0 && onStatus != nil {
 			onStatus(cCommon.ChatStatusThinking, "正在思考…")
 		}
@@ -701,7 +675,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 			return "", "", myException.LlmError(err, "chat service: runtime tool stream error")
 		}
 		if len(calls) == 0 {
-			// 本轮无工具调用:流式内容(早已通过 onChunk 转发)即为最终结果
+			// 本轮工具调用结束，唯一正常结束
 			return content, finishReason, nil
 		}
 		messages = append(messages, harness.BuildToolCallWithContentMessage(content, calls)) // 工具调用+文本一并回填
@@ -750,14 +724,15 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 				lastOut.Store(startTime.NanoTimestamp)
 				go func() {
 					defer close(heartDone)
-					ticker := time.NewTicker(ToolCallingHeartbeatInterval)
+					timeout := time.Duration(hCommon.ToolCallingHeartbeatInterval) * time.Second
+					ticker := time.NewTicker(timeout)
 					defer ticker.Stop()
 					for {
 						select {
 						case <-stopHeart:
 							return
 						case now := <-ticker.C: //此时返回的当前的时间（超时）
-							if time.Duration(now.UnixNano()-lastOut.Load()) < ToolCallingHeartbeatInterval {
+							if time.Duration(now.UnixNano()-lastOut.Load()) < (timeout) {
 								continue // 期间有新输出(未静默),不打扰用户
 							}
 							lastOut.Store(now.UnixNano())
@@ -815,5 +790,5 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 			messages = append(messages, harness.BuildToolResultMessage(r.item.callID, r.result))
 		}
 	}
-	return "", "", myException.ChatToolLoopKind.Newf("chat service: tool stream loop exceeded max iterations(%d)", cCommon.AgentToolLoopMax)
+	return "", "", myException.ChatToolLoopKind.Newf("chat service: tool stream loop exceeded max iterations(%d)", hCommon.AgentToolLoopMax)
 }

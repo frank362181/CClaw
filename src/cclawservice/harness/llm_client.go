@@ -26,9 +26,9 @@ import (
 	"strings"
 	"time"
 
-	myCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/harness/common"
+	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
@@ -66,22 +66,24 @@ func newClient(timeout time.Duration) *Client {
 	streamTransport.ResponseHeaderTimeout = timeout // 仅限制"等待首个字节",不影响已开始的流
 	return &Client{
 		httpClient: &http.Client{Timeout: timeout},
+
 		streamClient: &http.Client{
 			Timeout:   0,
 			Transport: streamTransport,
 		},
-		retryMaxAttempts: myCommon.LlmRetryMaxAttempts,
-		retryBaseDelay:   time.Duration(myCommon.LlmRetryBaseDelayMs) * time.Millisecond,
-		retryMaxDelay:    time.Duration(myCommon.LlmRetryMaxDelayMs) * time.Millisecond,
-		retryJitter:      myCommon.LlmRetryJitterRatio,
-		streamIdle:       time.Duration(myCommon.LlmStreamIdleTimeoutSecs) * time.Second,
+		retryMaxAttempts: hCommon.LlmRetryMaxAttempts,
+		retryBaseDelay:   time.Duration(hCommon.LlmRetryBaseDelayMs) * time.Millisecond,
+		retryMaxDelay:    time.Duration(hCommon.LlmRetryMaxDelayMs) * time.Millisecond,
+		retryJitter:      hCommon.LlmRetryJitterRatio,
+
+		streamIdle: time.Duration(hCommon.StreamResponseTimeout) * time.Second,
 	}
 }
 
 // NewClient 构造 LLM 客户端。
 // 鉴权密钥来自每次调用传入的 TLlm(数据库配置)
 func NewClient() *Client {
-	return newClient(myCommon.DefaultTimeout)
+	return newClient(time.Duration(hCommon.NonStreamResponseTimeout) * time.Second)
 }
 
 // Complete 轻量同步调用:以 system/user 文本调用 chat/completions 并返回回复文本。
@@ -229,10 +231,10 @@ func (c *Client) completeWithToolsOnce(ctx context.Context, llmProvider dataobje
 	}(httpResp.Body)
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return pCommon.BlankString, nil, llmproto.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
+		return pCommon.BlankString, nil, llmproto.ParseLlmResponseError(httpResp, hCommon.MaxResponseBytes)
 	}
 
-	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, myCommon.MaxResponseBytes))
+	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, hCommon.MaxResponseBytes))
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
 			return pCommon.BlankString, nil, llmproto.ErrRequestCanceled
@@ -285,7 +287,7 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 	}(httpResp.Body)
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return pCommon.BlankString, pCommon.BlankString, false, llmproto.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
+		return pCommon.BlankString, pCommon.BlankString, false, llmproto.ParseLlmResponseError(httpResp, hCommon.MaxResponseBytes)
 	}
 	requestID := llmproto.GetRequestIDFromLlmResponse(httpResp.Header) // 流中错误带上上游 request_id,便于排障
 	if idleTimer != nil {
@@ -299,7 +301,7 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 	emitted := false
 	eventName := ""
 	scanner := bufio.NewScanner(httpResp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), myCommon.MaxResponseBytes)
+	scanner.Buffer(make([]byte, 0, 64*1024), hCommon.MaxResponseBytes)
 	for scanner.Scan() {
 		if idleTimer != nil {
 			idleTimer.Reset(idle) // 收到数据 → 重置空闲计时
@@ -394,7 +396,7 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 	}(httpResp.Body)
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return "", nil, "", false, llmproto.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
+		return "", nil, "", false, llmproto.ParseLlmResponseError(httpResp, hCommon.MaxResponseBytes)
 	}
 	requestID := llmproto.GetRequestIDFromLlmResponse(httpResp.Header) // 流中错误带上上游 request_id,便于排障
 	if idleTimer != nil {
@@ -408,7 +410,7 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 	acc := newToolCallAccumulator()
 	reportedIntent := make(map[int]bool) // 已上报过工具意图的 index,避免同 index 分片重复上报
 	scanner := bufio.NewScanner(httpResp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), myCommon.MaxResponseBytes)
+	scanner.Buffer(make([]byte, 0, 64*1024), hCommon.MaxResponseBytes)
 	for scanner.Scan() {
 		if idleTimer != nil {
 			idleTimer.Reset(idle)
@@ -535,10 +537,10 @@ func (c *Client) doCompletionOnce(ctx context.Context, llmProvider dataobject.TL
 	}(httpResp.Body)
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return pCommon.BlankString, llmproto.ParseLlmResponseError(httpResp, myCommon.MaxResponseBytes)
+		return pCommon.BlankString, llmproto.ParseLlmResponseError(httpResp, hCommon.MaxResponseBytes)
 	}
 
-	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, myCommon.MaxResponseBytes))
+	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, hCommon.MaxResponseBytes))
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
 			return pCommon.BlankString, llmproto.ErrRequestCanceled
