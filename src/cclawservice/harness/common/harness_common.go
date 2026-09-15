@@ -4,7 +4,10 @@
 
 package common
 
-import "strconv"
+import (
+	"context"
+	"strconv"
+)
 
 // ==================== agent 启动文档与 skill 文档 ====================
 
@@ -214,6 +217,9 @@ const (
 	TurnToolRespMaxLen   = 256            //工具输出截取的字符数
 )
 
+// Summarizer 摘要生成器:由调用方注入(service 层包装 LLM 客户端)。
+type Summarizer func(ctx context.Context, systemPrompt, userPrompt string) (string, error)
+
 const (
 	CompactionModeDefault   = 0 // 默认模式:把需要压缩的区间整体摘要为一条摘要记录。
 	CompactionModeSafeguard = 1 // 保全模式:分块摘要 + 摘要后校验关键信息(路径/结论/待办)是否保留,
@@ -271,6 +277,11 @@ const (
 	//   - 落盘上限 MaxSummaryRunes(4000 rune)≈ 2667 token(中文按 1.5 字符/token 估);
 	//   - 蒸馏要求模型回"完整列表" —— DistillMaxMemoryFacts(20) × DistillMaxFactRunes(200) = 4000 rune。
 	SummaryMaxTokens = 4096
+
+	// MaintenanceMinOutputTokens 维护调用(蒸馏/压缩/合并)的**最小**输出额度。
+	// 窗口扣掉输入后剩余不到这个数时,调用方直接跳过 —— 输出这么短必然是一段被截断的残文,
+	// 写进历史摘要或长期记忆只会造成信息缺口,不如不写(问题指向窗口/输出额度配置)。
+	MaintenanceMinOutputTokens = 512
 
 	// CompactionMaxConcurrent 后台记忆维护(压缩/蒸馏)的全局并发上限:
 	// 记忆是旁路增强,不应把上游 RPM/TPM 配额吃光、挤掉用户真正的对话请求。

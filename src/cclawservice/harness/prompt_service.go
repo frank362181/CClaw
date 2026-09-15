@@ -144,7 +144,7 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 	sections, truncated = capSections(sections, hCommon.MaxPromptSectionLen, truncated)
 
 	// ---- 总预算控制:优先保留高优先级文件,超限从尾部压缩 ----
-	totalCap := ctxmgr.BoostrapBudget(agent.BootstrapTotalChars)
+	totalCap := ctxmgr.CalcBoostrapBudget(agent.BootstrapTotalChars)
 	sections, truncated = truncateTailBudget(sections, totalCap, truncated)
 
 	// 上限以 rune 表达、下游预算以 token 表达:把两者换算着打出来,
@@ -260,7 +260,7 @@ func sectionOverheadRunes(sec dataobject.SystemPromptSection, first bool) int {
 // truncateTailBudget 对全部注入内容施加总预算(rune):从前向后保留高优先级文件,
 // 超限时从尾部截断/丢弃,并返回被截断的文件清单。
 //
-// cap <= 0 表示**该上限关闭**(不截断,直接返回)。该分支由 BoostrapBudget(负数配置)进入 ——
+// cap <= 0 表示**该上限关闭**(不截断,直接返回)。该分支由 CalcBoostrapBudget(负数配置)进入 ——
 // 三态约定与 max_history_tokens 一致:0=未配置→默认、>0=显式值、<0=不限制。
 //
 // 记账口径 = **最终 prompt 里实际占用的 rune**(正文 + 标题 `## <Title>` + 段间分隔),

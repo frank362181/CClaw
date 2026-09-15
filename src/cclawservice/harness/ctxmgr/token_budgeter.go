@@ -1,6 +1,5 @@
 /**
 * LLM token budgeter
-*
 *	对LLM的各个组成、context window的大小做预算
 **/
 
@@ -25,6 +24,13 @@ const (
 	perMessageOverhead   = 4
 	estimateSafetyFactor = 0.2
 )
+
+// MaintenanceBudgets 各维护动作本轮可发送的源文本预算
+type MaintenanceBudgets struct {
+	DistillBudget int
+	CompactBudget int
+	MergeBudget   int
+}
 
 // DistillPressure 蒸馏的"内容侧"压力。
 //
@@ -80,15 +86,21 @@ func PolicyWarnings(policy ContextPolicy, systemTokens int) []string {
 			policy.SystemPromptReserveTokens, policy.OutputReserve, policy.ToolsReserveTokens, policy.ContextWindow))
 	}
 
+	// 维护调用(蒸馏/压缩/合并)同样要装进窗口:装不下时它们会被**整批跳过**,
+	// 表现为"记忆不再更新",而日志里只有后台的 debug 级跳过记录 —— 这里明确指向配置。
+	// 口径与 maintenanceBudgetsFor 一致(窗口 - 维护输出额度 - 系统提示余量)。
+	if avail := CalcMaintenanceAvailableTokens(policy.ContextWindow, hCommon.SummaryMaxTokens, ""); avail <= 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"context window (%d) minus the maintenance output budget (%d tokens) leaves no room for a maintenance call: "+
+				"distillation/compaction/merge will be skipped (use a larger window or lower SummaryMaxTokens)",
+			policy.ContextWindow, hCommon.SummaryMaxTokens))
+	}
+
 	return warnings
 }
 
-func SummaryOverBudget(records []hCommon.MemoryRecord) bool {
-	return hCommon.SummariesRunes(records) > hCommon.MaxSummaryTotalRunes
-}
-
-// BoostrapBudget 计算启动文档注入的总预算(**rune**)。
-func BoostrapBudget(configured int) int {
+// CalcBoostrapBudget 计算启动文档注入的总预算(**rune**)。
+func CalcBoostrapBudget(configured int) int {
 	switch {
 	case configured > 0:
 		return configured
@@ -99,24 +111,55 @@ func BoostrapBudget(configured int) int {
 	}
 }
 
-// CharsToTokens 把 rune 数按估算规则换算为 token(最坏情况按 CJK 计)。
-//
-// 存在意义:启动文档的上限用 rune 表达(20K/4K/32K/60K),而窗口/预留/历史上限用 token 表达,
-// 两套单位不换算就无法比较 —— 实测 61440 rune ≈ 41k token,是 SystemPromptReserveTokens
-// 默认量级的 5 倍,很容易被误解成"系统提示最多 8k token"。
-func CharsToTokens(runes int) int {
-	if runes <= 0 {
+// CalcMaintenanceBudgets 按模型窗口推导各动作的源文本预算
+func CalcMaintenanceBudgets(windowTokens int,
+	distillSystemPrompt string,
+	compactionSystemPrompt string,
+	compactionMergeSystemPrompt string) MaintenanceBudgets {
+	return MaintenanceBudgets{
+		DistillBudget: calcMaintenanceInputBudgetRunes(windowTokens, hCommon.SummaryMaxTokens, distillSystemPrompt, hCommon.DistillMaxInputChars),
+		CompactBudget: calcMaintenanceInputBudgetRunes(windowTokens, hCommon.SummaryMaxTokens, compactionSystemPrompt, hCommon.MaxCompactionInputChars),
+		MergeBudget:   calcMaintenanceInputBudgetRunes(windowTokens, hCommon.SummaryMaxTokens, compactionMergeSystemPrompt, hCommon.MaxCompactionInputChars),
+	}
+}
+
+// CalcMaintenanceAvailableTokens 报告维护调用的"可用 token 额度"(窗口 - 输出 - 系统提示估量)。
+// <=0 表示这个模型窗口装不下任何维护调用。供 PolicyWarnings 输出一条可操作的配置告警。
+func CalcMaintenanceAvailableTokens(windowTokens, outputTokens int, systemPrompt string) int {
+	if windowTokens <= 0 {
 		return 0
 	}
+	systemTokens := EstimateInputTokens([]llmproto.ChatMessage{{Role: hCommon.RoleSystem, Content: systemPrompt}})
+	return windowTokens - outputTokens - systemTokens
+}
 
-	return int(float64(runes) / CharsPerCJKToken)
+// CalcMaintenanceOutputTokens 计算一次维护调用应发送的 max_tokens。
+//
+// 返回 <=0 表示**装不下,调用方应跳过**(而不是发一个必然失败或必然被截断的请求):
+// 维护调用的输入同样占窗口,只按 SummaryMaxTokens 硬发会在小窗模型上直接越界。
+//   - windowTokens <= 0(未配置窗口):沿用 maxTokens(与"窗口未知就不裁剪"同一口径);
+//   - 剩余额度不足 MaintenanceMinOutputTokens:返回 0(残文没有写入价值);
+//   - 否则取 min(剩余额度, maxTokens)。
+func CalcMaintenanceOutputTokens(windowTokens, maxTokens int, systemPrompt, userPrompt string) int {
+	if windowTokens <= 0 {
+		return maxTokens
+	}
+
+	room := windowTokens - EstimateInputTokens([]llmproto.ChatMessage{
+		{Role: hCommon.RoleSystem, Content: systemPrompt},
+		{Role: hCommon.RoleUser, Content: userPrompt},
+	})
+	if room < hCommon.MaintenanceMinOutputTokens {
+		return 0
+	}
+	if room < maxTokens {
+		return room
+	}
+	return maxTokens
 }
 
 // Budget 返回"除历史之外可以动的输入额度":窗口扣除输出预留、系统提示预留、
-// 以及工具 schema 预留(工具定义随请求单独发送,不占 messages,但同样占窗口)。
-//
-// 注意:这是**总额度**,历史回放预算在此基础上再取 min(…, MaxHistoryTokens)(见 AssembleContext);
-// 工具循环(FitMessages)用的就是本函数 —— 它有意识地**不**受历史回放上限影响。
+// 以及工具 schema 预留(工具定义随请求单独发送,不占 messages,但同样占窗口)
 func Budget(policy ContextPolicy, msg llmproto.ChatMessage) int {
 	reserved := calcSystemReservedTokens(policy, msg)
 	budget := policy.ContextWindow - policy.OutputReserve - reserved - policy.ToolsReserveTokens
@@ -168,9 +211,19 @@ func EstimateInputTokens(messages []llmproto.ChatMessage) int {
 	return int(float64(total) * (1 + estimateSafetyFactor))
 }
 
+// SummaryOverBudget 生效摘要的**注入体积**是否已超上限。
+// 体积口径统一在 hCommon.SummariesRunes(== SummaryTextOf(records) 的 rune 数),
+// 与 SummaryTextOverBudget 对同一段文本给出同一结论。
+func SummaryOverBudget(records []hCommon.MemoryRecord) bool {
+	return hCommon.SummariesRunes(records) > hCommon.MaxSummaryTotalRunes
+}
+
 // SummaryTextOverBudget 将要注入 system 的摘要正文是否已超总量上限。
+//
+// 与 SummaryOverBudget(records) **同源**:后者按记录渲染出同一段文本再比
+// (hCommon.SummaryTextOf),因此"触发判定(注入文本)"与"动作门(文件记录)"得到同一个结论。
 func SummaryTextOverBudget(summary string) bool {
-	return len([]rune(summary)) > hCommon.MaxSummaryTotalRunes
+	return hCommon.TextRunes(summary) > hCommon.MaxSummaryTotalRunes
 }
 
 // NeedCompact 判断是否压缩(与 compaction_mode 无关)。
@@ -250,6 +303,31 @@ func NeedMerge(result AssembleResult) bool {
 	return !result.BudgetExhausted && SummaryTextOverBudget(result.Summary)
 }
 
+// CharsToTokens 把 rune 数按估算规则换算为 token(最坏情况按 CJK 计)。
+//
+// 存在意义:启动文档的上限用 rune 表达(20K/4K/32K/60K),而窗口/预留/历史上限用 token 表达,
+// 两套单位不换算就无法比较 —— 实测 61440 rune ≈ 41k token,是 SystemPromptReserveTokens
+// 默认量级的 5 倍,很容易被误解成"系统提示最多 8k token"。
+func CharsToTokens(runes int) int {
+	if runes <= 0 {
+		return 0
+	}
+
+	return int(float64(runes) / CharsPerCJKToken)
+}
+
+// TokensToChars 把 token 额度换算回可发送的字符数,**按最坏情况**(CJK 1.5 rune/token)。
+//
+// 方向很关键:预算宁可少发也不能超窗 —— 若按 ASCII 的 4 rune/token 换算,
+// 中文内容会直接把请求顶出窗口。
+func TokensToChars(tokens int) int {
+	if tokens <= 0 {
+		return 0
+	}
+
+	return int(float64(tokens) * CharsPerCJKToken)
+}
+
 // ======================== private functions & methods ===========================
 // calcSystemReservedTokens 计算系统提示应占用的 token 额度。
 //
@@ -266,4 +344,24 @@ func calcSystemReservedTokens(policy ContextPolicy, sysMsg llmproto.ChatMessage)
 	}
 
 	return reversed
+}
+
+// calcMaintenanceInputBudgetRunes 计算维护调用(蒸馏/压缩/合并)可发送的**源文本**预算(rune)
+func calcMaintenanceInputBudgetRunes(windowTokens, outputTokens int, systemPrompt string, hardCapRunes int) int {
+	if hardCapRunes <= 0 {
+		return 0
+	}
+	if windowTokens <= 0 {
+		return hardCapRunes
+	}
+
+	systemTokens := EstimateInputTokens([]llmproto.ChatMessage{{Role: hCommon.RoleSystem, Content: systemPrompt}})
+	avail := windowTokens - outputTokens - systemTokens
+	if avail < 0 {
+		avail = 0
+	}
+	if windowRunes := TokensToChars(avail); windowRunes < hardCapRunes {
+		return windowRunes
+	}
+	return hardCapRunes
 }

@@ -2,7 +2,7 @@
 * 记忆维护的查询代价回归测试
 *
 * 背景(P1):轮次序号原本要查两次 MAX(t_turn.seq)—— 一次在 AppendTurn 内部分配序号,
-* 一次在 triggerMemoryMaintenance 里判断蒸馏节拍,而后者在**请求路径**上、
+* 一次在 TriggerMemoryMaintenance 里判断蒸馏节拍,而后者在**请求路径**上、
 * 且在所有早退判断之前,等于每条用户消息白付一次 DB 往返。
 * 现在 AppendTurn 直接把分配的序号返回给调用方,记忆维护复用它。
 **/

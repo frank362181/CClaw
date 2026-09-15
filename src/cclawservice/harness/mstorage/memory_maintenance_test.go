@@ -4,7 +4,7 @@
 * 顺序错了不会报错,只会静默地让蒸馏看不到已被压缩的原文 —— 所以把顺序写成可测的契约。
 **/
 
-package service
+package mstorage
 
 import (
 	"testing"

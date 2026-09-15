@@ -401,7 +401,7 @@ func TestEffectiveBootstrapBudget(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := ctxmgr.BoostrapBudget(c.configured); got != c.want {
+			if got := ctxmgr.CalcBoostrapBudget(c.configured); got != c.want {
 				t.Errorf("effectiveBootstrapBudget(%d)=%d want=%d", c.configured, got, c.want)
 			}
 		})
@@ -416,7 +416,7 @@ func TestBootstrapBudgetNegativeMeansUnlimited(t *testing.T) {
 		{Title: "AGENTS.md", Content: strings.Repeat("规", hCommon.MaxBootstrapTotalChars*2)},
 	}
 
-	kept, truncated := truncateTailBudget(sections, ctxmgr.BoostrapBudget(-1), nil)
+	kept, truncated := truncateTailBudget(sections, ctxmgr.CalcBoostrapBudget(-1), nil)
 	if len(kept) != 1 || len(truncated) != 0 {
 		t.Fatalf("负数配置应完全不限: kept=%d truncated=%v", len(kept), truncated)
 	}
@@ -462,7 +462,7 @@ func TestSectionCapIsBackstopOnly(t *testing.T) {
 	if _, truncated := capSections(sections, hCommon.MaxPromptSectionLen, nil); len(truncated) != 0 {
 		t.Errorf("各 section 都在来源上限内,section 兑底不应截断: %v", truncated)
 	}
-	if _, truncated := truncateTailBudget(sections, ctxmgr.BoostrapBudget(0), nil); len(truncated) != 0 {
+	if _, truncated := truncateTailBudget(sections, ctxmgr.CalcBoostrapBudget(0), nil); len(truncated) != 0 {
 		t.Errorf("默认总预算下不应截断: %v", truncated)
 	}
 }

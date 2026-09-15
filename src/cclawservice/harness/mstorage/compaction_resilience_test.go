@@ -351,3 +351,163 @@ func indexesOf(records []hCommon.MemoryRecord) []int {
 	}
 	return out
 }
+
+// ============================== F6:合并的退一步重试 ==============================
+
+// mergeFixture3 构造三条互不覆盖、且各含不同关键标记的摘要(测试辅助)。
+func mergeFixture3(t *testing.T) (*MemoryService, dataobject.TSession, []hCommon.MemoryRecord) {
+	t.Helper()
+
+	writer, sessionId := newHistoryTestWriter(t)
+	body := bulkBody()
+
+	var seed []hCommon.MemoryRecord
+	for i := 1; i <= 8; i++ {
+		seed = append(seed, record(i, hCommon.HistoryRecordTypeUser, "", "早期内容"+body))
+	}
+	fileName := writeRecords(t, writer, sessionId, seed)
+
+	appendSummary := func(from, to int, text string) {
+		t.Helper()
+		content := "covers: " + itoa(from) + "-" + itoa(to) + "\n\n" + text
+		if _, err := writer.Append(sessionId, fileName, hCommon.HistoryRecordTypeSummary, "", content, "", 0); err != nil {
+			t.Fatalf("追加摘要(%d-%d)失败: %v", from, to, err)
+		}
+	}
+	fill := func(from, to int) {
+		for i := from; i <= to; i++ {
+			if _, err := writer.Append(sessionId, fileName, hCommon.HistoryRecordTypeUser, "", "中段内容"+body, "", 0); err != nil {
+				t.Fatalf("追加普通记录失败: %v", err)
+			}
+		}
+	}
+
+	appendSummary(1, 8, "第一段:读取 /Volumes/data/ddl_sqlite3.sql,共 123456 行"+strings.Repeat("补充细节。", 60))
+	fill(10, 17)
+	appendSummary(10, 17, "第二段:配置 config/agentdefault.json,单位编码 100001"+strings.Repeat("补充细节。", 60))
+	fill(19, 26)
+	appendSummary(19, 26, "第三段:报表模板 report/template.xlsx,编号 654321"+strings.Repeat("补充细节。", 60))
+
+	records, err := GetMemoryFileWriter().Read(sessionId, fileName)
+	if err != nil {
+		t.Fatalf("读回失败: %v", err)
+	}
+	return newCompactService(), dataobject.TSession{SessionId: sessionId, ChatData: fileName}, records
+}
+
+// TestCompactSummariesRetriesWithMinimalSetOnLossyMerge 回归(F6):
+// 一次合并 N 条摘要丢掉关键标记时,必须**退回最小集合再试一次**,而不是直接放弃。
+//
+// 为什么重要:放弃 + "摘要超预算禁用压缩" = 卡死态 —— 既不再产生摘要、摘要也不变小,
+// 历史继续被裁却没有任何摘要代表它。合并对象越少,关键标记越容易全部保住,
+// 所以"退一步"能在**不降低保全校验标准**的前提下解开卡死。
+func TestCompactSummariesRetriesWithMinimalSetOnLossyMerge(t *testing.T) {
+	svc, session, records := mergeFixture3(t)
+	GetCompactionThrottle().Reset(session.SessionId)
+	t.Cleanup(func() { GetCompactionThrottle().Reset(session.SessionId) })
+
+	if got := len(hCommon.SummariesOf(records)); got != 3 {
+		t.Fatalf("用例前提:应有 3 条摘要,实际 %d", got)
+	}
+	before := hCommon.SummariesRunes(records)
+
+	calls := 0
+	summarize := func(_ context.Context, _, userPrompt string) (string, error) {
+		calls++
+		if strings.Count(userPrompt, "(covers ") > hCommon.CompactionMergeMinSummaries {
+			// 多集合:刻意丢掉所有关键标记(路径/长数字)→ 保全校验应当拒绝
+			return "内容已合并。", nil
+		}
+		// 最小集合(前两条):保住它们的关键标记
+		return "第一段:读取 /Volumes/data/ddl_sqlite3.sql(共 123456 行);" +
+			"第二段:配置 config/agentdefault.json(单位编码 100001)。" + strings.Repeat("补充说明。", 20), nil
+	}
+
+	result, err := svc.CompactSummaries(context.Background(), session, records, summarize)
+	if err != nil {
+		t.Fatalf("CompactSummaries 失败: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("大集合丢标记后应退回最小集合重试一次(共 2 次调用),实际 %d", calls)
+	}
+	if result.SummaryIndex == 0 || result.Merged != hCommon.CompactionMergeMinSummaries {
+		t.Fatalf("应以最小集合完成合并: %+v", result)
+	}
+
+	after, _ := GetMemoryFileWriter().Read(session.SessionId, session.ChatData)
+	if got := hCommon.SummariesRunes(after); got >= before {
+		t.Errorf("合并后注入体积应下降: before=%d after=%d", before, got)
+	}
+	if got := len(hCommon.ActiveSummaries(after)); got != 2 {
+		t.Errorf("合并 2 条后应剩 2 条生效摘要,实际 %d", got)
+	}
+}
+
+// TestCompactSummariesGivesUpAndCoolsDownWhenNoLosslessMerge 回归(F6 的兜底):
+// 连最小集合都保不住关键标记时不得无限重试 —— WARN + 冷却(每轮最多两次尝试)是唯一可接受的降级,
+// 卡死态因此变得**可见**(日志里明确写出"摘要长期超预算、压缩被禁用")。
+func TestCompactSummariesGivesUpAndCoolsDownWhenNoLosslessMerge(t *testing.T) {
+	svc, session, records := mergeFixture3(t)
+	GetCompactionThrottle().Reset(session.SessionId)
+	t.Cleanup(func() { GetCompactionThrottle().Reset(session.SessionId) })
+
+	calls := 0
+	lossy := fakeSummarizer("内容已合并。", &calls) // 任何规模都丢关键标记
+
+	if _, err := svc.CompactSummaries(context.Background(), session, records, lossy); err != nil {
+		t.Fatalf("首次调用不应报错: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("两个候选规模都应尝试过,实际 %d", calls)
+	}
+
+	// 冷却期内再调用:不得再花调用
+	if _, err := svc.CompactSummaries(context.Background(), session, records, lossy); err != nil {
+		t.Fatalf("冷却期内调用不应报错: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("冷却期内不得重复尝试,实际 %d", calls)
+	}
+}
+
+// TestCompactSummariesThrottlesRepeatedFailures 回归(F5):合并失败后必须进入冷却。
+//
+// 为什么必须有:合并的触发条件(摘要总量超预算)一旦成立就是**持续为真**,
+// 而失败原因(无可安全合并的集合 / 合并后关键信息丢太多)也往往是持续状态 ——
+// 没有冷却就退化成每轮一次 LLM 调用(或每轮一次全量挑选),且永远不会自愈。
+//
+// 与压缩共用同一张节流表但**分键**(见 mergeThrottleKey):这里同时锁住 Reset 必须两把都清。
+func TestCompactSummariesThrottlesRepeatedFailures(t *testing.T) {
+	svc, session, records := mergeFixture(t)
+	GetCompactionThrottle().Reset(session.SessionId)
+	t.Cleanup(func() { GetCompactionThrottle().Reset(session.SessionId) })
+
+	calls := 0
+	lossy := fakeSummarizer("几段内容已合并。", &calls) // 刻意丢掉路径与编号 → 保全校验拒绝落盘
+
+	if _, err := svc.CompactSummaries(context.Background(), session, records, lossy); err != nil {
+		t.Fatalf("首次调用不应报错: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("首次应发起一次合并调用,实际 %d", calls)
+	}
+
+	// 冷却期内重复调用:不得再花调用
+	for i := 0; i < 2; i++ {
+		if _, err := svc.CompactSummaries(context.Background(), session, records, lossy); err != nil {
+			t.Fatalf("第 %d 次冷却期内调用不应报错: %v", i+2, err)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("冷却期内不得重复发起合并调用,实际 %d", calls)
+	}
+
+	// Reset 必须把压缩与合并两把锁都清掉(否则会出现"重置了却还在冷却")
+	GetCompactionThrottle().Reset(session.SessionId)
+	if _, err := svc.CompactSummaries(context.Background(), session, records, lossy); err != nil {
+		t.Fatalf("Reset 后调用不应报错: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("Reset 后应重新尝试合并,实际 %d", calls)
+	}
+}

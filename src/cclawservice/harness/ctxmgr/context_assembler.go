@@ -288,21 +288,15 @@ func composeSystemMessage(systemPrompt, summaryText string) llmproto.ChatMessage
 // 摘要记录(covers: from-to)取代了区间内的原始记录:被取代的记录不再回放,
 // 否则同一段历史会既以摘要、又以原文出现,既浪费预算也干扰模型判断。
 //
-// "哪些摘要仍生效""哪些记录已被取代"这两个判定**必须**用 hCommon 里的共享实现
-// (与写端 compactionRun / 合并触发 SummaryOverBudget 同一规则),否则会出现
-// "按 A 规则判断要不要压缩、按 B 规则决定注入什么"的漂移。
+// "哪些摘要仍生效""哪些记录已被取代""注入文本长什么样"这三个判定**必须**用 hCommon 里的
+// 共享实现(与写端 compactionRun / 合并判定 SummaryOverBudget 同一规则),
+// 否则会出现"按 A 规则判断要不要压缩、按 B 规则决定注入什么"的漂移。
 func splitSummaryAndActive(records []hCommon.MemoryRecord) (summaryText string, active []hCommon.MemoryRecord) {
 	if len(hCommon.SummariesOf(records)) == 0 {
 		return "", records
 	}
 
-	var texts []string
-	for _, rec := range hCommon.ActiveSummaries(records) {
-		if content := strings.TrimSpace(rec.Content); content != "" {
-			texts = append(texts, content)
-		}
-	}
-	return strings.Join(texts, "\n\n"), hCommon.ActivePlainRecords(records)
+	return hCommon.SummaryTextOf(records), hCommon.ActivePlainRecords(records)
 }
 
 // buildHistoryItems 把记录映射为历史消息(工具记录折叠进同轮助手消息)。

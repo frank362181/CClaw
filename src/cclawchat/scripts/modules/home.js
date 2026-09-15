@@ -56,7 +56,9 @@ const AGENT_FORM_FIELDS = [
     { key: 'ImageEmoji', label: '形象表情', type: 'emoji', tab: 'basic', section: '形象配置' },
     { key: 'ImageTheme', label: '形象主题', type: 'text', maxlength: 64, tab: 'basic', section: '形象配置' },
     { key: 'CompactionMode', label: '压缩模式', type: 'select', options: [{ value: 0, label: '整体摘要' }, { value: 1, label: '分块摘要' }], tab: 'basic', section: '上下文与压缩' },
-    { key: 'ReverseTokenFloor', label: '保留 Token 下限', type: 'number', min: 1, tab: 'basic', section: '上下文与压缩' },
+    // reverse_token_floor 是**系统提示预留**（启动文档 + 折叠进 system 的历史摘要的额度），
+    // 约束的是"历史可以占多少"，不是"历史至少要保留多少" —— 旧标签把方向写反了（当成历史下限）。
+    { key: 'ReverseTokenFloor', label: '系统提示预留 Token', type: 'number', min: 1, tab: 'basic', section: '上下文与压缩' },
     { key: 'MaxConcurrents', label: '最大并发数', type: 'number', min: 1, max: 10, tab: 'basic', section: '并发与限制' },
     { key: 'SubAgents', label: '子 Agent 上限', type: 'number', min: 1, max: 8, step: 1, tab: 'basic', section: '并发与限制' },
     { key: 'ReasoningMode', label: '推理展示方式', type: 'select', options: [{ value: 0, label: '不展示' }, { value: 1, label: '生成后附带' }, { value: 2, label: '实时流' }], tab: 'basic', section: '推理与工具' },

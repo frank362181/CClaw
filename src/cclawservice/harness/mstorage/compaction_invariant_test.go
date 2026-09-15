@@ -74,7 +74,7 @@ func TestFitCompactionRangeShrinksInsteadOfDropping(t *testing.T) {
 		run = append(run, record(i, hCommon.HistoryRecordTypeUser, "", body))
 	}
 
-	fitted, n := fitCompactionRange(run)
+	fitted, n := fitCompactionRange(run, hCommon.MaxCompactionInputChars)
 	if n >= len(run) {
 		t.Fatalf("超预算的区间应被收缩: fitted=%d total=%d", n, len(run))
 	}
@@ -299,7 +299,9 @@ func TestMergeCandidateAndCompactSummaries(t *testing.T) {
 // TestSummaryOverBudgetUsesActiveSummaries 摘要总量只看**生效**的摘要:被取代的摘要不再注入,
 // 不应计入预算(否则合并后仍会被判为超预算,陷入反复合并)。
 func TestSummaryOverBudgetUsesActiveSummaries(t *testing.T) {
-	half := hCommon.MaxSummaryTotalRunes / 2
+	// 体积口径 = **注入文本**的长度(SummaryTextOf:空正文不参与,摘要之间以空行连接),
+	// 因此两条摘要之间会多出 2 rune —— 构造时按"注入后恰好等于上限"对齐。
+	half := (hCommon.MaxSummaryTotalRunes - 2) / 2
 
 	// 两条互不覆盖的摘要(序号 9 与 18 都不落在对方的 covers 区间里)→ 都生效
 	first := record(9, hCommon.HistoryRecordTypeSummary, "", strings.Repeat("一", half))
@@ -311,8 +313,16 @@ func TestSummaryOverBudgetUsesActiveSummaries(t *testing.T) {
 	if got := len(hCommon.ActiveSummaries(before)); got != 2 {
 		t.Fatalf("两条互不覆盖的摘要都应生效,实际 %d", got)
 	}
-	if got := hCommon.SummariesRunes(before); got != hCommon.MaxSummaryTotalRunes {
-		t.Errorf("生效摘要总量应为 %d,实际 %d", hCommon.MaxSummaryTotalRunes, got)
+	injected := hCommon.TextRunes(hCommon.SummaryTextOf(before))
+	if injected != hCommon.MaxSummaryTotalRunes {
+		t.Fatalf("用例前提:注入体积应恰为上限 %d,实际 %d", hCommon.MaxSummaryTotalRunes, injected)
+	}
+	// F8 契约:体积只有**一个**口径 —— 记录侧与注入文本侧必须同源同值
+	if got := hCommon.SummariesRunes(before); got != injected {
+		t.Errorf("SummariesRunes 必须与注入文本同源: got=%d, 注入=%d", got, injected)
+	}
+	if ctxmgr.SummaryOverBudget(before) != ctxmgr.SummaryTextOverBudget(hCommon.SummaryTextOf(before)) {
+		t.Error("触发判定(注入文本)与动作门(记录)必须给出一致结论")
 	}
 	if ctxmgr.SummaryOverBudget(before) {
 		t.Errorf("总量恰好等于上限不应判为超预算")

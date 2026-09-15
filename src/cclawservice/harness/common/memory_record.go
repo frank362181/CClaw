@@ -109,11 +109,20 @@ func ParseMemoryRecords(text string) (records []MemoryRecord, consumed int) {
 	return records, consumed
 }
 
+// TextRunes 体积记账的**唯一口径**:去掉首尾空白后的 rune 数。
+//
+// 为什么统一:摘要/事实/源文本的体积都会拿去和同一个阈值(如 MaxSummaryTotalRunes)比较,
+// 而注入时的文本本来就是 TrimSpace 过的 —— 两边用不同口径会在阈值附近做出不一致的决定
+// (触发判定说"超了"、动作门说"没超")。
+func TextRunes(s string) int {
+	return utf8.RuneCountInString(strings.TrimSpace(s))
+}
+
 // CompactionStat 供日志使用:把记录数/字符数汇总为一行。
 func CompactionStat(targets []MemoryRecord) string {
 	chars := 0
-	for _, rec := range targets {
-		chars += utf8.RuneCountInString(rec.Content)
+	for i := range targets {
+		chars += TextRunes(targets[i].Content)
 	}
 	return fmt.Sprintf("records=%d chars=%d", len(targets), chars)
 }
@@ -122,7 +131,7 @@ func CompactionStat(targets []MemoryRecord) string {
 func RecordsRunes(records []MemoryRecord) int {
 	chars := 0
 	for i := range records {
-		chars += utf8.RuneCountInString(records[i].Content)
+		chars += TextRunes(records[i].Content)
 	}
 	return chars
 }
@@ -137,7 +146,7 @@ func RecordsRunesInRange(records []MemoryRecord, from, to, limit int) int {
 		if records[i].Index < from || records[i].Index > to {
 			continue
 		}
-		chars += utf8.RuneCountInString(records[i].Content)
+		chars += TextRunes(records[i].Content)
 		if limit > 0 && chars >= limit {
 			return chars
 		}
@@ -227,14 +236,23 @@ func ActiveSummaries(records []MemoryRecord) []MemoryRecord {
 	return active
 }
 
-// SummariesRunes 汇总生效摘要的正文总长(rune),即注入 system 时的摘要体积。
-// 过滤空正文与生效摘要保持一致(空正文不会被注入)。
-func SummariesRunes(records []MemoryRecord) int {
-	total := 0
+// SummaryTextOf 渲染"生效摘要"注入 system 时的文本(空正文不参与,空行连接)。
+//
+// 这是摘要文本的**唯一渲染处**:上下文装配(domain 层)与"摘要总量是否超预算"的
+// 一切判定/动作门都走它 —— 否则会出现"按 A 算法判要不要合并、按 B 算法算体积"的漂移。
+func SummaryTextOf(records []MemoryRecord) string {
+	var texts []string
 	for _, sum := range ActiveSummaries(records) {
-		total += utf8.RuneCountInString(strings.TrimSpace(sum.Content))
+		if content := strings.TrimSpace(sum.Content); content != "" {
+			texts = append(texts, content)
+		}
 	}
-	return total
+	return strings.Join(texts, "\n\n")
+}
+
+// SummariesRunes 生效摘要的**注入体积**(rune)—— 与 SummaryTextOf 严格同源。
+func SummariesRunes(records []MemoryRecord) int {
+	return TextRunes(SummaryTextOf(records))
 }
 
 // ============================== private functions & methods ==============================

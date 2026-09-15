@@ -164,10 +164,14 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 	}
 
 	// 记忆维护(旁路、异步):按需压缩历史、按需蒸馏长期记忆
-	s.triggerMemoryMaintenance(maintenanceRequest{
-		session: session, agent: agent, llm: llmProvider,
-		assembled: assembled, records: records, turnSeq: turnSeq,
-	})
+	s.memoryService.TriggerMemoryMaintenance(mstorage.MaintenanceRequest{
+		Session:       &session,
+		Agent:         &agent,
+		Assembled:     &assembled,
+		Records:       records,
+		TurnSeq:       turnSeq,
+		ContextWindow: int(llmProvider.ContextWindow),
+	}, s.summarizer(llmProvider))
 
 	// 组装应答
 	now := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
@@ -280,10 +284,14 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	}
 
 	// 记忆维护(旁路、异步):与同步路径共用同一触发条件
-	s.triggerMemoryMaintenance(maintenanceRequest{
-		session: session, agent: agent, llm: llmProvider,
-		assembled: assembled, records: records, turnSeq: turnSeq,
-	})
+	s.memoryService.TriggerMemoryMaintenance(mstorage.MaintenanceRequest{
+		Session:       &session,
+		Agent:         &agent,
+		Assembled:     &assembled,
+		Records:       records,
+		TurnSeq:       turnSeq,
+		ContextWindow: int(llmProvider.ContextWindow),
+	}, s.summarizer(llmProvider))
 	return reply, nil
 }
 
@@ -313,9 +321,15 @@ func (s *ChatService) EndChatSession(session dataobject.TSession, agent dataobje
 
 	// closing=true:不受节拍约束,直接把水位之后的尾巴蒸掉(NeedDistill 的收尾维度)。
 	// 没有可蒸内容时 Distill 内部自己会跳过,不会白烧调用。
-	s.triggerMemoryMaintenance(maintenanceRequest{
-		session: session, agent: agent, llm: llmProvider, records: records, closing: true,
-	})
+	// Assembled=nil:收尾路径没有"本轮装配结果",由 TriggerMemoryMaintenance 归一(zero 值)。
+	s.memoryService.TriggerMemoryMaintenance(mstorage.MaintenanceRequest{
+		Session:       &session,
+		Agent:         &agent,
+		Assembled:     nil,
+		Records:       records,
+		Closing:       true,
+		ContextWindow: int(llmProvider.ContextWindow),
+	}, s.summarizer(llmProvider))
 	return nil
 }
 
@@ -575,146 +589,6 @@ func (s *ChatService) collectSkillFiles(comCode string, agent dataobject.TAgent)
 	return files, agentExtensionRoot
 }
 
-// maintenanceRequest 一次后台记忆维护的输入。
-//
-// 用结构体而不是长参数列表:触发判定需要装配结果、记录快照与轮次序号,
-// 调用点靠字段名自解释(尤其 records 与 closing 这两个非显然项)。
-type maintenanceRequest struct {
-	session   dataobject.TSession
-	agent     dataobject.TAgent
-	llm       dataobject.TLlm
-	assembled ctxmgr.AssembleResult
-	records   []hCommon.MemoryRecord // 装配刚读回的记录快照(判断维护压力用,零额外 IO)
-	turnSeq   int                    // 本轮落库的轮次序号(AppendTurn 返回;<=0 表示未落库)
-	closing   bool                   // 会话收尾:必须把尾巴带走
-}
-
-// triggerMemoryMaintenance 触发后台记忆维护(旁路、异步):按需蒸馏、按需压缩、按需合并摘要。
-//
-// 为什么合并成一个后台任务:
-//
-//	三者都是"耗一次 LLM 调用、与用户回复无关"的记忆维护动作,合并后同一会话只起一个协程,
-//	并共享同一次读回结果,避免重复 IO。
-//
-// **执行顺序是契约** —— 蒸馏必须在压缩之前(否则被压缩的原文对蒸馏永久不可见),
-// 顺序由 maintenancePlan.steps 给出并单测锁住。
-//
-// 三个触发判定都是**内容驱动**的(见 ctxmgr.NeedCompact / NeedDistill):
-// 轮次节拍只是速率上限,是否真值得维护还要看被裁区间的体积、摘要预算与水位后的积压量。
-func (s *ChatService) triggerMemoryMaintenance(req maintenanceRequest) {
-	session, agent, llmProvider := req.session, req.agent, req.llm
-	assembled := req.assembled
-
-	if s.memoryService == nil || !s.memoryService.Enabled() {
-		return
-	}
-	if strings.TrimSpace(session.ChatData) == pCommon.BlankString {
-		return
-	}
-
-	// 预算为 0:窗口扣掉输出预留与系统提示预留后没有剩余,压缩改变不了这一点,
-	// 反复压缩只会白烧 LLM 调用。这里明确告警并把问题指向配置,而不是继续压
-	if assembled.BudgetExhausted {
-		logging.LogWarnF("chat service: history budget is exhausted for session=%s (context_window - output reserve - max(est(system), reverse_token_floor) <= 0); compaction disabled, check the agent/model config",
-			session.SessionId)
-	}
-
-	// 压缩的**收益**维度:被裁区间至少要有 MinCompactionSrcRunes 的体积才值得一次 LLM 调用。
-	// 早退扫描(够门槛就停),records 是装配刚读回的,请求路径上不额外读文件。
-	droppedRunes := hCommon.RecordsRunesInRange(req.records, assembled.DroppedFrom, assembled.DroppedTo,
-		hCommon.MinCompactionSrcRunes)
-	needCompact := ctxmgr.NeedCompact(assembled, droppedRunes)
-	// 冷却期内直接不起后台任务:省掉协程 + 一次全量读回(Compact 内部还会再判一次,以那里为准)
-	if needCompact && !mstorage.GetCompactionThrottle().Allow(session.SessionId, pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp) {
-		needCompact = false
-	}
-
-	// 轮次数直接取"本轮刚落库的序号" —— AppendTurn 已经查过一次 MAX(seq),
-	// 这里不再重复查询(它在请求路径上、且在本函数的所有早退判断之前)。
-	// 只有本轮未被记录(建档失败/幂等跳过)时才退回一次查询:那时序号没有推进。
-	turns := req.turnSeq
-	if turns <= 0 {
-		turns = s.memoryService.TurnCount(session.SessionId)
-	}
-
-	// 蒸馏的**内容**维度:水位之后还剩多少(够一轮就提前蒸,不必等节拍)。
-	// 压力只在内容检查节拍上才影响判定(见 ctxmgr.NeedDistillPressure):
-	// 其余轮次只需节拍,省掉这次 MEMORY.md 读取 + 扫描。
-	pressure := ctxmgr.NewDistillPressure(req.closing) //ctxmgr.DistillPressure{Closing: req.closing}
-	if ctxmgr.NeedDistillPressure(turns) {
-		pressure.PendingRecords, pressure.PendingChars = s.memoryService.DistillPressure(session, agent, req.records)
-	}
-	needDistill := ctxmgr.NeedDistill(turns, pressure)
-
-	// 摘要总量超上限 → 合并最旧的一批摘要(判定见 ctxmgr.NeedMerge,与压缩的预算维度同源)。
-	needMerge := ctxmgr.NeedMerge(assembled)
-	if !needCompact && !needDistill && !needMerge {
-		return
-	}
-
-	// 压缩模式来源:t_agent.compaction_mode —— 0=default(整体摘要) / 1=safeguard(分块+保全),
-	// 常量与名称见 dataobject.CompactionMode*,模式差异集中在 mstorage/compaction.go。
-	from, to, mode := assembled.DroppedFrom, assembled.DroppedTo, agent.CompactionMode
-
-	// 获得一个维护routine，避免无限次获取打满LLM
-	if !cCommon.AcquireMaintenanceSlot() {
-		logging.LogDebugF("chat service: memory maintenance slot unavailable, skip session=%s", session.SessionId)
-		return
-	}
-
-	go func() {
-		defer cCommon.ReleaseMaintenanceSlot()
-		defer func() { // 后台协程必须自兜 panic:否则单个会话的异常会带崩整个进程
-			if r := recover(); r != nil {
-				logging.LogErrorF("chat service: panic in memory maintenance of %s: %v", session.SessionId, r)
-			}
-		}()
-
-		ctx, cancel := context.WithTimeout(context.Background(), hCommon.CompactionRunTimeout*time.Second)
-		defer cancel()
-
-		records, err := s.memoryService.ReadRecords(session)
-		if err != nil {
-			logging.LogWarnF("chat service: read records for memory maintenance error:%s", err.Error())
-			return
-		}
-
-		// 动作顺序见 maintenancePlan.steps:蒸馏 → 压缩 → 合并摘要。
-		// 先蒸馏再压缩,两个目标都达到:长期记忆拿到完整原文,历史体积随后有界。
-		plan := maintenancePlan{distill: needDistill, compact: needCompact, merge: needMerge}
-		for _, step := range plan.steps() {
-			switch step {
-			case stepDistill:
-				if _, err = s.memoryService.Distill(ctx, session, records, agent, s.summarizer(llmProvider)); err != nil {
-					logging.LogWarnF("chat service: distill memory of %s error:%s", session.SessionId, err.Error())
-				}
-
-			case stepCompact:
-				if _, err = s.memoryService.Compact(ctx, session, records, from, to, mode, s.summarizer(llmProvider)); err != nil {
-					logging.LogWarnF("chat service: compact history of %s error:%s", session.SessionId, err.Error())
-				}
-
-			case stepMerge:
-				// 合并必须基于**最新**内容:压缩刚写完摘要,摘要集合与总量都变了。
-				// (蒸馏只动 MEMORY.md,不改历史文件,因此无需为它重读。)
-				if latest, readErr := s.memoryService.ReadRecords(session); readErr == nil {
-					records = latest
-				} else {
-					logging.LogWarnF("chat service: re-read records before merge of %s error:%s",
-						session.SessionId, readErr.Error())
-				}
-
-				// 以**重读后**的判定为准:压缩本身也可能把摘要总量推过阈值。
-				if ctxmgr.SummaryOverBudget(records) {
-					if _, err = s.memoryService.CompactSummaries(ctx, session, records, s.summarizer(llmProvider)); err != nil {
-						logging.LogWarnF("chat service: merge summaries of %s error:%s", session.SessionId, err.Error())
-					}
-				}
-			}
-		}
-	}()
-}
-
 // assembleChatContext 读回会话历史并装配成本轮完整的 LLM 消息序列。
 //
 // 装配形态:[system(系统提示 + 历史摘要)] + [历史消息(预算内)] + [本轮用户消息]。
@@ -928,9 +802,18 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 }
 
 // summarizer 把 LLM 客户端包装为"摘要生成器"注入 mstorage。
-func (s *ChatService) summarizer(llmProvider dataobject.TLlm) mstorage.Summarizer {
+func (s *ChatService) summarizer(llmProvider dataobject.TLlm) hCommon.Summarizer {
 	return func(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
-		text, finishReason, err := s.llmClient.Complete(ctx, llmProvider, systemPrompt, userPrompt, hCommon.SummaryMaxTokens)
+		// 输出额度按**窗口**收口(见 ctxmgr.CalcMaintenanceOutputTokens):维护调用的输入同样占窗口,
+		// 若无脑发 SummaryMaxTokens,小窗模型上会变成"输入 + 输出 > 窗口"的必然失败 ——
+		// 而且失败只发生在后台日志里。装不下时直接报错,不发起注定失败的调用。
+		maxTokens := ctxmgr.CalcMaintenanceOutputTokens(int(llmProvider.ContextWindow), hCommon.SummaryMaxTokens, systemPrompt, userPrompt)
+		if maxTokens <= 0 {
+			return pCommon.BlankString, myException.RuntimeClientErrEx(fmt.Sprintf(
+				"maintenance call does not fit the context window: window=%d", llmProvider.ContextWindow))
+		}
+
+		text, finishReason, err := s.llmClient.Complete(ctx, llmProvider, systemPrompt, userPrompt, maxTokens)
 		if err != nil {
 			return text, err
 		}

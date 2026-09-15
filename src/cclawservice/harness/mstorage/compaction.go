@@ -16,16 +16,13 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
 	hCommon "my.favorite/cclawservice/harness/common"
 	pCommon "my.favorite/platformutility/common"
 )
-
-// Summarizer 摘要生成器:由调用方注入(service 层包装 LLM 客户端)。
-// 用函数类型而非接口,是为了让 mstorage 不反向依赖 harness(否则会形成 import cycle)。
-type Summarizer func(ctx context.Context, systemPrompt, userPrompt string) (string, error)
 
 // 压缩提示词
 //
@@ -152,11 +149,14 @@ func volume(records []hCommon.MemoryRecord) int {
 
 // fitCompactionRange 按"送入摘要模型的字符预算"收缩区间**尾部**。
 //
+// budgetRunes 是**源文本**预算(rune):由调用方按模型窗口推导
+// (见 ctxmgr.CalcMaintenanceBudgets);窗口未知时等于 hCommon.MaxCompactionInputChars。
+//
 // 关键:宁可不压,也不能"丢弃区间内的记录却宣称覆盖整个区间" ——
 // covers 是承诺,区间内的每条记录都必须真的送进模型,否则那部分原文会永久退出回放。
 // 因此放不下时收缩 coverTo(剩下的部分下次再压),而不是把记录丢在区间里。
 // 返回收缩后的记录集与其长度;记录集至少保留 1 条。
-func fitCompactionRange(run []hCommon.MemoryRecord) ([]hCommon.MemoryRecord, int) {
+func fitCompactionRange(run []hCommon.MemoryRecord, budgetRunes int) ([]hCommon.MemoryRecord, int) {
 	if len(run) == 0 {
 		return nil, 0
 	}
@@ -165,7 +165,7 @@ func fitCompactionRange(run []hCommon.MemoryRecord) ([]hCommon.MemoryRecord, int
 	fit := 0
 	for i := range run {
 		lineRunes := utf8.RuneCountInString(compactionPromptLine(run[i]))
-		if i > 0 && total+lineRunes > hCommon.MaxCompactionInputChars {
+		if i > 0 && total+lineRunes > budgetRunes {
 			break
 		}
 		total += lineRunes
@@ -247,14 +247,28 @@ func effectiveSummaryCap(srcRunes int) int {
 // 从最大前缀向下尝试;找不到(或不足 2 条)返回 nil ——
 // 宁可摘要略超预算,也不写一条"过度承诺"的摘要(那会永久丢历史)。
 func mergeCandidate(records []hCommon.MemoryRecord) ([]hCommon.MemoryRecord, int, int) {
+	return mergeCandidateUpTo(records, 0)
+}
+
+// mergeCandidateUpTo 同 mergeCandidate,但把候选集合限制在至多 maxSize 条最旧摘要
+// (maxSize <= 0 表示不限制)。
+//
+// 为什么要能限制:合并是"一次处理越多越好"与"一次处理越少越不容易丢关键标记"之间的取舍。
+// 保留率不达标时退回到最小集合再试一次,而不是直接卡死(见 mergeWithBudget 的重试)。
+func mergeCandidateUpTo(records []hCommon.MemoryRecord, maxSize int) ([]hCommon.MemoryRecord, int, int) {
 	summaries := hCommon.SummariesOf(records)
 	if len(summaries) < hCommon.CompactionMergeMinSummaries {
 		return nil, 0, 0
 	}
 
+	limit := len(summaries)
+	if maxSize > 0 && maxSize < limit {
+		limit = maxSize
+	}
+
 	covered := hCommon.CoveredIndexes(summaries)
 	checker := newCoverChecker(records)
-	for size := len(summaries); size >= hCommon.CompactionMergeMinSummaries; size-- {
+	for size := limit; size >= hCommon.CompactionMergeMinSummaries; size-- {
 		set := summaries[:size]
 		if set[0].CoversFrom <= 0 {
 			continue
@@ -294,13 +308,13 @@ func mergeCandidate(records []hCommon.MemoryRecord) ([]hCommon.MemoryRecord, int
 }
 
 // summarizeOnce —— default 模式:整段区间一次摘要。
-func summarizeOnce(ctx context.Context, targets []hCommon.MemoryRecord, from, to int, summarize Summarizer) (string, error) {
+func summarizeOnce(ctx context.Context, targets []hCommon.MemoryRecord, from, to int, summarize hCommon.Summarizer) (string, error) {
 	return summarize(ctx, compactionSystemPrompt, buildCompactionUserPrompt(targets, from, to))
 }
 
 // summarizeInBlocks —— safeguard 模式:分块摘要后拼接。
 // 块内条目少,模型更不容易在长输入里丢要点(代价:调用次数多、摘要更长)。
-func summarizeInBlocks(ctx context.Context, targets []hCommon.MemoryRecord, summarize Summarizer) (string, error) {
+func summarizeInBlocks(ctx context.Context, targets []hCommon.MemoryRecord, summarize hCommon.Summarizer) (string, error) {
 	if len(targets) <= hCommon.SafeguardBlockRecords {
 		chunk := targets
 		return summarize(ctx, compactionSystemPrompt, buildCompactionUserPrompt(chunk, chunk[0].Index, chunk[len(chunk)-1].Index))
@@ -328,6 +342,25 @@ func summarizeInBlocks(ctx context.Context, targets []hCommon.MemoryRecord, summ
 func compactionPromptLine(rec hCommon.MemoryRecord) string {
 	body := pCommon.TruncateRunes(strings.TrimSpace(rec.Content), hCommon.MemoryExcerptRunes, hCommon.TruncatedMarker)
 	return fmt.Sprintf("[%d] %s: %s\n", rec.Index, recordLabel(rec), body)
+}
+
+// promptLineRunes 一条记录送审时的**行体积**(rune)。
+//
+// 为什么需要它:体积判定(蒸馏压力)与体积消耗(选批/收缩区间)必须是**同一个口径** ——
+// 否则会出现"压力说攒够一轮了"而实际批次只装了零头(或反过来)。
+// 它与 compactionPromptLine 渲染出来的行严格一致,但**不构造字符串**:
+// 压力扫描在请求路径上,而单条工具记录可能上百 KB(构造会白花内存与 GC)。
+// 公式与渲染是同一个来源,一致性由 TestPromptLineRunesMatchesRendered 锁住 ——
+// 改渲染格式必须同步改这里。
+func promptLineRunes(rec hCommon.MemoryRecord) int {
+	body := hCommon.TextRunes(rec.Content)
+	if body > hCommon.MemoryExcerptRunes {
+		// 截断后的正文 = 上限 + 截断标记(与 pCommon.TruncateRunes 的行为一致)
+		body = hCommon.MemoryExcerptRunes + utf8.RuneCountInString(hCommon.TruncatedMarker)
+	}
+
+	return len("[") + len(strconv.Itoa(rec.Index)) + len("] ") +
+		utf8.RuneCountInString(recordLabel(rec)) + len(": ") + body + len("\n")
 }
 
 // buildCompactionUserPrompt 渲染送入模型的源文本。

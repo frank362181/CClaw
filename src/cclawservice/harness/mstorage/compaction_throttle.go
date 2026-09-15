@@ -18,6 +18,7 @@ package mstorage
 
 import (
 	"sort"
+	"strings"
 	"sync"
 
 	pCommon "my.favorite/platformutility/common"
@@ -86,10 +87,28 @@ func (t *CompactionThrottle) RecordFailure(sessionId string, now int64) {
 }
 
 // Reset 清除某会话的节流状态(测试与运维用)。
+//
+// 压缩与合并共用这一张表但**分键**(见 mergeThrottleKey):两者必须一起清,
+// 否则会出现"重置了却还在冷却"这种诡异状态。
 func (t *CompactionThrottle) Reset(sessionId string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
 	delete(t.entries, sessionId)
+	delete(t.entries, mergeThrottleKey(sessionId))
+}
+
+// mergeThrottleKey 合并路径的节流键。
+//
+// 为什么与压缩**分键**:两者的失败模式与代价都不同 ——
+// 压缩失败是"区间太短/降级后仍有损"(有降级兜底),合并失败是"无可安全合并的集合/合并后有损"
+// (没有兜底,且摘要超预算是一个**持续**为真的状态)。
+// 共用一个键会让"压缩刚推进"顺手抹掉合并的冷却,反之亦然。
+//
+// 键里带前缀不会与压缩键(sessionId 本身)碰撞:sessionId 经 NormalizeCompactId 规整,
+// 只保留安全字符(不含 ':')。
+func mergeThrottleKey(sessionId string) string {
+	return "merge:" + strings.TrimSpace(sessionId)
 }
 
 // ============================== private functions & methods ==============================

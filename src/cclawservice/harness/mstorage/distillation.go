@@ -81,8 +81,8 @@ type DistillResult struct {
 	Updated    int      // 被改写为新说法的条数(同一槽位更新)
 	Removed    int      // 模型未再输出、因而被移出长期记忆的旧条目数
 	Migrated   int      // 迁移掉的旧格式小节数
-	CoversFrom int      // 本次送入模型的记录区间起点(0 表示未执行)
-	CoversTo   int      // 本次送入模型的记录区间终点
+	CoversFrom int      // 本次**判定过**的记录区间起点(0 表示未判定到任何区间)
+	CoversTo   int      // 本次判定过的区间终点 —— 调用方据此判断"哪些原文可以被压缩吞掉"
 	Backlog    int      // 因超出输入预算而留给下一轮的记录条数
 }
 
@@ -134,8 +134,8 @@ func parseDistillHeader(line string) (sessionId string, from, to int, ok bool) {
 	return sessionId, from, to, true
 }
 
-// lastDistilledIndex 返回该会话在 MEMORY.md 里已蒸馏到的最大记录序号(0 = 还没蒸馏过)。
-//
+// lastDistilledIndex 从内容(内容来自于MEMORY.md )中返回该会话里已蒸馏到的最大记录序号
+// (0 = 还没蒸馏过)
 // 两个来源取**较大值**:
 //   - 格式:自动记忆区定界注释里的 `watermarks=sess:120,…`;
 func lastDistilledIndex(content, sessionId string) int {

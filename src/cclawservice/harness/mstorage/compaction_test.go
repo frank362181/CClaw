@@ -21,7 +21,8 @@ func record(index int, recordType, title, content string) hCommon.MemoryRecord {
 }
 
 // fakeSummarizer 返回固定摘要(测试辅助),同时统计调用次数。
-func fakeSummarizer(text string, calls *int) Summarizer {
+// (Summarizer 类型已上移到 hCommon:service 层不再需要 import mstorage 才能命名它)
+func fakeSummarizer(text string, calls *int) hCommon.Summarizer {
 	return func(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 		if calls != nil {
 			*calls++
