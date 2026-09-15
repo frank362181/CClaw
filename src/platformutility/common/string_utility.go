@@ -159,6 +159,23 @@ func TruncateRunes(s string, max int, marker string) string {
 	return string(runes[:max]) + marker
 }
 
+func TruncateString(s string, beginIndex, length int) string {
+	sLen := len(s)
+	if sLen == 0 || beginIndex >= sLen {
+		return BlankString
+	}
+
+	if beginIndex < 0 {
+		beginIndex = 0
+	}
+
+	if length > sLen-beginIndex {
+		length = sLen - beginIndex
+	}
+
+	return s[beginIndex : beginIndex+length]
+}
+
 // IsCJK 判断字符是否属于中日韩(CJK)文字区。
 // 这些字符在多数 tokenizer 中每字符约 0.5~1 token,与拉丁字符(约 4 字符/token)差异明显,
 // 分开统计可让估算更贴近真实用量。

@@ -154,6 +154,11 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 		if recorded && cCommon.IsInterrupted(ctx, err) {
 			s.memoryService.AppendInterruptedTurn(session, req, pCommon.BlankString, recorder.Snapshot(), cCommon.InterruptionReason(ctx, err))
 		}
+		// 工具循环被守卫中止时可能已有产出文本:同步接口只返回 err,不会把它交给客户端,
+		// 但必须留下痕迹 —— 否则"模型到底说了什么"在日志与历史里都查不到(流式路径靠已下发的增量自然留痕)。
+		if strings.TrimSpace(reply) != pCommon.BlankString {
+			logging.LogWarnF("chat service: tool loop stopped with partial reply: %s", pCommon.TruncateRunes(reply, 200, "…"))
+		}
 		return nil, myException.LlmError(err, "chat service: runtime call chat")
 	}
 
@@ -193,7 +198,8 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 //   - onTool:   工具调用进度事件(intent/running/done/error),由控制器以 tool 事件转发
 //   - 返回值:   完整回复文本
 //   - 与 SendMessage 共用 prepareChat,保证同步/流式两条路径的校验与解析完全一致
-func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, sender, comCode string, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent), onNotice func(code, msg string)) (string, error) {
+func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, sender, comCode string,
+	onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent), onNotice func(code, msg string)) (string, error) {
 	if onStatus != nil {
 		onStatus(cCommon.ChatStatusPreparing, "正在解析任务…")
 	}
@@ -249,7 +255,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	recorder := mstorage.NewTurnRecorder()
 	var reply, finishReason string
 	if s.functionCalling && toolSet != nil && len(toolSet.LLMTools()) > 0 {
-		reply, finishReason, err = s.streamToolLoop(runCtx, llmProvider, assembled.Messages, toolSet, forwardChunk, onStatus, onReasoning, onTool, recorder)
+		reply, finishReason, err = s.streamToolLoop(runCtx, llmProvider, assembled.Messages, toolSet, forwardChunk, onStatus, onReasoning, onTool, onNotice, recorder)
 	} else {
 		reply, finishReason, err = s.llmClient.ChatCompletionStreamMessages(runCtx, llmProvider, assembled.Messages, forwardChunk, onReasoning)
 	}
@@ -630,12 +636,46 @@ func (s *ChatService) completeChat(ctx context.Context, llmProvider dataobject.T
 	return s.llmClient.ChatCompletionMessages(ctx, llmProvider, messages)
 }
 
+// applyLoopGuard 判定一次**已执行完**的工具调用,并完成命中后的三件事:
+// 写日志(可观测性)、给用户一条提示(流式路径)、把守卫提示回填给模型。返回应回填给模型的工具结果内容。
+//
+// 判定必须落在工具循环的串行回填点、按"模型声明的顺序"调用(见 ctxmgr.TurnLoopGuard 的使用约束)。
+func applyLoopGuard(guard *ctxmgr.TurnLoopGuard, toolName, toolArgs string, resultOK bool, result string, onNotice func(code, msg string)) string {
+	hint := guard.Check(toolName, toolArgs, resultOK, result)
+	if hint == pCommon.BlankString {
+		return result
+	}
+
+	verdict := guard.LastVerdict()
+	logging.LogWarnF("chat service: tool loop guard hit: rule=%s level=%s hits=%d tool=%s hint=%s",
+		verdict.Rule, verdict.Level, guard.Hits(), toolName, hint)
+
+	// 首次命中:以 notice 让用户知道"模型在重复调用工具,已提醒它换策略";
+	// 再次命中会以 chat.tool_loop_guard 错误收尾(错误通道自带提示),不重复下发。
+	if onNotice != nil && !guard.ShouldStop() {
+		onNotice(cCommon.ChatNoticeToolLoopGuard, loopGuardNoticeMsg(verdict.Level))
+	}
+
+	return ctxmgr.ToolResultWithHint(result, hint)
+}
+
+// loopGuardNoticeMsg 按判定级别选用户话术:提醒换策略 / 已要求停止重试。
+func loopGuardNoticeMsg(level ctxmgr.LoopGuardLevel) string {
+	if level == ctxmgr.LoopLevelStop {
+		return cCommon.ConstChatNoticeToolLoopGuardStopMsg
+	}
+
+	return cCommon.ConstChatNoticeToolLoopGuardWarnMsg
+}
+
 // runToolLoop 同步路径的工具调用循环:调用LLM → 执行工具 → 结果回填 → 再次调用,直到模型给出最终文本。
 //
 // 每轮请求前都做一次预算贴合(FitMessages):工具结果不断回填会持续挤压上下文窗口,
 // 长工具链必须随时把最老的历史裁掉,否则会遇到上游"超窗口"报错。
 func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet, recorder *mstorage.TurnRecorder) (string, error) {
 	policy := ctxmgr.ContextPolicy{ContextWindow: int(llmProvider.ContextWindow)}
+	// 工具死循环守卫:一轮对话一个实例(局部变量),禁止做成服务字段/单例,原因见 chat_tool_guard.go。
+	guard := ctxmgr.NewTurnLoopGuard()
 	for i := 0; i < hCommon.AgentToolLoopMax; i++ {
 		content, calls, err := s.llmClient.CompleteWithTools(ctx, llmProvider, ctxmgr.FitMessages(llmProvider, messages, policy), toolSet.LLMTools())
 		if err != nil {
@@ -643,6 +683,11 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 		}
 		if len(calls) == 0 {
 			return content, nil
+		}
+		if guard.ShouldStop() {
+			// 已提示过且**再次命中**守卫(模型没换策略)→ 终止本轮,不再执行工具;
+			// 这一轮已产出的文本仍带回调用方(用于留痕/日志,避免"内容全丢")。
+			return content, guard.StopError("chat service: tool loop")
 		}
 		messages = append(messages, harness.BuildToolCallWithContentMessage(content, calls)) // 缺口1:工具轮文本一并回填
 		for _, call := range calls {
@@ -653,6 +698,8 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 				result = fmt.Sprintf(`{"error":%q}`, err.Error())
 			}
 			recorder.Record(call.Function.Name, callTime, respTime, result) // 旁路记录(recorder 为 nil 时静默)
+			// 死循环判定:同步路径本身串行执行,顺序天然等于"模型声明的顺序"(同步接口无 notice 通道)
+			result = applyLoopGuard(guard, call.Function.Name, call.Function.Arguments, err == nil, result, nil)
 			messages = append(messages, harness.BuildToolResultMessage(call.ID, result))
 		}
 	}
@@ -663,9 +710,13 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 // 工具调用阶段实时推送给用户:模型声明调用(intent)→开始执行(running)→结果(done/error),
 // 最终内容增量通过 onChunk 流式转发。底层仍为多次上游请求(OpenAI 兼容协议不支持服务端工具循环),
 // 此处把多轮编排为一条面向客户端的事件流。
-func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet, onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent), recorder *mstorage.TurnRecorder) (string, string, error) {
+func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet,
+	onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent), onNotice func(code, msg string), recorder *mstorage.TurnRecorder) (string, string, error) {
 	seq := 0 // 本回合工具调用序号(跨轮自增,前端按 seq 追踪同一工具调用)
 	policy := ctxmgr.ContextPolicy{ContextWindow: int(llmProvider.ContextWindow)}
+
+	// 工具死循环守卫:一轮对话一个实例
+	guard := ctxmgr.NewTurnLoopGuard()
 	for i := 0; i < hCommon.AgentToolLoopMax; i++ {
 		if i > 0 && onStatus != nil {
 			onStatus(cCommon.ChatStatusThinking, "正在思考…")
@@ -685,6 +736,10 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 		if len(calls) == 0 {
 			// 本轮工具调用结束，唯一正常结束
 			return content, finishReason, nil
+		}
+		if guard.ShouldStop() {
+			// 已提示过且**再次命中**守卫(模型没换策略)→ 终止本轮,不再执行工具。
+			return content, finishReason, guard.StopError("chat service: stream tool loop")
 		}
 		messages = append(messages, harness.BuildToolCallWithContentMessage(content, calls)) // 工具调用+文本一并回填
 
@@ -788,14 +843,17 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 					onTool(ToolEvent{Phase: cCommon.ChatToolEventError, Seq: r.item.seq, Name: r.item.name, Detail: r.err.Error()})
 				}
 				recorder.Record(r.item.name, r.callTime, r.respTime, r.err.Error()) // 旁路记录(recorder 为 nil 时静默)
-				messages = append(messages, harness.BuildToolResultMessage(r.item.callID, fmt.Sprintf(`{"error":%q}`, r.err.Error())))
+				result := fmt.Sprintf(`{"error":%q}`, r.err.Error())
+
+				// 死循环判定必须落在串行回填点(同轮工具是并发执行的,这里才是"模型声明的顺序")
+				messages = append(messages, harness.BuildToolResultMessage(r.item.callID, applyLoopGuard(guard, r.item.name, r.item.arg, false, result, onNotice)))
 				continue
 			}
 			if onTool != nil {
 				onTool(ToolEvent{Phase: cCommon.ChatToolEventDone, Seq: r.item.seq, Name: r.item.name, Detail: pCommon.TruncateRunes(r.result, 600, "…")})
 			}
 			recorder.Record(r.item.name, r.callTime, r.respTime, r.result) // 旁路记录(recorder 为 nil 时静默)
-			messages = append(messages, harness.BuildToolResultMessage(r.item.callID, r.result))
+			messages = append(messages, harness.BuildToolResultMessage(r.item.callID, applyLoopGuard(guard, r.item.name, r.item.arg, true, r.result, onNotice)))
 		}
 	}
 	return "", "", myException.ChatToolLoopKind.Newf("chat service: tool stream loop exceeded max iterations(%d)", hCommon.AgentToolLoopMax)

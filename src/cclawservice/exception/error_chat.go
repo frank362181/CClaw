@@ -2,7 +2,7 @@
 * 聊天域业务错误 Kind 表(业务码 4601..4616)+ 用户文案取值。
 *
 * HTTPStatus 与既有 controller 行为保持一致(前端契约不变)。
-* 码值布局:4600 为本域基址(ConstErrorMax + 2600),域内自 +1 连续分配 → 4601..4616;
+* 码值布局:4600 为本域基址(ConstErrorMax + 2600),域内自 +1 连续分配 → 4601..4617;
 * harness.runtime_client 独占 4501(见 error_runtime.go) —— 由 exception/error_codes_test.go 的契约测试锁定。
 **/
 
@@ -31,6 +31,7 @@ const (
 	codeChatLLMInvalidRequest
 	codeChatLLMRateLimit
 	codeChatLLMContentFilter
+	codeChatToolLoopGuard
 )
 
 // 聊天错误的 Kind 表。HTTPStatus 与既有 controller 行为保持一致(前端契约不变)。
@@ -96,6 +97,17 @@ var (
 		Notify:     true,
 		HTTPStatus: http.StatusBadGateway,
 		Msg:        "任务步骤过多未能完成,请缩小范围或分批执行后重试",
+	})
+
+	// ChatToolLoopGuardKind 工具死循环守卫命中:模型在被提示"换策略/停止重试"后仍继续请求工具。
+	// 与 ChatToolLoopKind 区分:不是"任务步骤太多",而是同一批调用在重复
+	// (完全相同的调用 / 同一工具连打 / 二元交替调用)。HTTP 502(与工具循环同族)。
+	ChatToolLoopGuardKind = apperr.Register(apperr.Kind{
+		Name:       "chat.tool_loop_guard",
+		Code:       codeChatToolLoopGuard,
+		Notify:     true,
+		HTTPStatus: http.StatusBadGateway,
+		Msg:        "检测到重复调用工具已中止,请换一种方式描述需求或缩小范围",
 	})
 
 	// ChatCanceledKind 请求上下文被取消(客户端断开/服务端主动中断)。

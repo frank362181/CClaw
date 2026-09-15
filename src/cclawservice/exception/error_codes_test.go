@@ -62,7 +62,7 @@ func TestErrorCodeContract(t *testing.T) {
 		{"agent.workspace", AgentWorkspaceKind, wantAgentBase + 4, http.StatusOK},
 		// agent.internal 不对外暴露业务码(Code=0),响应由 controller 回退平台通用内部错误码。
 		{"agent.internal", AgentInternalKind, 0, http.StatusInternalServerError},
-		// 聊天域:4601..4616(独立 4600 段,自 +1 起)
+		// 聊天域:4601..4617(独立 4600 段,自 +1 起)
 		{"chat.parameter", ChatParameterKind, wantChatBase + 1, http.StatusBadRequest},
 		{"chat.agent_not_found", ChatAgentNotFoundKind, wantChatBase + 2, http.StatusNotFound},
 		{"chat.llm", ChatLLMKind, wantChatBase + 3, http.StatusBadGateway},
@@ -79,6 +79,7 @@ func TestErrorCodeContract(t *testing.T) {
 		{"chat.llm.invalid_request", ChatLLMInvalidRequestKind, wantChatBase + 14, http.StatusBadGateway},
 		{"chat.llm.rate_limit", ChatLLMRateLimitKind, wantChatBase + 15, http.StatusTooManyRequests},
 		{"chat.llm.content_filter", ChatLLMContentFilterKind, wantChatBase + 16, http.StatusBadGateway},
+		{"chat.tool_loop_guard", ChatToolLoopGuardKind, wantChatBase + 17, http.StatusBadGateway},
 	}
 
 	for _, c := range cases {

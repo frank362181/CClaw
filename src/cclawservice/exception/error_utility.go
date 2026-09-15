@@ -82,6 +82,7 @@ var chatKinds = map[*apperr.Kind]struct{}{
 	ChatLLMQuotaKind:          {},
 	ChatRunTimeoutKind:        {},
 	ChatToolLoopKind:          {},
+	ChatToolLoopGuardKind:     {},
 	ChatCanceledKind:          {},
 	ChatNotActiveKind:         {},
 	ChatBusyKind:              {},

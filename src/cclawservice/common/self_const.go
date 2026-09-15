@@ -107,10 +107,18 @@ const (
 	// 告警提示下发,不覆盖已输出内容,也不降级为"可能不完整";文案取自错误的 Kind.Msg。
 	ChatNoticeError = "chat_error"
 
+	// ChatNoticeToolLoopGuard 工具死循环守卫首次命中(模型在重复调用工具,已提醒它换策略)。
+	// 再次命中会以 chat.tool_loop_guard 错误收尾,不再重复下发本提示。
+	ChatNoticeToolLoopGuard = "tool_loop_guard"
+
 	// ChatNoticeLevelError 通知级别:错误级(前端用醒目样式渲染,如红色图标与描边)。
 	ChatNoticeLevelError = "error"
 
 	ConstChatNoticeTruncatedMsg     = "回答已达长度上限,可能不完整"
 	ConstChatNoticeContentFilterMsg = "回答未通过模型内容安全审核,可能不完整"
 	ConstChatNoticeIncompleteMsg    = "回答生成中断,可能不完整"
+
+	// 工具死循环守卫命中提示(按判定级别取话术,见 ctxmgr.LoopGuardLevel)
+	ConstChatNoticeToolLoopGuardWarnMsg = "模型在重复调用工具,已提醒它换一种方式"
+	ConstChatNoticeToolLoopGuardStopMsg = "检测到重复调用工具,已要求模型停止重试"
 )
