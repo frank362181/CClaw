@@ -144,7 +144,18 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 	sections, truncated = capSections(sections, hCommon.MaxPromptSectionLen, truncated)
 
 	// ---- 总预算控制:优先保留高优先级文件,超限从尾部压缩 ----
-	sections, truncated = truncateTailBudget(sections, ctxmgr.BoostrapBudget(agent.BootstrapTotalChars), truncated)
+	totalCap := ctxmgr.BoostrapBudget(agent.BootstrapTotalChars)
+	sections, truncated = truncateTailBudget(sections, totalCap, truncated)
+
+	// 上限以 rune 表达、下游预算以 token 表达:把两者换算着打出来,
+	// 否则"为什么历史少了 41k"要靠人肉反推(61440 rune ≈ 41k token)。
+	if totalCap > 0 {
+		logging.LogDebugF("prompt service: agent=%s scope=%s bootstrap budget: section_cap=%d runes(≈%d tokens) total_cap=%d runes(≈%d tokens) skill_cap=%d runes(≈%d tokens) truncated=%v",
+			agent.AgentId, scope.String(),
+			hCommon.MaxPromptSectionLen, ctxmgr.CharsToTokens(hCommon.MaxPromptSectionLen),
+			totalCap, ctxmgr.CharsToTokens(totalCap),
+			hCommon.MaxSkillsPromptChars, ctxmgr.CharsToTokens(hCommon.MaxSkillsPromptChars), truncated)
+	}
 
 	// MEMORY.md 在注入顺序里是**最后**一段,总预算吃紧时它是第一个被截断/丢弃的。
 	// 蒸馏按 DistillMemoryDocMaxChars 往这个文件里写长期记忆,一旦被挤掉,
@@ -167,16 +178,16 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 		})
 	}
 
-	// ---- 拼接最终 prompt ----
+	// ---- 拼接最终 prompt(分隔符与预算记账共用 sectionTitlePrefix/sectionSeparator) ----
 	var sb strings.Builder
 	for i := range sections {
 		if i > 0 {
-			sb.WriteString("\n\n")
+			sb.WriteString(sectionSeparator)
 		}
 		if len(sections[i].Title) > 0 {
-			sb.WriteString("## ")
+			sb.WriteString(sectionTitlePrefix)
 			sb.WriteString(sections[i].Title)
-			sb.WriteString("\n\n")
+			sb.WriteString(sectionSeparator)
 		}
 		sb.WriteString(sections[i].Content)
 	}
@@ -198,8 +209,17 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 	}, nil
 }
 
-// capSections 对单个 section 施加硬上限:任何 section 的 rune 数不得超过 limit。
-// limit <= 0 表示不限制。超限内容被截断,并记录对应 section 标题。
+// capSections 对单个 section 施加硬上限(rune):任何 section 都不得超过 limit。
+// limit <= 0 表示**该上限关闭**(不截断)。
+//
+// 【它是兜底层,不是第一道防线】当前每个 section 都有更紧的来源上限:
+//   - 启动文档:MaxBootstrapFileChars(20480 rune),USER.md 用 MaxUserDocChars(4096 rune);
+//   - Available Skills:MaxSkillsPromptChars(18000 rune);
+//   - 通知 / 输出语言尾巴:极短。
+//
+// 三者都小于 MaxPromptSectionLen,因此本函数在当前常量下**不会截断任何东西** ——
+// 它的价值是将来新增一种没有来源上限的 section 时兜底。改动上述任一常量前,
+// 先看 TestSectionCapIsBackstopOnly(那条测试把这个前提显式化了)。
 func capSections(sections []dataobject.SystemPromptSection, limit int, truncated []string) ([]dataobject.SystemPromptSection, []string) {
 	if limit <= 0 {
 		return sections, truncated
@@ -216,8 +236,38 @@ func capSections(sections []dataobject.SystemPromptSection, limit int, truncated
 	return sections, truncated
 }
 
-// truncateTailBudget 对全部注入内容施加总预算:从前向后保留高优先级文件,
+// 渲染分隔符:最终拼接与预算记账**共用同一组常量**,否则"记账"与"实际"会再次漂移。
+// (都是 ASCII,所以 len() 即 rune 数)
+const (
+	sectionTitlePrefix = "## "
+	sectionSeparator   = "\n\n"
+)
+
+// sectionOverheadRunes section 除正文之外的开销(标题 + 段间分隔),与最终拼接严格一致。
+// first=true 表示它是输出里的第一段(不加分隔符)。
+func sectionOverheadRunes(sec dataobject.SystemPromptSection, first bool) int {
+	overhead := 0
+	if len(sec.Title) > 0 {
+		overhead += len(sectionTitlePrefix) + len([]rune(sec.Title)) + len(sectionSeparator)
+	}
+	if !first {
+		overhead += len(sectionSeparator)
+	}
+
+	return overhead
+}
+
+// truncateTailBudget 对全部注入内容施加总预算(rune):从前向后保留高优先级文件,
 // 超限时从尾部截断/丢弃,并返回被截断的文件清单。
+//
+// cap <= 0 表示**该上限关闭**(不截断,直接返回)。该分支由 BoostrapBudget(负数配置)进入 ——
+// 三态约定与 max_history_tokens 一致:0=未配置→默认、>0=显式值、<0=不限制。
+//
+// 记账口径 = **最终 prompt 里实际占用的 rune**(正文 + 标题 `## <Title>` + 段间分隔),
+// 以前只算正文,于是实际 prompt 会比 cap 多出「#section × (标题+分隔)」。
+//
+// 仍在预算外(有意):总预算之后追加的 `Bootstrap Context Notice` 与末尾「输出语言」尾巴,
+// 以及它们各自贡献的那一个分隔符 —— 它们是固定开销,由调用方按需预留。
 func truncateTailBudget(sections []dataobject.SystemPromptSection, cap int, truncated []string) ([]dataobject.SystemPromptSection, []string) {
 	if cap <= 0 {
 		return sections, truncated
@@ -225,7 +275,7 @@ func truncateTailBudget(sections []dataobject.SystemPromptSection, cap int, trun
 
 	total := 0
 	for i := range sections {
-		total += len([]rune(sections[i].Content))
+		total += len([]rune(sections[i].Content)) + sectionOverheadRunes(sections[i], i == 0)
 	}
 	if total <= cap {
 		return sections, truncated
@@ -234,18 +284,23 @@ func truncateTailBudget(sections []dataobject.SystemPromptSection, cap int, trun
 	budget := cap
 	kept := make([]dataobject.SystemPromptSection, 0, len(sections))
 	for i := range sections {
+		// first 以"它在输出里的位置"为准(已保留数),而非输入下标:
+		// 若前面有 section 连标题都放不下而被整体丢弃,它就不是第一段了。
+		first := len(kept) == 0
+		overhead := sectionOverheadRunes(sections[i], first)
 		runeLen := len([]rune(sections[i].Content))
-		if runeLen <= budget {
-			budget -= runeLen
+		if runeLen+overhead <= budget {
+			budget -= runeLen + overhead
 			kept = append(kept, sections[i])
 			continue
 		}
 
-		// 该文件超出剩余预算:优先截断;预算耗尽则丢弃
-		if budget > 0 {
+		// 该文件超出剩余预算:先扣掉标题/分隔开销,余下留给正文;连标题都放不下则整体丢弃。
+		// 一旦截断,预算即耗尽(后续 section 只可能更放不下)。
+		if available := budget - overhead; available > 0 {
 			kept = append(kept, dataobject.SystemPromptSection{
 				Title:   sections[i].Title,
-				Content: pCommon.TruncateRunes(sections[i].Content, budget, pCommon.BlankString),
+				Content: pCommon.TruncateRunes(sections[i].Content, available, pCommon.BlankString),
 			})
 			truncated = append(truncated, sections[i].Title)
 			budget = 0
@@ -313,14 +368,18 @@ func renderSkillsCatalog(skills []dataobject.SkillDocument) (string, bool) {
 	const minDesc = 4
 	const maxDesc = 120
 
+	// 预算一律按 **rune** 计(与 MaxBootstrapFileChars / MaxPromptSectionLen / 总预算同单位)。
+	// 以前这里用的是 len(...)(字节):常量名叫 Chars 却按字节卡,中文描述实际只有约 1/3 的额度。
+	runes := func(s string) int { return len([]rune(s)) }
+
 	// 完整描述若可容纳,直接使用
-	if full := render(catalog, 0); len(full) <= hCommon.MaxSkillsPromptChars {
+	if full := render(catalog, 0); runes(full) <= hCommon.MaxSkillsPromptChars {
 		return full, false
 	}
 
 	// 二分查找能容纳全部 skill 的最大描述长度
 	fits := func(descMax int) bool {
-		return len(render(catalog, descMax)) <= hCommon.MaxSkillsPromptChars
+		return runes(render(catalog, descMax)) <= hCommon.MaxSkillsPromptChars
 	}
 
 	lo, hi := minDesc, maxDesc
@@ -341,7 +400,7 @@ func renderSkillsCatalog(skills []dataobject.SkillDocument) (string, bool) {
 	keep := make([]dataobject.SkillDocument, 0, len(catalog))
 	for i := range catalog {
 		candidate := append(keep, catalog[i])
-		if len(render(candidate, lo)) > hCommon.MaxSkillsPromptChars {
+		if runes(render(candidate, lo)) > hCommon.MaxSkillsPromptChars {
 			break
 		}
 		keep = candidate

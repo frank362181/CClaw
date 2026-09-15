@@ -214,7 +214,7 @@ func (r *AgentRouter) classifyByLLM(ctx context.Context, comCode string, agents 
 		})
 	}
 
-	content, err := r.llmClient.Complete(classifyCtx, provider, BuildClassifySystemPrompt(candidates), reqMsg, r.llmMaxTokens)
+	content, _, err := r.llmClient.Complete(classifyCtx, provider, BuildClassifySystemPrompt(candidates), reqMsg, r.llmMaxTokens)
 	if err != nil {
 		logging.LogDebugF("agent router: runtime classify skipped, err:%s", err.Error())
 		return dataobject.TAgent{}, false

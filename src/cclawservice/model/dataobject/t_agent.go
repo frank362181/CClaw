@@ -117,16 +117,20 @@ type TAgent struct {
 	ImageTheme string `json:"ImageTheme"`
 
 	CompactionMode      int `json:"CompactionMode"`      //压缩模式
-	BootstrapTotalChars int `json:"BootstrapTotalChars"` //启动文件最大的大小
+	BootstrapTotalChars int `json:"BootstrapTotalChars"` //启动文档注入总上限(rune):0/未配置 → MaxBootstrapTotalChars;负数 → 不限制
 
-	ReverseTokenFloor       int `json:"ReverseTokenFloor"` //为agent系统启动文件预留的占比
+	ReverseTokenFloor       int `json:"ReverseTokenFloor"` // 为系统提示(7 个启动文档 + 折叠进 system 的摘要)预留的最小 token 额度;只在该值大于实测系统提示估量时才生效
 	ReverseTokenFloorTokens int `gorm:"-" json:"ReverseTokenFloorTokens"`
-	MemorySummarySize       int `json:"MemorySummarySize"` //长期记忆摘要占比
-	MemorySummaryTokens     int `gorm:"-" json:"MemorySummaryTokens"`
-	MemorySize              int `json:"MemorySize"` // 历史记忆占比
-	MemoryTokens            int `gorm:"-" json:"MemoryTokens"`
-	CurrentSize             int `json:"CurrentSize"` //当前用户输入+工具输出结果占比
-	CurrentTokens           int `gorm:"-" json:"CurrentTokens"`
+
+	// MaxHistoryTokens 历史回放上限(tokens):0/未配置 → 用 hCommon.DefaultMaxHistoryTokens;负数 → 不限制。
+	// 只作用于"历史回放"这一项预算,不影响工具循环(FitMessages)—— 想多早开始压缩历史就调它。
+	MaxHistoryTokens    int `gorm:"column:max_history_tokens" json:"MaxHistoryTokens"`
+	MemorySummarySize   int `json:"MemorySummarySize"` //长期记忆摘要占比
+	MemorySummaryTokens int `gorm:"-" json:"MemorySummaryTokens"`
+	MemorySize          int `json:"MemorySize"` // 历史记忆占比
+	MemoryTokens        int `gorm:"-" json:"MemoryTokens"`
+	CurrentSize         int `json:"CurrentSize"` //当前用户输入+工具输出结果占比
+	CurrentTokens       int `gorm:"-" json:"CurrentTokens"`
 
 	MaxConcurrents int `gorm:"column:max_concurrent" json:"MaxConcurrents"` // DDL 列为 max_concurrent
 	SubAgents      int `json:"SubAgents"`
@@ -154,6 +158,7 @@ func AgentValues(a *TAgent) map[string]interface{} {
 		"compaction_mode":       a.CompactionMode,
 		"bootstrap_total_chars": a.BootstrapTotalChars,
 		"reverse_token_floor":   a.ReverseTokenFloor,
+		"max_history_tokens":    a.MaxHistoryTokens,
 		"memory_summary_size":   a.MemorySummarySize,
 		"memory_summary_tokens": a.MemorySummaryTokens,
 		"memory_size":           a.MemorySize,

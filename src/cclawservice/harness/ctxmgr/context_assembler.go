@@ -18,8 +18,13 @@
 *
 * 预算裁剪(性能与稳定性):
 *   - 只在"组边界"(以 user 消息为起点)上裁剪,绝不切散 assistant/tool 配对;
-*   - t_agent.reverse_token_floor 是**为系统提示(AGENTS.md 等启动文档 + 历史摘要)预留的最小额度**,
-*     它约束的是"历史可以占多少"而非"历史至少保留多少":预留额度越大,历史回放得越少;
+*   - `SystemPromptReserveTokens`(DB 列名仍是 `t_agent.reverse_token_floor`)是**为系统提示
+*     (7 个启动文档 + 折叠进 system 的历史摘要)预留的最小额度**:它约束"历史可以占多少",
+*     而不是"历史至少保留多少"。注意它只会在**大于实测系统提示估量**时生效
+*     —— 启动文档本身的大小已由估量覆盖,这个额度是给摘要增长留的余量,
+*     因此取值应与 `MaxSummaryTotalRunes` 同量级,而不是与窗口同量级;
+*   - `MaxHistoryTokens` 是**历史回放上限**:想"多早就开始压缩历史"就调它 ——
+*     它是独立旋钮,不影响工具循环(FitMessages 不会被它限制);
 *   - 历史预算是硬上限:算不下就不带历史(请求仍然合法:system + 本轮用户消息),
 *     不会为了多带历史把请求顶出模型窗口;
 *   - 被裁掉的记录区间会回传给调用方,作为"需要压缩"的判据(压缩由 mstorage 落盘为新摘要记录)。
@@ -46,9 +51,23 @@ const (
 
 // ContextPolicy 上下文装配策略(来源:t_agent 与 t_llm 配置)。
 type ContextPolicy struct {
-	ContextWindow      int // 模型上下文窗口(tokens);<=0 表示未知,不做裁剪(保持阶段1行为)
-	OutputReserve      int // 为输出预留的 tokens;<=0 取默认
-	ReverseTokenFloor  int // 为系统提示(AGENTS.md 等启动文档 + 历史摘要)预留的最小 tokens(t_agent.reverse_token_floor)
+	ContextWindow int // 模型上下文窗口(tokens);<=0 表示未知,不做裁剪(保持阶段1行为)
+	OutputReserve int // 为输出预留的 tokens;<=0 取默认
+
+	// SystemPromptReserveTokens 系统提示(7 个启动文档 + 折叠进 system 的历史摘要)的最小预留额度。
+	// 来自 t_agent.reverse_token_floor(列名保留,语义已按实际用途澄清)。
+	// 只在**大于实测估量**时生效,取值应与 MaxSummaryTotalRunes 同量级,不要拿它当历史旋钮。
+	SystemPromptReserveTokens int
+
+	// MaxHistoryTokens 历史回放上限:<0 表示不限制;0 表示用默认;
+	// >0 时历史回放预算取 min(窗口预算, 本值)—— 只作用于历史回放,不作用于工具循环。
+	// 注意是**软上限**:裁剪以"组"为单位且永远保留最新一组(否则会一条历史都不带),
+	// 因此实际回放可能比本值多出最新一组的体积。
+	MaxHistoryTokens int
+
+	// ToolsReserveTokens 工具 schema(随请求单独发送,不占 messages)的 token 预留。
+	ToolsReserveTokens int
+
 	ToolReplayMaxRunes int // 单条工具结果回放的最大字符数;<=0 取默认
 }
 
@@ -61,13 +80,15 @@ func DefaultContextPolicy() ContextPolicy {
 }
 
 // GetContextPolicy 按 Agent 与模型配置推导装配策略。
-// compaction_mode 与 reverse_token_floor 是 t_agent 上为"压缩"预留的配置项;
-// reverse_token_floor 是为系统提示(AGENTS.md 等启动文档、以及折叠进 system 的历史摘要)
-// 预留的**最小** token 额度 —— 它保护的是"规则文档不被历史挤掉",因此在这里读取。
+//   - context_window 来自 t_llm;
+//   - reverse_token_floor 是 t_agent 上**为系统提示预留的最小额度**(保护启动文档不被历史挤掉);
+//   - max_history_tokens 是 t_agent 上**历史回放上限**(压缩节奏旋钮):
+//     0/未配置 → 用 DefaultMaxHistoryTokens;值为负 → 不限制。
 func GetContextPolicy(agent dataobject.TAgent, contextWindow int) ContextPolicy {
 	policy := DefaultContextPolicy()
 	policy.ContextWindow = contextWindow
-	policy.ReverseTokenFloor = agent.ReverseTokenFloor
+	policy.SystemPromptReserveTokens = agent.ReverseTokenFloor
+	policy.MaxHistoryTokens = agent.MaxHistoryTokens
 
 	return policy
 }
@@ -83,6 +104,13 @@ type AssembleResult struct {
 	DroppedCount       int  // 被裁掉的历史消息条数(工具结果折叠后的条数)
 	DroppedRecordCount int  // 被裁掉的历史**记录**条数(工具记录各算一条) —— 压缩门槛用它
 	BudgetExhausted    bool // 历史预算已为 0(窗口扣掉输出预留与系统提示预留后没有剩余)
+
+	// 以下为预算分解(可观测):任何一个都能在日志里一眼看到"历史为什么只剩这么多"。
+	SystemReserveTokens int // 实际生效的系统提示预留额度 = max(est(system), SystemPromptReserveTokens)
+	ToolsReserveTokens  int // 工具 schema 预留
+	HistoryCapTokens    int // 生效的历史回放上限;<=0 表示不限制
+	HistoryBudgetTokens int // 最终给历史回放用的 token 预算(已扣本轮用户消息)
+	KeptHistoryTokens   int // 实际回放的历史估算 token
 }
 
 // historyItem 一条历史消息及其来源记录序号(用于裁剪后报告被裁区间)。
@@ -111,22 +139,31 @@ func AssembleContext(systemPrompt string, records []hCommon.MemoryRecord, curren
 
 	result := AssembleResult{Summary: summaryText}
 
-	// 历史预算 = 窗口 - 输出预留 - 系统提示预留 - 本轮用户消息
+	// 历史预算 = 窗口 - 输出预留 - 系统提示预留 - 工具 schema - 本轮用户消息,
+	// 再取 min(…, MaxHistoryTokens)(历史回放上限)。
 	// 窗口未知(ContextWindow<=0)时不裁剪,保持阶段1行为(不做任何预算推断)。
 	var kept, dropped []historyItem
 	if policy.ContextWindow <= 0 {
 		kept = items
 	} else {
-		//budget := policy.ContextWindow - policy.OutputReserve -
-		//	CalcSystemReservedTokens(policy, system) - EstimateInputTokens([]llmproto.ChatMessage{current})
+		result.SystemReserveTokens = calcSystemReservedTokens(policy, system)
+		result.ToolsReserveTokens = policy.ToolsReserveTokens
+		result.HistoryCapTokens = policy.MaxHistoryTokens
+
 		budget := Budget(policy, system) - EstimateInputTokens([]llmproto.ChatMessage{current})
 		if budget < 0 {
 			budget = 0 // 窗口不够:本轮不带历史(而不是强行塞入历史把请求顶出窗口)
 		}
+		// 历史回放上限在"预算为正"的基础上再收一道:它只决定历史回放多少,
+		// 不影响工具循环(FitMessages 用 Budget,不取这个 min)。
+		if result.HistoryCapTokens > 0 && budget > result.HistoryCapTokens {
+			budget = result.HistoryCapTokens
+		}
+		result.HistoryBudgetTokens = budget
 		// 预算为 0 意味着"一条历史都放不下",此时压缩毫无意义:压缩不改变 system 预留,
-		// 真正的问题是配置(reverse_token_floor / OutputReserve 相对窗口过大),要改配置而不是反复压缩。
+		// 真正的问题是配置(SystemPromptReserveTokens / OutputReserve 相对窗口过大),要改配置而不是反复压缩。
 		result.BudgetExhausted = budget <= 0
-		kept, dropped = trimHistoryItems(items, budget)
+		kept, dropped, result.KeptHistoryTokens = trimHistoryItems(items, budget)
 	}
 	if len(dropped) > 0 {
 		result.Trimmed = true
@@ -163,7 +200,7 @@ func AssembleContext(systemPrompt string, records []hCommon.MemoryRecord, curren
 //   - 首条 system 消息固定保留(它承载系统提示与历史摘要);
 //   - 其余消息按"组"裁剪,组以 user 消息为起点(assistant/tool 配对因此在同一组内,不会被切散);
 //   - 末组(本轮用户消息 + 其工具调用链)永远保留 —— 它属于本轮,丢了就没法继续;
-//   - 历史预算同样要扣除为系统提示预留的 reverse_token_floor(见 systemReserveTokens)。
+//   - 历史预算同样要扣除为系统提示预留的 SystemPromptReserveTokens(见 calcSystemReservedTokens)。
 func FitMessages(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, policy ContextPolicy) []llmproto.ChatMessage {
 	if len(messages) <= 1 {
 		return messages
@@ -219,9 +256,18 @@ func normalizePolicy(policy ContextPolicy) ContextPolicy {
 	if policy.ToolReplayMaxRunes <= 0 {
 		policy.ToolReplayMaxRunes = hCommon.DefaultToolReplayMaxRunes
 	}
-	if policy.ReverseTokenFloor < 0 {
-		policy.ReverseTokenFloor = 0
+	if policy.SystemPromptReserveTokens < 0 {
+		policy.SystemPromptReserveTokens = 0
 	}
+	if policy.ToolsReserveTokens < 0 {
+		policy.ToolsReserveTokens = 0
+	}
+	// 历史回放上限:0 = 用默认;负数 = 显式不限制。默认值统一在这里兜 ——
+	// 手写的 ContextPolicy(测试、特殊调用方)不会因为漏填而变成"不限制"。
+	if policy.MaxHistoryTokens == 0 {
+		policy.MaxHistoryTokens = hCommon.DefaultMaxHistoryTokens
+	}
+
 	return policy
 }
 
@@ -340,12 +386,12 @@ func renderToolBlock(tools []hCommon.MemoryRecord, maxRunes int) string {
 // 裁剪点必须落在"组边界"(user 消息)上:否则历史会以一条 orphan 的 assistant/tool 消息开头,
 // 既容易让模型误判上下文,也可能与协议对消息顺序的要求冲突。
 // budgetTokens <= 0 时返回"不带历史"(请求仍然合法:system + 本轮用户消息)。
-func trimHistoryItems(items []historyItem, budgetTokens int) (kept, dropped []historyItem) {
+func trimHistoryItems(items []historyItem, budgetTokens int) (kept, dropped []historyItem, keptTokens int) {
 	if len(items) == 0 {
-		return nil, nil
+		return nil, nil, 0
 	}
 	if budgetTokens <= 0 {
-		return nil, items // 窗口不够:不带历史(而不是强行塞入把请求顶出窗口)
+		return nil, items, 0 // 窗口不够:不带历史(而不是强行塞入把请求顶出窗口)
 	}
 
 	cut := 0 // 保留 items[cut:]
@@ -372,9 +418,9 @@ func trimHistoryItems(items []historyItem, budgetTokens int) (kept, dropped []hi
 		}
 	}
 	if cut <= 0 {
-		return items, nil
+		return items, nil, total
 	}
-	return items[cut:], items[:cut]
+	return items[cut:], items[:cut], total
 }
 
 // groupMessages 把消息按"组"切分:组以 user 消息为起点,后续 assistant/tool 消息归属该组。

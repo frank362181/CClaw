@@ -127,6 +127,24 @@ func RecordsRunes(records []MemoryRecord) int {
 	return chars
 }
 
+// RecordsRunesInRange 汇总 [from,to] 区间内记录的正文总长;**一旦达到 limit 就提前返回**。
+//
+// 用于"值不值得"这类粗判(如被裁区间的体积够不够换一条摘要):
+// 只需要知道"够不够",不必为一次判断扫完整段内容(这个判断在请求路径上)。
+func RecordsRunesInRange(records []MemoryRecord, from, to, limit int) int {
+	chars := 0
+	for i := range records {
+		if records[i].Index < from || records[i].Index > to {
+			continue
+		}
+		chars += utf8.RuneCountInString(records[i].Content)
+		if limit > 0 && chars >= limit {
+			return chars
+		}
+	}
+	return chars
+}
+
 // CoveredIndexes 汇总摘要记录已经取代的记录序号集合。
 func CoveredIndexes(summaries []MemoryRecord) map[int]bool {
 	covered := make(map[int]bool)

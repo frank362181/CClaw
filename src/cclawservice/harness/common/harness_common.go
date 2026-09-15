@@ -109,13 +109,18 @@ const (
 	// StartupFileCacheTTLSeconds 启动文件列表缓存的 TTL(秒):管理界面可接受短暂延迟,换取高并发下免重复磁盘 IO
 	StartupFileCacheTTLSeconds = 30
 
+	MaxBootstrapTotalChars = 60 * 1024  //启动文档注入总上限(OpenClaw bootstrapTotalMaxChars 默认值);单位 **rune**,≈41k token(中文)
 	MaxAgentDocSize        = 256 * 1024 //agent 启动文档单文件读取上限:256KB
-	MaxBootstrapFileChars  = 20 * 1024  //单个启动文档注入上限(OpenClaw bootstrapMaxChars 默认值)
-	MaxBootstrapTotalChars = 60 * 1024  //启动文档注入总上限(OpenClaw bootstrapTotalMaxChars 默认值)
-	MaxUserDocChars        = 4 * 1024   //USER.md 单独的字符上限
+	MaxBootstrapFileChars  = 20 * 1024  //单个启动文档注入上限(OpenClaw bootstrapMaxChars 默认值);单位 **rune**
+	MaxUserDocChars        = 4 * 1024   //USER.md 单独的字符上限;单位 **rune**
 )
 
 // MaxPromptSectionLen 由 prompt_service.assembleSystemPrompt 中的 capSections 施加。
+//
+// 【兑底常量】当前每个 section 都有更紧的来源上限(MaxBootstrapFileChars 20480 rune /
+// MaxUserDocChars 4096 rune / MaxSkillsPromptChars 18000 rune),它们都小于本值 ⇒
+// 本上限在当前常量下**不会截断任何东西**,只防"将来新增一种没有来源上限的 section"。
+// 改这些常量前先看 TestSectionCapIsBackstopOnly。
 const (
 	MaxPromptSectionLen = 32 * 1024 //system prompt 单个 section 的最大 rune 数
 )
@@ -133,7 +138,7 @@ const (
 	SkillDocFileName     = "SKILL.md" //skill.md:技能定义
 	MaxSkillDocSize      = 256 * 1024 //skill 文档单文件读取上限:256KB
 	MaxSkillsInPrompt    = 150        //注入 prompt 的 skill 数量上限
-	MaxSkillsPromptChars = 18000      //skill 元数据目录的字符上限
+	MaxSkillsPromptChars = 18000      //skill 元数据目录的字符上限;单位 **rune**(与其它上限一致)
 )
 
 const (
@@ -145,6 +150,19 @@ const (
 
 	DefaultToolReplayMaxRunes  = 1200 // 单条工具结果回放的最大字符数(控制历史体积;完整内容仍在文件里)
 	DefaultOutputReserveTokens = 4096 // 为模型输出预留的 token 数
+
+	// DefaultMaxHistoryTokens 历史回放上限的默认值(tokens):历史回放预算取
+	// min(窗口预算, 本值)。
+	//
+	// 为什么需要这个旋钮:在此之前唯一能约束历史回放的量是"为系统提示预留的额度"
+	// (t_agent.reverse_token_floor),而它同时被三处消费(系统预留 / 历史回放 / 工具循环),
+	// 且与窗口强耦合在 1M 窗口下形同虚设 —— 实测:真实会话 79 条记录也只回放 1.2 万 token,
+	// 要到几百上千轮才会碰到窗口。
+	//
+	// 64k 的量级参考(实测 100001c80d… 那个 22 轮真实会话):回放约 1.2 万 token
+	// = 每轮约 540 token(工具结果回放被截到 1200 rune,所以远小于文件体积);
+	// 因此 64k 大致对应"百轮量级"的会话开始进入压缩 —— 既不打扰短会话,也不会永不触发。
+	DefaultMaxHistoryTokens = 64 * 1024
 )
 
 // LLM 调用重试 / 单次请求空闲超时/流式空闲超时 / SSE 心跳相关配置(秒或毫秒;<=0 表示禁用)。
@@ -240,9 +258,10 @@ const (
 	SummaryShrinkRatio = 0.6 // 摘要不超过源体积的比例
 	SummaryMinRunes    = 400 // 摘要的下限(再小就没有信息量)
 
+	// MinCompactionSrcRunes 触发压缩的**体积**门槛:被裁区间至少这么大才值得一次 LLM 调用。
+	MinCompactionSrcRunes = SummaryMinRunes
+
 	// MaxSummaryTotalRunes 注入 system 的历史摘要总量上限。
-	// 摘要会被拼接后折进 system 消息,不设总量上限的话长会话的 system 会单调增长,
-	// 而 system 越长历史预算越小 —— 会形成正反馈,因此超限时合并最旧的一批摘要。
 	MaxSummaryTotalRunes = 12000
 
 	CompactionRunTimeout = 120 //后台压缩的最长时长,因为压缩也是要调用LLM的,超时就放弃,下一轮再来
@@ -251,8 +270,6 @@ const (
 	// 必须 ≥ 代码自己承诺的长度上限,否则契约与能力自相矛盾:
 	//   - 落盘上限 MaxSummaryRunes(4000 rune)≈ 2667 token(中文按 1.5 字符/token 估);
 	//   - 蒸馏要求模型回"完整列表" —— DistillMaxMemoryFacts(20) × DistillMaxFactRunes(200) = 4000 rune。
-	// 取 2048 时,模型一旦写满就会被上游截断,而 finish_reason=length 在 summarizer 里被当作失败
-	// → 同一段记录每轮重试、永远压不掉(实测阈值刚好落在大段中文对话上)。
 	SummaryMaxTokens = 4096
 
 	// CompactionMaxConcurrent 后台记忆维护(压缩/蒸馏)的全局并发上限:
@@ -267,7 +284,14 @@ const (
 	// DistillMinTurns 蒸馏的触发条件
 	DistillMinTurns      = 6  // 触发蒸馏的最少轮次数(太短的会话没有长期价值)
 	DistillMinRecords    = 6  // **首次**蒸馏的最小记录数(太短的对话没有长期价值)
-	DistillIntervalTurns = 10 // 蒸馏间隔(轮次):每跨过这么多个轮次蒸馏一次
+	DistillIntervalTurns = 10 // 蒸馏节拍(轮次):作为**速率上限**,每跨过这么多轮蒸馏一次
+
+	// DistillCheckIntervalTurns 内容驱动触发的最短间隔(轮)。
+	// 节拍是速率上限,内容才是触发源:水位之后攒够一轮送入门槛(DistillMaxInputChars)
+	// 就提前排空 —— 工具密集的会话单轮就能产出远超一次送入预算的记录,
+	// 只靠节拍会让队列无限增长(实测 Backlog 只会打日志、从来不调速)。
+	// 按固定短间隔生效(而不是每轮),避免蒸馏持续失败时每轮重试同一份输入。
+	DistillCheckIntervalTurns = 3
 
 	// DistillMemoryDocMaxChars MEMORY.md 的体积上限(蒸馏写入时裁剪)。
 	//

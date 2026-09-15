@@ -5,6 +5,7 @@
 package harness
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,38 @@ import (
 	"my.favorite/cclawservice/model/repo"
 	pCommon "my.favorite/platformutility/common"
 )
+
+// TestSkillsCatalogBudgetIsRuneBased 回归(S2):skill 目录的预算按 **rune** 计,不再按字节。
+//
+// 中文的 UTF-8 字节数是 rune 的 3 倍 —— 按字节卡会让实际额度只剩 1/3,
+// 而且额度随中英文比例漂移(同一个常量,英文目录 18000 字、中文目录只有 6000 字)。
+func TestSkillsCatalogBudgetIsRuneBased(t *testing.T) {
+	skills := make([]dataobject.SkillDocument, 0, 100)
+	for i := 0; i < 100; i++ {
+		skills = append(skills, dataobject.SkillDocument{
+			FrontMatter: dataobject.SkillFrontMatter{
+				Name:        fmt.Sprintf("技能%03d", i),
+				Version:     "1.0.0",
+				Description: strings.Repeat("描述", 50), // 100 rune
+			},
+		})
+	}
+
+	catalog, truncated := renderSkillsCatalog(skills)
+	runes, bytes := len([]rune(catalog)), len(catalog)
+
+	if truncated {
+		t.Errorf("约 %d rune / %d 字节的目录应落在 %d rune 预算内,不应被截断"+
+			"(按字节卡时,中文目录的实际额度只剩 ~1/3)", runes, bytes, hCommon.MaxSkillsPromptChars)
+	}
+	if runes > hCommon.MaxSkillsPromptChars {
+		t.Fatalf("目录 rune 数 %d 超出预算 %d", runes, hCommon.MaxSkillsPromptChars)
+	}
+	if bytes <= hCommon.MaxSkillsPromptChars {
+		t.Fatalf("用例前提不成立:本 fixture 应处于「字节超限、rune 未超限」区间(bytes=%d runes=%d)",
+			bytes, runes)
+	}
+}
 
 // writeFile 创建测试工作区文件
 func writeFile(t *testing.T, path, content string) {
@@ -306,6 +339,53 @@ func TestBuildSystemPromptRejectsOversizeFile(t *testing.T) {
 	}
 }
 
+// TestTruncateTailBudgetAccountsForTitles 回归(S4):总预算必须把标题与段间分隔一起记账。
+//
+// 修复前只累计正文,于是"预算 61440"实际会写出含标题的更长 prompt;
+// 关键设计是**记账口径与最终拼接共用同一组常量**(sectionOverheadRunes),
+// 以后改分隔符不会再出现"记账一套、渲染另一套"。
+func TestTruncateTailBudgetAccountsForTitles(t *testing.T) {
+	sections := []dataobject.SystemPromptSection{
+		{Title: "AGENTS.md", Content: strings.Repeat("甲", 500)},
+		{Title: "SOUL.md", Content: strings.Repeat("乙", 500)},
+		{Title: "TOOLS.md", Content: strings.Repeat("丙", 500)},
+	}
+
+	rendered := func(list []dataobject.SystemPromptSection) int {
+		total := 0
+		for i := range list {
+			total += len([]rune(list[i].Content)) + sectionOverheadRunes(list[i], i == 0)
+		}
+		return total
+	}
+
+	// 预算取"两份正文 + 一点余量":修复前会把第三份也按正文预算截出一截,渲染总长超预算
+	const cap = 1100
+	kept, truncated := truncateTailBudget(sections, cap, nil)
+
+	if got := rendered(kept); got > cap {
+		t.Errorf("渲染后的总占用 %d 超出预算 %d(记账必须含标题/分隔开销)", got, cap)
+	}
+	if got := rendered(kept); cap-got > 64 {
+		t.Errorf("渲染后只用了 %d/%d,预算未被填满", got, cap)
+	}
+	if len(truncated) == 0 {
+		t.Errorf("预算不足时应记录被截断/丢弃的 section: %v", truncated)
+	}
+
+	// 标题开销必须真的算进去:同样正文、带标题比不带标题更早触顶
+	unstyled := []dataobject.SystemPromptSection{
+		{Content: strings.Repeat("甲", 500)},
+		{Content: strings.Repeat("乙", 500)},
+		{Content: strings.Repeat("丙", 500)},
+	}
+	want := 3*len(sectionSeparator) + 3*len(sectionTitlePrefix) + len("AGENTS.md") + len("SOUL.md") + len("TOOLS.md")
+	if diff := rendered(sections) - rendered(unstyled); diff != want {
+		t.Errorf("标题/分隔开销计算不符: styled=%d plain=%d diff=%d want=%d",
+			rendered(sections), rendered(unstyled), diff, want)
+	}
+}
+
 func TestEffectiveBootstrapBudget(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -314,7 +394,9 @@ func TestEffectiveBootstrapBudget(t *testing.T) {
 	}{
 		{"explicit budget", 80000, 80000},
 		{"zero falls back to default", 0, hCommon.MaxBootstrapTotalChars},
-		{"negative falls back to default", -1, hCommon.MaxBootstrapTotalChars},
+		// 三态约定(与 max_history_tokens 一致):负数 = 显式不限制 → 返回 0,
+		// 调用方(truncateTailBudget)把 cap<=0 解释为"该上限关闭"
+		{"negative disables the cap", -1, 0},
 	}
 
 	for _, c := range cases {
@@ -323,6 +405,83 @@ func TestEffectiveBootstrapBudget(t *testing.T) {
 				t.Errorf("effectiveBootstrapBudget(%d)=%d want=%d", c.configured, got, c.want)
 			}
 		})
+	}
+}
+
+// TestBootstrapBudgetNegativeMeansUnlimited 三态约定的下半段:负数配置真的能让总上限不生效。
+// (以前 0 与负数都回落默认值,于是"我要不限制"根本表达不出来,
+// truncateTailBudget 里那句 cap<=0 也就成了生产不可达的死分支。)
+func TestBootstrapBudgetNegativeMeansUnlimited(t *testing.T) {
+	sections := []dataobject.SystemPromptSection{
+		{Title: "AGENTS.md", Content: strings.Repeat("规", hCommon.MaxBootstrapTotalChars*2)},
+	}
+
+	kept, truncated := truncateTailBudget(sections, ctxmgr.BoostrapBudget(-1), nil)
+	if len(kept) != 1 || len(truncated) != 0 {
+		t.Fatalf("负数配置应完全不限: kept=%d truncated=%v", len(kept), truncated)
+	}
+	if len([]rune(kept[0].Content)) != len([]rune(sections[0].Content)) {
+		t.Error("不限制时内容应原样保留")
+	}
+}
+
+// TestSectionCapIsBackstopOnly 把"capSections 只是兑底层"这个前提显式化。
+//
+// 这条测试变红只有两种可能:
+//   - 有人放开了某个来源上限(那时 section 兑底会真的生效,需要重新定值);
+//   - 有人调小了 MaxPromptSectionLen(那时它开始截断正常文档 —— 更要三思)。
+func TestSectionCapIsBackstopOnly(t *testing.T) {
+	sources := map[string]int{
+		"MaxBootstrapFileChars": hCommon.MaxBootstrapFileChars,
+		"MaxUserDocChars":       hCommon.MaxUserDocChars,
+		"MaxSkillsPromptChars":  hCommon.MaxSkillsPromptChars,
+	}
+	for name, limit := range sources {
+		if limit >= hCommon.MaxPromptSectionLen {
+			t.Errorf("%s(%d) 已达到/超过 MaxPromptSectionLen(%d):section 兑底会真的生效,请重新评估该常量",
+				name, limit, hCommon.MaxPromptSectionLen)
+		}
+	}
+
+	// 行为层面:每类 section 都塞到各自来源上限,section 兑底与默认总预算都不应截断
+	sections := []dataobject.SystemPromptSection{
+		{Title: "AGENTS.md", Content: strings.Repeat("规", hCommon.MaxBootstrapFileChars)},
+		{Title: "USER.md", Content: strings.Repeat("用", hCommon.MaxUserDocChars)},
+		{Title: "Available Skills", Content: strings.Repeat("技", hCommon.MaxSkillsPromptChars)},
+	}
+
+	totalRunes := 0
+	for i := range sections {
+		totalRunes += len([]rune(sections[i].Content))
+	}
+	if totalRunes >= hCommon.MaxBootstrapTotalChars {
+		t.Errorf("各来源上限之和(%d rune)已达到默认总上限(%d):默认总预算需要重新定值",
+			totalRunes, hCommon.MaxBootstrapTotalChars)
+	}
+
+	if _, truncated := capSections(sections, hCommon.MaxPromptSectionLen, nil); len(truncated) != 0 {
+		t.Errorf("各 section 都在来源上限内,section 兑底不应截断: %v", truncated)
+	}
+	if _, truncated := truncateTailBudget(sections, ctxmgr.BoostrapBudget(0), nil); len(truncated) != 0 {
+		t.Errorf("默认总预算下不应截断: %v", truncated)
+	}
+}
+
+// TestCharsToTokens 单位换算:rune → token(最坏情况按 CJK 计)。
+// 上限用 rune 表达、下游预算用 token 表达,这个换算是二者能比较的唯一桥梁。
+func TestCharsToTokens(t *testing.T) {
+	if got := ctxmgr.CharsToTokens(0); got != 0 {
+		t.Errorf("0 rune 应为 0 token,实际 %d", got)
+	}
+	if got := ctxmgr.CharsToTokens(-5); got != 0 {
+		t.Errorf("负数应归零,实际 %d", got)
+	}
+	if got := ctxmgr.CharsToTokens(int(ctxmgr.CharsPerCJKToken * 100)); got != 100 {
+		t.Errorf("150 rune 应为 100 token,实际 %d", got)
+	}
+	// 实测口径:61440 rune ≈ 41k token —— 这是 SystemPromptReserveTokens 默认量级的 5 倍
+	if got := ctxmgr.CharsToTokens(hCommon.MaxBootstrapTotalChars); got < 40000 || got > 42000 {
+		t.Errorf("默认总上限的 token 当量应约 41k,实际 %d", got)
 	}
 }
 
@@ -401,19 +560,25 @@ func TestBuildSystemPromptTotalBudgetFallback(t *testing.T) {
 		t.Fatalf("BuildSystemPrompt error:%s", err.Error())
 	}
 
-	// 截断提示 section 是在总预算之后追加的固定说明段(与"输出语言"尾巴同性质),不参与预算
+	// 截断提示 section 是在总预算之后追加的固定说明段(与"输出语言"尾巴同性质),不参与预算。
+	// 记账口径 = 最终 prompt 的实际占用(正文 + 标题 + 段间分隔),与 truncateTailBudget 一致
+	// (以前只算正文,于是实际 prompt 会比 cap 多出「#section × (标题+分隔)」)。
 	injected := 0
 	for i := range prompt.Sections {
 		if prompt.Sections[i].Title == "Bootstrap Context Notice" {
 			continue
 		}
-		injected += len([]rune(prompt.Sections[i].Content))
+		injected += len([]rune(prompt.Sections[i].Content)) + sectionOverheadRunes(prompt.Sections[i], injected == 0)
 	}
 
-	// 4 份 20000 rune 的文档,默认总预算 60000:应保留 3 份、丢弃第 4 份,且尽量填满预算
-	if injected != hCommon.MaxBootstrapTotalChars {
-		t.Errorf("injected sections total=%d want exactly=%d (fallback budget must be applied and filled)",
+	// 4 份 20000 rune 的文档,默认总预算 61440:应保留前 3 份、截断第 4 份,且尽量填满预算
+	if injected > hCommon.MaxBootstrapTotalChars {
+		t.Errorf("injected sections total=%d must not exceed the budget=%d",
 			injected, hCommon.MaxBootstrapTotalChars)
+	}
+	if slack := hCommon.MaxBootstrapTotalChars - injected; slack > 64 {
+		t.Errorf("injected sections total=%d, budget=%d: 剩余 %d rune 未被利用(预算应尽量填满)",
+			injected, hCommon.MaxBootstrapTotalChars, slack)
 	}
 	if len(prompt.Truncated) == 0 {
 		t.Errorf("expected total-budget truncation to be recorded")

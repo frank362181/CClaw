@@ -120,7 +120,10 @@ func FactSimilarity(a, b string) float64 {
 	return float64(intersection) / float64(union)
 }
 
-// FactSame 从数组中找相同的，否则返回-1
+// FactSame 在既有条目里找"同一槽位"的那条(找不到返回 -1)。
+//
+// 判定分两级:规范化相等(**与长度无关**)→ 高相似度。第二级有 minRunes 门槛
+// (短句的相似度不可靠),因此只用相似度会把短条目反复当成"新事实"重复写入。
 func FactSame(facts []string, fact string, ratio float64, minRunes int) int {
 	key := NormalizeFact(fact)
 	if key != BlankString {

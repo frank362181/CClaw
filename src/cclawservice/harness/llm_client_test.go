@@ -83,7 +83,7 @@ func TestComplete_ThinkingFlagForQwen(t *testing.T) {
 		srv := newMockServer(t, http.StatusOK, okResponse, &cap)
 		// 镜像生产配置:t_llm 中 qwen3-8b 的 vendor = alibaba, model = qwen3-8b
 		p := dataobject.TLlm{ProviderId: "qwen3-8b", Model: "qwen3-8b", Vendor: "alibaba", BaseUrl: srv.URL}
-		if _, err := NewClient().Complete(context.Background(), p, "sys", "hi", 128); err != nil {
+		if _, _, err := NewClient().Complete(context.Background(), p, "sys", "hi", 128); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if cap.Payload.EnableThinking == nil || *cap.Payload.EnableThinking {
@@ -95,7 +95,7 @@ func TestComplete_ThinkingFlagForQwen(t *testing.T) {
 		var cap capturedRequest
 		srv := newMockServer(t, http.StatusOK, okResponse, &cap)
 		p := dataobject.TLlm{ProviderId: "px", Model: "custom-alias", Vendor: "aliyun", BaseUrl: srv.URL}
-		if _, err := NewClient().Complete(context.Background(), p, "sys", "hi", 128); err != nil {
+		if _, _, err := NewClient().Complete(context.Background(), p, "sys", "hi", 128); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if cap.Payload.EnableThinking == nil || *cap.Payload.EnableThinking {
@@ -107,7 +107,7 @@ func TestComplete_ThinkingFlagForQwen(t *testing.T) {
 		var cap capturedRequest
 		srv := newMockServer(t, http.StatusOK, okResponse, &cap)
 		p := dataobject.TLlm{ProviderId: "deepseek-v4-pro", Model: "deepseek-v4-pro", Vendor: "deepseek", ThkNonStreaming: false, BaseUrl: srv.URL}
-		if _, err := NewClient().Complete(context.Background(), p, "sys", "hi", 128); err != nil {
+		if _, _, err := NewClient().Complete(context.Background(), p, "sys", "hi", 128); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if cap.Payload.EnableThinking == nil || *cap.Payload.EnableThinking {

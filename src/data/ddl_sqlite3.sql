@@ -71,7 +71,9 @@ CREATE TABLE t_agent (
 
     -- 上下文与压缩策略
                          compaction_mode INTEGER NOT NULL DEFAULT 0,      -- 上下文压缩策略 (0:default/1:safeguard)
-                         reverse_token_floor INTEGER DEFAULT NULL,        -- 为系统提示预留的最小的token数量
+                         reverse_token_floor INTEGER DEFAULT NULL,        -- 为系统提示(7 个启动文档 + 折叠进 system 的摘要)预留的最小 token 额度
+                         bootstrap_total_chars INTEGER DEFAULT NULL,      -- 启动文档注入总预算(rune;0/NULL → MaxBootstrapTotalChars,负 → 不限制)
+                         max_history_tokens INTEGER DEFAULT NULL,         -- 历史回放上限(tokens;NULL/0 → DefaultMaxHistoryTokens,负 → 不限制)
 
     -- 并发与限制
                          max_concurrent INTEGER NOT NULL DEFAULT 1,       -- 主agent并发会话上限

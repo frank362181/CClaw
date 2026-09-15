@@ -239,11 +239,12 @@ func TestAssembleContextBudgetTrimsOldestGroups(t *testing.T) {
 
 	policy := DefaultContextPolicy()
 	policy.ContextWindow = 900
-	policy.OutputReserve = 64     // 显式调小,使历史预算为正
-	policy.ReverseTokenFloor = 64 // 系统提示预留(此处远小于 SYS 实际值,以实际值为准)
+	policy.OutputReserve = 64             // 显式调小,使历史预算为正
+	policy.SystemPromptReserveTokens = 64 // 系统提示预留(此处远小于 SYS 实际值,以实际值为准)
+	policy.MaxHistoryTokens = -1          // 用例关注的是窗口预算本身,不受历史回放上限影响
 	result := AssembleContext("SYS", records, "本轮问题", policy)
 
-	if !result.Trimmed || !ShouldCompact(result) {
+	if !result.Trimmed || !NeedCompact(result, hCommon.MinCompactionSrcRunes*10) {
 		t.Fatalf("预算不足时必须判定为已裁剪且需压缩: %+v", result)
 	}
 	if result.BudgetExhausted {
@@ -306,7 +307,7 @@ func TestAssembleContextSystemFloorReservesPromptSpace(t *testing.T) {
 	}
 
 	// 预留额度超过整个窗口 → 历史预算为 0 → 不带历史(请求仍合法),系统提示优先
-	tight := ContextPolicy{ContextWindow: 200, OutputReserve: 10, ReverseTokenFloor: 4000, ToolReplayMaxRunes: 100}
+	tight := ContextPolicy{ContextWindow: 200, OutputReserve: 10, SystemPromptReserveTokens: 4000, ToolReplayMaxRunes: 100, MaxHistoryTokens: -1}
 	result := AssembleContext("SYS", records, "问题", tight)
 
 	if got := strings.Join(roles(result.Messages), ","); got != "system,user" {
@@ -331,8 +332,8 @@ func TestAssembleContextSystemFloorReservesPromptSpace(t *testing.T) {
 		many = append(many, record(i, kind, "", short))
 	}
 
-	small := ContextPolicy{ContextWindow: 400, OutputReserve: 10, ReverseTokenFloor: 0, ToolReplayMaxRunes: 100}
-	large := ContextPolicy{ContextWindow: 400, OutputReserve: 10, ReverseTokenFloor: 200, ToolReplayMaxRunes: 100}
+	small := ContextPolicy{ContextWindow: 400, OutputReserve: 10, SystemPromptReserveTokens: 0, ToolReplayMaxRunes: 100, MaxHistoryTokens: -1}
+	large := ContextPolicy{ContextWindow: 400, OutputReserve: 10, SystemPromptReserveTokens: 200, ToolReplayMaxRunes: 100, MaxHistoryTokens: -1}
 
 	keptSmall := len(AssembleContext("SYS", many, "问题", small).Messages)
 	keptLarge := len(AssembleContext("SYS", many, "问题", large).Messages)
@@ -348,10 +349,10 @@ func TestSystemReserveTokens(t *testing.T) {
 	if got := calcSystemReservedTokens(ContextPolicy{}, system); got != EstimateInputTokens([]llmproto.ChatMessage{system}) {
 		t.Errorf("未配置 floor 时应用实际估算: %d", got)
 	}
-	if got := calcSystemReservedTokens(ContextPolicy{ReverseTokenFloor: 50}, system); got != EstimateInputTokens([]llmproto.ChatMessage{system}) {
+	if got := calcSystemReservedTokens(ContextPolicy{SystemPromptReserveTokens: 50}, system); got != EstimateInputTokens([]llmproto.ChatMessage{system}) {
 		t.Errorf("floor 小于实际时应以实际为准: %d", got)
 	}
-	if got := calcSystemReservedTokens(ContextPolicy{ReverseTokenFloor: 9999}, system); got != 9999 {
+	if got := calcSystemReservedTokens(ContextPolicy{SystemPromptReserveTokens: 9999}, system); got != 9999 {
 		t.Errorf("floor 大于实际时应以 floor 为准: %d", got)
 	}
 }
@@ -412,32 +413,8 @@ func TestFitMessagesKeepsLastGroupAndPairs(t *testing.T) {
 	}
 }
 
-// TestShouldCompact 压缩触发判定(与 compaction_mode 无关):
-//   - 被裁的**记录**数达到门槛才触发;
-//   - 历史预算为 0 时永不触发 —— 压缩改变不了 system 预留,问题在配置。
-func TestShouldCompact(t *testing.T) {
-	dropped := AssembleResult{Trimmed: true, DroppedFrom: 1, DroppedTo: 10, DroppedRecordCount: hCommon.CompactionMinRecords}
-	if !ShouldCompact(dropped) {
-		t.Error("被裁记录数达到门槛时应触发压缩")
-	}
-
-	short := dropped
-	short.DroppedRecordCount = hCommon.CompactionMinRecords - 1
-	if ShouldCompact(short) {
-		t.Error("被裁记录数不足门槛时不应触发压缩(不划算)")
-	}
-
-	// 预算耗尽:区间再大也不该压 —— 压缩不改变 system 预留,再怎么压历史预算还是 0
-	exhausted := dropped
-	exhausted.BudgetExhausted = true
-	if ShouldCompact(exhausted) {
-		t.Error("历史预算为 0 时不应触发压缩(应改配置而不是反复烧 LLM 调用)")
-	}
-
-	if ShouldCompact(AssembleResult{}) {
-		t.Error("未裁剪时不应触发压缩")
-	}
-}
+// TestNeedCompact 的逐维度判定见 trigger_predicate_test.go(收益/预算/正确性主干)。
+// 这里只留"装配结果与判定联动"的端到端断言。
 
 // TestAssembleContextBudgetExhaustedMarksNoCompaction 预留额度挤掉全部历史时,
 // 必须标记预算耗尽并**不**触发压缩(否则每轮都会白烧一次压缩调用)。
@@ -450,13 +427,13 @@ func TestAssembleContextBudgetExhaustedMarksNoCompaction(t *testing.T) {
 	}
 
 	// floor 远超窗口:历史预算被压到 0
-	policy := ContextPolicy{ContextWindow: 200, OutputReserve: 10, ReverseTokenFloor: 5000, ToolReplayMaxRunes: 100}
+	policy := ContextPolicy{ContextWindow: 200, OutputReserve: 10, SystemPromptReserveTokens: 5000, ToolReplayMaxRunes: 100}
 	result := AssembleContext("SYS", records, "问题", policy)
 
 	if !result.BudgetExhausted {
 		t.Fatalf("窗口被预留额度吃光时应标记预算耗尽: %+v", result)
 	}
-	if ShouldCompact(result) {
+	if NeedCompact(result, hCommon.MinCompactionSrcRunes*10) {
 		t.Error("预算耗尽时不得触发压缩")
 	}
 	if got := strings.Join(roles(result.Messages), ","); got != "system,user" {
@@ -511,7 +488,7 @@ func TestAssembleContextUsesActiveSummariesOnly(t *testing.T) {
 // TestContextPolicyFor 策略推导:窗口与 reverse_token_floor 来自配置。
 func TestContextPolicyFor(t *testing.T) {
 	policy := GetContextPolicy(dataobject.TAgent{ReverseTokenFloor: 2048}, 32768)
-	if policy.ContextWindow != 32768 || policy.ReverseTokenFloor != 2048 {
+	if policy.ContextWindow != 32768 || policy.SystemPromptReserveTokens != 2048 {
 		t.Errorf("策略推导不正确: %+v", policy)
 	}
 	if policy.OutputReserve != hCommon.DefaultOutputReserveTokens || policy.ToolReplayMaxRunes != hCommon.DefaultToolReplayMaxRunes {

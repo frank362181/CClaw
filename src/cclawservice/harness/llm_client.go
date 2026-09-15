@@ -81,7 +81,6 @@ func newClient(timeout time.Duration) *Client {
 }
 
 // NewClient 构造 LLM 客户端。
-// 鉴权密钥来自每次调用传入的 TLlm(数据库配置)
 func NewClient() *Client {
 	return newClient(time.Duration(hCommon.NonStreamResponseTimeout) * time.Second)
 }
@@ -89,20 +88,10 @@ func NewClient() *Client {
 // Complete 轻量同步调用:以 system/user 文本调用 chat/completions 并返回回复文本。
 // 用来根据用户问题的意图匹配最适合的agent的函数
 // 用于"Agent 路由分类"等短输出场景;maxTokens 限制输出上限(<=0 时由供应商默认,仍受 context_window 约束)。
-func (c *Client) Complete(ctx context.Context, llmProvider dataobject.TLlm, system, user string, maxTokens int) (string, error) {
+func (c *Client) Complete(ctx context.Context, llmProvider dataobject.TLlm, system, user string, maxTokens int) (string, string, error) {
 	req := BuildChatCompletionRequestWithString(llmProvider, system, user, maxTokens, false)
-	content, _, err := c.doCompletion(ctx, llmProvider, req)
-	return content, err
-}
-
-// CompleteWithFinish 同 Complete,额外返回上游 finish_reason。
-//
-// 用于"内容完整性敏感"的场景(如历史压缩的摘要):同步路径不会因为 finish_reason=length
-// 而报错(内容非空就正常返回),若不把 finish_reason 透出来,摘要被 max_tokens 截断
-// 就会**静默变短** —— 落盘后再也看不出丢过内容。
-func (c *Client) CompleteWithFinish(ctx context.Context, llmProvider dataobject.TLlm, system, user string, maxTokens int) (string, string, error) {
-	req := BuildChatCompletionRequestWithString(llmProvider, system, user, maxTokens, false)
-	return c.doCompletion(ctx, llmProvider, req)
+	content, finishReason, err := c.doCompletion(ctx, llmProvider, req)
+	return content, finishReason, err
 }
 
 // ChatCompletion 调用指定 baseURL 的 chat/completions 端点,返回回复文本(已去首尾空白)。

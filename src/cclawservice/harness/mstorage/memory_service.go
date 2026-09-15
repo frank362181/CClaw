@@ -239,6 +239,44 @@ func (s *MemoryService) ReadRecords(session dataobject.TSession) ([]hCommon.Memo
 	return GetMemoryFileWriter().Read(session.SessionId, fileName)
 }
 
+// DistillPressure 汇总"内容侧"的蒸馏压力:水位之后还剩多少没蒸(供调用方决定要不要发蒸馏)。
+//
+// 数据来源都是调用方已经有的东西:records(装配刚读过)+ MEMORY.md 的水位(<=12KB 的小文件)。
+// 文字长度按"够一轮就早退"扫,不做全量统计 —— 这个判断在请求路径上,必须便宜。
+//
+// 口径刻意比 Distill 的输入**宽**一点(只按水位切,不再排除被摘要代表的记录):
+// 那是为了省掉每请求一次的 ActivePlainRecords(建 map + 全量扫),
+// 而精确口径由 Distill 内部再卡一次 —— 多触发一次只会被它内部拦住,代价极小。
+func (s *MemoryService) DistillPressure(session dataobject.TSession, agent dataobject.TAgent,
+	records []hCommon.MemoryRecord) (pendingRecords, pendingChars int) {
+	if !s.fileStorageUsable() || len(records) == 0 {
+		return 0, 0
+	}
+
+	path, ok := memoryDocPath(agent)
+	if !ok {
+		return 0, 0
+	}
+
+	content, err := pCommon.ReadTextIfExists(path)
+	if err != nil {
+		return 0, 0
+	}
+	watermark := lastDistilledIndex(content, session.SessionId)
+
+	for i := range records {
+		if records[i].Index <= watermark || records[i].IsSummary() {
+			continue
+		}
+		pendingRecords++
+		pendingChars += utf8.RuneCountInString(records[i].Content)
+		if pendingChars >= hCommon.DistillMaxInputChars {
+			break // 够一轮就够判断了
+		}
+	}
+	return pendingRecords, pendingChars
+}
+
 // TurnCount 返回会话已记录的轮次数(供后台记忆维护做节流判断;失败返回 0)。
 func (s *MemoryService) TurnCount(sessionId string) int {
 	if !s.usable() {
