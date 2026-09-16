@@ -195,6 +195,8 @@ func composeSystemMessage(systemPrompt, summaryText string) llmproto.ChatMessage
 		content = strings.TrimSpace(content + "\n\n" + historySummaryTitle + "\n" + summary)
 	}
 	return llmproto.ChatMessage{Role: hCommon.RoleSystem, Content: content}
+
+	//return harness.ComposeSystemMessage(systemPrompt, summaryText,historySummaryTitle)
 }
 
 // splitSummaryAndActive 拆出"摘要文本"与"仍需回放的记录"。

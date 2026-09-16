@@ -9,6 +9,7 @@ import (
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
+	pCommon "my.favorite/platformutility/common"
 )
 
 // BuildSimpleChatMessage 以system/user 文本构建简单的prompt
@@ -120,12 +121,20 @@ func BuildToolCallWithContentMessage(content string, calls []llmproto.ToolCall) 
 	return llmproto.ChatMessage{Role: hCommon.RoleAssistant, Content: content, ToolCalls: calls}
 }
 
-// BuildToolCallMessage 构造纯工具调用(无文本)的 assistant 消息(向后兼容入口)。
-func BuildToolCallMessage(calls []llmproto.ToolCall) llmproto.ChatMessage {
-	return BuildToolCallWithContentMessage("", calls)
-}
-
 // BuildToolResultMessage 构造工具执行结果消息(role=tool,按 tool_call_id 关联)。
 func BuildToolResultMessage(toolCallID, content string) llmproto.ChatMessage {
 	return llmproto.ChatMessage{Role: hCommon.RoleTool, ToolCallID: toolCallID, Content: content}
+}
+
+// ComposeSystemMessage 组装 system 消息:系统提示 + 历史摘要(摘要追加在系统提示之后)。
+//
+// 摘要刻意不单独成一条 system 消息:部分供应商对"非首条 system"支持不一致,
+// 折进同一条 system 消息可以完全规避该类兼容问题。
+func ComposeSystemMessage(systemPrompt, summaryText, summaryTitle string) llmproto.ChatMessage {
+	content := strings.TrimSpace(systemPrompt)
+	if summary := strings.TrimSpace(summaryText); summary != pCommon.BlankString {
+		content = strings.TrimSpace(content + "\n\n" + summaryTitle + "\n" + summary)
+	}
+
+	return llmproto.ChatMessage{Role: hCommon.RoleSystem, Content: content}
 }
