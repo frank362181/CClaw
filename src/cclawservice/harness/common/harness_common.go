@@ -11,102 +11,6 @@ import (
 
 // ==================== agent 启动文档与 skill 文档 ====================
 
-// AgentDocumentKind 定义 agent 启动文档的种类
-type AgentDocumentKind int
-
-const (
-	AgentDocUnknown   AgentDocumentKind = iota
-	AgentDocAgent                       // AGENTS.md
-	AgentDocSoul                        // SOUL.md
-	AgentDocTools                       // TOOLS.md
-	AgentDocMemory                      //MEMORY.md
-	AgentDocIdentity                    //IDENTITY.md
-	AgentDocUser                        //USER.md
-	AgentDocBootstrap                   //BOOTSTRAP.md
-
-	AgentDocFileName     = "AGENTS.md"    //agent.md:运行规则(必需)
-	SoulDocFileName      = "SOUL.md"      //soul.md:人格/语气/边界(可选)
-	IdentityDocFileName  = "IDENTITY.md"  //身份:名称/形象/emoji(可选)
-	UserDocFileName      = "USER.md"      //用户模型:偏好/沟通风格(可选)
-	ToolsDocFileName     = "TOOLS.md"     //tools.md:工具使用指引(可选)
-	BootstrapDocFileName = "BOOTSTRAP.md" //首次运行的引导仪式(仅新工作区)
-	MemoryDocFileName    = "MEMORY.md"    //长期记忆文件(存在才注入)
-)
-
-// String 返回文档种类的可读名称
-func (kind AgentDocumentKind) String() string {
-	switch kind {
-	case AgentDocAgent:
-		return "agent"
-	case AgentDocSoul:
-		return "soul"
-	case AgentDocTools:
-		return "tools"
-	case AgentDocMemory:
-		return "memory"
-	case AgentDocIdentity:
-		return "identity"
-	case AgentDocUser:
-		return "user"
-	case AgentDocBootstrap:
-		return "bootstrap"
-	default:
-		return "unknown"
-	}
-}
-
-// StartupDocSpec 启动文档清单中的一项(文件名/种类/是否必需)
-type StartupDocSpec struct {
-	Kind     AgentDocumentKind
-	Name     string
-	Required bool
-}
-
-// MissingFileMarker 缺失文件标记(OpenClaw context-file: [MISSING] Expected at: <path>)
-const MissingFileMarker = "[MISSING]"
-
-// StartupDocFiles 启动文档清单,按固定顺序加载。
-// required=true 的必需文件缺失时,仍会生成带 Missing 标记的文档,由 prompt 组装层注入 [MISSING] 提示;
-// required=false 的可选文件缺失时直接省略。
-var StartupDocFiles = []StartupDocSpec{
-	{AgentDocAgent, AgentDocFileName, true},
-	{AgentDocSoul, SoulDocFileName, false},
-	{AgentDocIdentity, IdentityDocFileName, false},
-	{AgentDocUser, UserDocFileName, false},
-	{AgentDocTools, ToolsDocFileName, false},
-	{AgentDocBootstrap, BootstrapDocFileName, false},
-	{AgentDocMemory, MemoryDocFileName, false},
-}
-
-// BootstrapScope 定义启动文档注入的会话范围。
-// filterBootstrapFilesForSession:不同会话形态注入不同的启动文件,
-// 并据此控制 MEMORY.md 等隐私敏感文件的可见性。
-type BootstrapScope int
-
-// 定义启动范围，决定哪些信息进入到system prompt
-const (
-	BootstrapScopeNormal    BootstrapScope = iota // 正常会话:注入全部(含 MEMORY.md)
-	BootstrapScopeSubagent                        // 子代理会话:仅 AGENTS.md,不含人格/用户/记忆
-	BootstrapScopeCron                            // 定时任务:AGENTS/SOUL/IDENTITY/USER,不含 MEMORY.md
-	BootstrapScopeHeartbeat                       // 心跳/轻量会话:不注入启动文件
-)
-
-// String 返回会话范围的可读名称
-func (scope BootstrapScope) String() string {
-	switch scope {
-	case BootstrapScopeNormal:
-		return "normal"
-	case BootstrapScopeSubagent:
-		return "subagent"
-	case BootstrapScopeCron:
-		return "cron"
-	case BootstrapScopeHeartbeat:
-		return "heartbeat"
-	default:
-		return "unknown"
-	}
-}
-
 // 启动文档注入预算(安全/性能,应用于 bootstrap-budget)
 const (
 	// StartupFileCacheTTLSeconds 启动文件列表缓存的 TTL(秒):管理界面可接受短暂延迟,换取高并发下免重复磁盘 IO
@@ -126,14 +30,6 @@ const (
 // 改这些常量前先看 TestSectionCapIsBackstopOnly。
 const (
 	MaxPromptSectionLen = 32 * 1024 //system prompt 单个 section 的最大 rune 数
-)
-
-// SKILL的作用域
-const (
-	SkillScopeSystem = iota
-	SkillScopePersonal
-	SkillScopeProject
-	SkillScopePlugin
 )
 
 // skill 元数据目录预算
@@ -202,19 +98,6 @@ const (
 	HistoryRecordTypeTool        = "tool"
 	HistoryRecordTypeSummary     = "summary"     //表示该记录为summary,压缩摘要记录
 	HistoryRecordTypeInterrupted = "interrupted" //表示为中断标记
-)
-
-// ==================== 记忆管理模块(阶段1:双写落库 + 历史文件) ====================
-// 对应 data/ddl_sqlite3.sql 的 t_session / t_turn / t_turn_tool 三张表。
-// 设计:会话内容写入 memory_{yyyyMMddHHmmss}.md,t_session.chat_data 只保存该文件名,
-// 文件目录由 session_id 推导为 <exeDir>/cclaw/chat_history/<session_id>/。
-const (
-	ChatMemoryDirName    = "chat_history" // 会话历史文件根目录名(与 AgentBootstrapDir 同级)。
-	ChatMemoryFilePrefix = "memory_"      // 历史文件名前缀:memory_{yyyyMMddHHmmss}.md
-	ChatMemoryFileExt    = ".md"          // 历史文件扩展名。
-	SessionNameMaxLen    = 64             // 会话名称长度上限(对齐 t_session.session_name VARCHAR(64))。
-	SessionDefaultName   = "NewSession"   // 无可用标题时的会话名称(首条消息为空时兜底)。
-	TurnToolRespMaxLen   = 256            //工具输出截取的字符数
 )
 
 // Summarizer 摘要生成器:由调用方注入(service 层包装 LLM 客户端)。

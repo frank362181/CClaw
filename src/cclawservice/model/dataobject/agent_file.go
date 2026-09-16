@@ -10,9 +10,43 @@ package dataobject
 
 import (
 	"encoding/json"
-
-	hCommon "my.favorite/cclawservice/harness/common"
 )
+
+// AgentDocumentKind 启动文档种类(实体词汇:AgentDocument.Kind 的取值)。
+type AgentDocumentKind int
+
+const (
+	AgentDocUnknown   AgentDocumentKind = iota
+	AgentDocAgent                       // AGENTS.md
+	AgentDocSoul                        // SOUL.md
+	AgentDocTools                       // TOOLS.md
+	AgentDocMemory                      //MEMORY.md
+	AgentDocIdentity                    //IDENTITY.md
+	AgentDocUser                        //USER.md
+	AgentDocBootstrap                   //BOOTSTRAP.md
+)
+
+// String 返回文档种类的可读名称
+func (kind AgentDocumentKind) String() string {
+	switch kind {
+	case AgentDocAgent:
+		return "agent"
+	case AgentDocSoul:
+		return "soul"
+	case AgentDocTools:
+		return "tools"
+	case AgentDocMemory:
+		return "memory"
+	case AgentDocIdentity:
+		return "identity"
+	case AgentDocUser:
+		return "user"
+	case AgentDocBootstrap:
+		return "bootstrap"
+	default:
+		return "unknown"
+	}
+}
 
 // AgentFrontMatter 是 agent 启动文档的 YAML 元数据
 type AgentFrontMatter struct {
@@ -23,11 +57,11 @@ type AgentFrontMatter struct {
 
 // AgentDocument 表示一个已解析的 agent 启动文档
 type AgentDocument struct {
-	Kind        hCommon.AgentDocumentKind `json:"kind"`
-	FileName    string                    `json:"fileName"`
-	FrontMatter AgentFrontMatter          `json:"frontMatter"`
-	Content     string                    `json:"content"`
-	ByteSize    int64                     `json:"byteSize"` // 原始文件字节数,用于缓存指纹与日志
+	Kind        AgentDocumentKind `json:"kind"`
+	FileName    string            `json:"fileName"`
+	FrontMatter AgentFrontMatter  `json:"frontMatter"`
+	Content     string            `json:"content"`
+	ByteSize    int64             `json:"byteSize"` // 原始文件字节数,用于缓存指纹与日志
 
 	Missing  bool `json:"missing"`  // 必需文件缺失(OpenClaw WorkspaceBootstrapFile.missing)
 	Required bool `json:"required"` // 是否为必需文件;缺失时注入 [MISSING] 标记,可选文件缺失则省略

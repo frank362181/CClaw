@@ -17,7 +17,6 @@ import (
 	"regexp"
 	"strings"
 
-	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
@@ -75,7 +74,7 @@ func ValidateSkill(sk dataobject.TSkill) error {
 	if strings.TrimSpace(sk.SkillDir) == "" {
 		return pException.ParameterEmptyErrorEx("skill dir is empty")
 	}
-	if sk.SkillScope < hCommon.SkillScopeSystem || sk.SkillScope > hCommon.SkillScopePlugin {
+	if sk.SkillScope < SkillScopeSystem || sk.SkillScope > SkillScopePlugin {
 		return pException.ParameterEmptyErrorEx("skill scope is invalid")
 	}
 	return nil
@@ -119,13 +118,13 @@ func ResolveStartupPath(workspaceRoot, fileName string) (string, error) {
 }
 
 // FindStartupDocFile 按文件名(精确匹配)在启动文件清单中查找,未命中返回 ok=false。
-func FindStartupDocFile(fileName string) (hCommon.StartupDocSpec, bool) {
-	for _, f := range hCommon.StartupDocFiles {
+func FindStartupDocFile(fileName string) (StartupDocSpec, bool) {
+	for _, f := range StartupDocFiles {
 		if f.Name == fileName {
 			return f, true
 		}
 	}
-	return hCommon.StartupDocSpec{}, false
+	return StartupDocSpec{}, false
 }
 
 // ===================== session 业务表示部分函数===========================
@@ -179,14 +178,6 @@ func NewCompactId(prefix string) string {
 	return NormalizeCompactId(prefix + pCommon.GenerateUUID())
 }
 
-func BuildSessionName(message string) string {
-	name := strings.TrimSpace(pCommon.TruncateRunes(strings.TrimSpace(message), hCommon.SessionNameMaxLen, pCommon.BlankString))
-	if name == pCommon.BlankString {
-		return hCommon.SessionDefaultName
-	}
-	return name
-}
-
 // IsInterrupted 用于报告一次失败是否属于“被中断”(用户取消/客户断开/任务超时)
 func IsInterrupted(runCtx context.Context, err error) bool {
 	if runCtx != nil && (errors.Is(runCtx.Err(), context.Canceled) || errors.Is(runCtx.Err(), context.DeadlineExceeded)) {
@@ -219,26 +210,5 @@ func FinishReasonNotice(finishReason string) (code, msg string) {
 		return ChatNoticeContentFilter, ConstChatNoticeContentFilterMsg
 	default:
 		return "", ""
-	}
-}
-
-// maintenanceSlots 后台记忆维护的全局并发闸(压缩/蒸馏都要调用 LLM)。
-var maintenanceSlots = make(chan struct{}, hCommon.CompactionMaxConcurrent)
-
-// AcquireMaintenanceSlot 非阻塞获取一个维护名额(拿不到就放弃本次)。
-func AcquireMaintenanceSlot() bool {
-	select {
-	case maintenanceSlots <- struct{}{}:
-		return true
-	default:
-		return false
-	}
-}
-
-// ReleaseMaintenanceSlot 释放维护名额。
-func ReleaseMaintenanceSlot() {
-	select {
-	case <-maintenanceSlots:
-	default:
 	}
 }

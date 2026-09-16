@@ -72,7 +72,7 @@ func ParseLlmResponseError(resp *http.Response, readBytes int64) error {
 //   - 事件类型为 error(Anthropic / 网关自定义)→ 取整个数据块
 //
 // 注意:这里的 "error" 是**上游协议**的事件名/字段名,与我们对前端下发的事件名无关。
-// 无错误时返回 ok=false。载荷的解析与分类见 NewLlmStreamError 与 classify.go。
+// 无错误时返回 ok=false。载荷的解析与分类见 NewLlmStreamError 与 classify_error.go。
 func StreamErrorPayload(eventName string, chunk ChatCompletionChunk, data string) (json.RawMessage, bool) {
 	if HasError(chunk.Error) {
 		return chunk.Error, true

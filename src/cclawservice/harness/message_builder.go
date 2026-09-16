@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	hCommon "my.favorite/cclawservice/harness/common"
-	"my.favorite/cclawservice/harness/ctxmgr"
+	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
@@ -81,7 +81,7 @@ func BuildChatCompletionRequest(llmProvider dataobject.TLlm, systemPrompt *datao
 	}
 
 	// 动态裁剪 max_tokens:仅当 ContextWindow 已配置时才计算,否则返回 nil
-	maxTokens := ctxmgr.DynamicMaxTokens(llmProvider, messages)
+	maxTokens := security.DynamicMaxTokens(llmProvider, messages)
 	if maxTokens == 0 {
 		req.MaxTokens = nil //应用供应商的默认配置
 	} else {
@@ -104,7 +104,7 @@ func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []
 	if !stream {
 		req.EnableThinking = new(llmProvider.ThkNonStreaming)
 	}
-	mt := ctxmgr.DynamicMaxTokens(llmProvider, messages)
+	mt := security.DynamicMaxTokens(llmProvider, messages)
 	if mt == 0 {
 		req.MaxTokens = nil // 应用供应商默认
 	} else {

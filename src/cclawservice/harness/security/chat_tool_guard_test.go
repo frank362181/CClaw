@@ -8,7 +8,7 @@
 * (它们都 import ctxmgr,会构成测试期 import cycle)。工具循环的端到端测试在 service 包。
 **/
 
-package ctxmgr
+package security
 
 import (
 	"fmt"

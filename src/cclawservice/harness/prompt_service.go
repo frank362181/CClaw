@@ -21,7 +21,7 @@ import (
 
 	cCommon "my.favorite/cclawservice/common"
 	hCommon "my.favorite/cclawservice/harness/common"
-	"my.favorite/cclawservice/harness/ctxmgr"
+	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	pCommon "my.favorite/platformutility/common"
@@ -51,12 +51,12 @@ func GetPromptService() *PromptService {
 //   - agent:       agent 对象
 //   - skillFiles:    需要载入元数据的 SKILL.md 文件列表(可为空)
 func (service *PromptService) BuildSystemPrompt(agent dataobject.TAgent, skillFiles []string) (*dataobject.SystemPrompt, error) {
-	return service.BuildSystemPromptEx(agent, skillFiles, hCommon.BootstrapScopeNormal)
+	return service.BuildSystemPromptEx(agent, skillFiles, dataobject.BootstrapScopeNormal)
 }
 
 // BuildSystemPromptEx 按指定会话范围组装 system prompt。
 // (文件未变零读盘),从而让长会话能看到工作区文件的编辑。
-func (service *PromptService) BuildSystemPromptEx(agent dataobject.TAgent, skillFiles []string, scope hCommon.BootstrapScope) (*dataobject.SystemPrompt, error) {
+func (service *PromptService) BuildSystemPromptEx(agent dataobject.TAgent, skillFiles []string, scope dataobject.BootstrapScope) (*dataobject.SystemPrompt, error) {
 	workspaceRoot, _ := cCommon.BuildAgentBootstrapRoot(agent)
 
 	// 1. 加载并缓存 agent 启动文档(指纹未变化时直接命中缓存)
@@ -83,7 +83,7 @@ func (service *PromptService) BuildSystemPromptEx(agent dataobject.TAgent, skill
 }
 
 // assembleSystemPrompt 按规范顺序组装,应用会话范围过滤、缺失标记与预算控制。
-func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, workspaceRoot string, scope hCommon.BootstrapScope) (*dataobject.SystemPrompt, error) {
+func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, workspaceRoot string, scope dataobject.BootstrapScope) (*dataobject.SystemPrompt, error) {
 	documents := service.promptRepo.GetAllDocuments(agent.AgentId) // 已按规范顺序加载
 	skills := service.promptRepo.GetAllSkills(agent.AgentId)
 
@@ -101,7 +101,7 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 		if doc.Missing {
 			sections = append(sections, dataobject.SystemPromptSection{
 				Title:   doc.FileName,
-				Content: hCommon.MissingFileMarker + " Expected at: " + filepath.Join(workspaceRoot, doc.FileName),
+				Content: cCommon.MissingFileMarker + " Expected at: " + filepath.Join(workspaceRoot, doc.FileName),
 			})
 			missing = append(missing, doc.FileName)
 			continue
@@ -114,7 +114,7 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 
 		// 单文件预算:USER.md 独立 4K,其余 20K
 		budget := hCommon.MaxBootstrapFileChars
-		if doc.Kind == hCommon.AgentDocUser {
+		if doc.Kind == dataobject.AgentDocUser {
 			budget = hCommon.MaxUserDocChars
 		}
 		if runeLen := len([]rune(content)); runeLen > budget {
@@ -144,7 +144,7 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 	sections, truncated = capSections(sections, hCommon.MaxPromptSectionLen, truncated)
 
 	// ---- 总预算控制:优先保留高优先级文件,超限从尾部压缩 ----
-	totalCap := ctxmgr.CalcBoostrapBudget(agent.BootstrapTotalChars)
+	totalCap := security.CalcBoostrapBudget(agent.BootstrapTotalChars)
 	sections, truncated = truncateTailBudget(sections, totalCap, truncated)
 
 	// 上限以 rune 表达、下游预算以 token 表达:把两者换算着打出来,
@@ -152,18 +152,18 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 	if totalCap > 0 {
 		logging.LogDebugF("prompt service: agent=%s scope=%s bootstrap budget: section_cap=%d runes(≈%d tokens) total_cap=%d runes(≈%d tokens) skill_cap=%d runes(≈%d tokens) truncated=%v",
 			agent.AgentId, scope.String(),
-			hCommon.MaxPromptSectionLen, ctxmgr.CharsToTokens(hCommon.MaxPromptSectionLen),
-			totalCap, ctxmgr.CharsToTokens(totalCap),
-			hCommon.MaxSkillsPromptChars, ctxmgr.CharsToTokens(hCommon.MaxSkillsPromptChars), truncated)
+			hCommon.MaxPromptSectionLen, security.CharsToTokens(hCommon.MaxPromptSectionLen),
+			totalCap, security.CharsToTokens(totalCap),
+			hCommon.MaxSkillsPromptChars, security.CharsToTokens(hCommon.MaxSkillsPromptChars), truncated)
 	}
 
 	// MEMORY.md 在注入顺序里是**最后**一段,总预算吃紧时它是第一个被截断/丢弃的。
 	// 蒸馏按 DistillMemoryDocMaxChars 往这个文件里写长期记忆,一旦被挤掉,
 	// 就会出现"事实写进了文件、却从没进过 prompt"——必须让它可见。
 	for i := range truncated {
-		if truncated[i] == hCommon.MemoryDocFileName {
+		if truncated[i] == cCommon.MemoryDocFileName {
 			logging.LogWarnF("prompt service: agent=%s long-term memory (%s) was truncated by the prompt budget; distilled facts may never reach the prompt",
-				agent.AgentId, hCommon.MemoryDocFileName)
+				agent.AgentId, cCommon.MemoryDocFileName)
 			break
 		}
 	}

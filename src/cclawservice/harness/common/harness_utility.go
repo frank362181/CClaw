@@ -10,28 +10,51 @@ import (
 	"strings"
 	"time"
 
+	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/llmproto"
+	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
 )
+
+// maintenanceSlots 后台记忆维护的全局并发闸(压缩/蒸馏都要调用 LLM)。
+var maintenanceSlots = make(chan struct{}, CompactionMaxConcurrent)
+
+// AcquireMaintenanceSlot 非阻塞获取一个维护名额(拿不到就放弃本次)。
+func AcquireMaintenanceSlot() bool {
+	select {
+	case maintenanceSlots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// ReleaseMaintenanceSlot 释放维护名额。
+func ReleaseMaintenanceSlot() {
+	select {
+	case <-maintenanceSlots:
+	default:
+	}
+}
 
 // IsKindAllowedInScope 按会话范围过滤启动文档(参考 OpenClaw filterBootstrapFilesForSession)。
 //   - normal:   注入全部(含 MEMORY.md)
 //   - subagent: 仅 AGENTS.md(不继承父 agent 的人格/用户/记忆)
 //   - cron:     AGENTS/SOUL/IDENTITY/USER,不含 MEMORY.md
 //   - heartbeat: 不注入启动文件
-func IsKindAllowedInScope(kind AgentDocumentKind, scope BootstrapScope) bool {
+func IsKindAllowedInScope(kind dataobject.AgentDocumentKind, scope dataobject.BootstrapScope) bool {
 	switch scope {
-	case BootstrapScopeSubagent:
-		return kind == AgentDocAgent
-	case BootstrapScopeCron:
+	case dataobject.BootstrapScopeSubagent:
+		return kind == dataobject.AgentDocAgent
+	case dataobject.BootstrapScopeCron:
 		switch kind {
-		case AgentDocAgent, AgentDocSoul,
-			AgentDocIdentity, AgentDocUser:
+		case dataobject.AgentDocAgent, dataobject.AgentDocSoul,
+			dataobject.AgentDocIdentity, dataobject.AgentDocUser:
 			return true
 		}
 		return false
-	case BootstrapScopeHeartbeat:
+	case dataobject.BootstrapScopeHeartbeat:
 		return false
 	default:
 		return true
@@ -81,6 +104,14 @@ func StripFrontMatter(data []byte) string {
 	return content
 }
 
+func BuildSessionName(message string) string {
+	name := strings.TrimSpace(pCommon.TruncateRunes(strings.TrimSpace(message), cCommon.SessionNameMaxLen, pCommon.BlankString))
+	if name == pCommon.BlankString {
+		return cCommon.SessionDefaultName
+	}
+	return name
+}
+
 // StreamReadError 归一化流读取失败:
 // 流式读取失败的归一化:把底层读流错误分类为"客户端断开"或"传输层故障"。
 //   - 客户端断开(外层 ctx 取消)      → ErrRequestCanceled(静默,不重试)
@@ -107,7 +138,7 @@ func BuildMemoryFileName(at *pCommon.DatetimeItem) string {
 	if at != nil {
 		datetime = at
 	}
-	return ChatMemoryFilePrefix + FormatCompactDatetime(datetime) + ChatMemoryFileExt
+	return cCommon.ChatMemoryFilePrefix + FormatCompactDatetime(datetime) + cCommon.ChatMemoryFileExt
 }
 
 // BuildHistoryLockKey 历史写入的会话级锁键。

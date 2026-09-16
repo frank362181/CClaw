@@ -33,6 +33,7 @@ import (
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/harness/mstorage"
+	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
@@ -458,7 +459,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 
 	// 7. 基于 Agent 工作区启动文档组装 system prompt,并解析其 skill 中声明的可用工具
 	skillFiles, agentExtensionRoot := s.collectSkillFiles(comCode, agent)
-	systemPrompt, err := s.promptService.BuildSystemPromptEx(agent, skillFiles, hCommon.BootstrapScopeNormal)
+	systemPrompt, err := s.promptService.BuildSystemPromptEx(agent, skillFiles, dataobject.BootstrapScopeNormal)
 	if err != nil {
 		logging.LogErrorF("chat service: build system prompt error:%s", err.Error())
 		return nil, dataobject.TAgent{}, nil, dataobject.TLlm{}, nil, myException.ChatLLMKind.Newf("chat service: build system prompt error:%s", err.Error())
@@ -485,7 +486,7 @@ func (s *ChatService) toolsReserveTokens(agent dataobject.TAgent, toolSet *harne
 
 	tokens := 0
 	if toolSet != nil {
-		tokens = ctxmgr.EstimateToolsTokens(toolSet.LLMTools())
+		tokens = security.EstimateToolsTokens(toolSet.LLMTools())
 	}
 	s.toolsTokens.Store(agent.AgentId, tokens)
 	logging.LogDebugF("chat service: agent=%s tools schema reserves %d tokens (context budget)", agent.AgentId, tokens)
@@ -507,7 +508,7 @@ func (s *ChatService) warnPolicyIssues(agent dataobject.TAgent, llmProvider data
 		return
 	}
 
-	policy := ctxmgr.GetContextPolicy(agent, window)
+	policy := hCommon.GetContextPolicy(agent, window)
 	if tokens, ok := s.toolsTokens.Load(agent.AgentId); ok {
 		policy.ToolsReserveTokens = tokens.(int)
 	}
@@ -516,9 +517,9 @@ func (s *ChatService) warnPolicyIssues(agent dataobject.TAgent, llmProvider data
 	if systemPrompt != nil {
 		systemText = systemPrompt.Prompt
 	}
-	systemTokens := ctxmgr.EstimateInputTokens([]llmproto.ChatMessage{{Role: hCommon.RoleSystem, Content: systemText}})
+	systemTokens := security.EstimateInputTokens([]llmproto.ChatMessage{{Role: hCommon.RoleSystem, Content: systemText}})
 
-	for _, issue := range ctxmgr.PolicyWarnings(policy, systemTokens) {
+	for _, issue := range security.PolicyWarnings(policy, systemTokens) {
 		logging.LogWarnF("chat service: agent=%s context budget issue: %s", agent.AgentId, issue)
 	}
 	s.policyWarned.Store(agent.AgentId, true)
@@ -605,8 +606,8 @@ func (s *ChatService) collectSkillFiles(comCode string, agent dataobject.TAgent)
 // 返回结果同时给出"是否因预算裁掉了历史"等判定,供记忆压缩编排使用;
 // 并回传本次读回的记录 —— 维护触发要按"水位之后还剩多少"决定要不要蒸,
 // 直接复用这份读回结果,避免在请求路径上再读一次。
-func (s *ChatService) assembleChatContext(session dataobject.TSession, agent dataobject.TAgent, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest) (ctxmgr.AssembleResult, []hCommon.MemoryRecord) {
-	policy := ctxmgr.GetContextPolicy(agent, int(llmProvider.ContextWindow))
+func (s *ChatService) assembleChatContext(session dataobject.TSession, agent dataobject.TAgent, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest) (hCommon.AssembleResult, []hCommon.MemoryRecord) {
+	policy := hCommon.GetContextPolicy(agent, int(llmProvider.ContextWindow))
 	// 工具 schema 的预留由 prepareChat 量好并缓存(它知道 toolSet);这里只取用
 	if tokens, ok := s.toolsTokens.Load(agent.AgentId); ok {
 		policy.ToolsReserveTokens = tokens.(int)
@@ -640,7 +641,7 @@ func (s *ChatService) completeChat(ctx context.Context, llmProvider dataobject.T
 // 写日志(可观测性)、给用户一条提示(流式路径)、把守卫提示回填给模型。返回应回填给模型的工具结果内容。
 //
 // 判定必须落在工具循环的串行回填点、按"模型声明的顺序"调用(见 ctxmgr.TurnLoopGuard 的使用约束)。
-func applyLoopGuard(guard *ctxmgr.TurnLoopGuard, toolName, toolArgs string, resultOK bool, result string, onNotice func(code, msg string)) string {
+func applyLoopGuard(guard *security.TurnLoopGuard, toolName, toolArgs string, resultOK bool, result string, onNotice func(code, msg string)) string {
 	hint := guard.Check(toolName, toolArgs, resultOK, result)
 	if hint == pCommon.BlankString {
 		return result
@@ -656,12 +657,12 @@ func applyLoopGuard(guard *ctxmgr.TurnLoopGuard, toolName, toolArgs string, resu
 		onNotice(cCommon.ChatNoticeToolLoopGuard, loopGuardNoticeMsg(verdict.Level))
 	}
 
-	return ctxmgr.ToolResultWithHint(result, hint)
+	return security.ToolResultWithHint(result, hint)
 }
 
 // loopGuardNoticeMsg 按判定级别选用户话术:提醒换策略 / 已要求停止重试。
-func loopGuardNoticeMsg(level ctxmgr.LoopGuardLevel) string {
-	if level == ctxmgr.LoopLevelStop {
+func loopGuardNoticeMsg(level security.LoopGuardLevel) string {
+	if level == security.LoopLevelStop {
 		return cCommon.ConstChatNoticeToolLoopGuardStopMsg
 	}
 
@@ -673,9 +674,9 @@ func loopGuardNoticeMsg(level ctxmgr.LoopGuardLevel) string {
 // 每轮请求前都做一次预算贴合(FitMessages):工具结果不断回填会持续挤压上下文窗口,
 // 长工具链必须随时把最老的历史裁掉,否则会遇到上游"超窗口"报错。
 func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet, recorder *mstorage.TurnRecorder) (string, error) {
-	policy := ctxmgr.ContextPolicy{ContextWindow: int(llmProvider.ContextWindow)}
+	policy := hCommon.ContextPolicy{ContextWindow: int(llmProvider.ContextWindow)}
 	// 工具死循环守卫:一轮对话一个实例(局部变量),禁止做成服务字段/单例,原因见 chat_tool_guard.go。
-	guard := ctxmgr.NewTurnLoopGuard()
+	guard := security.NewTurnLoopGuard()
 	for i := 0; i < hCommon.AgentToolLoopMax; i++ {
 		content, calls, err := s.llmClient.CompleteWithTools(ctx, llmProvider, ctxmgr.FitMessages(llmProvider, messages, policy), toolSet.LLMTools())
 		if err != nil {
@@ -713,10 +714,10 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet,
 	onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent), onNotice func(code, msg string), recorder *mstorage.TurnRecorder) (string, string, error) {
 	seq := 0 // 本回合工具调用序号(跨轮自增,前端按 seq 追踪同一工具调用)
-	policy := ctxmgr.ContextPolicy{ContextWindow: int(llmProvider.ContextWindow)}
+	policy := hCommon.ContextPolicy{ContextWindow: int(llmProvider.ContextWindow)}
 
 	// 工具死循环守卫:一轮对话一个实例
-	guard := ctxmgr.NewTurnLoopGuard()
+	guard := security.NewTurnLoopGuard()
 	for i := 0; i < hCommon.AgentToolLoopMax; i++ {
 		if i > 0 && onStatus != nil {
 			onStatus(cCommon.ChatStatusThinking, "正在思考…")
@@ -862,10 +863,10 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 // summarizer 把 LLM 客户端包装为"摘要生成器"注入 mstorage。
 func (s *ChatService) summarizer(llmProvider dataobject.TLlm) hCommon.Summarizer {
 	return func(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
-		// 输出额度按**窗口**收口(见 ctxmgr.CalcMaintenanceOutputTokens):维护调用的输入同样占窗口,
+		// 输出额度按**窗口**收口(见 security.CalcMaintenanceOutputTokens):维护调用的输入同样占窗口,
 		// 若无脑发 SummaryMaxTokens,小窗模型上会变成"输入 + 输出 > 窗口"的必然失败 ——
 		// 而且失败只发生在后台日志里。装不下时直接报错,不发起注定失败的调用。
-		maxTokens := ctxmgr.CalcMaintenanceOutputTokens(int(llmProvider.ContextWindow), hCommon.SummaryMaxTokens, systemPrompt, userPrompt)
+		maxTokens := security.CalcMaintenanceOutputTokens(int(llmProvider.ContextWindow), hCommon.SummaryMaxTokens, systemPrompt, userPrompt)
 		if maxTokens <= 0 {
 			return pCommon.BlankString, myException.RuntimeClientErrEx(fmt.Sprintf(
 				"maintenance call does not fit the context window: window=%d", llmProvider.ContextWindow))

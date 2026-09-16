@@ -202,8 +202,8 @@ func (repo *AgentFileRepository) buildStartupFilesList(agentBootstrapRoot string
 	}
 	realRoot := pCommon.ResolveRealPath(filepath.Clean(rootAbs))
 
-	list := make([]dataobject.AgentDocument, 0, len(hCommon.StartupDocFiles))
-	for _, item := range hCommon.StartupDocFiles {
+	list := make([]dataobject.AgentDocument, 0, len(cCommon.StartupDocFiles))
+	for _, item := range cCommon.StartupDocFiles {
 		doc := dataobject.AgentDocument{
 			Kind:     item.Kind,
 			FileName: item.Name,

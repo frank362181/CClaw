@@ -6,7 +6,7 @@
 *
 * 分层约定:apperr ← llmproto ← exception ← harness ← service ← controller。
 * 严禁本包 import my.favorite/cclawservice 下的其它包,否则会与 exception ↔ harness 形成 import cycle。
-* 同包文件:classify.go(特征词/分类/错误体解析)、proto_utility.go(request_id、非 2xx 响应解析)。
+* 同包文件:classify_error.go(特征词/分类/错误体解析)、proto_utility.go(request_id、非 2xx 响应解析)。
 **/
 
 package llmproto

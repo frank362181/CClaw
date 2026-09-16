@@ -61,7 +61,7 @@ import (
 	"strings"
 	"sync"
 
-	myCommon "my.favorite/cclawservice/common"
+	cCommon "my.favorite/cclawservice/common"
 	hCommon "my.favorite/cclawservice/harness/common"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
@@ -142,7 +142,7 @@ func (w *MemoryFileRWriter) MemoryDir(sessionId string) (string, error) {
 	if !pCommon.IsSafeDir(sessionId) || strings.ContainsAny(sessionId, `/\`) {
 		return pCommon.BlankString, pException.FilePathErrorEx("illegal session id for history dir: " + sessionId)
 	}
-	return filepath.Join(pCommon.GetExecutableDir(), myCommon.AgentBootstrapDir, hCommon.ChatMemoryDirName, sessionId), nil
+	return filepath.Join(pCommon.GetExecutableDir(), cCommon.AgentBootstrapDir, cCommon.ChatMemoryDirName, sessionId), nil
 }
 
 // Ensure 确保会话历史文件存在并返回其文件名(不含目录)。
@@ -164,7 +164,7 @@ func (w *MemoryFileRWriter) Ensure(sessionId string, at *pCommon.DatetimeItem, h
 	}
 
 	var sb strings.Builder
-	_, _ = fmt.Fprintf(&sb, "# %s %s\n\n", hCommon.SessionDefaultName, sessionId)
+	_, _ = fmt.Fprintf(&sb, "# %s %s\n\n", cCommon.SessionDefaultName, sessionId)
 	for _, line := range headerLines {
 		line = strings.TrimSpace(line)
 		if line == pCommon.BlankString {

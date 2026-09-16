@@ -1,9 +1,10 @@
 /**
 * LLM token budgeter
+*   防止预算熔断
 *	对LLM的各个组成、context window的大小做预算
 **/
 
-package ctxmgr
+package security
 
 import (
 	"encoding/json"
@@ -64,7 +65,7 @@ func EstimateToolsTokens(tools []llmproto.Tool) int {
 //
 // 阈值取"实测 + 摘要上限":预留的正当用途就是给摘要增长留余量,
 // 超过这个量就不是"预留"了。
-func PolicyWarnings(policy ContextPolicy, systemTokens int) []string {
+func PolicyWarnings(policy hCommon.ContextPolicy, systemTokens int) []string {
 	var warnings []string
 
 	if policy.ContextWindow <= 0 {
@@ -160,8 +161,8 @@ func CalcMaintenanceOutputTokens(windowTokens, maxTokens int, systemPrompt, user
 
 // Budget 返回"除历史之外可以动的输入额度":窗口扣除输出预留、系统提示预留、
 // 以及工具 schema 预留(工具定义随请求单独发送,不占 messages,但同样占窗口)
-func Budget(policy ContextPolicy, msg llmproto.ChatMessage) int {
-	reserved := calcSystemReservedTokens(policy, msg)
+func Budget(policy hCommon.ContextPolicy, msg llmproto.ChatMessage) int {
+	reserved := CalcSystemReservedTokens(policy, msg)
 	budget := policy.ContextWindow - policy.OutputReserve - reserved - policy.ToolsReserveTokens
 
 	return budget
@@ -239,7 +240,7 @@ func SummaryTextOverBudget(summary string) bool {
 //     被裁记录一直留在文件里,下一轮仍是同一批,不会漏(最多延迟一轮)。
 //
 // 历史预算为 0 时永不触发:压缩改变不了 system 预留,问题在配置。
-func NeedCompact(result AssembleResult, droppedRunes int) bool {
+func NeedCompact(result hCommon.AssembleResult, droppedRunes int) bool {
 	if result.BudgetExhausted {
 		return false //budget=0,就没必要压缩了
 	}
@@ -299,7 +300,7 @@ func NeedDistill(turns int, p DistillPressure) bool {
 // NeedMerge 判断是否合并摘要:摘要总量超上限,且预算没有耗尽。
 //
 // 预算耗尽时不做合并 —— 摘要再小也装不下历史,问题在配置(与压缩被禁同一个理由)。
-func NeedMerge(result AssembleResult) bool {
+func NeedMerge(result hCommon.AssembleResult) bool {
 	return !result.BudgetExhausted && SummaryTextOverBudget(result.Summary)
 }
 
@@ -328,8 +329,7 @@ func TokensToChars(tokens int) int {
 	return int(float64(tokens) * CharsPerCJKToken)
 }
 
-// ======================== private functions & methods ===========================
-// calcSystemReservedTokens 计算系统提示应占用的 token 额度。
+// CalcSystemReservedTokens 计算系统提示应占用的 token 额度。
 //
 // 取 max(系统提示实际估量, policy.SystemPromptReserveTokens):
 //   - 预留额度的语义是"为启动文档 + 折叠进 system 的摘要留出的最小空间",
@@ -337,7 +337,7 @@ func TokensToChars(tokens int) int {
 //   - 系统提示实际更大时以实际为准(不能因为预留小就超窗);
 //   - 它只在"大于实际估量"时才起作用 —— 启动文档大小已由估量覆盖,
 //     这个额度真正兜的是摘要增长(上限 MaxSummaryTotalRunes)。
-func calcSystemReservedTokens(policy ContextPolicy, sysMsg llmproto.ChatMessage) int {
+func CalcSystemReservedTokens(policy hCommon.ContextPolicy, sysMsg llmproto.ChatMessage) int {
 	reversed := EstimateInputTokens([]llmproto.ChatMessage{sysMsg})
 	if policy.SystemPromptReserveTokens > reversed {
 		return policy.SystemPromptReserveTokens
@@ -345,6 +345,8 @@ func calcSystemReservedTokens(policy ContextPolicy, sysMsg llmproto.ChatMessage)
 
 	return reversed
 }
+
+// ======================== private functions & methods ===========================
 
 // calcMaintenanceInputBudgetRunes 计算维护调用(蒸馏/压缩/合并)可发送的**源文本**预算(rune)
 func calcMaintenanceInputBudgetRunes(windowTokens, outputTokens int, systemPrompt string, hardCapRunes int) int {

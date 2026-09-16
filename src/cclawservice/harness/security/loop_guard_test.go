@@ -14,7 +14,7 @@
 * 避免相互干扰;仅在需要验证规则交互时才刻意构造重叠场景。
 **/
 
-package ctxmgr
+package security
 
 import (
 	"fmt"

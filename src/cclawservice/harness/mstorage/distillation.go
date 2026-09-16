@@ -92,7 +92,7 @@ func memoryDocPath(agent dataobject.TAgent) (string, bool) {
 	if !ok {
 		return pCommon.BlankString, false
 	}
-	return filepath.Join(root, hCommon.MemoryDocFileName), true
+	return filepath.Join(root, cCommon.MemoryDocFileName), true
 }
 
 // ============================== watermark(增量蒸馏) ==============================

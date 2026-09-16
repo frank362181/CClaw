@@ -23,7 +23,7 @@ import (
 
 	cCommon "my.favorite/cclawservice/common"
 	hCommon "my.favorite/cclawservice/harness/common"
-	"my.favorite/cclawservice/harness/ctxmgr"
+	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
@@ -163,7 +163,7 @@ func (s *MemoryService) Begin(sender string, agent dataobject.TAgent, req *reque
 	// 2. 首条消息 → 建档
 	session := dataobject.TSession{
 		SessionId:      sessionId,
-		SessionName:    cCommon.BuildSessionName(req.ReqMsg),
+		SessionName:    hCommon.BuildSessionName(req.ReqMsg),
 		AgentId:        strings.TrimSpace(agent.AgentId),
 		BeginTimestamp: now.Timestamp,
 		ChatType:       req.ChatType,
@@ -264,7 +264,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 	}
 	// 收尾路径(EndChatSession)没有"本轮装配结果",传 nil:归一为"无裁剪 + 预算未耗尽"的零值。
 	if maintenanceReq.Assembled == nil {
-		zero := ctxmgr.AssembleResult{}
+		zero := hCommon.AssembleResult{}
 		maintenanceReq.Assembled = &zero
 	}
 
@@ -285,7 +285,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 	// 早退扫描(够门槛就停),records 是装配刚读回的,请求路径上不额外读文件。
 	droppedRunes := hCommon.RecordsRunesInRange(maintenanceReq.Records, maintenanceReq.Assembled.DroppedFrom, maintenanceReq.Assembled.DroppedTo,
 		hCommon.MinCompactionSrcRunes)
-	needCompact := ctxmgr.NeedCompact(*maintenanceReq.Assembled, droppedRunes)
+	needCompact := security.NeedCompact(*maintenanceReq.Assembled, droppedRunes)
 	// 请求路径上只取一次"当前时刻",压缩与合并两处节流共用
 	now := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 
@@ -303,33 +303,33 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 	}
 
 	// 蒸馏的**内容**维度:水位之后还剩多少(够一轮就提前蒸,不必等节拍)。
-	// 压力只在内容检查节拍上才影响判定(见 ctxmgr.NeedDistillPressure):
+	// 压力只在内容检查节拍上才影响判定(见 security.NeedDistillPressure):
 	// 其余轮次只需节拍,省掉这次 MEMORY.md 读取 + 扫描。
 	//
 	// 压缩判定同样需要水位(见下面的压缩上界),因此两处**共用一次读取**。
-	needPressure := ctxmgr.NeedDistillPressure(turns)
+	needPressure := security.NeedDistillPressure(turns)
 	watermark, watermarkKnown := 0, false
 	if needPressure || needCompact {
 		watermark, watermarkKnown = s.distillWatermark(*agent, session.SessionId)
 	}
 
-	pressure := ctxmgr.NewDistillPressure(maintenanceReq.Closing)
+	pressure := security.NewDistillPressure(maintenanceReq.Closing)
 	if needPressure && watermarkKnown {
 		pressure.PendingRecords, pressure.PendingChars = distillPressureAt(watermark, maintenanceReq.Records)
 	}
-	needDistill := ctxmgr.NeedDistill(turns, pressure)
+	needDistill := security.NeedDistill(turns, pressure)
 
-	// 摘要总量超上限 → 合并最旧的一批摘要(判定见 ctxmgr.NeedMerge,与压缩的预算维度同源)。
-	needMerge := ctxmgr.NeedMerge(*maintenanceReq.Assembled)
+	// 摘要总量超上限 → 合并最旧的一批摘要(判定见 security.NeedMerge,与压缩的预算维度同源)。
+	needMerge := security.NeedMerge(*maintenanceReq.Assembled)
 
 	// 【维护预算按窗口收口】
 	//
 	// 三个动作都要调用模型,而它们的源文本上限(20000/24000 rune)是"看着大模型定的"常量:
 	// 换成小窗模型会把请求顶出窗口,而失败只发生在后台日志里(前端完全看不到)。
 	// 这里按 (窗口 - 维护输出额度 - 系统提示估量) 收窄,**装不下就不排这个动作**,
-	// 并把问题指向配置(面向运维的告警见 ctxmgr.PolicyWarnings,每 agent 只记一次)。
+	// 并把问题指向配置(面向运维的告警见 security.PolicyWarnings,每 agent 只记一次)。
 	// 窗口未知(ContextWindow<=0)时退化为硬上限,行为与收口前完全一致。
-	budgets := ctxmgr.CalcMaintenanceBudgets(maintenanceReq.ContextWindow, distillSystemPrompt, compactionSystemPrompt, compactionMergeSystemPrompt)
+	budgets := security.CalcMaintenanceBudgets(maintenanceReq.ContextWindow, distillSystemPrompt, compactionSystemPrompt, compactionMergeSystemPrompt)
 	if needDistill && budgets.DistillBudget <= 0 {
 		logging.LogDebugF("memory service: session=%s distill skipped, the window (%d) leaves no room for a maintenance call",
 			session.SessionId, maintenanceReq.ContextWindow)
@@ -373,7 +373,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 	from, to, mode := maintenanceReq.Assembled.DroppedFrom, maintenanceReq.Assembled.DroppedTo, agent.CompactionMode
 
 	// 获得一个维护routine，避免无限次获取打满LLM
-	if !cCommon.AcquireMaintenanceSlot() {
+	if !hCommon.AcquireMaintenanceSlot() {
 		logging.LogDebugF("memory service: memory maintenance slot unavailable, skip session=%s", session.SessionId)
 		return
 	}
@@ -384,7 +384,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 	plan := maintenancePlan{distill: needDistill, compact: needCompact, merge: needMerge}
 
 	go func() {
-		defer cCommon.ReleaseMaintenanceSlot()
+		defer hCommon.ReleaseMaintenanceSlot()
 		defer func() { // 后台协程必须自兜 panic:否则单个会话的异常会带崩整个进程
 			if r := recover(); r != nil {
 				logging.LogErrorF("memory service: panic in memory maintenance of %s: %v", session.SessionId, r)
@@ -451,7 +451,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 				}
 
 				// 以**重读后**的判定为准:压缩本身也可能把摘要总量推过阈值。
-				if ctxmgr.SummaryOverBudget(records) {
+				if security.SummaryOverBudget(records) {
 					if _, err = s.mergeWithBudget(ctx, *session, records, summarizer, budgets.MergeBudget); err != nil {
 						logging.LogWarnF("memory service: merge summaries of %s error:%s", session.SessionId, err.Error())
 					}
@@ -682,7 +682,7 @@ func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRe
 			ToolCalled: true,
 			CallTime:   tool.CallTime,
 			ToolName:   tool.ToolName,
-			ToolResp:   pCommon.TruncateRunes(strings.TrimSpace(tool.Result), hCommon.TurnToolRespMaxLen, pCommon.BlankString),
+			ToolResp:   pCommon.TruncateRunes(strings.TrimSpace(tool.Result), cCommon.TurnToolRespMaxLen, pCommon.BlankString),
 			RespTime:   tool.RespTime,
 		})
 		if fileName != "" {

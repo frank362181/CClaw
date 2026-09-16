@@ -2,7 +2,7 @@
 * 上游 LLM 协议 DTO(OpenAI 兼容):请求体 / 应答体 / 流式块 / 消息与工具结构。
 *
 * 纯协议层,不依赖任何业务定义;供 harness(组装请求/解析应答)、service(拼装对话历史)
-* 共同使用。同包文件:proto_error.go/classify.go/proto_utility.go。
+* 共同使用。同包文件:proto_error.go/classify_error.go/proto_utility.go。
 **/
 
 package llmproto
@@ -99,7 +99,7 @@ type ChatCompletionUsage struct {
 }
 
 // ChatCompletionResponse chat/completions 应答体
-// Error 保留原始 JSON(error 字段内容),其结构与分类由本包(classify.go)负责。
+// Error 保留原始 JSON(error 字段内容),其结构与分类由本包(classify_error.go)负责。
 type ChatCompletionResponse struct {
 	ID      string                 `json:"id"`
 	Model   string                 `json:"model"`

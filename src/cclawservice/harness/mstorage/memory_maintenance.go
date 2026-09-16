@@ -9,7 +9,6 @@ package mstorage
 
 import (
 	hCommon "my.favorite/cclawservice/harness/common"
-	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/model/dataobject"
 )
 
@@ -82,7 +81,7 @@ type MaintenanceRequest struct {
 
 	// Assembled 本轮上下文装配结果。收尾路径(EndChatSession)没有"本轮装配",传 nil ——
 	// TriggerMemoryMaintenance 会把它归一为零值(预算未耗尽、无被裁区间)。
-	Assembled *ctxmgr.AssembleResult
+	Assembled *hCommon.AssembleResult
 	// Records 装配时刚读回的记录快照,**只用于请求路径上的判定**(维护压力/压缩收益),0 额外 IO。
 	// 后台动作读的是协程内的重读结果 —— 排队等锁期间可能已有其它轮次追加了记录或摘要。
 	Records []hCommon.MemoryRecord

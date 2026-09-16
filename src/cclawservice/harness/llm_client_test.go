@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"my.favorite/cclawservice/harness/ctxmgr"
+	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
@@ -165,7 +165,7 @@ func TestChatCompletion_Success(t *testing.T) {
 	if *cap.Payload.MaxTokens >= 8192 {
 		t.Errorf("max_tokens = %d, want < context_window 8192", *cap.Payload.MaxTokens)
 	}
-	want := 8192 - ctxmgr.EstimateInputTokens(cap.Payload.Messages)
+	want := 8192 - security.EstimateInputTokens(cap.Payload.Messages)
 	if want > 4096 {
 		want = 4096
 	}
@@ -454,7 +454,7 @@ func TestBuildChatCompletionRequest_DynamicMaxTokens(t *testing.T) {
 	}
 
 	// 不变量:估算输入 + max_tokens = context_window(推导自窗口剩余空间)
-	if est := ctxmgr.EstimateInputTokens(req.Messages); est+*req.MaxTokens != int(p.ContextWindow) {
+	if est := security.EstimateInputTokens(req.Messages); est+*req.MaxTokens != int(p.ContextWindow) {
 		t.Errorf("invariant violated: estimateInput(%d) + max_tokens(%d) = %d, want context_window(%d)",
 			est, *req.MaxTokens, est+*req.MaxTokens, p.ContextWindow)
 	}
@@ -499,8 +499,8 @@ func TestBuildChatCompletionRequest_DynamicMaxTokens_NoWindow(t *testing.T) {
 
 // TestEstimateInputTokens 验证估算函数的基本行为:CJK 密集文本比 ASCII 估算出更多 token。
 func TestEstimateInputTokens(t *testing.T) {
-	cjk := ctxmgr.EstimateInputTokens([]llmproto.ChatMessage{{Role: "user", Content: strings.Repeat("中", 1000)}})
-	ascii := ctxmgr.EstimateInputTokens([]llmproto.ChatMessage{{Role: "user", Content: strings.Repeat("a", 1000)}})
+	cjk := security.EstimateInputTokens([]llmproto.ChatMessage{{Role: "user", Content: strings.Repeat("中", 1000)}})
+	ascii := security.EstimateInputTokens([]llmproto.ChatMessage{{Role: "user", Content: strings.Repeat("a", 1000)}})
 	if cjk <= ascii {
 		t.Errorf("CJK estimate (%d) should exceed ASCII estimate (%d)", cjk, ascii)
 	}
