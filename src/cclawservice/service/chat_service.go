@@ -434,7 +434,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 	}
 
 	// 2. 发送者以服务端认证信息为准
-	if strings.TrimSpace(sender) != "" {
+	if strings.TrimSpace(sender) != pCommon.BlankString {
 		req.SenderId = strings.TrimSpace(sender)
 	}
 
@@ -458,7 +458,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 	}
 
 	// 7. 基于 Agent 工作区启动文档组装 system prompt,并解析其 skill 中声明的可用工具
-	skillFiles, agentExtensionRoot := s.collectSkillFiles(comCode, agent)
+	skillFiles, agentExtensionRoot := s.collectSkillFiles(agent)
 	systemPrompt, err := s.promptService.BuildSystemPromptEx(agent, skillFiles, dataobject.BootstrapScopeNormal)
 	if err != nil {
 		logging.LogErrorF("chat service: build system prompt error:%s", err.Error())
@@ -565,18 +565,18 @@ func (s *ChatService) resolveProvider(comCode string, agent dataobject.TAgent) (
 	return dataobject.TLlm{}, pException.UnMatchErrorEx2("no available runtime provider for agent: %s", agent.AgentId)
 }
 
-// collectSkillFiles 收集该 comCode 下可用的 skill 文件路径,并返回 Agent 的 extension 根目录。
+// collectSkillFiles 与当前agent对应的 skill 文件路径,并返回 Agent 的 extension 根目录。
 // 相对路径显式拼接 Agent 工作区根(与 PromptRepository.resolveSkillPathLocked 语义一致);
 // 文件缺失由仓库告警后跳过,不影响主流程。
 // 返回值:skill 文件路径列表 + extension 根目录(供 ToolSet 解析脚本工具时做安全校验)。
-func (s *ChatService) collectSkillFiles(comCode string, agent dataobject.TAgent) ([]string, string) {
+func (s *ChatService) collectSkillFiles(agent dataobject.TAgent) ([]string, string) {
 	if s.agentRepo == nil {
 		return nil, ""
 	}
 
 	agentExtensionRoot, _ := cCommon.BuildAgentExtensionRoot(agent)
 
-	skills := s.agentRepo.GetSkills(comCode)
+	skills := s.agentRepo.GetSkillsByAgent(agent)
 	if len(skills) == 0 {
 		return nil, agentExtensionRoot
 	}
@@ -637,38 +637,6 @@ func (s *ChatService) completeChat(ctx context.Context, llmProvider dataobject.T
 	return s.llmClient.ChatCompletionMessages(ctx, llmProvider, messages)
 }
 
-// applyLoopGuard 判定一次**已执行完**的工具调用,并完成命中后的三件事:
-// 写日志(可观测性)、给用户一条提示(流式路径)、把守卫提示回填给模型。返回应回填给模型的工具结果内容。
-//
-// 判定必须落在工具循环的串行回填点、按"模型声明的顺序"调用(见 ctxmgr.TurnLoopGuard 的使用约束)。
-func applyLoopGuard(guard *security.TurnLoopGuard, toolName, toolArgs string, resultOK bool, result string, onNotice func(code, msg string)) string {
-	hint := guard.Check(toolName, toolArgs, resultOK, result)
-	if hint == pCommon.BlankString {
-		return result
-	}
-
-	verdict := guard.LastVerdict()
-	logging.LogWarnF("chat service: tool loop guard hit: rule=%s level=%s hits=%d tool=%s hint=%s",
-		verdict.Rule, verdict.Level, guard.Hits(), toolName, hint)
-
-	// 首次命中:以 notice 让用户知道"模型在重复调用工具,已提醒它换策略";
-	// 再次命中会以 chat.tool_loop_guard 错误收尾(错误通道自带提示),不重复下发。
-	if onNotice != nil && !guard.ShouldStop() {
-		onNotice(cCommon.ChatNoticeToolLoopGuard, loopGuardNoticeMsg(verdict.Level))
-	}
-
-	return security.ToolResultWithHint(result, hint)
-}
-
-// loopGuardNoticeMsg 按判定级别选用户话术:提醒换策略 / 已要求停止重试。
-func loopGuardNoticeMsg(level security.LoopGuardLevel) string {
-	if level == security.LoopLevelStop {
-		return cCommon.ConstChatNoticeToolLoopGuardStopMsg
-	}
-
-	return cCommon.ConstChatNoticeToolLoopGuardWarnMsg
-}
-
 // runToolLoop 同步路径的工具调用循环:调用LLM → 执行工具 → 结果回填 → 再次调用,直到模型给出最终文本。
 //
 // 每轮请求前都做一次预算贴合(FitMessages):工具结果不断回填会持续挤压上下文窗口,
@@ -700,7 +668,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 			}
 			recorder.Record(call.Function.Name, callTime, respTime, result) // 旁路记录(recorder 为 nil 时静默)
 			// 死循环判定:同步路径本身串行执行,顺序天然等于"模型声明的顺序"(同步接口无 notice 通道)
-			result = applyLoopGuard(guard, call.Function.Name, call.Function.Arguments, err == nil, result, nil)
+			result = guard.ApplyLoopGuard(call.Function.Name, call.Function.Arguments, err == nil, result, nil)
 			messages = append(messages, harness.BuildToolResultMessage(call.ID, result))
 		}
 	}
@@ -847,14 +815,16 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 				result := fmt.Sprintf(`{"error":%q}`, r.err.Error())
 
 				// 死循环判定必须落在串行回填点(同轮工具是并发执行的,这里才是"模型声明的顺序")
-				messages = append(messages, harness.BuildToolResultMessage(r.item.callID, applyLoopGuard(guard, r.item.name, r.item.arg, false, result, onNotice)))
+				loopGuardResult := guard.ApplyLoopGuard(r.item.name, r.item.arg, false, result, onNotice)
+				messages = append(messages, harness.BuildToolResultMessage(r.item.callID, loopGuardResult))
 				continue
 			}
 			if onTool != nil {
 				onTool(ToolEvent{Phase: cCommon.ChatToolEventDone, Seq: r.item.seq, Name: r.item.name, Detail: pCommon.TruncateRunes(r.result, 600, "…")})
 			}
 			recorder.Record(r.item.name, r.callTime, r.respTime, r.result) // 旁路记录(recorder 为 nil 时静默)
-			messages = append(messages, harness.BuildToolResultMessage(r.item.callID, applyLoopGuard(guard, r.item.name, r.item.arg, true, r.result, onNotice)))
+			loopGuardResult := guard.ApplyLoopGuard(r.item.name, r.item.arg, true, r.result, onNotice)
+			messages = append(messages, harness.BuildToolResultMessage(r.item.callID, loopGuardResult))
 		}
 	}
 	return "", "", myException.ChatToolLoopKind.Newf("chat service: tool stream loop exceeded max iterations(%d)", hCommon.AgentToolLoopMax)

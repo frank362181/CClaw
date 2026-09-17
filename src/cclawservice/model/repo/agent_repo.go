@@ -7,6 +7,7 @@ package repo
 
 import (
 	"math"
+	"slices"
 	"strings"
 	"sync"
 
@@ -25,6 +26,7 @@ type AgentRepository struct {
 	dataAccessor dataaccessor.IAgentAccessor
 
 	llmProviders *common.SafeList[dataobject.TLlm]
+	baseTools    *common.SafeList[dataobject.TTool]
 	agents       *common.SafeList[dataobject.TAgent]
 	skills       *common.SafeList[dataobject.TSkill]
 	routeRules   *common.SafeList[dataobject.TAgentRouteRule]
@@ -54,7 +56,14 @@ type IAgentRepository interface {
 	UpdateAgent(agent dataobject.TAgent) error
 	RemoveAgent(ownerId, agentId string) error
 
+	GetBaseTools() []dataobject.TTool
+	GetBaseTool(toolId string) (dataobject.TTool, bool)
+	AddBaseTool(tool dataobject.TTool) error
+	UpdateBaseTool(tool dataobject.TTool) error
+	RemoveBaseTool(toolId string) error
+
 	GetSkills(comCode string) []dataobject.TSkill
+	GetSkillsByAgent(agent dataobject.TAgent) []dataobject.TSkill
 	AddSkill(skill dataobject.TSkill) error
 	UpdateSkill(skill dataobject.TSkill) error
 	RemoveSkill(ownerId, skillId string) error
@@ -265,12 +274,121 @@ func (repo *AgentRepository) RemoveAgent(ownerId, agentId string) error {
 	return nil
 }
 
+func (repo *AgentRepository) GetBaseTools() []dataobject.TTool {
+	repo.refreshIfExpired()
+
+	out := make([]dataobject.TTool, 0, repo.baseTools.Len())
+	repo.baseTools.Range(func(_ int, item dataobject.TTool) bool {
+		out = append(out, item)
+		return true
+	})
+
+	return out
+}
+
+func (repo *AgentRepository) GetBaseTool(toolId string) (dataobject.TTool, bool) {
+	repo.refreshIfExpired()
+
+	var found dataobject.TTool
+	ok := false
+	repo.baseTools.Range(func(_ int, item dataobject.TTool) bool {
+		if strings.EqualFold(toolId, item.ToolId) {
+			found = item
+			ok = true
+			return false
+		}
+		return true
+	})
+
+	return found, ok
+}
+
+func (repo *AgentRepository) AddBaseTool(tool dataobject.TTool) error {
+	if err := repo.requireAccessor(); err != nil {
+		return err
+	}
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if err := repo.dataAccessor.CreateBaseTool(&tool); err != nil {
+		return err
+	}
+
+	repo.baseTools.Append(tool)
+	repo.lastLoaded = common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
+	repo.dataVersion++
+	return nil
+}
+
+func (repo *AgentRepository) UpdateBaseTool(tool dataobject.TTool) error {
+	if err := repo.requireAccessor(); err != nil {
+		return err
+	}
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if err := repo.dataAccessor.UpdateBaseTool(&tool); err != nil {
+		return err
+	}
+	idx := common.FindIndex(repo.baseTools, func(t dataobject.TTool) bool {
+		return t.ToolId == tool.ToolId
+	})
+
+	if idx >= 0 {
+		_ = repo.baseTools.Update(idx, tool)
+	}
+	repo.lastLoaded = common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
+	repo.dataVersion++
+	return nil
+}
+
+func (repo *AgentRepository) RemoveBaseTool(toolId string) error {
+	if err := repo.requireAccessor(); err != nil {
+		return err
+	}
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+
+	if err := repo.dataAccessor.DeleteBaseTool(toolId); err != nil {
+		return err
+	}
+
+	idx := common.FindIndex(repo.baseTools, func(t dataobject.TTool) bool {
+		return t.ToolId == toolId
+	})
+	if idx >= 0 {
+		_ = repo.baseTools.Remove(idx)
+	}
+	repo.lastLoaded = common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
+	repo.dataVersion++
+	return nil
+}
+
 func (repo *AgentRepository) GetSkills(comCode string) []dataobject.TSkill {
 	repo.refreshIfExpired()
 
 	out := make([]dataobject.TSkill, 0, repo.skills.Len())
 	repo.skills.Range(func(_ int, item dataobject.TSkill) bool {
 		if strings.EqualFold(comCode, item.OwnerId) {
+			out = append(out, item)
+		}
+		return true
+	})
+
+	return out
+}
+
+func (repo *AgentRepository) GetSkillsByAgent(agent dataobject.TAgent) []dataobject.TSkill {
+	if len(agent.SkillIds) == 0 {
+		return nil
+	}
+
+	repo.refreshIfExpired()
+	out := make([]dataobject.TSkill, 0, len(agent.SkillIds))
+
+	repo.skills.Range(func(_ int, item dataobject.TSkill) bool {
+		if slices.Contains(agent.SkillIds, item.SkillId) {
 			out = append(out, item)
 		}
 		return true
@@ -361,6 +479,10 @@ func (repo *AgentRepository) Destroy() {
 		repo.agents.Clear()
 	}
 
+	if repo.baseTools != nil {
+		repo.baseTools.Clear()
+	}
+
 	if repo.skills != nil {
 		repo.skills.Clear()
 	}
@@ -392,29 +514,34 @@ func newSafeListFrom[T any](items []T) *common.SafeList[T] {
 
 // loadAllFromDB 在锁外执行四张配置表的全量读取,构造全新快照(不触碰现有缓存)。
 // 任一查询失败返回 err 且不产生可替换的快照;调用方应保留旧缓存,避免"先清后载"清空可用配置。
-func (repo *AgentRepository) loadAllFromDB() (*common.SafeList[dataobject.TLlm], *common.SafeList[dataobject.TAgent], *common.SafeList[dataobject.TSkill], *common.SafeList[dataobject.TAgentRouteRule], error) {
+func (repo *AgentRepository) loadAllFromDB() (*common.SafeList[dataobject.TLlm], *common.SafeList[dataobject.TAgent], *common.SafeList[dataobject.TTool], *common.SafeList[dataobject.TSkill], *common.SafeList[dataobject.TAgentRouteRule], error) {
 	if err := repo.requireAccessor(); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	providers, err := repo.dataAccessor.GetAllLLMProviders()
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	agents, err := repo.dataAccessor.GetAllAgents()
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
+	}
+
+	tools, err := repo.dataAccessor.GetBaseTools()
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
 	}
 	skills, err := repo.dataAccessor.GetAllSkills()
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	rules, err := repo.dataAccessor.GetAllAgentRouteRules()
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
-	return newSafeListFrom(providers), newSafeListFrom(agents), newSafeListFrom(skills), newSafeListFrom(rules), nil
+	return newSafeListFrom(providers), newSafeListFrom(agents), newSafeListFrom(tools), newSafeListFrom(skills), newSafeListFrom(rules), nil
 }
 
 // reloadIfNeeded 在 TTL 到期(或 force)时,以 singleflight 方式执行一次全量重载:
@@ -453,7 +580,7 @@ func (repo *AgentRepository) reloadIfNeeded(force bool) {
 		repo.mu.Unlock()
 
 		// 锁外 DB 全量读取(真正耗时的部分,不阻塞任何读写)
-		providers, agents, skills, rules, loadErr := repo.loadAllFromDB()
+		providers, agents, tools, skills, rules, loadErr := repo.loadAllFromDB()
 
 		repo.mu.Lock()
 		repo.reloading = false
@@ -471,6 +598,7 @@ func (repo *AgentRepository) reloadIfNeeded(force bool) {
 		// copy-on-write:整体换引用(短临界区)
 		repo.llmProviders = providers
 		repo.agents = agents
+		repo.baseTools = tools
 		repo.skills = skills
 		repo.routeRules = rules
 		repo.lastLoaded = repo.currentTimestamp()

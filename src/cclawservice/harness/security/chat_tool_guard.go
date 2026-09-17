@@ -14,8 +14,10 @@ package security
 import (
 	"strings"
 
+	cCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	pCommon "my.favorite/platformutility/common"
+	"my.favorite/platformutility/logging"
 )
 
 // maxGuardHitsBeforeStop 避免重复提示
@@ -67,6 +69,37 @@ func (g *TurnLoopGuard) ShouldStop() bool { return g.hits > maxGuardHitsBeforeSt
 // StopError 再次命中守卫时的终止错误
 func (g *TurnLoopGuard) StopError(scope string) error {
 	return myException.ChatToolLoopGuardKind.Newf("%s: stopped by loop guard: %s", scope, g.hint)
+}
+
+// ApplyLoopGuard 判定一次已经执行一次的工具调用，并完成命中后的三件事
+// 1.写日志、2.给用户一条提示(流式路径)、3.把守卫提示回填给模型，返回回填的内容
+func (g *TurnLoopGuard) ApplyLoopGuard(toolName, toolArgs string, resultOK bool, result string,
+	onNotice func(code, msg string)) string {
+	hint := g.Check(toolName, toolArgs, resultOK, result)
+	if hint == pCommon.BlankString {
+		return result
+	}
+
+	verdict := g.LastVerdict()
+	logging.LogWarnF("chat service: tool loop guard hit: rule=%s level=%s hits=%d tool=%s hint=%s",
+		verdict.Rule, verdict.Level, g.Hits(), toolName, hint)
+
+	//首次命中：以onNotice 让用户知道“模型在重复调用工具,已提醒它换策略”
+	//再次命中：以chat.tool_loop_guard错误收尾,不会重复下发
+	if onNotice != nil && !g.ShouldStop() {
+		onNotice(cCommon.ChatNoticeToolLoopGuard, GetLoopGuardLevelMsg(verdict.Level))
+	}
+
+	return ToolResultWithHint(result, hint)
+}
+
+// GetLoopGuardLevelMsg 按照判定级别选用户的话术：提醒/停止重试
+func GetLoopGuardLevelMsg(level LoopGuardLevel) string {
+	if level == LoopLevelStop {
+		return cCommon.ConstChatNoticeToolLoopGuardStopMsg
+	}
+
+	return cCommon.ConstChatNoticeToolLoopGuardWarnMsg
 }
 
 // ToolResultWithHint 组装回填给模型的工具结果:命中的提示追加在原始结果之后,

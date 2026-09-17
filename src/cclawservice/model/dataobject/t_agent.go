@@ -137,6 +137,8 @@ type TAgent struct {
 	ReasoningMode  int `json:"ReasoningMode"` //推理展示的方式 0/1/2:off/生成后附带/2 streaming
 	ToolProgress   int `json:"ToolProgress"`  //工具执行的进度
 
+	SkillIds []string `gorm:"-" json:"SkillIds"` //与之关联的skill
+
 	Deleted  bool                   `json:"Deleted"`
 	Disabled bool                   `json:"Disabled"`
 	DVersion optimisticlock.Version `json:"dVersion"`

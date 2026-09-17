@@ -15,18 +15,23 @@ type IAgentAccessor interface {
 	GetDatabase() core.IBaseDatabase
 
 	GetAllLLMProviders() ([]dataobject.TLlm, error)
-	GetAllAgents() ([]dataobject.TAgent, error)
-	GetAllSkills() ([]dataobject.TSkill, error)
-	GetAllAgentRouteRules() ([]dataobject.TAgentRouteRule, error)
-
 	CreateLLMProvider(provider *dataobject.TLlm) error
 	UpdateLLMProvider(provider *dataobject.TLlm) error
 	DeleteLLMProvider(ownerId, providerId string) error
 
+	GetAllAgentRouteRules() ([]dataobject.TAgentRouteRule, error)
+
+	GetAllAgents() ([]dataobject.TAgent, error)
 	CreateAgent(agent *dataobject.TAgent) error
 	UpdateAgent(agent *dataobject.TAgent) error
 	DeleteAgent(ownerId, agentId string) error
 
+	GetBaseTools() ([]dataobject.TTool, error)
+	CreateBaseTool(tool *dataobject.TTool) error
+	UpdateBaseTool(tool *dataobject.TTool) error
+	DeleteBaseTool(toolId string) error
+
+	GetAllSkills() ([]dataobject.TSkill, error)
 	CreateSkill(skill *dataobject.TSkill) error
 	UpdateSkill(skill *dataobject.TSkill) error
 	DeleteSkill(ownerId, skillId string) error
@@ -77,6 +82,35 @@ func (g *AgentAccessor) GetAllAgents() ([]dataobject.TAgent, error) {
 	err := g.gormDb.Where("deleted = 0").Find(&list).Error
 	if err != nil {
 		return nil, exception2.DatabaseQueryErrEx2("load agents error:%s", err.Error())
+	}
+
+	// 2. 用聚合查与agent关联的SKILL
+	var agentIds []string
+	for _, agent := range list {
+		agentIds = append(agentIds, agent.AgentId)
+	}
+
+	type agentSkills struct {
+		AgentId string `gorm:"agent_id"`
+		SkillId string `gorm:"skill_id"`
+	}
+
+	var rows []agentSkills
+	err = g.gormDb.Table("t_agent_skill").
+		Select("agent_id,skill_id").
+		Where("deleted = 0 and disabled = 0 and agent_id in ?", agentIds).
+		Find(&rows).Error
+	if err != nil {
+		return nil, exception2.DatabaseQueryErrEx2("load agents error:%s", err.Error())
+	}
+
+	for index, _ := range list {
+		for _, tmp := range rows {
+			if tmp.AgentId == list[index].AgentId {
+				list[index].SkillIds = append(list[index].SkillIds, tmp.SkillId)
+				//tmpAgent.SkillIds = append(tmpAgent.SkillIds, tmp.SkillId)
+			}
+		}
 	}
 	return list, nil
 }
@@ -192,7 +226,7 @@ func (g *AgentAccessor) CreateAgent(a *dataobject.TAgent) error {
 		return exception2.DatabaseQueryErrEx2("check agent error:%s", err.Error())
 	}
 	if count > 0 {
-		return exception.MatchErrorEx2("agent already exists:%s", a.AgentId)
+		return exception.MatchErrorEx2("agent already exists:%s", a.AgentName)
 	}
 
 	values := dataobject.AgentValues(a)
@@ -254,6 +288,97 @@ func (g *AgentAccessor) DeleteAgent(ownerId, agentId string) error {
 	}
 	if res.RowsAffected == 0 {
 		return exception.UnMatchErrorEx2("agent not found: %s", agentId)
+	}
+	return nil
+}
+
+// ============================== base tool 管理操作 ========================
+
+func (g *AgentAccessor) GetBaseTools() ([]dataobject.TTool, error) {
+	var tools []dataobject.TTool
+	err := g.gormDb.Where("deleted = 0").Find(&tools).Error
+	if err != nil {
+		return nil, exception2.DatabaseQueryErrEx2("get tools error:%s", err.Error())
+	}
+
+	return tools, nil
+}
+
+func (g *AgentAccessor) CreateBaseTool(tool *dataobject.TTool) error {
+	var count int64
+	if err := g.gormDb.Model(&dataobject.TTool{}).
+		Where("tool_id = ? AND deleted = 0", tool.ToolId).Count(&count).Error; err != nil {
+		return exception2.DatabaseQueryErrEx2("create tool error:%s", err.Error())
+	}
+
+	if count > 0 {
+		return exception.MatchErrorEx2("tool already exists:%s", tool.ToolName)
+	}
+
+	values := dataobject.ToolValues(tool)
+	values["deleted"] = 0
+	values["d_version"] = gorm.Expr("d_version + 1")
+	res := g.gormDb.Model(&dataobject.TTool{}).
+		Where("tool_id = ? and deleted = 1", tool.ToolId).
+		Updates(values)
+	if res.Error != nil {
+		WriteBackRevivedVersion(g.gormDb, &dataobject.TTool{}, "tool_id", tool.ToolId, &tool.DVersion)
+		return exception2.DatabaseQueryErrEx2("revive tool error:%s", res.Error.Error())
+	}
+
+	if res.RowsAffected > 0 {
+		return nil
+	}
+
+	//乐观锁 clause自动将 d_version 设置为1
+	if err := g.gormDb.Create(tool).Error; err != nil {
+		return exception2.DatabaseQueryErrEx2("create tool error:%s", err.Error())
+	}
+	return nil
+}
+
+func (g *AgentAccessor) UpdateBaseTool(tool *dataobject.TTool) error {
+	var curTool dataobject.TTool
+	err := g.gormDb.Where("tool_id = ? and deleted = 0", tool.ToolId).First(&curTool).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return exception.UnMatchErrorEx2("tool not found:%s", tool.ToolName)
+	}
+
+	if err != nil {
+		return exception2.DatabaseQueryErrEx2("update tool error:%s", err.Error())
+	}
+
+	if curTool.DVersion != tool.DVersion {
+		return exception.UnMatchErrorEx2("tool version conflict:%s", tool.ToolId)
+	}
+
+	values := dataobject.ToolValues(tool)
+	values["d_version"] = gorm.Expr("d_version + 1")
+	res := g.gormDb.Model(&dataobject.TTool{}).
+		Where("tool_id = ? and deleted = 0 and d_version = ?", tool.ToolId, tool.DVersion.Int64).
+		Updates(values)
+	if res.Error != nil {
+		return exception2.DatabaseQueryErrEx2("update tool error:%s", res.Error.Error())
+	}
+
+	if res.RowsAffected == 0 {
+		return exception.UnMatchErrorEx2("tool version conflict:%s", tool.ToolId)
+	}
+	tool.DVersion.Int64++
+	return nil
+}
+
+func (g *AgentAccessor) DeleteBaseTool(toolId string) error {
+	res := g.gormDb.Model(&dataobject.TTool{}).
+		Where("tool_id = ? AND deleted = 0", toolId).
+		Update("deleted", 1)
+
+	if res.Error != nil {
+		return exception2.DatabaseQueryErrEx2("delete tool error:%s", res.Error.Error())
+	}
+
+	if res.RowsAffected == 0 {
+		return exception.UnMatchErrorEx2("tool not found:%s", toolId)
 	}
 	return nil
 }

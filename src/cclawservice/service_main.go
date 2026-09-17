@@ -95,9 +95,7 @@ func (m *ServiceMain) Init() error {
 		return exception.ConfigErrorEx2("[Init] failed to load %s error: %s,confuse to startup", m.configFileName, err.Error())
 	}
 
-	// 并发闸上限(ini [server],<=0 用默认):
-	//   - maxConcurrentStreams:SSE 流式连接数
-	//   - maxChatConcurrency:全局聊天(同步+流式)请求数
+	// 并发闸上限(ini [server],<=0 用默认):全局并发限制 + 流式并发限制
 	maxStreams, _ := m.configHelper.GetIntValueDefault("server", "maxStreamConcurrency", cCommon.DefaultMaxStreamConcurrency)
 	maxChats, _ := m.configHelper.GetIntValueDefault("server", "maxChatConcurrency", cCommon.DefaultMaxChatConcurrency)
 	m.streamGate = serviceCore.GetStreamConcurrencyGate(maxStreams)

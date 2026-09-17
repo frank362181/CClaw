@@ -9,6 +9,8 @@
 
 package dataobject
 
+import "gorm.io/plugin/optimisticlock"
+
 type TTool struct {
 	ToolId      string `gorm:"column:tool_id" json:"ToolId"`
 	ToolName    string `gorm:"column:tool_name" json:"ToolName"`
@@ -17,8 +19,23 @@ type TTool struct {
 	InputSchema string `gorm:"column:input_schema" json:"InputSchema"`
 	Disabled    bool   `gorm:"column:disabled" json:"Disabled"`
 	Deleted     bool   `gorm:"column:deleted" json:"Deleted"`
+
+	DVersion optimisticlock.Version `gorm:"column:d_version" json:"DVersion"`
 }
 
 func (t TTool) TableName() string {
 	return "t_tool"
+}
+
+func ToolValues(t *TTool) map[string]interface{} {
+	return map[string]interface{}{
+		"tool_id":      t.ToolId,
+		"tool_name":    t.ToolName,
+		"description":  t.Description,
+		"script":       t.Script,
+		"input_schema": t.InputSchema,
+		"disabled":     t.Disabled,
+		"deleted":      t.Deleted,
+		"dVersion":     t.DVersion,
+	}
 }

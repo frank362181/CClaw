@@ -219,3 +219,26 @@ CREATE INDEX IF NOT EXISTS idx_t_turn_tool_turn_id ON t_turn_tool(turn_id);
 -- 会话内 seq/索引分配由服务端串行化，该唯一约束作为最后一道防线，
 -- 防止重试或多实例并发导致同一轮被重复落库。
 CREATE UNIQUE INDEX IF NOT EXISTS idx_t_turn_session_seq ON t_turn(session_id, seq);
+
+-- agent skill 关联表 t_agent_skill
+create table if not exists t_agent_skill (
+    ID integer primary key autoincrement,
+    agent_id varchar(8) not null,
+    skill_id varchar(8) not null,
+    disabled integer not null default 0,
+    deleted integer not null default 0
+    foreign key(agent_id) references t_agent(agent_id),
+    foreign key(skill_id) references t_skill(skill_id)
+);
+
+CREATE TABLE IF NOT EXISTS t_tool (
+    ID           INTEGER PRIMARY KEY AUTOINCREMENT,     -- Auto Incr Not Null
+    tool_id      VARCHAR(8)  NOT NULL UNIQUE,           -- Not Null Primary Key（SQLite 用 UNIQUE 替代）
+    tool_name    VARCHAR(32)  NOT NULL,                 -- tool名称
+    description  VARCHAR(64)   NOT NULL,                -- 描述
+    script       VARCHAR(128)      NOT NULL,            -- 脚本相对路径
+    input_schema VARCHAR(128)      NOT NULL,            -- schema 相对路径
+    disabled     INTEGER NOT NULL DEFAULT 0,            -- 是否禁用：0 否/1 是
+    deleted      INTEGER NOT NULL DEFAULT 0,            -- 是否删除 0 否 / 1 是
+    d_version    INTEGER      NOT NULL DEFAULT 0        -- 乐观锁
+);
