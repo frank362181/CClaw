@@ -36,6 +36,7 @@ import (
 	"fmt"
 	"strings"
 
+	"my.favorite/cclawservice/harness"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/llmproto"
@@ -71,7 +72,7 @@ func AssembleContext(systemPrompt string, records []hCommon.MemoryRecord, curren
 	summaryText, active := splitSummaryAndActive(records)
 	items := buildHistoryItems(active, policy.ToolReplayMaxRunes)
 
-	system := composeSystemMessage(systemPrompt, summaryText)
+	system := harness.ComposeSystemMessage(systemPrompt, summaryText, historySummaryTitle) //composeSystemMessage(systemPrompt, summaryText)
 	current := llmproto.ChatMessage{Role: hCommon.RoleUser, Content: currentUserMsg}
 
 	result := hCommon.AssembleResult{Summary: summaryText}
@@ -184,20 +185,6 @@ func FitMessages(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, p
 }
 
 // ============================== private functions & methods ==============================
-
-// composeSystemMessage 组装 system 消息:系统提示 + 历史摘要(摘要追加在系统提示之后)。
-//
-// 摘要刻意不单独成一条 system 消息:部分供应商对"非首条 system"支持不一致,
-// 折进同一条 system 消息可以完全规避该类兼容问题。
-func composeSystemMessage(systemPrompt, summaryText string) llmproto.ChatMessage {
-	content := strings.TrimSpace(systemPrompt)
-	if summary := strings.TrimSpace(summaryText); summary != "" {
-		content = strings.TrimSpace(content + "\n\n" + historySummaryTitle + "\n" + summary)
-	}
-	return llmproto.ChatMessage{Role: hCommon.RoleSystem, Content: content}
-
-	//return harness.ComposeSystemMessage(systemPrompt, summaryText,historySummaryTitle)
-}
 
 // splitSummaryAndActive 拆出"摘要文本"与"仍需回放的记录"。
 //

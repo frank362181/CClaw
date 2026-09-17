@@ -67,7 +67,7 @@ type ChatService struct {
 	agentRepo     repo.IAgentRepository
 	promptService *harness.PromptService
 	llmClient     *harness.Client
-	agentRouter   *harness.AgentRouter
+	agentRouter   *ctxmgr.AgentRouter
 
 	// memoryService 会话管理(阶段1双写:只写不读的旁路)。
 	// 为 nil 或未启用时全部记录动作静默跳过,不影响聊天主流程。
@@ -103,7 +103,7 @@ var chatService = pCommon.GetSingleton(func() *ChatService {
 //   - sessionRecord:  是否启用会话记录(阶段1双写),来源于 [chat] sessionRecord 配置
 func GetChatService(db core.IBaseDatabase, functionCalling bool, sessionRecord bool) baseService.IService {
 	chatService.agentRepo = repo.GetAgentRepository(db)
-	chatService.agentRouter = harness.GetAgentRouter(chatService.agentRepo)
+	chatService.agentRouter = ctxmgr.GetAgentRouter(chatService.agentRepo)
 	chatService.functionCalling = functionCalling
 	chatService.memoryService = mstorage.GetMemoryService(db, sessionRecord)
 

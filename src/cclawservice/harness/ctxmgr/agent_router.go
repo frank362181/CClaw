@@ -18,7 +18,7 @@
 *   - 仅一个可用 Agent 时直接短路返回,不做无谓的路由计算。
 **/
 
-package harness
+package ctxmgr
 
 import (
 	"context"
@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
+	"my.favorite/cclawservice/harness"
 	hCommon "my.favorite/cclawservice/harness/common"
-	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/platformutility/common"
@@ -38,8 +38,8 @@ import (
 // AgentRouter 负责将一条用户消息解析到目标 Agent。
 type AgentRouter struct {
 	agentRepo     repo.IAgentRepository
-	llmClient     *Client
-	sessionAgents *ctxmgr.ChatSessionAgentRegistry
+	llmClient     *harness.Client
+	sessionAgents *ChatSessionAgentRegistry
 
 	llmRoutingOn bool          // 是否启用 LLM 智能分类路由
 	llmTimeout   time.Duration // LLM 分类超时
@@ -49,8 +49,8 @@ type AgentRouter struct {
 var agentRouter = common.GetSingleton(func() *AgentRouter {
 	return &AgentRouter{
 		agentRepo:     nil,
-		llmClient:     NewClient(),
-		sessionAgents: ctxmgr.GetChatSessionAgentMgr(),
+		llmClient:     harness.NewClient(),
+		sessionAgents: GetChatSessionAgentMgr(),
 		llmRoutingOn:  hCommon.AgentRoutingLLMEnabled,
 		llmTimeout:    time.Duration(hCommon.AgentRoutingLLMTimeoutSeconds) * time.Second,
 		llmMaxTokens:  hCommon.AgentRoutingLLMMaxTokens,
@@ -214,7 +214,7 @@ func (r *AgentRouter) classifyByLLM(ctx context.Context, comCode string, agents 
 		})
 	}
 
-	content, _, err := r.llmClient.Complete(classifyCtx, provider, BuildClassifySystemPrompt(candidates), reqMsg, r.llmMaxTokens)
+	content, _, err := r.llmClient.Complete(classifyCtx, provider, harness.BuildClassifySystemPrompt(candidates), reqMsg, r.llmMaxTokens)
 	if err != nil {
 		logging.LogDebugF("agent router: runtime classify skipped, err:%s", err.Error())
 		return dataobject.TAgent{}, false
