@@ -13,7 +13,6 @@
 package repo
 
 import (
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -143,7 +142,8 @@ func (repo *PromptRepository) AddSkill(agentId, skillId, skillFile string) error
 		return exception.UnMatchErrorEx2("prompt repo: agent id not found")
 	}
 
-	filePath, err := repo.resolveSkillPathLocked(agentPrompt.agentBootstrapRoot, skillFile)
+	// 技能目录配置 → SKILL.md 绝对路径(相对 skills 根解析 + 越界校验都在 common 里单点收敛)
+	filePath, err := cCommon.ResolveSkillDocPath(skillFile)
 	if err != nil {
 		return err
 	}
@@ -295,29 +295,4 @@ func (repo *PromptRepository) readAgentDocumentLocked(kind dataobject.AgentDocum
 	}
 
 	return base, true, nil
-}
-
-// resolveSkillPathLocked 解析 skill 文件路径:相对路径相对于工作区根,绝对路径直接使用。
-// skill 文件来自数据库配置(TSkill.SkillFile,管理员维护),允许位于工作区之外的共享 skill 目录,
-// 因此不做 workspace 包含性校验;安全约束聚焦于:文件名必须为 SKILL.md + 单文件大小上限。
-func (repo *PromptRepository) resolveSkillPathLocked(workspaceRoot, skillFile string) (string, error) {
-	skillFile = strings.TrimSpace(skillFile)
-	if len(skillFile) == 0 {
-		return "", exception.ParameterEmptyErrorEx("prompt repo: skill file is empty")
-	}
-	if filepath.Base(skillFile) != hCommon.SkillDocFileName {
-		return "", exception.FilePathErrorEx("prompt repo: skill file must be SKILL.md: " + skillFile)
-	}
-
-	filePath := skillFile
-	if !filepath.IsAbs(filePath) {
-		filePath = filepath.Join(workspaceRoot, filePath)
-	}
-
-	absPath, err := filepath.Abs(filePath)
-	if err != nil {
-		return "", exception.FilePathErrorEx("prompt repo: resolve skill path error: " + err.Error())
-	}
-
-	return filepath.Clean(absPath), nil
 }

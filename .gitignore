@@ -8,9 +8,15 @@ target/
 .log/*
 
 ### Go build output ###
-# 构建输出目录:忽略任意层级下的 bin 目录(含可执行文件 agentService、bin/log 等)
-bin/
-**/bin/
+# 忽略任意层级 bin/ 下的构建产物与运行态数据(可执行文件 agentService、log/、temp/、workspace/、config/ 等)。
+# 【不能写成 `bin/` 或 `**/bin/`(整目录忽略)】git 不会进入被忽略的父目录,
+# 之后的 `!` 负向规则对其内容一律无效 ⇒ bin/cclaw/skills 下的技能资产
+# (SKILL.md / scripts / config)会永远进不了版本库。故改为:
+# "忽略 bin 下全部内容" + "逐层放行技能目录"。
+**/bin/**
+!**/bin/cclaw/
+!**/bin/cclaw/skills/
+!**/bin/cclaw/skills/**
 
 secret*.*
 *.pem
@@ -35,7 +41,9 @@ secret*.*
 ./*/.idea/
 
 ### python
-*/__pycache__/
+# 注意必须是 **/ (任意层级):`*/__pycache__/` 只匹配一层,
+# 匹配不到 skills/<skill>/scripts/__pycache__ 这种深层目录。
+**/__pycache__/
 # Python:
 *.py[cod]
 *.so

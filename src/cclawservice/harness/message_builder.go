@@ -10,6 +10,7 @@ import (
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
 	pCommon "my.favorite/platformutility/common"
+	"my.favorite/platformutility/logging"
 )
 
 // BuildSimpleChatMessage 以system/user 文本构建简单的prompt
@@ -26,6 +27,31 @@ func BuildChatMessage(systemPrompt *dataobject.SystemPrompt, req *request.ChatRe
 		{Role: hCommon.RoleUser, Content: req.ReqMsg},
 	}
 
+}
+
+// BuildToolCallWithContentMessage 构造携带文本与工具调用的 assistant 消息(工具循环回填历史用)。
+// 模型可能在一轮里既输出文本又请求工具(OpenAI 规范允许 content 与 tool_calls 并存),
+// 文本须一并回填,否则下一轮 LLM 看不到自己刚说的话(上下文缺失)。
+func BuildToolCallWithContentMessage(content string, calls []llmproto.ToolCall) llmproto.ChatMessage {
+	return llmproto.ChatMessage{Role: hCommon.RoleAssistant, Content: content, ToolCalls: calls}
+}
+
+// BuildToolResultMessage 构造工具执行结果消息(role=tool,按 tool_call_id 关联)。
+func BuildToolResultMessage(toolCallID, content string) llmproto.ChatMessage {
+	return llmproto.ChatMessage{Role: hCommon.RoleTool, ToolCallID: toolCallID, Content: content}
+}
+
+// ComposeSystemMessage 组装 system 消息:系统提示 + 历史摘要(摘要追加在系统提示之后)。
+//
+// 摘要刻意不单独成一条 system 消息:部分供应商对"非首条 system"支持不一致,
+// 折进同一条 system 消息可以完全规避该类兼容问题。
+func ComposeSystemMessage(systemPrompt, summaryText, summaryTitle string) llmproto.ChatMessage {
+	content := strings.TrimSpace(systemPrompt)
+	if summary := strings.TrimSpace(summaryText); summary != pCommon.BlankString {
+		content = strings.TrimSpace(content + "\n\n" + summaryTitle + "\n" + summary)
+	}
+
+	return llmproto.ChatMessage{Role: hCommon.RoleSystem, Content: content}
 }
 
 // BuildClassifySystemPrompt 构建用来通过用户问题的意图询问LLM返回合适Agent的 prompt。
@@ -92,14 +118,24 @@ func BuildChatCompletionRequest(llmProvider dataobject.TLlm, systemPrompt *datao
 	return req
 }
 
-// BuildChatCompletionRequestWithTool 构造带工具的 chat/completions 请求体。
+// BuildChatCompletionRequestWithTool 构造带工具的 chat/completions 请求体(tool_choice 不发送)。
 // max_tokens 沿用与普通请求一致的动态推导(dynamicMaxTokens)。
 func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool, stream bool) llmproto.ChatCompletionRequest {
+	return BuildChatCompletionRequestWithToolChoice(llmProvider, messages, tools, pCommon.BlankString, stream)
+}
+
+// BuildChatCompletionRequestWithToolChoice 在带工具请求的基础上附上工具选择策略。
+//   - toolChoice: llmproto.ToolChoice* 常量;空串则不发送 tool_choice 字段(等价 auto)
+//
+// 为什么需要:技能正文不注入 system prompt,模型看不到"必须调用工具"的流程要求,
+// 可能直接用上下文里的历史工具结果作答 —— 对实时类工具(force-call)首轮必须强制调用。
+func BuildChatCompletionRequestWithToolChoice(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool, toolChoice string, stream bool) llmproto.ChatCompletionRequest {
 	req := llmproto.ChatCompletionRequest{
-		Model:    llmProvider.GetModelName(),
-		Messages: messages,
-		Stream:   stream,
-		Tools:    tools,
+		Model:      llmProvider.GetModelName(),
+		Messages:   messages,
+		Stream:     stream,
+		Tools:      tools,
+		ToolChoice: strings.TrimSpace(toolChoice),
 	}
 	// 仅非流式请求按 provider 配置发送 enable_thinking;流式保持 nil(不关闭 thinking)
 	if !stream {
@@ -114,27 +150,22 @@ func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []
 	return req
 }
 
-// BuildToolCallWithContentMessage 构造携带文本与工具调用的 assistant 消息(工具循环回填历史用)。
-// 模型可能在一轮里既输出文本又请求工具(OpenAI 规范允许 content 与 tool_calls 并存),
-// 文本须一并回填,否则下一轮 LLM 看不到自己刚说的话(上下文缺失)。
-func BuildToolCallWithContentMessage(content string, calls []llmproto.ToolCall) llmproto.ChatMessage {
-	return llmproto.ChatMessage{Role: hCommon.RoleAssistant, Content: content, ToolCalls: calls}
-}
-
-// BuildToolResultMessage 构造工具执行结果消息(role=tool,按 tool_call_id 关联)。
-func BuildToolResultMessage(toolCallID, content string) llmproto.ChatMessage {
-	return llmproto.ChatMessage{Role: hCommon.RoleTool, ToolCallID: toolCallID, Content: content}
-}
-
-// ComposeSystemMessage 组装 system 消息:系统提示 + 历史摘要(摘要追加在系统提示之后)。
-//
-// 摘要刻意不单独成一条 system 消息:部分供应商对"非首条 system"支持不一致,
-// 折进同一条 system 消息可以完全规避该类兼容问题。
-func ComposeSystemMessage(systemPrompt, summaryText, summaryTitle string) llmproto.ChatMessage {
-	content := strings.TrimSpace(systemPrompt)
-	if summary := strings.TrimSpace(summaryText); summary != pCommon.BlankString {
-		content = strings.TrimSpace(content + "\n\n" + summaryTitle + "\n" + summary)
+// DropForceToolCallRequest 供应商拒绝tool force call时，参数降级
+func DropForceToolCallRequest(req *llmproto.ChatCompletionRequest, err error) bool {
+	if req == nil || err == nil || req.ToolChoice == pCommon.BlankString {
+		return false
 	}
 
-	return llmproto.ChatMessage{Role: hCommon.RoleSystem, Content: content}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "tool_choice") && !strings.Contains(msg, "enable_thinking") {
+		return false
+	}
+
+	logging.LogWarnF("llm client: provider rejected tool forced-call params (clear tool_choice=%s/enable_thinking), retry: %s",
+		req.ToolChoice, err.Error())
+
+	req.ToolChoice = pCommon.BlankString
+	req.EnableThinking = nil
+
+	return true
 }

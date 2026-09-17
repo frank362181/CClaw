@@ -108,8 +108,9 @@ func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm
 // CompleteWithTools 执行一次同步 chat/completions(带工具),返回正式文本与工具调用(可能为空)。
 // 不执行工具:由调用方(工具循环)解析并执行返回的工具调用。
 // 429/5xx/断流(传输层)按指数退避重试(同步调用无副作用,可安全重试)。
-func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool) (string, []llmproto.ToolCall, error) {
-	req := BuildChatCompletionRequestWithTool(llmProvider, messages, tools, false)
+//   - toolChoice: llmproto.ToolChoice* 常量;空串表示不发送 tool_choice(默认 auto)
+func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool, toolChoice string) (string, []llmproto.ToolCall, error) {
+	req := BuildChatCompletionRequestWithToolChoice(llmProvider, messages, tools, toolChoice, false)
 	var lastErr error
 	for attempt := 1; attempt <= c.retryMaxAttempts; attempt++ {
 		if attempt > 1 {
@@ -122,6 +123,11 @@ func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.T
 			return content, calls, nil
 		}
 		lastErr = err
+		// 供应商不接受强制调用相关参数(tool_choice / enable_thinking):降级重试一次 ——
+		// 强制调用失败不该让整轮对话失败,退回"由模型自行决定"仍优于把 502 抛给用户。
+		if dropped := DropForceToolCallRequest(&req, err); dropped {
+			continue
+		}
 		if !llmproto.IsRetryableLlmError(err) {
 			return pCommon.BlankString, nil, err
 		}
@@ -192,8 +198,9 @@ func (c *Client) streamRequest(ctx context.Context, llmProvider dataobject.TLlm,
 //     供调用方把工具意图实时推给前端(真正执行仍需等流结束拿到完整 arguments)。
 //   - 返回值:       累计正式文本 + 模型请求的工具调用(若有;arguments 已按 index 拼接完整) + finish_reason
 //   - 重试:         429/5xx/断流在"尚未输出任何内容/思考/工具意图"时按指数退避重试。
-func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool, onChunk func(string), onReasoning func(string), onToolIntent func(name string)) (string, []llmproto.ToolCall, string, error) {
-	req := BuildChatCompletionRequestWithTool(llmProvider, messages, tools, true)
+//   - toolChoice:   llmproto.ToolChoice* 常量;空串表示不发送 tool_choice(默认 auto)
+func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool, toolChoice string, onChunk func(string), onReasoning func(string), onToolIntent func(name string)) (string, []llmproto.ToolCall, string, error) {
+	req := BuildChatCompletionRequestWithToolChoice(llmProvider, messages, tools, toolChoice, true)
 	lastFinish := ""
 	var lastErr error
 	for attempt := 1; attempt <= c.retryMaxAttempts; attempt++ {
@@ -207,6 +214,10 @@ func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLl
 			return content, calls, finishReason, nil
 		}
 		lastErr, lastFinish = err, finishReason
+		// 供应商不接受强制调用相关参数:降级重试一次(已向客户端输出增量时不可重试)
+		if !emitted && DropForceToolCallRequest(&req, err) {
+			continue
+		}
 		if emitted || !llmproto.IsRetryableLlmError(err) {
 			return pCommon.BlankString, nil, finishReason, err
 		}

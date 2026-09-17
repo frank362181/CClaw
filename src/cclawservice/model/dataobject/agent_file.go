@@ -110,11 +110,13 @@ type SkillRequires struct {
 //   - Name/Description/Parameters:用于生成给 LLM 的函数 schema;
 //   - Script:相对 SKILL.md 所在目录的脚本路径(如 scripts/weather.py),执行时以参数 JSON 写入 stdin,
 //     脚本把结果(JSON/文本)写到 stdout,退出码非 0 表示失败(stderr 为错误信息)。
+//   - ForceCall:"必须调用"标记(如取实时数据的工具):工具循环首轮会强制 tool_choice=required。
 type SkillTool struct {
 	Name        string         `json:"name,omitempty" yaml:"name,omitempty"`
 	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
 	Script      string         `json:"script,omitempty" yaml:"script,omitempty"`
 	Parameters  map[string]any `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+	ForceCall   bool           `json:"forceCall,omitempty" yaml:"force-call,omitempty"`
 }
 
 // SkillFrontMatter 是 SKILL.md 的 YAML 元数据部分

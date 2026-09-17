@@ -263,6 +263,10 @@ func buildHistoryItems(records []hCommon.MemoryRecord, toolMaxRunes int) []histo
 }
 
 // renderToolBlock 把同轮工具结果渲染为一个文本块(控制单条长度,完整内容仍在历史文件里)。
+//
+// 每条都带**记录时间**前缀:历史工具结果原本与"刚查到的"长得一模一样,
+// 模型会把旧数据当当下复述(实测:两天前的天气被当成今天)。时间由记录头解析而来
+// (MemoryRecord.TimeText),缺失时降级为不带时间的旧格式。
 func renderToolBlock(tools []hCommon.MemoryRecord, maxRunes int) string {
 	var sb strings.Builder
 	sb.WriteString(historyToolBlockOpen)
@@ -271,7 +275,12 @@ func renderToolBlock(tools []hCommon.MemoryRecord, maxRunes int) string {
 		if name == "" {
 			name = "tool"
 		}
-		_, _ = fmt.Fprintf(&sb, "\n- %s: %s", name, pCommon.TruncateRunes(strings.TrimSpace(tool.Content), maxRunes, hCommon.TruncatedMarker))
+		body := pCommon.TruncateRunes(strings.TrimSpace(tool.Content), maxRunes, hCommon.TruncatedMarker)
+		if timeText := strings.TrimSpace(tool.TimeText); timeText != "" {
+			_, _ = fmt.Fprintf(&sb, "\n- [%s] %s: %s", timeText, name, body)
+		} else {
+			_, _ = fmt.Fprintf(&sb, "\n- %s: %s", name, body)
+		}
 	}
 	sb.WriteString("\n")
 	sb.WriteString(historyToolBlockClose)

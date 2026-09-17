@@ -192,6 +192,13 @@ func (service *PromptService) assembleSystemPrompt(agent dataobject.TAgent, work
 		sb.WriteString(sections[i].Content)
 	}
 
+	// ---- 当前时间(固定尾巴:始终生效、不受预算截断) ----
+	// 为什么必须有:此前 system prompt 里没有任何"今天几号"的锚点,而历史回放不带时间语义,
+	// 模型无法判断上下文里的日期是否过期 —— 实测出现过把两天前的天气结果当"今天"复述的问题。
+	// 放在最末(而非开头)是为保住前缀缓存:动态内容越靠后,被它失效化的前缀越短。
+	sb.WriteString("\n\n## 当前时间\n\n")
+	sb.WriteString(pCommon.FormatCurrentTime())
+
 	// ---- 输出语言要求(面向中文用户的统一约定;追加在提示词最末,始终生效、不受预算截断) ----
 	sb.WriteString("\n\n## 输出语言\n\n")
 	sb.WriteString("你面向中文用户。所有呈现给用户的输出一律使用简体中文:包括正式回复、思考/推理过程、" +

@@ -161,8 +161,14 @@ export const State = {
             name: String(tool.name || ''),
             detail: String(tool.detail || ''),
         };
-        if (idx >= 0) msg.toolLog[idx] = entry;
-        else msg.toolLog.push(entry);
+        if (idx >= 0) {
+            // 同一 seq 的后续事件可能**不带** detail(done 只报完成态,不再回传结果 JSON):
+            // 此时保留已累积的执行进度文本,否则重渲染时进度日志会被清空(与流式实时视图不一致)。
+            if (!entry.detail) entry.detail = String(msg.toolLog[idx].detail || '');
+            msg.toolLog[idx] = entry;
+        } else {
+            msg.toolLog.push(entry);
+        }
         if (persist) this.save();
         return true;
     },

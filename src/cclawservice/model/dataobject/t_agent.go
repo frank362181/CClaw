@@ -171,6 +171,8 @@ func AgentValues(a *TAgent) map[string]interface{} {
 		"subagents":             a.SubAgents,
 		"reasoning_mode":        a.ReasoningMode,
 		"tool_progress":         a.ToolProgress,
+		"skill_ids":             a.SkillIds,
+		"deleted":               a.Deleted,
 		"disabled":              a.Disabled,
 	}
 }
@@ -192,12 +194,45 @@ func (agent *TAgent) FromJsonString(jsonStr string) error {
 	return nil
 }
 
+// SkillScope 技能作用域(与 t_skill.skill_scope 对齐):决定技能对哪些归属可见。
+//
+// 与 t_agent_skill 的分工:关联表决定"某 agent 是否启用该技能",作用域决定
+// "该技能能否被该归属使用"(见 TSkill.IsSkillVisibleTo),两者同时满足才生效。
+type SkillScope int
+
+const (
+	SkillScopeSystem   SkillScope = iota // 0 系统:平台级技能,所有归属可见(如 owner_id=000000)
+	SkillScopePersonal                   // 1 个人:仅技能归属(owner_id)自身可见
+	SkillScopeProject                    // 2 项目:仅技能归属自身可见(当前无项目维度,按归属判定)
+	SkillScopePlugin                     // 3 插件:随插件分发的技能,所有归属可见
+)
+
+func (s SkillScope) String() string {
+	switch s {
+	case SkillScopeSystem:
+		return "system"
+	case SkillScopePersonal:
+		return "personal"
+	case SkillScopeProject:
+		return "project"
+	case SkillScopePlugin:
+		return "plugin"
+	default:
+		return "unknown"
+	}
+}
+
+// Valid 判断作用域取值是否合法(0..3)。
+func (s SkillScope) Valid() bool {
+	return s >= SkillScopeSystem && s <= SkillScopePlugin
+}
+
 type TSkill struct {
 	OwnerId    string `json:"OwnerId"`
 	SkillId    string `json:"skillId"`
 	SkillName  string `json:"skillName"`
-	SkillDir   string `json:"skillDir"`   // 指向skill对应的相对路径,定位SKILL.md
-	SkillScope int    `json:"skillScope"` // 指向skill的作用域
+	SkillDir   string `json:"skillDir"`   // 技能目录名(相对 skills 根的安全相对路径),其下固定为 SKILL.md
+	SkillScope int    `json:"skillScope"` // 作用域,见 SkillScope(0系统/1个人/2项目/3插件)
 
 	Disabled bool                   `json:"Disabled"`
 	Deleted  bool                   `json:"Deleted"`
@@ -214,16 +249,30 @@ func SkillValues(sk *TSkill) map[string]interface{} {
 	}
 }
 
-func (skill *TSkill) ToJsonString() (string, error) {
-	jsonSting, err := json.Marshal(skill)
+// Scope 返回强类型作用域(便于与 SkillScope 常量比较)。
+func (sk *TSkill) Scope() SkillScope { return SkillScope(sk.SkillScope) }
+
+// IsSkillVisibleTo 判断该技能对指定归属(comCode/owner_id)是否可见。
+//   - 系统/插件作用域:全局可见(平台技能);
+//   - 个人/项目作用域:仅当技能归属与使用方归属一致时可见(防跨单位越权引用)。
+func (sk *TSkill) IsSkillVisibleTo(ownerId string) bool {
+	if scope := sk.Scope(); scope == SkillScopeSystem || scope == SkillScopePlugin {
+		return true
+	}
+
+	return strings.EqualFold(strings.TrimSpace(sk.OwnerId), strings.TrimSpace(ownerId))
+}
+
+func (sk *TSkill) ToJsonString() (string, error) {
+	jsonSting, err := json.Marshal(sk)
 	if err != nil {
 		return "", err
 	}
 	return string(jsonSting), nil
 }
 
-func (skill *TSkill) FromJsonString(jsonStr string) error {
-	err := json.Unmarshal([]byte(jsonStr), skill)
+func (sk *TSkill) FromJsonString(jsonStr string) error {
+	err := json.Unmarshal([]byte(jsonStr), sk)
 	if err != nil {
 		return err
 	}

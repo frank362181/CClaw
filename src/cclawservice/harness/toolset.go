@@ -33,8 +33,9 @@ import (
 
 // ToolSet 是某 Agent 本次会话可用的工具集合。
 type ToolSet struct {
-	tools []llmproto.Tool   // 提供给 LLM 的函数声明
-	exec  map[string]string // 工具名 → 脚本绝对路径
+	tools     []llmproto.Tool   // 提供给 LLM 的函数声明
+	exec      map[string]string // 工具名 → 脚本绝对路径
+	forceCall bool              // 是否有工具声明了 force-call(首轮强制 tool_choice=required)
 }
 
 // LoadToolSet 扫描 skillFiles(每个都是 SKILL.md 绝对路径),解析其中声明的工具。
@@ -57,6 +58,9 @@ func LoadToolSet(extensionRoot string, skillFiles []string) *ToolSet {
 		for _, pt := range getSkillToolsCached(rootClean, skillFile) {
 			ts.tools = append(ts.tools, pt.tool)
 			ts.exec[pt.name] = pt.script
+			if pt.forceCall {
+				ts.forceCall = true
+			}
 		}
 	}
 	return ts
@@ -64,6 +68,19 @@ func LoadToolSet(extensionRoot string, skillFiles []string) *ToolSet {
 
 // LLMTools 返回全部工具声明(供 LLM function-calling schema)。
 func (ts *ToolSet) LLMTools() []llmproto.Tool { return ts.tools }
+
+// RequiresForcedCall 报告本工具集是否含"必须调用"的工具(front matter force-call:true)。
+// 为 true 时调用方在工具循环**首轮**设置 tool_choice=required ——
+// 技能正文不注入,模型看不到"必须调工具"的流程要求,不给硬约束它会用历史结果充当新结果。
+func (ts *ToolSet) RequiresForcedCall() bool { return ts.forceCall }
+
+func (ts *ToolSet) ForceToolChoice() string {
+	if ts.RequiresForcedCall() {
+		return llmproto.ToolChoiceRequired
+	}
+
+	return pCommon.BlankString
+}
 
 // Exec 执行指定工具:校验注册 → 运行脚本 → 返回结果文本。
 func (ts *ToolSet) Exec(ctx context.Context, name, argsJSON string) (string, error) {
@@ -89,9 +106,10 @@ func (ts *ToolSet) ExecStream(ctx context.Context, name, argsJSON string, onLine
 
 // parsedTool 是单个 SKILL.md 解析出的一个工具(内部缓存单元)。
 type parsedTool struct {
-	name   string
-	script string
-	tool   llmproto.Tool
+	name      string
+	script    string
+	tool      llmproto.Tool
+	forceCall bool // front matter force-call:首轮强制调用(取实时数据的工具)
 }
 
 // skillToolsCacheEntry 缓存条目:SKILL.md 的 (size,mtime) 指纹 + 解析出的工具。
@@ -172,7 +190,7 @@ func parseSkillTools(rootClean, skillFile string) []parsedTool {
 		if !ok {
 			continue // 脚本缺失/越界 → 跳过该工具
 		}
-		out = append(out, parsedTool{name: tool.Function.Name, script: scriptPath, tool: tool})
+		out = append(out, parsedTool{name: tool.Function.Name, script: scriptPath, tool: tool, forceCall: t.ForceCall})
 	}
 	return out
 }

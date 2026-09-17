@@ -84,6 +84,11 @@ func (g *AgentAccessor) GetAllAgents() ([]dataobject.TAgent, error) {
 		return nil, exception2.DatabaseQueryErrEx2("load agents error:%s", err.Error())
 	}
 
+	//1. 若此时agent为空,就不需要从数据库中读取对应的skill了
+	if len(list) == 0 {
+		return list, nil
+	}
+
 	// 2. 用聚合查与agent关联的SKILL
 	var agentIds []string
 	for _, agent := range list {
@@ -117,7 +122,7 @@ func (g *AgentAccessor) GetAllAgents() ([]dataobject.TAgent, error) {
 
 func (g *AgentAccessor) GetAllSkills() ([]dataobject.TSkill, error) {
 	var list []dataobject.TSkill
-	err := g.gormDb.Where("deleted = 0").Find(&list).Error
+	err := g.gormDb.Where("deleted = 0 and disabled = 0").Find(&list).Error
 	if err != nil {
 		return nil, exception2.DatabaseQueryErrEx2("load skills error:%s", err.Error())
 	}

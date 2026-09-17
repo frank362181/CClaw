@@ -18,9 +18,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -458,14 +458,14 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 	}
 
 	// 7. 基于 Agent 工作区启动文档组装 system prompt,并解析其 skill 中声明的可用工具
-	skillFiles, agentExtensionRoot := s.collectSkillFiles(agent)
+	skillFiles, skillRoot := s.collectSkillFiles(agent)
 	systemPrompt, err := s.promptService.BuildSystemPromptEx(agent, skillFiles, dataobject.BootstrapScopeNormal)
 	if err != nil {
 		logging.LogErrorF("chat service: build system prompt error:%s", err.Error())
 		return nil, dataobject.TAgent{}, nil, dataobject.TLlm{}, nil, myException.ChatLLMKind.Newf("chat service: build system prompt error:%s", err.Error())
 	}
 
-	toolSet := harness.LoadToolSet(agentExtensionRoot, skillFiles)
+	toolSet := harness.LoadToolSet(skillRoot, skillFiles)
 	// 工具 schema 占窗口但与历史竞争同一份额度:量一次并缓存(不量 = 预算永远偏乐观)
 	s.toolsReserveTokens(agent, toolSet)
 	// 上下文预算的配置异味(预留吃光窗口 / 把系统预留当历史旋钮)只报一次
@@ -565,35 +565,36 @@ func (s *ChatService) resolveProvider(comCode string, agent dataobject.TAgent) (
 	return dataobject.TLlm{}, pException.UnMatchErrorEx2("no available runtime provider for agent: %s", agent.AgentId)
 }
 
-// collectSkillFiles 与当前agent对应的 skill 文件路径,并返回 Agent 的 extension 根目录。
-// 相对路径显式拼接 Agent 工作区根(与 PromptRepository.resolveSkillPathLocked 语义一致);
-// 文件缺失由仓库告警后跳过,不影响主流程。
-// 返回值:skill 文件路径列表 + extension 根目录(供 ToolSet 解析脚本工具时做安全校验)。
+// collectSkillFiles 收集当前 Agent 启用的 skill 文档路径(SKILL.md 绝对路径),并返回 skills 根目录。
+//
+// 布局约定:所有技能统一位于 <exeDir>/cclaw/skills/<skill_dir>/SKILL.md,
+// 由 t_skill.skill_dir 定位(相对 skills 根的安全相对路径,一个目录一个技能)。
+// 目录非法/文件缺失都不影响主流程:非法目录告警后跳过,文件缺失由仓库告警后跳过。
+// 返回值:SKILL.md 路径列表 + skills 根目录(供 ToolSet 解析脚本工具时做安全校验)。
 func (s *ChatService) collectSkillFiles(agent dataobject.TAgent) ([]string, string) {
-	if s.agentRepo == nil {
-		return nil, ""
-	}
+	skillRoot, _ := cCommon.BuildSkillRoot()
 
-	agentExtensionRoot, _ := cCommon.BuildAgentExtensionRoot(agent)
+	if s.agentRepo == nil {
+		return nil, skillRoot
+	}
 
 	skills := s.agentRepo.GetSkillsByAgent(agent)
 	if len(skills) == 0 {
-		return nil, agentExtensionRoot
+		return nil, skillRoot
 	}
 
 	files := make([]string, 0, len(skills))
 	for i := range skills {
-		dir := strings.TrimSpace(skills[i].SkillDir)
-		if dir == "" {
+		docPath, err := cCommon.ResolveSkillDocPath(skills[i].SkillDir)
+		if err != nil {
+			logging.LogWarnF("chat service: agent=%s skill=%s has an illegal skill dir[%s]:%s",
+				agent.AgentId, skills[i].SkillId, skills[i].SkillDir, err.Error())
 			continue
 		}
-		if !filepath.IsAbs(dir) && agentExtensionRoot != "" {
-			dir = filepath.Join(agentExtensionRoot, dir)
-		}
-		files = append(files, dir)
+		files = append(files, docPath)
 	}
 
-	return files, agentExtensionRoot
+	return files, skillRoot
 }
 
 // assembleChatContext 读回会话历史并装配成本轮完整的 LLM 消息序列。
@@ -627,6 +628,25 @@ func (s *ChatService) assembleChatContext(session dataobject.TSession, agent dat
 	return ctxmgr.AssembleContext(systemText, records, req.ReqMsg, policy), records
 }
 
+// looksLikeToolResultJSON 判断脚本 stdout 的一行是否为"整行一个 JSON 对象/数组"。
+//
+// 这基本就是工具的结果体本身(例:save_report 的 {"saved":true,...}、ingest_router 的
+// {"tool":"ingest_router",...})。用途:只把这类行挡在**进度展示**之外 ——
+// 工具结果是给模型的,聊天界面不需要展示原始 JSON;普通文本进度行仍照旧下发。
+func looksLikeToolResultJSON(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) < 2 {
+		return false
+	}
+
+	head, tail := trimmed[0], trimmed[len(trimmed)-1]
+	if !(head == '{' && tail == '}') && !(head == '[' && tail == ']') {
+		return false
+	}
+
+	return json.Valid([]byte(trimmed))
+}
+
 // completeChat 取回完整回复:function-calling 开启且该 Agent 有可用工具时走工具循环,否则走普通同步调用。
 //   - messages: 已装配好的完整消息序列(system + 历史 + 本轮用户消息)
 //   - recorder: 旁路记录本轮调用过的工具(可为 nil)
@@ -645,8 +665,12 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 	policy := hCommon.ContextPolicy{ContextWindow: int(llmProvider.ContextWindow)}
 	// 工具死循环守卫:一轮对话一个实例(局部变量),禁止做成服务字段/单例,原因见 chat_tool_guard.go。
 	guard := security.NewTurnLoopGuard()
+	// 首轮:含 force-call 工具(取实时数据)的技能强制模型调用工具;之后交回 auto,
+	// 否则会一直强制调用、永远收敛不出最终答复。
+	toolChoice := toolSet.ForceToolChoice() //forcedToolChoice(toolSet)
 	for i := 0; i < hCommon.AgentToolLoopMax; i++ {
-		content, calls, err := s.llmClient.CompleteWithTools(ctx, llmProvider, ctxmgr.FitMessages(llmProvider, messages, policy), toolSet.LLMTools())
+		content, calls, err := s.llmClient.CompleteWithTools(ctx, llmProvider, ctxmgr.FitMessages(llmProvider, messages, policy), toolSet.LLMTools(), toolChoice)
+		toolChoice = pCommon.BlankString
 		if err != nil {
 			return "", myException.LlmError(err, "chat service: runtime tool call chat")
 		}
@@ -686,12 +710,14 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 
 	// 工具死循环守卫:一轮对话一个实例
 	guard := security.NewTurnLoopGuard()
+	// 首轮:含 force-call 工具(取实时数据)的技能强制模型调用工具;之后交回 auto(见 forcedToolChoice)
+	toolChoice := toolSet.ForceToolChoice() //forcedToolChoice(toolSet)
 	for i := 0; i < hCommon.AgentToolLoopMax; i++ {
 		if i > 0 && onStatus != nil {
 			onStatus(cCommon.ChatStatusThinking, "正在思考…")
 		}
 		var roundIntents []int // 本轮模型声明的工具调用序号(与返回的 calls 一一对应)
-		content, calls, finishReason, err := s.llmClient.StreamWithTools(ctx, llmProvider, ctxmgr.FitMessages(llmProvider, messages, policy), toolSet.LLMTools(), onChunk, onReasoning,
+		content, calls, finishReason, err := s.llmClient.StreamWithTools(ctx, llmProvider, ctxmgr.FitMessages(llmProvider, messages, policy), toolSet.LLMTools(), toolChoice, onChunk, onReasoning,
 			func(name string) { // onToolIntent:模型流式声明将调用某工具,立即告知前端
 				if onTool != nil {
 					seq++
@@ -699,6 +725,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 					onTool(ToolEvent{Phase: cCommon.ChatToolEventIntent, Seq: seq, Name: name})
 				}
 			})
+		toolChoice = pCommon.BlankString
 		if err != nil {
 			return "", "", myException.LlmError(err, "chat service: runtime tool stream error")
 		}
@@ -777,7 +804,12 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 				//执行具体的工具
 				res, err := toolSet.ExecStream(ctx, run.name, run.arg, func(line string) {
 					lastOut.Store(pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().NanoTimestamp)
-					// 脚本 stdout 行:仅投递到通道,由唯一转发 goroutine 推送(不在此处直接写 SSE)
+					// 脚本 stdout 行:仅投递到通道,由唯一转发 goroutine 推送(不在此处直接写 SSE)。
+					// 整行 JSON(= 脚本的结果体,如 save_report 的 {"saved":true,...})不当进度展示:
+					// 结果是给模型的,不是给用户看的 —— 否则聊天界面上会糊一大段 JSON。
+					if looksLikeToolResultJSON(line) {
+						return
+					}
 					lineCh <- ToolEvent{Phase: cCommon.ChatToolEventProgress, Seq: run.seq, Name: run.name, Detail: line}
 				})
 				respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
@@ -820,7 +852,9 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 				continue
 			}
 			if onTool != nil {
-				onTool(ToolEvent{Phase: cCommon.ChatToolEventDone, Seq: r.item.seq, Name: r.item.name, Detail: pCommon.TruncateRunes(r.result, 600, "…")})
+				// done 事件只报"完成",不回传结果 JSON:结果是给模型的,聊天界面对它没有价值
+				// (前端按 phase 显示 "✓ 完成";失败仍走 error 事件携带错误文本,便于排查)
+				onTool(ToolEvent{Phase: cCommon.ChatToolEventDone, Seq: r.item.seq, Name: r.item.name})
 			}
 			recorder.Record(r.item.name, r.callTime, r.respTime, r.result) // 旁路记录(recorder 为 nil 时静默)
 			loopGuardResult := guard.ApplyLoopGuard(r.item.name, r.item.arg, true, r.result, onNotice)

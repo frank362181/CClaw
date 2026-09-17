@@ -33,7 +33,7 @@ const (
 	AgentBootstrapDir            = "cclaw"             //agent 启动文件目录名称
 	DefaultAgentConfigFile       = "agentdefault.json" //agent 的默认配置所在的文件
 
-	AgentExtensionDirName = "extension"
+	SkillDirName = "skills"
 )
 
 // ==================== agent 根据内容意图识别确定agent ====================
@@ -144,6 +144,9 @@ const (
 	ToolsDocFileName     = "TOOLS.md"     //tools.md:工具使用指引(可选)
 	BootstrapDocFileName = "BOOTSTRAP.md" //首次运行的引导仪式(仅新工作区)
 	MemoryDocFileName    = "MEMORY.md"    //长期记忆文件(存在才注入)
+
+	// SkillDocFileName 技能定义文件名:skills/<skill_dir>/SKILL.md(一个目录一个技能)
+	SkillDocFileName = "SKILL.md"
 )
 
 // StartupDocSpec 启动文档清单中的一项(文件名/种类/是否必需)
@@ -169,13 +172,8 @@ var StartupDocFiles = []StartupDocSpec{
 	{dataobject.AgentDocMemory, MemoryDocFileName, false},
 }
 
-// SKILL的作用域
-const (
-	SkillScopeSystem = iota
-	SkillScopePersonal
-	SkillScopeProject
-	SkillScopePlugin
-)
+// SKILL 的作用域枚举已下沉到 model/dataobject(实体词汇) —— 见 dataobject.SkillScope,
+// 可见性规则见 dataobject.TSkill.IsSkillVisibleTo。
 
 // ==================== 记忆管理模块(阶段1:双写落库 + 历史文件) ====================
 // 对应 data/ddl_sqlite3.sql 的 t_session / t_turn / t_turn_tool 三张表。

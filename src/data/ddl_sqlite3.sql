@@ -123,8 +123,17 @@ CREATE TABLE t_skill (
     skill_id VARCHAR(8) NOT NULL unique,
     owner_id VARCHAR(16) NOT NULL DEFAULT '000000',
     skill_name VARCHAR(64) NOT NULL,
+
+    -- skill_dir:技能目录名(相对 skills 根的安全相对路径),一个目录一个技能。
+    --   例:skill_dir='npa-report' ⇒ 技能文档 = <exeDir>/cclaw/skills/npa-report/SKILL.md
+    --   兼容历史写法:也可直接写 'npa-report/SKILL.md'(代码取其上层层级,见 common.NormalizeSkillDir)
     skill_dir VARCHAR(256) NOT NULL,
+
+    -- skill_scope:作用域 0 系统 / 1 个人 / 2 项目 / 3 插件(见 dataobject.SkillScope)
+    --   0/3 全局可见;1/2 仅 owner_id 自身可见(防跨单位越权引用,见 TSkill.IsSkillVisibleTo)
+    --   与 t_agent_skill 的分工:关联表决定"某 agent 是否启用",作用域决定"该归属能否使用"
     skill_scope INTEGER NOT NULL DEFAULT 0,
+
     disabled INTEGER NOT NULL DEFAULT 0,
     deleted INTEGER NOT NULL DEFAULT 0,
     d_version INTEGER NOT NULL DEFAULT 0

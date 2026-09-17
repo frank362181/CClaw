@@ -69,6 +69,12 @@ type ChatCompletionRequest struct {
 	Stream    bool          `json:"stream"`
 	Tools     []Tool        `json:"tools,omitempty"`
 
+	// ToolChoice 工具选择策略(OpenAI 兼容:auto / required / none;空串则不发送该字段)。
+	// required 用于"必须实时取数"的工具(技能 front matter 的 force-call:true):
+	// 模型看不到技能正文,若不给硬约束,它可能直接用上下文里的历史工具结果作答
+	// (实测:天气技能复述了两天前的旧结果)。仅首轮强制,后续轮次交回 auto。
+	ToolChoice string `json:"tool_choice,omitempty"`
+
 	// EnableThinking 是否开启 thinking(Qwen3 等思考型模型专用;omitempty 为 nil 时不发送)。
 	// 约束:该类模型非流式调用必须显式 enable_thinking=false,否则网关返回 400。
 	EnableThinking *bool `json:"enable_thinking,omitempty"`
@@ -80,6 +86,13 @@ const (
 	FinishReasonLength        = "length"         // 达到 max_tokens/上下文上限,内容被截断
 	FinishReasonToolCalls     = "tool_calls"     // 模型请求调用工具(工具循环续跑)
 	FinishReasonContentFilter = "content_filter" // 输出被内容安全策略过滤
+)
+
+// 工具选择策略(tool_choice)取值(OpenAI 兼容)
+const (
+	ToolChoiceAuto     = "auto"     // 模型自行决定(不发送该字段时的默认行为)
+	ToolChoiceRequired = "required" // 必须调用工具(至少调用一个)
+	ToolChoiceNone     = "none"     // 禁止调用工具
 )
 
 // ==================== 应答侧(chat/completions 应答体 / 流式块) ====================

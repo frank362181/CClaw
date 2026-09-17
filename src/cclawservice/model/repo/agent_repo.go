@@ -35,7 +35,7 @@ type AgentRepository struct {
 	configTTL  int64 // 缓存过期时间;<=0 表示禁用 TTL 刷新(仅启动时加载一次)
 	lastLoaded int64 // 最近一次从 DB 全量加载的时间(秒级时间戳)
 
-	// 刷新协调(singleflight):reloading=true 表示已有 goroutine 正在全量重载,
+	// 刷新协调(single flight):reloading=true 表示已有 goroutine 正在全量重载,
 	// 其余读直接使用现有快照,避免并发重复全量查询(读放大)。
 	reloading bool
 
@@ -370,7 +370,8 @@ func (repo *AgentRepository) GetSkills(comCode string) []dataobject.TSkill {
 
 	out := make([]dataobject.TSkill, 0, repo.skills.Len())
 	repo.skills.Range(func(_ int, item dataobject.TSkill) bool {
-		if strings.EqualFold(comCode, item.OwnerId) {
+		// 可见性 = skill_scope + owner_id(系统/插件技能全局可见,个人/项目技能仅归属自身可见)
+		if item.IsSkillVisibleTo(comCode) {
 			out = append(out, item)
 		}
 		return true
@@ -380,15 +381,17 @@ func (repo *AgentRepository) GetSkills(comCode string) []dataobject.TSkill {
 }
 
 func (repo *AgentRepository) GetSkillsByAgent(agent dataobject.TAgent) []dataobject.TSkill {
+	repo.refreshIfExpired()
+
 	if len(agent.SkillIds) == 0 {
 		return nil
 	}
 
-	repo.refreshIfExpired()
 	out := make([]dataobject.TSkill, 0, len(agent.SkillIds))
 
 	repo.skills.Range(func(_ int, item dataobject.TSkill) bool {
-		if slices.Contains(agent.SkillIds, item.SkillId) {
+		// 两道门槛:t_agent_skill 关联(是否启用)+ skill_scope 可见性(该归属能否使用)
+		if slices.Contains(agent.SkillIds, item.SkillId) && item.IsSkillVisibleTo(agent.OwnerId) {
 			out = append(out, item)
 		}
 		return true
