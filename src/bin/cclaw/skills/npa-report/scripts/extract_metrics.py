@@ -1,18 +1,30 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-extract_metrics.py —— 结构化指标正则提取（npa-data-extraction 技能第 2 步）
+extract_metrics.py —— 结构化指标正则提取（npa-report 技能第 2 步）
 
-读取 npa_ingest 生成的 parsed_context_*.json（含 documents[].context 按页内容，
-可传其所在目录），依据 <skill>/config/extraction_rules.json 的正则规则，对每篇
-文档逐字段提取 10 项个贷不良指标（姓名/性别/出生日期/身份证号/住址/发证机关/
-发证日期/借款合同编号/结婚状况/不动产证编号）。
+读取 npa_ingest 生成的 **单个** parsed_context_*.json（含 documents[].context 按页内容），
+依据 <skill>/config/extraction_rules.json 的正则规则，对每篇文档逐字段提取 11 项个贷不良
+指标（姓名/性别/出生日期/身份证号/住址/发证机关/发证日期/借款合同编号/保证合同编号/
+结婚状况/不动产证编号）。
 
 结果 JSON 写 stdout（ensure_ascii=False），并默认落盘为
 <bin>/temp/extracted_metrics_YYYY_MM_DD.json（stdout 顶层带 result_file 路径）。
 
+input 契约（重要）:
+  - **只能传单个文件**：上一步 npa_ingest 的 result_file.path（parsed_context json）或纯文本；
+  - **不接受目录**：早期实现把目录当成"递归收集目录下所有 parsed_context 并合并"，与文档
+    语义（省略 input = 取最新一份）不一致 —— 实测把 bin/temp（50 份历史产物）当输入，
+    同一文件重复 8–12 次、331 条记录互相矛盾，报告因此丢掉第二份借款合同；
+  - 路径丢失时**省略 input**（脚本取 bin/temp 最新产物，并在 input.used 回带实际使用的文件）。
+
+输出里的自检字段（供调用方核对输入是否干净）:
+  - `input.files`             实际消费的输入文件列表
+  - `summary.documents_total` 去重前条数 / `documents_unique` 去重后条数 / `duplicates_collapsed`
+  - `warnings[]`              去重、文档数过少、走了兜底等情况下的显式提醒
+
 调用方式（两种兼容）：
-  1) CLI:  python3 scripts/extract_metrics.py <parsed_context.json 或目录 或文本>
+  1) CLI:  python3 scripts/extract_metrics.py <parsed_context.json 或纯文本>
   2) stdin JSON（CClaw 脚本执行器约定）:  echo '{"input":"/…/parsed_context_….json"}' | python3 scripts/extract_metrics.py
 """
 
@@ -24,7 +36,7 @@ from datetime import datetime
 from pathlib import Path
 
 TOOL_NAME = "extract_metrics"
-VERSION = "1.0.0"
+VERSION = "1.2.0"
 
 # 复用 ingest_router 的目录定位/落盘工具（同目录，避免重复实现）
 import ingest_router as _ir  # noqa: E402
@@ -74,30 +86,53 @@ def load_rules():
 # 指标提取
 # ---------------------------------------------------------------------------
 
+def _capture_value(pat, m, strip_tokens):
+    """按 capture/format 取出捕获值，并按 strip 清理粘连后缀（如 “（盖章）”）。"""
+    cap = pat.get("capture", 1)
+    if isinstance(cap, int):
+        value = m.group(cap) or ""
+    else:  # 多组(如日期 年/月/日)
+        fmt = pat.get("format", {}) or {}
+        pad = int(fmt.get("pad") or 0)
+        parts = []
+        for i in cap:
+            g = m.group(i) or ""
+            parts.append(g.zfill(pad) if pad else g)
+        value = fmt.get("join", "").join(parts)
+
+    for tok in strip_tokens:
+        if value.endswith(tok):
+            value = value[:-len(tok)]
+    return value.strip()
+
+
 def _extract_one(field, text):
-    """对单个 field 按 priority 顺序提取；命中返回值字符串，否则返回 None。"""
+    """对单个 field 按 priority 顺序提取；命中返回值字符串，否则返回 None。
+
+    patterns[].prefer_prefix（可选，字符串数组）是**形态兜底类** pattern 的“前缀偏好”：
+    同一 pattern 在一篇文档里可能命中多个值（如既有借款合同号 SJ…、又有借据号 WJ…），
+    此时优先返回以偏好前缀开头的那个；都没有前缀命中时退回首个命中。
+    典型用途：`source_documents` 之外的文书里，第一个形态命中往往不是合同编号。
+    """
     for pat in field["patterns"]:
-        m = pat["compiled"].search(text)
-        if not m:
-            continue
-        cap = pat.get("capture", 1)
-        if isinstance(cap, int):
-            value = m.group(cap) or ""
-        else:  # 多组(如日期 年/月/日)
-            fmt = pat.get("format", {}) or {}
-            pad = int(fmt.get("pad") or 0)
-            parts = []
-            for i in cap:
-                g = m.group(i) or ""
-                parts.append(g.zfill(pad) if pad else g)
-            value = fmt.get("join", "").join(parts)
-        # 去除粘连的冗余 token（如 “（盖章）”）
-        for tok in field["strip"]:
-            if value.endswith(tok):
-                value = value[:-len(tok)]
-        value = value.strip()
-        if value:
-            return value
+        prefer = [str(p).upper() for p in (pat.get("prefer_prefix") or [])]
+        first_value = None
+        matches = pat["compiled"].finditer(text) if prefer else (pat["compiled"].search(text),)
+        for m in matches:
+            if m is None:
+                continue
+            value = _capture_value(pat, m, field["strip"])
+            if not value:
+                continue
+            if not prefer:
+                return value
+            if first_value is None:
+                first_value = value
+            if any(value.upper().startswith(p) for p in prefer):
+                return value
+        if first_value is not None:
+            # 有命中但没有前缀偏好命中：按优先级语义用它（仍好于继续往更低优先级找）
+            return first_value
     return None
 
 
@@ -432,47 +467,142 @@ def _collect_texts_from_file(path):
     return [(os.path.basename(path), text)]
 
 
+def _dir_candidates_hint(path):
+    """目录入参被拒时附上候选提示（优先列最近几轮 run 目录，其次旧的扁平产物），帮助自我纠正。"""
+    try:
+        root = Path(path)
+        runs_root = root / _ir.RUN_DIR_NAME
+        runs = []
+        if runs_root.is_dir():
+            runs = sorted([p.name for p in runs_root.iterdir() if p.is_dir()], reverse=True)[:5]
+        if runs:
+            return "；该目录下最近几轮 run（请取其下的 %s）: %s" % (
+                _ir.RUN_PARSED_NAME, ", ".join(runs))
+        cands = sorted(root.glob("parsed_context_*.json"),
+                       key=lambda p: p.stat().st_mtime, reverse=True)[:5]
+    except Exception:
+        return ""
+    if not cands:
+        return ""
+    return "；该目录下候选(最近 5 个): " + ", ".join(p.name for p in cands)
+
+
 def collect_inputs(input_path):
-    """input 可为 parsed_context json / 目录(含 json 或文本) / 纯文本 → [(label, text)]。"""
+    """input 必须是**单个文件**（parsed_context json / 纯文本）→ [(label, text)]；目录一律拒绝。
+
+    为什么拒绝目录:目录入参曾被实现为"递归收集目录下所有 parsed_context json 并合并"，
+    与文档语义("省略 input = 取 bin/temp 最新一份")不一致 —— 实测把 bin/temp(50 份历史
+    产物)传进来后，同一文件重复 8–12 次、331 条记录互相矛盾，模型只能"高频者胜"，
+    低频细节(如第二份借款合同 SJ…537N1)会被丢掉。宁可报错也不静默合并。
+    """
     input_path = os.path.expanduser(str(input_path or "").strip())
     if not input_path or not os.path.exists(input_path):
         raise ValueError("输入不存在: %s" % input_path)
     if os.path.isfile(input_path):
         return _collect_texts_from_file(input_path)
-    # 目录：递归收集 parsed_context json 与纯文本（跳过隐藏/临时）
-    out = []
-    for base, dirs, names in os.walk(input_path):
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
-        for name in sorted(names):
-            if name.startswith(".") or name.startswith("~") or name.startswith("._"):
-                continue
-            full = os.path.join(base, name)
-            ext = os.path.splitext(name)[1].lower()
-            if ext == ".json":
-                try:
-                    out.extend(_collect_texts_from_file(full))
-                except Exception:
-                    continue  # 非本技能产物的 json 跳过
-            elif ext in (".txt", ".md", ".csv", ".log"):
-                text, _ = _ir.read_text_file(full, _ir._max_text_bytes({}))
-                out.append((os.path.relpath(full, input_path), text))
-    out.sort(key=lambda item: item[0].lower())
-    return out
+
+    raise ValueError(
+        "input 不接受目录(会被误当成多次运行产物的合并): %s%s。"
+        "请把上一步 npa_ingest 的 result_file.path 原样传入；"
+        "路径丢失时可省略 input，脚本会自动取 bin/temp 最新一份产物并在 input.used 回带"
+        % (input_path, _dir_candidates_hint(input_path))
+    )
 
 
 # ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 
+def _doc_key(label):
+    """去重键：相对路径归一化（分隔符/大小写）后比较。"""
+    return os.path.normpath(str(label)).replace("\\", "/").lower()
+
+
+def _doc_rank(doc):
+    """保留优先级：命中字段多者优先，其次文本长者优先（视为更完整的一次解析）。"""
+    return (len(doc.get("found") or []), int(doc.get("text_chars") or 0))
+
+
+def _dedup_documents(documents):
+    """同一文件的多条记录只保留最完整的一条，返回 (去重后列表, 被折叠条数)。
+
+    为什么要去重：重复 ingest / 目录入参(已禁止)会把同一文件以多个版本塞进输入，
+    模型面对互相矛盾的副本会"高频者胜"，低频细节(如第二份借款合同的编号)会被丢弃。
+    去重后每个文件只出现一次，与报告"按文件列示"的预期一致。
+    """
+    best, kept_order, dropped = {}, [], 0
+    for doc in documents:
+        key = _doc_key(doc.get("file", ""))
+        cur = best.get(key)
+        if cur is None:
+            best[key] = doc
+            kept_order.append(key)
+            continue
+        dropped += 1
+        if _doc_rank(doc) > _doc_rank(cur):
+            best[key] = doc
+    return [best[k] for k in kept_order], dropped
+
+
 def _latest_parsed_file():
-    """bin/temp 中最新的 parsed_context_*.json（input 缺失时的兜底）。"""
+    """input 缺失时的兜底：优先取最新一轮 run 的 parsed_context.json，其次旧的扁平产物。
+
+    目录入参已被拒（见 collect_inputs），所以这里只会返回**单个文件**：
+    最新 run ⇒ 天然对应“最近一次 ingest”，不会把历史轮次混进来。
+    """
     temp = _ir._default_result_dir()
+    runs_root = temp / _ir.RUN_DIR_NAME
+    if runs_root.is_dir():
+        runs = sorted([p for p in runs_root.iterdir() if p.is_dir()], key=lambda p: p.name, reverse=True)
+        for run in runs:
+            cand = run / _ir.RUN_PARSED_NAME
+            if cand.is_file():
+                return cand
     if not temp.is_dir():
         return None
     cands = [p for p in temp.glob("parsed_context_*.json") if p.is_file()]
     if not cands:
         return None
     return max(cands, key=lambda p: p.stat().st_mtime)
+
+
+def _run_dir_of(path):
+    """输入文件若位于 <temp>/runs/<run_id>/ 下，返回该 run 目录（否则 None = 旧扁平产物）。"""
+    try:
+        parent = Path(path).resolve().parent
+    except Exception:
+        return None
+    return parent if parent.parent.name == _ir.RUN_DIR_NAME else None
+
+
+def _read_manifest(run_dir):
+    """读取本轮材料清单（ingest 写入的 manifest.json）；没有/不可读返回 None。"""
+    if run_dir is None:
+        return None
+    mf = run_dir / _ir.RUN_MANIFEST_NAME
+    if not mf.is_file():
+        return None
+    try:
+        with open(mf, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _materials_check(manifest, documents):
+    """P1-2 对账：把本轮材料清单与抽取出的文档列表比一比，不一致就暴露出来。"""
+    declared_files = [m.get("rel") for m in (manifest.get("materials") or []) if m.get("rel")]
+    declared = (manifest.get("summary") or {}).get("files_processed")
+    got = {d.get("file") for d in documents}
+    missing = [f for f in declared_files if f not in got]
+    return {
+        "declared_documents": declared,
+        "declared_files": len(declared_files),
+        "extracted_documents": len(documents),
+        "missing_files": missing[:20],
+        "match": bool(declared == len(documents) and not missing),
+    }
 
 
 def run_extract(opts):
@@ -482,10 +612,10 @@ def run_extract(opts):
     used, fallback = requested, False
 
     if requested:
-        items = collect_inputs(requested)  # 路径不存在会抛错
+        items = collect_inputs(requested)  # 目录/不存在都会报错
     else:
         items = []
-    if not items:  # 未给 input 或目录里没有可提取产物 → 兜底最新 parsed_context
+    if not items:  # 未给 input → 兜底 bin/temp 里最新的一份产物
         latest = _latest_parsed_file()
         if latest is not None:
             items = collect_inputs(str(latest))
@@ -493,10 +623,10 @@ def run_extract(opts):
     if not items:
         raise ValueError(
             "没有可提取的输入：请先调用 npa_ingest 生成 parsed_context_*.json（bin/temp）"
-            "，或显式传入 input 路径（parsed json/目录/纯文本）"
+            "，或显式传入 input 路径（单个 parsed_context json / 纯文本）"
         )
 
-    documents, total_found, persons_docs = [], 0, 0
+    documents = []
     for label, text in items:
         metrics = extract_metrics_from_text(text, fields)
         # 身份证号兜底推导/校验 性别、出生日期（标签缺失时）
@@ -507,13 +637,11 @@ def run_extract(opts):
                 metrics["gender"] = g
             if not metrics.get("birth_date") and b:
                 metrics["birth_date"] = b
-        found = [k for k, v in metrics.items() if v]
-        total_found += len(found)
         doc = {
             "file": label,
             "text_chars": len(text),
             "metrics": metrics,
-            "found": found,
+            "found": [k for k, v in metrics.items() if v],
         }
         # 角色化多主体“个人信息”：债务人/每名保证人等（见 documents[].persons）
         if pcfg:
@@ -523,23 +651,78 @@ def run_extract(opts):
                 persons = []
             if persons:
                 doc["persons"] = persons
-                persons_docs += 1
         documents.append(doc)
+
+    documents_total = len(documents)
+    documents, duplicates_collapsed = _dedup_documents(documents)
+    total_hits = sum(len(d.get("found") or []) for d in documents)
+    persons_docs = sum(1 for d in documents if d.get("persons"))
+
+    # ---- P0-2/P1-2：识别本轮 run、读材料清单对账 ----
+    run_dir = _run_dir_of(used)
+    manifest = _read_manifest(run_dir)
+    check = _materials_check(manifest, documents) if manifest else None
+    run_id = (manifest or {}).get("run_id") or (run_dir.name if run_dir else None)
+
+    warnings = []
+    if duplicates_collapsed:
+        warnings.append(
+            "已折叠 %d 条重复文件记录(同一文件在输入里出现多次)，每个文件只保留最完整的一条"
+            % duplicates_collapsed
+        )
+    if len(documents) < 2:
+        warnings.append(
+            "本次输入只解析出 %d 份文档，可能不是整轮 ingest 的结果 —— 请核对 input.used"
+            % len(documents)
+        )
+    if fallback:
+        warnings.append(
+            "未传 input，已自动取最新一轮 run 的产物：%s（%d 份文档）" % (used, len(documents))
+        )
+    if manifest is None:
+        warnings.append(
+            "input 不在 run 目录内（旧版扁平产物），无法与材料清单对账；"
+            "建议改用本轮 npa_ingest 的 result_file.path（<bin>/temp/runs/<run_id>/%s）"
+            % _ir.RUN_PARSED_NAME
+        )
+    elif not check.get("match"):
+        warnings.append(
+            "与材料清单不一致：清单声明 %s 份、实际抽取 %d 份%s；请核对 input.used 是否为 %s 轮的产物"
+            % (check.get("declared_documents"), len(documents),
+               "（缺失: %s）" % ", ".join(check.get("missing_files") or []) if check.get("missing_files") else "",
+               run_id)
+        )
 
     payload = {
         "tool": TOOL_NAME,
         "version": VERSION,
         "rules": str(_rules_file()),
-        "input": {"requested": requested or None, "used": used, "fallback": fallback},
+        "run_id": run_id,
+        "input": {
+            "requested": requested or None,
+            "used": used,
+            "fallback": fallback,
+            "files": [used] if used else [],
+        },
         "processed_at": _ir.iso_now(),
         "documents": documents,
         "summary": {
             "documents": len(documents),
+            "documents_total": documents_total,
+            "documents_unique": len(documents),
+            "duplicates_collapsed": duplicates_collapsed,
             "fields_per_doc": len(fields),
-            "total_hits": total_found,
+            "total_hits": total_hits,
             "documents_with_persons": persons_docs,
+            "materials_declared": (check or {}).get("declared_documents"),
+            "materials_check": check,
         },
+        "warnings": warnings,
     }
+    if run_dir is not None:
+        payload["run_dir"] = str(run_dir)
+    if manifest is not None:
+        payload["manifest_file"] = str(run_dir / _ir.RUN_MANIFEST_NAME)
     roster = _merge_roster(documents)
     if roster:
         payload["personal_info_roster"] = roster
@@ -566,6 +749,24 @@ def load_args():
     return args
 
 
+def _output_opts(payload, opts):
+    """抽取结果的落盘参数：默认写回输入所在的 run 目录（extracted_metrics.json），
+    否则（旧扁平产物）沿用带日期的文件名。
+
+    覆盖旧行为只在 run 目录内生效（同一轮只应有一份抽取结果）；旧扁平产物保持
+    "同名追加 _HHMMSS 不覆盖"的原有语义，避免静静盖掉当天已有产物。
+    """
+    merged = dict(opts)
+    run_dir = payload.get("run_dir")
+    if not str(merged.get("result_dir") or "").strip() and run_dir:
+        merged["result_dir"] = run_dir
+        merged.setdefault("overwrite_result", True)
+    if not str(merged.get("result_name") or "").strip():
+        merged["result_name"] = (_ir.RUN_METRICS_NAME if run_dir
+                                 else "extracted_metrics_%s.json" % datetime.now().strftime("%Y_%m_%d"))
+    return merged
+
+
 def main():
     opts = load_args()
     try:
@@ -574,11 +775,8 @@ def main():
         print(json.dumps({"error": "%s: %s" % (type(exc).__name__, exc)}, ensure_ascii=False))
         sys.exit(1)
 
-    # 落盘 extracted_metrics_YYYY_MM_DD.json 到 bin/temp（stdout 回填 result_file）
-    result_info = _ir.save_result_file(
-        payload,
-        {"result_name": "extracted_metrics_%s.json" % datetime.now().strftime("%Y_%m_%d")},
-    )
+    # 落盘：默认写回同一 run 目录（extracted_metrics.json），路径回填到 stdout 的 result_file
+    result_info = _ir.save_result_file(payload, _output_opts(payload, opts))
     if result_info is not None:
         payload = dict(payload)
         payload["result_file"] = result_info
@@ -592,7 +790,9 @@ def main():
 def selftest():
     fields = load_rules()
     ids = [f["id"] for f in fields]
-    assert len(fields) == 10, ids
+    assert len(fields) == 11, ids
+    fids = [f["id"] for f in fields]
+    assert "guarantee_contract_no" in fids, fids
     sample = (
         "姓名：张三 性别：男 出生日期：1990年1月2日\n"
         "住址：浙江省杭州市西湖区文一西路969号\n"
@@ -607,6 +807,22 @@ def selftest():
     assert metrics["id_card_no"] == "110101199001011234"
     assert metrics["issue_date"] == "2015-01-01"
     assert metrics["loan_contract_no"] == "GD2025-0012"
+
+    # ---- 编号类字段：标签允许逐字换行(竖排版式)、值必须满足编号形态、兜底可配前缀偏好 ----
+    labeled = (
+        "3 、借款合同编号：SJ202108250196537 、\nSJ202108250196537N1；\n"
+        "保\n证\n合\n同\n编\n号\n：\nSJ202108250196537-1\n、\nSJ202108250196537-2；\n"
+    )
+    m2 = extract_metrics_from_text(labeled, fields)
+    assert m2["loan_contract_no"] == "SJ202108250196537", m2["loan_contract_no"]
+    assert m2["guarantee_contract_no"] == "SJ202108250196537-1", m2["guarantee_contract_no"]
+    # 旧规则用 [：:\s]{0,3} 跨行会把“贷款人：”当值取出
+    assert extract_metrics_from_text("合同编号\n贷款人：江苏银行", fields)["loan_contract_no"] is None
+    # 无标签兜底：优先取偏好前缀(SJ)，不被同文档里的借据号(WJ)截走
+    fallback = "WJXD2022082911225146\n/\nSJ202108250196537N1\nWJ210914000000607\n"
+    assert extract_metrics_from_text(fallback, fields)["loan_contract_no"] == "SJ202108250196537N1"
+    # 仅存在非偏好前缀时退回首个命中（如借据页/截屏）
+    assert extract_metrics_from_text("WJ210914000000607", fields)["loan_contract_no"] == "WJ210914000000607"
     assert metrics["marital_status"] == "已婚"
     assert metrics["real_estate_cert_no"] == "京（2020）朝阳不动产权第0001234号"
     assert metrics["address"] and "文一西路969号" in metrics["address"]
@@ -657,6 +873,28 @@ def selftest():
     assert "罗勇兴" in rmap and rmap["罗勇兴"]["role"] == "债务人", roster
     assert "杨瑞雪" in rmap and rmap["杨瑞雪"]["role"] == "保证人", roster
     assert "常州市喆广金属材料有限公司" in rmap and rmap["常州市喆广金属材料有限公司"]["role"] == "保证人", roster
+
+    # ---- 去重：同文件多版本 → 保留最完整的一条（命中字段多 > 文本长）----
+    docs = [
+        {"file": "a.pdf", "text_chars": 10, "found": ["x"], "metrics": {}},
+        {"file": "A.PDF", "text_chars": 99, "found": ["x", "y"], "metrics": {}},
+        {"file": "b.pdf", "text_chars": 5, "found": [], "metrics": {}},
+    ]
+    uniq, dropped = _dedup_documents(docs)
+    assert dropped == 1, dropped
+    assert len(uniq) == 2, [d["file"] for d in uniq]
+    assert next(d for d in uniq if d["file"] == "A.PDF")["text_chars"] == 99
+
+    # ---- 目录入参必须被拒绝（不再静默合并历史产物）----
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="extract_input_") as td:
+        Path(td, "parsed_context_2026_09_18.json").write_text("{}", encoding="utf-8")
+        try:
+            collect_inputs(td)
+        except ValueError as exc:
+            assert "不接受目录" in str(exc), exc
+        else:
+            raise AssertionError("目录入参应当报错")
 
     print("selftest ok (%s v%s, %d fields, persons ok)" % (TOOL_NAME, VERSION, len(fields)))
 

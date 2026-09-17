@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ingest_router.py —— 数据摄入路由器（npa-data-extraction 技能第一步）
+ingest_router.py —— 数据摄入路由器（npa-report 技能第一步）
 
 从指定目录（可含子目录）或单个文件中读取 PDF / JPG 等图片 / Word / Excel /
 纯文本等文档，按"页"抽取内容，组装为统一 JSON 输出给下游（结构化抽取 / LLM），
@@ -37,6 +37,9 @@ ingest_router.py —— 数据摄入路由器（npa-data-extraction 技能第一
     path                  必填，文件或目录路径
     recursive             true 表示递归子目录（默认 true）
     include_hidden        false 表示跳过隐藏文件/目录（默认 false）
+    include_markdown      false 表示跳过 .md/.markdown（默认 false）。默认**不把**
+                          save_report 生成的报告当“材料”读回来 —— 否则模型会读到
+                          自己上一次写的报告，把旧结论当既有事实（自我污染）
     extensions            [] 限定扩展名，如 [".pdf",".jpg",".docx"]（空=全部支持类型）
     max_files             最多处理文件数（0=不限）
     max_pages_per_file    每文件最多输出页数（0=不限）
@@ -50,10 +53,18 @@ ingest_router.py —— 数据摄入路由器（npa-data-extraction 技能第一
     ocr_langs             tesseract 语言，如 "chi_sim+eng"（rapidocr 内置中文，默认用不到）
     ocr_dpi               扫描 PDF 页渲染 OCR 的分辨率（默认 200）
     save_result           是否把结果 JSON 落盘到文件（默认 true）
-    result_dir            结果输出目录（默认自动定位到 bin/temp；可覆盖为任意目录）
-    result_name           结果文件名（默认 parsed_context_YYYY_MM_DD.json）
-    overwrite_result      当日结果文件已存在时是否覆盖（默认 false：追加 _HHMMSS 防覆盖）
+    result_dir            结果输出目录（默认自动定位到 <bin>/temp/runs/<run_id>；可覆盖为任意目录）
+    result_name           结果文件名（默认 parsed_context.json；同轮覆盖，不追加日期后缀）
+    overwrite_result      保留参数（同轮产物默认覆盖；不再追加日期/时间后缀，靠 run_id 区分）
+    keep_runs             保留最近 N 轮 run 目录（默认 20；<=0 不清理）
     emit_stdout           true=stdout 输出完整结果 JSON（默认）；false=stdout 仅回执保存路径/概要
+
+产物布局（按运行隔离，run_id = yyyymmdd_HHMMSS）：
+  <bin>/temp/runs/<run_id>/parsed_context.json     本轮摄入结果（result_file.path）
+  <bin>/temp/runs/<run_id>/manifest.json           材料清单（每份文件 sha256/大小/页数/字符数/需否 OCR）
+  <bin>/temp/runs/<run_id>/extracted_metrics.json  本轮指标抽取结果（由 extract_metrics 写回同一 run）
+为什么隔离：历史产物曾堆在 bin/temp 根下，一旦被当作输入合并，同一文件会重复多次、
+互相矛盾，模型“高频者胜”丢掉低频细节（2026-09-18 丢合同事故）。
 
 结果落盘：
   - 抽取完成后，结果 JSON（ensure_ascii=False，indent=2）写入
@@ -78,6 +89,7 @@ ingest_router.py —— 数据摄入路由器（npa-data-extraction 技能第一
   - 每文件相互独立，workers>0 时并行解析并保序汇总。
 """
 
+import hashlib
 import json
 import os
 import re
@@ -94,7 +106,7 @@ from html import unescape as html_unescape
 from importlib import import_module
 from pathlib import Path
 
-VERSION = "1.2.0"
+VERSION = "1.4.0"
 TOOL_NAME = "ingest_router"
 
 # 输出文本被截断时追加的标记（便于下游感知数据不完整）
@@ -104,6 +116,30 @@ TRUNCATED_MARK = "\n…[内容已截断]"
 RESULT_DIR_NAME = "temp"                        # 输出目录名（bin 下的 temp）
 RESULT_NAME_FMT = "parsed_context_%Y_%m_%d.json"  # 例如 parsed_context_2026_09_07.json
 RESULT_ALT_SUFFIX_FMT = "_%H%M%S"               # 同名已存在时的防覆盖后缀
+
+# ---- 生成的报告(产物)默认不作为“材料”摄入 ----
+# 报告由 save_report 落在 case 目录(或其 reports/ 子目录)，都是 .md。
+# 若下一轮 ingest 把整个 case 目录当输入，就会把自己上一次写的报告读回来当证据
+# (实测:10罗勇兴 案混入 4 份历史报告)，旧结论被反复强化、字段抽取也被污染
+# (如 loan_contract_no 抽到“等）已由生效判决书覆盖确认”)。
+# 故默认跳过 .md/.markdown 与 reports/ 目录；确需把 markdown 当材料时传 include_markdown=true。
+GENERATED_REPORT_DIR = "reports"
+MARKDOWN_EXTS = {".md", ".markdown"}
+
+# ---- 按运行隔离的产物目录（run_id）----
+# 一次“摄入→抽取（→报告）”对应一个 run 目录：<bin>/temp/runs/<run_id>/
+#   parsed_context.json    本轮摄入结果
+#   manifest.json          材料清单（对账用：每份文件的 sha256/大小/页数/字符数）
+#   extracted_metrics.json 本轮抽取结果（extract_metrics 写回同一 run）
+# 为什么隔离：历史产物曾堆在 bin/temp 根下，一旦被当输入合并，同一文件会重复多次、
+# 互相矛盾，模型“高频者胜”丢细节（2026-09-18 丢合同事故）。run 目录让“本轮”可辨识。
+RUN_DIR_NAME = "runs"
+RUN_PARSED_NAME = "parsed_context.json"
+RUN_MANIFEST_NAME = "manifest.json"
+RUN_METRICS_NAME = "extracted_metrics.json"
+RUN_ID_FMT = "%Y%m%d_%H%M%S"
+KEEP_RUNS_DEFAULT = 20   # 保留最近 N 轮 run 目录（<=0 表示不清理）
+MATERIAL_SHA_LEN = 16    # 清单回带的 sha256 前缀长度（完整值在 run 的 manifest.json）
 
 # ---- WordprocessingML / SpreadsheetML / 关系 命名空间 ----
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -964,16 +1000,26 @@ def _is_junk(name):
 
 
 def discover_files(root, opts):
-    """返回 (files, skipped)，files 为 [(abs, rel), ...] 已排序。"""
-    files, skipped = [], []
+    """返回 (files, skipped, skipped_generated)，files 为 [(abs, rel), ...] 已排序。
+
+    - files:            待解析的文件
+    - skipped:          扩展名不受支持 / 被 extensions 过滤掉的文件（相对路径）
+    - skipped_generated: 被跳过的**本技能生成的产物**（报告 .md、reports/ 目录下的文件）
+                         —— 默认不把产物当材料，详见 GENERATED_REPORT_DIR 处的注释
+    """
+    files, skipped, skipped_generated = [], [], []
     ext_allow = [e.lower() for e in (opts.get("extensions") or [])]
     recursive = bool(opts.get("recursive", True))
     include_hidden = bool(opts.get("include_hidden", False))
+    include_markdown = bool(opts.get("include_markdown", False))
     root_path = Path(root)
 
     for base, dirs, names in os.walk(root):
         if not include_hidden:
             dirs[:] = [d for d in dirs if not d.startswith(".")]
+        if not include_markdown:
+            # 产物目录（reports/）整体跳过：即使里面放了非 .md 的中间产物也不当材料
+            dirs[:] = [d for d in dirs if d.lower() != GENERATED_REPORT_DIR]
         dirs[:] = sorted(dirs)
         for name in sorted(names):
             if _is_junk(name):
@@ -981,6 +1027,9 @@ def discover_files(root, opts):
             if name.startswith(".") and not include_hidden:
                 continue
             ext = os.path.splitext(name)[1].lower()
+            if not include_markdown and ext in MARKDOWN_EXTS:
+                skipped_generated.append(os.path.relpath(os.path.join(base, name), root_path))
+                continue
             if ext not in EXT_TYPE:
                 skipped.append(os.path.relpath(os.path.join(base, name), root_path))
                 continue
@@ -995,7 +1044,7 @@ def discover_files(root, opts):
             break
 
     files.sort(key=lambda item: item[1].lower())
-    return files, skipped
+    return files, skipped, skipped_generated
 
 
 # ---------------------------------------------------------------------------
@@ -1139,9 +1188,9 @@ def run_ingest(opts):
                 },
             }
         files = [(in_path, os.path.basename(in_path))]
-        skipped = []
+        skipped, skipped_generated = [], []
     else:
-        files, skipped = discover_files(in_path, opts)
+        files, skipped, skipped_generated = discover_files(in_path, opts)
     if max_files > 0:
         files = files[:max_files]
 
@@ -1164,6 +1213,7 @@ def run_ingest(opts):
 
     total_pages = sum(d["metadata"]["pages"] for d in documents)
     total_chars = sum(d["metadata"]["chars"] for d in documents)
+    materials = _build_materials(files, documents, errors)
 
     # 缺文本(疑为扫描件/图片)清单:供"两遍式 OCR"策略使用——
     # 先不带 OCR 快速 ingest 整目录,依据 files_need_ocr 得知哪些文件需单独 ocr:true 补读,
@@ -1188,10 +1238,13 @@ def run_ingest(opts):
         },
         "processed_at": iso_now(),
         "documents": documents,
+        "materials": materials,
         "summary": {
-            "files_found": len(files) + len(skipped) if os.path.isdir(in_path) else len(files),
+            "files_found": len(files) + len(skipped) + len(skipped_generated) if os.path.isdir(in_path) else len(files),
             "files_processed": len(documents),
             "files_skipped_unsupported": len(skipped) if os.path.isdir(in_path) else 0,
+            "files_skipped_generated": len(skipped_generated) if os.path.isdir(in_path) else 0,
+            "files_skipped_generated_sample": skipped_generated[:10],
             "files_failed": len(errors),
             "total_pages": total_pages,
             "total_chars": total_chars,
@@ -1218,6 +1271,142 @@ def _find_bin_root():
 def _default_result_dir():
     """默认结果目录：<bin>/temp。"""
     return _find_bin_root() / RESULT_DIR_NAME
+
+
+def _sha256_prefix(path, length=MATERIAL_SHA_LEN):
+    """文件内容 sha256 前 N 位（失败返回 None）。用于材料清单的“同一份文件”认定。"""
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                h.update(chunk)
+        return h.hexdigest()[:length]
+    except Exception:
+        return None
+
+
+def _build_materials(files, documents, errors):
+    """材料清单（P1-2）：每份文件一行 {rel,size,sha256,type,pages,chars,need_ocr,failed}。
+
+    用途：①让调用方对账“本轮到底吃了几份材料、每份多少页”（报告附录里的“N 份/ M 页”
+    必须与它同源）；②后续步骤/人工可核对是否用错轮次产物。
+    """
+    by_rel = {d.get("file"): d for d in documents}
+    err_files = {e.get("file") for e in errors}
+    out = []
+    for abs_path, rel in files:
+        md = (by_rel.get(rel) or {}).get("metadata") or {}
+        try:
+            size = os.path.getsize(abs_path)
+        except OSError:
+            size = None
+        out.append({
+            "rel": rel,
+            "size": size,
+            "sha256": _sha256_prefix(abs_path),
+            "type": md.get("type"),
+            "pages": md.get("pages"),
+            "chars": md.get("chars"),
+            "need_ocr": bool(md.get("chars") == 0 and md.get("type") in ("pdf", "image")),
+            "failed": rel in err_files,
+        })
+    return out
+
+
+def _new_run_dir(base_dir, keep):
+    """创建本轮产物目录 <base_dir>/runs/<run_id>，并按保留策略清理过旧的 run。
+
+    run_id = yyyymmdd_HHMMSS（同秒冲突时追加 _2/_3…）；返回 (run_dir, run_id, pruned_run_ids)。
+    保留策略只作用于 runs/ 子目录（用户放在 temp 根下的其它文件一律不动）。
+    """
+    runs_root = Path(base_dir) / RUN_DIR_NAME
+    runs_root.mkdir(parents=True, exist_ok=True)
+
+    stamp = datetime.now().strftime(RUN_ID_FMT)
+    run_id, run_dir, suffix = stamp, runs_root / stamp, 1
+    while run_dir.exists():
+        suffix += 1
+        run_id = "%s_%d" % (stamp, suffix)
+        run_dir = runs_root / run_id
+    run_dir.mkdir(parents=True, exist_ok=False)
+
+    pruned = []
+    if keep and int(keep) > 0:
+        try:
+            runs = sorted([p for p in runs_root.iterdir() if p.is_dir()],
+                          key=lambda p: p.name, reverse=True)
+            for stale in runs[int(keep):]:
+                shutil.rmtree(stale, ignore_errors=True)
+                pruned.append(stale.name)
+        except Exception:
+            pass  # 清理失败不影响本轮结果
+    return run_dir, run_id, pruned
+
+
+def save_run_outputs(payload, opts):
+    """把本轮产物写进 run 目录（parsed_context.json + manifest.json），并回填 run 信息。
+
+    - save_result=false 时不落盘；
+    - result_dir 显式指定时直接用该目录当 run 目录（不再套 runs/，也不做保留清理）；
+    - 同轮产物**默认覆盖**（靠 run_id 区分轮次，不再追加 _HHMMSS）。
+    """
+    if not bool(opts.get("save_result", True)):
+        return payload
+
+    try:
+        dir_arg = str(opts.get("result_dir") or "").strip()
+        if dir_arg:
+            run_dir = Path(dir_arg).expanduser()
+            run_dir.mkdir(parents=True, exist_ok=True)
+            run_id, pruned = run_dir.name, []
+        else:
+            keep = opts.get("keep_runs")
+            keep = KEEP_RUNS_DEFAULT if keep in (None, "") else keep
+            run_dir, run_id, pruned = _new_run_dir(_default_result_dir(), keep)
+
+        parsed_name = str(opts.get("result_name") or "").strip() or RUN_PARSED_NAME
+        if not parsed_name.lower().endswith(".json"):
+            parsed_name += ".json"
+        parsed_path = run_dir / parsed_name
+        text = json.dumps(payload, ensure_ascii=False, indent=2)
+        with open(parsed_path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+        manifest_path = run_dir / RUN_MANIFEST_NAME
+        manifest = {
+            "tool": TOOL_NAME,
+            "version": VERSION,
+            "run_id": run_id,
+            "created_at": iso_now(),
+            "input": payload.get("input"),
+            "summary": payload.get("summary"),
+            "materials": payload.get("materials") or [],
+        }
+        with open(manifest_path, "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh, ensure_ascii=False, indent=2)
+
+        out = dict(payload)
+        summary = dict(out.get("summary") or {})
+        if pruned:
+            summary["pruned_runs"] = pruned
+        out["summary"] = summary
+        out.update({
+            "run_id": run_id,
+            "run_dir": str(run_dir),
+            "manifest_file": str(manifest_path),
+            "result_file": {
+                "dir": str(run_dir),
+                "name": parsed_path.name,
+                "path": str(parsed_path),
+                "bytes": len(text.encode("utf-8")),
+                "saved_at": iso_now(),
+            },
+        })
+        return out
+    except Exception as exc:  # 落盘失败不致命：stdout 仍返回完整结果
+        out = dict(payload)
+        out["result_file"] = {"error": "结果落盘失败: %s: %s" % (type(exc).__name__, exc)}
+        return out
 
 
 def _resolve_result_target(result_dir, base_name, now, overwrite):
@@ -1270,11 +1459,12 @@ def save_result_file(payload, opts):
 # stdin JSON 中允许的路径字段别名
 _PATH_KEYS = ("path", "input", "input_path", "dir", "directory", "file")
 _ALLOWED_OPTS = {
-    "path", "recursive", "include_hidden", "extensions", "max_files",
+    "path", "recursive", "include_hidden", "include_markdown", "extensions", "max_files",
     "max_pages_per_file", "max_chars_per_page", "max_chars_per_file",
     "max_text_mb", "word_paragraphs_per_page", "context_style", "workers",
     "ocr", "ocr_langs", "ocr_dpi",
     "save_result", "result_dir", "result_name", "overwrite_result", "emit_stdout",
+    "keep_runs",
 }
 
 
@@ -1340,19 +1530,18 @@ def main():
     except Exception as exc:  # 兜底：stdout 输出错误 JSON，退出码非 0
         emit_result({"error": "%s: %s" % (type(exc).__name__, exc)}, ok=False, code=1)
 
-    # 结果落盘：bin/temp/parsed_context_YYYY_MM_DD.json，路径回填到 stdout 的 result_file
-    result_info = save_result_file(payload, opts)
-    if result_info is not None:
-        payload = dict(payload)
-        payload["result_file"] = result_info
+    # 产物落盘：<bin>/temp/runs/<run_id>/{parsed_context.json, manifest.json}
+    payload = save_run_outputs(payload, opts)
 
     if not bool(opts.get("emit_stdout", True)):
-        # 只要文件、不回传超长 JSON：stdout 输出轻量回执
-        saved_ok = result_info is not None and "error" not in result_info
+        # 只要文件、不回传超长 JSON：stdout 输出轻量回执（带 run_id / 清单路径，便于对账）
+        rf = payload.get("result_file") or {}
         payload = {
-            "ok": saved_ok,
+            "ok": bool(rf.get("path")) and "error" not in rf,
+            "run_id": payload.get("run_id"),
             "summary": payload.get("summary"),
-            "result_file": payload.get("result_file"),
+            "result_file": rf,
+            "manifest_file": payload.get("manifest_file"),
         }
     emit_result(payload)
 
@@ -1422,6 +1611,46 @@ def selftest():
         assert json.loads(Path(info["path"]).read_text(encoding="utf-8"))["ok"] is True
         # save_result=false -> 不落盘
         assert save_result_file({"tool": TOOL_NAME}, {"result_dir": td, "save_result": False}) is None
+
+    # ---- P0-2 run 目录隔离 + 保留策略 ----
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="ingest_run_") as td:
+        base = Path(td) / "temp"
+        r1, id1, pruned1 = _new_run_dir(base, keep=2)
+        assert r1.is_dir() and r1.parent.name == RUN_DIR_NAME and pruned1 == []
+        assert id1 == datetime.now().strftime(RUN_ID_FMT), id1
+        # 同秒再次创建 -> 追加后缀，不覆盖
+        r2, id2, _ = _new_run_dir(base, keep=2)
+        assert id2 != id1 and r2.is_dir()
+        # 保留策略：第 3 轮创建后只留最新 2 个
+        r3, _, pruned3 = _new_run_dir(base, keep=2)
+        left = sorted(p.name for p in (base / RUN_DIR_NAME).iterdir() if p.is_dir())
+        assert len(left) == 2 and pruned3 and id1 in pruned3, (left, pruned3)
+        assert r3.is_dir()
+
+    # ---- P1-2 材料清单（sha256/页数/需 OCR） ----
+    with tempfile.TemporaryDirectory(prefix="ingest_materials_") as td:
+        f = Path(td) / "a.pdf"
+        f.write_bytes(b"hello")
+        docs = [{"file": "a.pdf", "metadata": {"pages": 3, "chars": 12, "type": "pdf"}},
+                {"file": "scan.pdf", "metadata": {"pages": 1, "chars": 0, "type": "pdf"}}]
+        errs = [{"file": "bad.pdf", "error": "boom"}]
+        mats = _build_materials([(str(f), "a.pdf"), (str(f), "scan.pdf"), (str(f), "bad.pdf")], docs, errs)
+        assert [m["rel"] for m in mats] == ["a.pdf", "scan.pdf", "bad.pdf"]
+        assert mats[0]["sha256"] == hashlib.sha256(b"hello").hexdigest()[:MATERIAL_SHA_LEN]
+        assert mats[0]["pages"] == 3 and mats[0]["need_ocr"] is False
+        assert mats[1]["need_ocr"] is True
+        assert mats[2]["failed"] is True
+
+        # save_run_outputs：result_dir 显式时直接用该目录，且写入 manifest/parsed + 回填 run 字段
+        payload = {"tool": TOOL_NAME, "input": {"path": "x"}, "summary": {"files_processed": 1},
+                   "materials": mats}
+        out = save_run_outputs(payload, {"result_dir": td, "result_name": RUN_PARSED_NAME})
+        assert out["manifest_file"] == str(Path(td) / RUN_MANIFEST_NAME)
+        assert Path(out["result_file"]["path"]).name == RUN_PARSED_NAME
+        saved = json.loads(Path(out["manifest_file"]).read_text(encoding="utf-8"))
+        assert saved["run_id"] == Path(td).name and len(saved["materials"]) == 3
+
     print("selftest ok (%s v%s)" % (TOOL_NAME, VERSION))
 
 

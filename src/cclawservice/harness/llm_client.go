@@ -125,7 +125,7 @@ func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.T
 		lastErr = err
 		// 供应商不接受强制调用相关参数(tool_choice / enable_thinking):降级重试一次 ——
 		// 强制调用失败不该让整轮对话失败,退回"由模型自行决定"仍优于把 502 抛给用户。
-		if dropped := DropForceToolCallRequest(&req, err); dropped {
+		if dropped := DegradeChatRequest(&req, err); dropped {
 			continue
 		}
 		if !llmproto.IsRetryableLlmError(err) {
@@ -215,7 +215,7 @@ func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLl
 		}
 		lastErr, lastFinish = err, finishReason
 		// 供应商不接受强制调用相关参数:降级重试一次(已向客户端输出增量时不可重试)
-		if !emitted && DropForceToolCallRequest(&req, err) {
+		if !emitted && DegradeChatRequest(&req, err) {
 			continue
 		}
 		if emitted || !llmproto.IsRetryableLlmError(err) {

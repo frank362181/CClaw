@@ -171,7 +171,6 @@ func AgentValues(a *TAgent) map[string]interface{} {
 		"subagents":             a.SubAgents,
 		"reasoning_mode":        a.ReasoningMode,
 		"tool_progress":         a.ToolProgress,
-		"skill_ids":             a.SkillIds,
 		"deleted":               a.Deleted,
 		"disabled":              a.Disabled,
 	}

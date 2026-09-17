@@ -235,7 +235,7 @@ create table if not exists t_agent_skill (
     agent_id varchar(8) not null,
     skill_id varchar(8) not null,
     disabled integer not null default 0,
-    deleted integer not null default 0
+    deleted integer not null default 0,
     foreign key(agent_id) references t_agent(agent_id),
     foreign key(skill_id) references t_skill(skill_id)
 );

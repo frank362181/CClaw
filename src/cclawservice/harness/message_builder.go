@@ -150,8 +150,8 @@ func BuildChatCompletionRequestWithToolChoice(llmProvider dataobject.TLlm, messa
 	return req
 }
 
-// DropForceToolCallRequest 供应商拒绝tool force call时，参数降级
-func DropForceToolCallRequest(req *llmproto.ChatCompletionRequest, err error) bool {
+// DegradeChatRequest 错误信息中包含的信息对chat request降级
+func DegradeChatRequest(req *llmproto.ChatCompletionRequest, err error) bool {
 	if req == nil || err == nil || req.ToolChoice == pCommon.BlankString {
 		return false
 	}
@@ -164,6 +164,7 @@ func DropForceToolCallRequest(req *llmproto.ChatCompletionRequest, err error) bo
 	logging.LogWarnF("llm client: provider rejected tool forced-call params (clear tool_choice=%s/enable_thinking), retry: %s",
 		req.ToolChoice, err.Error())
 
+	//对强制工具调用进行降级
 	req.ToolChoice = pCommon.BlankString
 	req.EnableThinking = nil
 

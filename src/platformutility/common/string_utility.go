@@ -328,3 +328,18 @@ func LooksLikeFact(item string, minFactRuns int) bool {
 	}
 	return true
 }
+
+// LooksLikeJson 判断字符串是否是json串
+func LooksLikeJson(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) < 2 {
+		return false
+	}
+
+	head, tail := trimmed[0], trimmed[len(trimmed)-1]
+	if !(head == '{' && tail == '}') && !(head == '[' && tail == ']') {
+		return false
+	}
+
+	return json.Valid([]byte(trimmed))
+}

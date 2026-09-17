@@ -18,7 +18,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -628,25 +627,6 @@ func (s *ChatService) assembleChatContext(session dataobject.TSession, agent dat
 	return ctxmgr.AssembleContext(systemText, records, req.ReqMsg, policy), records
 }
 
-// looksLikeToolResultJSON 判断脚本 stdout 的一行是否为"整行一个 JSON 对象/数组"。
-//
-// 这基本就是工具的结果体本身(例:save_report 的 {"saved":true,...}、ingest_router 的
-// {"tool":"ingest_router",...})。用途:只把这类行挡在**进度展示**之外 ——
-// 工具结果是给模型的,聊天界面不需要展示原始 JSON;普通文本进度行仍照旧下发。
-func looksLikeToolResultJSON(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	if len(trimmed) < 2 {
-		return false
-	}
-
-	head, tail := trimmed[0], trimmed[len(trimmed)-1]
-	if !(head == '{' && tail == '}') && !(head == '[' && tail == ']') {
-		return false
-	}
-
-	return json.Valid([]byte(trimmed))
-}
-
 // completeChat 取回完整回复:function-calling 开启且该 Agent 有可用工具时走工具循环,否则走普通同步调用。
 //   - messages: 已装配好的完整消息序列(system + 历史 + 本轮用户消息)
 //   - recorder: 旁路记录本轮调用过的工具(可为 nil)
@@ -804,10 +784,8 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 				//执行具体的工具
 				res, err := toolSet.ExecStream(ctx, run.name, run.arg, func(line string) {
 					lastOut.Store(pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().NanoTimestamp)
-					// 脚本 stdout 行:仅投递到通道,由唯一转发 goroutine 推送(不在此处直接写 SSE)。
-					// 整行 JSON(= 脚本的结果体,如 save_report 的 {"saved":true,...})不当进度展示:
-					// 结果是给模型的,不是给用户看的 —— 否则聊天界面上会糊一大段 JSON。
-					if looksLikeToolResultJSON(line) {
+					// json串不需要输出到UI界面上
+					if pCommon.LooksLikeJson(line) {
 						return
 					}
 					lineCh <- ToolEvent{Phase: cCommon.ChatToolEventProgress, Seq: run.seq, Name: run.name, Detail: line}
