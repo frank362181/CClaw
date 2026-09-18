@@ -45,7 +45,6 @@ const (
 	AgentRoutingLLMTimeoutSeconds = 10   // LLM 分类调用超时(秒),避免拖慢主聊天流程。
 	AgentRoutingLLMMaxTokens      = 1024 // LLM 分类输出 token 上限(分类只需返回一个短 AgentId)。
 	SessionAgentBindingTTLSeconds = 3600 // 会话→Agent 内存绑定的有效期(秒),过期后重新路由。
-	AgentToolLoopMax              = 30   // function-calling 工具循环的最大迭代次数(防止模型反复请求工具导致死循环/超时)。
 
 	DefaultToolReplayMaxRunes  = 1200 // 单条工具结果回放的最大字符数(控制历史体积;完整内容仍在文件里)
 	DefaultOutputReserveTokens = 4096 // 为模型输出预留的 token 数
@@ -66,7 +65,9 @@ const (
 
 // LLM 调用重试 / 单次请求空闲超时/流式空闲超时 / SSE 心跳相关配置(秒或毫秒;<=0 表示禁用)。
 const (
-	AgentRunTimeout = 600 //Agent单次聊天运行超时时间(工具循环+LLM生成)
+	AgentRunTimeout  = 600                          //Agent单次聊天运行超时时间(工具循环+LLM生成)
+	ChatRunTimeout   = "CCLAW_CHAT_RUN_TIMEOUT_SEC" //聊天最长的时间环境变量
+	AgentToolLoopMax = 30                           // function-calling 工具循环的最大迭代次数(防止模型反复请求工具导致死循环/超时)。
 
 	NonStreamResponseTimeout = 60 // 单次 LLM 同步请求的默认超时，同步情况下起作用
 	StreamResponseTimeout    = 60 // 流式读取空闲上限(秒):LLM无返回的最大时间

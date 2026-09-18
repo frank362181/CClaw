@@ -1,7 +1,7 @@
 /**
 * Chat 业务服务
 *
-* 职责:接收 cclawchat 聊天界面发来的消息,调用 LLM 引擎返回真实回复。
+* 职责:接收 聊天界面发来的消息,调用 LLM 引擎返回真实回复。
 *
 * 处理流程:
 *   1. 校验消息内容并做长度限制,解析/生成会话标识
@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,25 +47,13 @@ import (
 // MaxChatMessageLen 单条聊天消息的字符上限(防超大请求体滥用)
 const MaxChatMessageLen = 4096
 
-// chatRunTimeout 返回应用级运行超时:优先取环境变量 CCLAW_CHAT_RUN_TIMEOUT_SEC,
-// 否则用 AgentRunTimeoutSecs 默认值。
-func chatRunTimeout() time.Duration {
-	if v := strings.TrimSpace(pCommon.GetEnvString("CCLAW_CHAT_RUN_TIMEOUT_SEC")); v != "" {
-		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
-			return time.Duration(sec) * time.Second
-		}
-	}
-	return hCommon.AgentRunTimeout * time.Second
-}
-
 // ChatService 处理聊天消息:校验 → 解析 Agent/Provider → 组装 prompt → 调用 LLM。
 type ChatService struct {
 	baseService.BaseService
 
-	agentRepo     repo.IAgentRepository
-	promptService *harness.PromptService
-	llmClient     *harness.Client
-	agentRouter   *ctxmgr.AgentRouter
+	agentRepo   repo.IAgentRepository
+	llmClient   *harness.Client
+	agentRouter *ctxmgr.AgentRouter
 
 	// memoryService 会话管理(阶段1双写:只写不读的旁路)。
 	// 为 nil 或未启用时全部记录动作静默跳过,不影响聊天主流程。
@@ -89,10 +76,9 @@ var chatService = pCommon.GetSingleton(func() *ChatService {
 			Name:        "chatService",
 			Description: "receive chat messages and reply via the LLM engine",
 		},
-		agentRepo:     nil,
-		promptService: harness.GetPromptService(),
-		llmClient:     harness.NewClient(),
-		agentRouter:   nil,
+		agentRepo:   nil,
+		llmClient:   harness.NewClient(),
+		agentRouter: nil,
 	}
 }).Instance()
 
@@ -225,7 +211,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	defer ctxmgr.GetTurnStreamMgr().Unregister(key)
 
 	// 应用级运行超时:界定"这一轮任务最多跑多久"(工具循环 + LLM 生成整段)。
-	runCtx, runCancel := context.WithTimeout(streamCtx, chatRunTimeout())
+	runCtx, runCancel := context.WithTimeout(streamCtx, time.Duration(pCommon.GetEnvIntDefault(hCommon.ChatRunTimeout, hCommon.AgentRunTimeout))*time.Millisecond)
 	defer runCancel()
 
 	if onStatus != nil {
@@ -267,7 +253,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 
 		// 应用级运行超时:给可读错误,而不是笼统的 "request canceled by client"
 		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-			return pCommon.BlankString, myException.ChatRunTimeoutKind.Newf("chat service: run timeout after %s", chatRunTimeout())
+			return pCommon.BlankString, myException.ChatRunTimeoutKind.Newf("chat service: run timeout after %d seconds", pCommon.GetEnvIntDefault(hCommon.ChatRunTimeout, hCommon.AgentRunTimeout))
 		}
 		return pCommon.BlankString, myException.LlmError(err, "chat service: runtime stream error")
 	}
@@ -353,7 +339,7 @@ func (s *ChatService) InterruptChat(sender, turnId string) error {
 
 // =============================== private functions & methods===========================
 
-func (s *ChatService) normalizeRequest(comCode, sender string, req *request.ChatRequest) *request.ChatRequest {
+func (s *ChatService) normalizeRequest(comCode string, req *request.ChatRequest) *request.ChatRequest {
 	// 会话标识:统一带单位编码前缀 —— 无论客户端是否提供。
 	clientSessionId := cCommon.NormalizeCompactId(req.SessionId)
 	if clientSessionId == pCommon.BlankString {
@@ -442,7 +428,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 	//    前端 crypto.randomUUID() 与服务端 GenerateUUID() 产出的是 36 字符标准 UUID,
 	//    去分隔符后为 32 字符;服务端生成的带前缀 ID 最长 48 → 截断到 40。
 	//    该值会被用作历史文件目录名,规整中的字符过滤顺带杜绝了路径穿越。
-	s.normalizeRequest(comCode, sender, req)
+	s.normalizeRequest(comCode, req)
 
 	// 5. 解析目标 Agent(混合路由:显式 → 会话绑定 → 关键词 → LLM 分类 → 默认)
 	agent, err := s.resolveAgent(ctx, comCode, req.SessionId, req.ReqMsg, req.AgentId)
@@ -458,7 +444,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 
 	// 7. 基于 Agent 工作区启动文档组装 system prompt,并解析其 skill 中声明的可用工具
 	skillFiles, skillRoot := s.collectSkillFiles(agent)
-	systemPrompt, err := s.promptService.BuildSystemPromptEx(agent, skillFiles, dataobject.BootstrapScopeNormal)
+	systemPrompt, err := ctxmgr.BuildSystemPromptEx(agent, skillFiles, dataobject.BootstrapScopeNormal)
 	if err != nil {
 		logging.LogErrorF("chat service: build system prompt error:%s", err.Error())
 		return nil, dataobject.TAgent{}, nil, dataobject.TLlm{}, nil, myException.ChatLLMKind.Newf("chat service: build system prompt error:%s", err.Error())

@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -564,7 +565,22 @@ func Close(file *os.File) {
 }
 
 func GetEnvString(key string) string {
+	key = strings.TrimSpace(key)
 	return os.Getenv(key)
+}
+
+func GetEnvIntDefault(key string, defaultValue int) int {
+	if len(key) == 0 {
+		return defaultValue
+	}
+
+	envValue := GetEnvString(key)
+	envValueInt, err := strconv.Atoi(envValue)
+	if err == nil && envValueInt > 0 {
+		return envValueInt
+	}
+
+	return defaultValue
 }
 
 // CreateTimerWithContext 根据context的cancel创建一个timer
