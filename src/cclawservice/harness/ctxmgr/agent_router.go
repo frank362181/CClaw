@@ -204,10 +204,10 @@ func (r *AgentRouter) classifyByLLM(ctx context.Context, comCode string, agents 
 
 	// 每个候选 Agent 的"简介"优先取工作区 AGENTS.md 的 front matter summary,
 	// 无摘要时回退数据库 description
-	candidates := make([]dataobject.ClassifyAgent, 0, len(agents))
+	candidates := make([]hCommon.ClassifyAgent, 0, len(agents))
 	for i := range agents {
 		agent := &agents[i]
-		candidates = append(candidates, dataobject.ClassifyAgent{
+		candidates = append(candidates, hCommon.ClassifyAgent{
 			AgentId:   agent.AgentId,
 			AgentName: agent.AgentName,
 			Label:     r.classifyLabel(*agent),
@@ -283,7 +283,7 @@ func (r *AgentRouter) agentDocSummary(agent dataobject.TAgent) string {
 		return ""
 	}
 	for _, doc := range promptRepo.GetAllDocuments(agent.AgentId) {
-		if doc.Kind == dataobject.AgentDocAgent {
+		if doc.Kind == hCommon.AgentDocAgent {
 			return strings.TrimSpace(doc.FrontMatter.Summary)
 		}
 	}

@@ -38,7 +38,6 @@ import (
 	"sort"
 	"strings"
 
-	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/harness"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/security"
@@ -76,7 +75,7 @@ func BuildSystemPrompt(agent dataobject.TAgent, skillFiles []string) (*dataobjec
 
 // BuildSystemPromptEx 按指定会话范围组装system prompt
 func BuildSystemPromptEx(agent dataobject.TAgent, skillFiles []string, scope dataobject.BootstrapScope) (*dataobject.SystemPrompt, error) {
-	workspaceRoot, _ := cCommon.BuildAgentBootstrapRoot(agent)
+	workspaceRoot, _ := hCommon.BuildAgentBootstrapRoot(agent)
 
 	// 1. 加载并缓存 agent 启动文件(文件fingerprint未变化则直接命中缓存)
 	if err := repo.GetPromptRepository().LoadAgentBootstrap(agent); err != nil {
@@ -246,7 +245,7 @@ func assembleSystemPrompt(agent dataobject.TAgent, workspaceRoot string, scope d
 		if doc.Missing {
 			sections = append(sections, dataobject.SystemPromptSection{
 				Title:   doc.FileName,
-				Content: cCommon.MissingFileMarker + " Expected at: " + filepath.Join(workspaceRoot, doc.FileName),
+				Content: hCommon.MissingFileMarker + " Expected at: " + filepath.Join(workspaceRoot, doc.FileName),
 			})
 			missing = append(missing, doc.FileName)
 			continue
@@ -259,7 +258,7 @@ func assembleSystemPrompt(agent dataobject.TAgent, workspaceRoot string, scope d
 
 		// 单文件预算:USER.md 独立 4K,其余 20K
 		budget := hCommon.MaxBootstrapFileChars
-		if doc.Kind == dataobject.AgentDocUser {
+		if doc.Kind == hCommon.AgentDocUser {
 			budget = hCommon.MaxUserDocChars
 		}
 		if runeLen := len([]rune(content)); runeLen > budget {
@@ -306,9 +305,9 @@ func assembleSystemPrompt(agent dataobject.TAgent, workspaceRoot string, scope d
 	// 蒸馏按 DistillMemoryDocMaxChars 往这个文件里写长期记忆,一旦被挤掉,
 	// 就会出现"事实写进了文件、却从没进过 prompt"——必须让它可见。
 	for i := range truncated {
-		if truncated[i] == cCommon.MemoryDocFileName {
+		if truncated[i] == hCommon.MemoryDocFileName {
 			logging.LogWarnF("prompt service: agent=%s long-term memory (%s) was truncated by the prompt budget; distilled facts may never reach the prompt",
-				agent.AgentId, cCommon.MemoryDocFileName)
+				agent.AgentId, hCommon.MemoryDocFileName)
 			break
 		}
 	}
@@ -461,9 +460,9 @@ func truncateTailBudget(sections []dataobject.SystemPromptSection, cap int, trun
 //   - 仅输出元数据(名称 + 版本 + 描述),按名称排序,受数量与字符预算约束
 //   - 优先完整描述;超出预算则先缩短描述,再逐条丢弃尾部 skill
 //   - 返回 (目录文本, 是否被截断)
-func renderSkillsCatalog(skills []dataobject.SkillDocument) (string, bool) {
+func renderSkillsCatalog(skills []hCommon.SkillDocument) (string, bool) {
 	// 过滤空元数据
-	catalog := make([]dataobject.SkillDocument, 0, len(skills))
+	catalog := make([]hCommon.SkillDocument, 0, len(skills))
 	for i := range skills {
 		meta := &skills[i].FrontMatter
 		if len(meta.Name) == 0 && len(meta.Description) == 0 {
@@ -485,7 +484,7 @@ func renderSkillsCatalog(skills []dataobject.SkillDocument) (string, bool) {
 		catalog = catalog[:hCommon.MaxSkillsInPrompt]
 	}
 
-	render := func(list []dataobject.SkillDocument, descMax int) string {
+	render := func(list []hCommon.SkillDocument, descMax int) string {
 		var sb strings.Builder
 		for i := range list {
 			meta := &list[i].FrontMatter
@@ -542,7 +541,7 @@ func renderSkillsCatalog(skills []dataobject.SkillDocument) (string, bool) {
 	}
 
 	// 最短描述也放不下:逐条丢弃尾部 skill 直到满足预算
-	keep := make([]dataobject.SkillDocument, 0, len(catalog))
+	keep := make([]hCommon.SkillDocument, 0, len(catalog))
 	for i := range catalog {
 		candidate := append(keep, catalog[i])
 		if runes(render(candidate, lo)) > hCommon.MaxSkillsPromptChars {
@@ -640,13 +639,13 @@ func buildHistoryItems(records []hCommon.MemoryRecord, toolMaxRunes int) []histo
 func renderToolBlock(tools []hCommon.MemoryRecord, maxRunes int) string {
 	var sb strings.Builder
 	sb.WriteString(historyToolBlockOpen)
-	for _, tool := range tools {
-		name := strings.TrimSpace(tool.Title)
+	for _, t := range tools {
+		name := strings.TrimSpace(t.Title)
 		if name == "" {
 			name = "tool"
 		}
-		body := pCommon.TruncateRunes(strings.TrimSpace(tool.Content), maxRunes, hCommon.TruncatedMarker)
-		if timeText := strings.TrimSpace(tool.TimeText); timeText != "" {
+		body := pCommon.TruncateRunes(strings.TrimSpace(t.Content), maxRunes, hCommon.TruncatedMarker)
+		if timeText := strings.TrimSpace(t.TimeText); timeText != "" {
 			_, _ = fmt.Fprintf(&sb, "\n- [%s] %s: %s", timeText, name, body)
 		} else {
 			_, _ = fmt.Fprintf(&sb, "\n- %s: %s", name, body)

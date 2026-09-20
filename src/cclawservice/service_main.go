@@ -15,6 +15,7 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	selfController "my.favorite/cclawservice/controller"
+	hCommon "my.favorite/cclawservice/harness/common"
 	selfInterceptor "my.favorite/cclawservice/interceptor"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/cclawservice/service"
@@ -324,12 +325,12 @@ func (m *ServiceMain) Destroy() {
 
 func (m *ServiceMain) loadAgentConfigurations() error {
 	// 1.首先判断所需的目录是否存在
-	workSpaceDir := filepath.Join(pCommon.GetExecutableDir(), cCommon.AgentServiceWorkspaceDirName)
+	workSpaceDir := filepath.Join(pCommon.GetExecutableDir(), hCommon.AgentServiceWorkspaceDirName)
 	_ = pCommon.CreateDir(workSpaceDir)
 
 	// 2. 加载agent的默认配置信息
 	configDir := filepath.Join(pCommon.GetExecutableDir(), "config")
-	defaultAgentConfigFile := filepath.Join(configDir, cCommon.DefaultAgentConfigFile)
+	defaultAgentConfigFile := filepath.Join(configDir, hCommon.DefaultAgentConfigFile)
 	m.defaultAgentConfigHelper, _ = config.GetConfigurationHelper(defaultAgentConfigFile)
 	_ = m.defaultAgentConfigHelper.LoadConfiguration()
 

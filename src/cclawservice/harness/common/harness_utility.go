@@ -7,15 +7,119 @@ package common
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
-	cCommon "my.favorite/cclawservice/common"
+	"gopkg.in/yaml.v2"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
 )
+
+// BuildAgentBootstrapRoot 根据agent的信息构建agent的工作目录
+// 安全:agent_dir 必须为合法相对路径,防止工作区根逃出 <exeDir>/workspace。
+func BuildAgentBootstrapRoot(agent dataobject.TAgent) (string, bool) {
+	if !pCommon.IsSafeDir(agent.AgentDir) {
+		return pCommon.BlankString, false
+	}
+
+	agentBootstrapRoot := filepath.Join(pCommon.GetExecutableDir(), AgentBootstrapDir, agent.OwnerId, agent.AgentDir)
+	if pCommon.IsDir(agentBootstrapRoot) {
+		return agentBootstrapRoot, true
+	}
+
+	return pCommon.BlankString, false
+}
+
+// ResolveStartupPath 校验并解析启动文档路径:仅允许纯文件名,禁止目录穿越与符号链接逃逸。
+// 供 prompt 组装(LoadWorkspace)与启动文件管理(StartupFileRepository)共用,
+// 保证同一套安全路径规则。文件名非法/越界时返回平台 FilePathError。
+func ResolveStartupPath(workspaceRoot, fileName string) (string, error) {
+	// 只允许纯文件名:不能包含路径分隔符、"." 或 ".."
+	if filepath.Base(fileName) != fileName || fileName == "." || fileName == ".." {
+		return pCommon.BlankString, pException.FilePathErrorEx("illegal document file name: " + fileName)
+	}
+
+	return pCommon.SafeJoin(workspaceRoot, filepath.Join(workspaceRoot, fileName))
+}
+
+// BuildSkillRoot 返回技能根目录 <exeDir>/cclaw/skills。
+// 所有技能都位于该目录之下,一个子目录一个技能(目录名即 t_skill.skill_dir)。
+func BuildSkillRoot() (string, bool) {
+	skillRoot := filepath.Join(pCommon.GetExecutableDir(), AgentBootstrapDir, SkillDirName)
+	return skillRoot, true
+}
+
+// NormalizeSkillDir 把 skill 目录配置规整为“技能目录名”(相对 skills 根的安全相对路径)。
+//
+// 布局约定(一个目录一个技能):技能文档固定为 <exeDir>/cclaw/skills/<skillDir>/SKILL.md。
+// 兼容两种写法(历史数据存的是后者):
+//   - 目录形式(推荐):"npa-report"
+//   - 文档形式(历史,等价):"npa-report/SKILL.md" —— 取其上层层级
+//
+// 安全:必须是安全的相对路径(非空、非绝对、无 "."/".." 段与冗余分隔符),
+// 保证技能一律落在 skills 根之内;非法时返回业务错误(与 ValidateAgent 口径一致)。
+func NormalizeSkillDir(skillDir string) (string, error) {
+	dir := strings.TrimSpace(filepath.ToSlash(skillDir))
+	if dir == "" {
+		return pCommon.BlankString, pException.ParameterEmptyErrorEx("skill dir is empty")
+	}
+
+	// 历史写法:配置直接指向 SKILL.md(或任何层级的该文件),取其上层层级
+	if filepath.Base(dir) == SkillDocFileName {
+		dir = strings.TrimSpace(filepath.ToSlash(filepath.Dir(dir)))
+	}
+	if !pCommon.IsSafeDir(dir) {
+		return pCommon.BlankString, pException.ParameterEmptyErrorEx("skill dir is an illegal path: " + skillDir)
+	}
+
+	return dir, nil
+}
+
+// ResolveSkillDocPath 解析 skill 的 SKILL.md 绝对路径(技能文档的唯一解析入口)。
+//
+// 支持三种输入:
+//   - 技能目录名(推荐,与 t_skill.skill_dir 的入库格式一致):"npa-report"
+//   - 历史文档路径:"npa-report/SKILL.md"
+//   - 已解析的绝对路径(调用链内部产物,如 collectSkillFiles 的输出):
+//     必须位于 skills 根内且文件名为 SKILL.md
+//
+// 安全:结果的真实路径必须落在 skills 根内(防目录穿越/符号链接逃逸)。
+func ResolveSkillDocPath(skillDir string) (string, error) {
+	skillRoot, _ := BuildSkillRoot()
+
+	cfg := strings.TrimSpace(skillDir)
+	if len(cfg) == 0 {
+		return pCommon.BlankString, pException.ParameterEmptyErrorEx("skill dir is empty")
+	}
+
+	// 已解析的绝对路径:只校验"仍在 skills 根内 + 名为 SKILL.md"
+	if filepath.IsAbs(cfg) {
+		absPath, err := pCommon.SafeJoin(skillRoot, cfg)
+		if err != nil {
+			return pCommon.BlankString, pException.FilePathErrorEx("skill doc escapes skill root: " + skillDir)
+		}
+		if filepath.Base(absPath) != SkillDocFileName {
+			return pCommon.BlankString, pException.FilePathErrorEx("skill doc must be " + SkillDocFileName + ": " + skillDir)
+		}
+		return absPath, nil
+	}
+
+	dir, err := NormalizeSkillDir(cfg)
+	if err != nil {
+		return pCommon.BlankString, err
+	}
+
+	// 目录名已是安全相对路径,仍走 SafeJoin 兜底符号链接逃逸
+	absPath, err := pCommon.SafeJoin(skillRoot, filepath.Join(skillRoot, dir, SkillDocFileName))
+	if err != nil {
+		return pCommon.BlankString, pException.FilePathErrorEx("skill doc escapes skill root: " + skillDir)
+	}
+
+	return absPath, nil
+}
 
 // maintenanceSlots 后台记忆维护的全局并发闸(压缩/蒸馏都要调用 LLM)。
 var maintenanceSlots = make(chan struct{}, CompactionMaxConcurrent)
@@ -43,14 +147,14 @@ func ReleaseMaintenanceSlot() {
 //   - subagent: 仅 AGENTS.md(不继承父 agent 的人格/用户/记忆)
 //   - cron:     AGENTS/SOUL/IDENTITY/USER,不含 MEMORY.md
 //   - heartbeat: 不注入启动文件
-func IsKindAllowedInScope(kind dataobject.AgentDocumentKind, scope dataobject.BootstrapScope) bool {
+func IsKindAllowedInScope(kind AgentDocumentKind, scope dataobject.BootstrapScope) bool {
 	switch scope {
 	case dataobject.BootstrapScopeSubagent:
-		return kind == dataobject.AgentDocAgent
+		return kind == AgentDocAgent
 	case dataobject.BootstrapScopeCron:
 		switch kind {
-		case dataobject.AgentDocAgent, dataobject.AgentDocSoul,
-			dataobject.AgentDocIdentity, dataobject.AgentDocUser:
+		case AgentDocAgent, AgentDocSoul,
+			AgentDocIdentity, AgentDocUser:
 			return true
 		}
 		return false
@@ -59,6 +163,74 @@ func IsKindAllowedInScope(kind dataobject.AgentDocumentKind, scope dataobject.Bo
 	default:
 		return true
 	}
+}
+
+func ParseSkillDocument(skillFile string) (SkillTool, bool) {
+	doc, ok := LoadSkillDocument(skillFile)
+	if !ok {
+		return SkillTool{}, false
+	}
+
+	var out []BasicTool
+
+	for _, t := range doc.FrontMatter.Tools {
+		if len(strings.TrimSpace(t.Name)) == 0 {
+			continue // 工具名称为空即放弃
+		}
+		baseDir := filepath.Dir(skillFile)
+		t.Script, _ = pCommon.ResolveFile(baseDir, t.Script)
+		out = append(out, t)
+	}
+
+	return SkillTool{
+		Tools:           out,
+		AllowedTools:    doc.FrontMatter.AllowedTools,
+		DisallowedTools: doc.FrontMatter.DisallowedTools,
+		SkillFileName:   skillFile,
+	}, true
+}
+
+func LoadSkillDocument(skillFile string) (*SkillDocument, bool) {
+	data, _, err := pCommon.ReadFile(skillFile, MaxSkillDocSize)
+	if err != nil {
+		return nil, false
+	}
+
+	frontMatter, _ := SplitFrontMatter(data)
+	doc := &SkillDocument{SkillFile: skillFile}
+	if len(frontMatter) > 0 {
+		if err := yaml.Unmarshal([]byte(frontMatter), &doc.FrontMatter); err != nil {
+			return nil, false
+		}
+	}
+
+	return doc, true
+}
+
+func BasicToolToLLMTool(t BasicTool) (llmproto.Tool, bool) {
+	name := strings.TrimSpace(t.Name)
+	if len(name) == 0 {
+		return llmproto.Tool{}, false
+	}
+
+	return llmproto.Tool{
+		Type: "function",
+		Function: llmproto.ToolFunction{
+			Name:        name,
+			Description: strings.TrimSpace(t.Description),
+			Parameters:  pCommon.YamlToJsonMap(t.Parameters),
+		},
+	}, true
+}
+
+// FindStartupDocFile 按文件名(精确匹配)在启动文件清单中查找,未命中返回 ok=false。
+func FindStartupDocFile(fileName string) (StartupDocSpec, bool) {
+	for _, f := range StartupDocFiles {
+		if f.Name == fileName {
+			return f, true
+		}
+	}
+	return StartupDocSpec{}, false
 }
 
 // FrontMatterDelimiter front matter 的定界符
@@ -105,30 +277,11 @@ func StripFrontMatter(data []byte) string {
 }
 
 func BuildSessionName(message string) string {
-	name := strings.TrimSpace(pCommon.TruncateRunes(strings.TrimSpace(message), cCommon.SessionNameMaxLen, pCommon.BlankString))
+	name := strings.TrimSpace(pCommon.TruncateRunes(strings.TrimSpace(message), SessionNameMaxLen, pCommon.BlankString))
 	if name == pCommon.BlankString {
-		return cCommon.SessionDefaultName
+		return SessionDefaultName
 	}
 	return name
-}
-
-// StreamReadError 归一化流读取失败:
-// 流式读取失败的归一化:把底层读流错误分类为"客户端断开"或"传输层故障"。
-//   - 客户端断开(外层 ctx 取消)      → ErrRequestCanceled(静默,不重试)
-//   - 空闲超时(仅内层 streamCtx 取消) → 传输层错误(可重试)
-//   - 其它(连接重置/EOF 等)          → 传输层错误(可重试)
-func StreamReadError(ctx context.Context, streamCtx context.Context, err error, requestID string, idle time.Duration) error {
-	if ctx.Err() != nil {
-		return llmproto.ErrRequestCanceled
-	}
-	if idle > 0 && streamCtx.Err() != nil {
-		return llmproto.NewLlmStreamTransportError(
-			fmt.Errorf("stream idle timeout after %s without data: %v", idle, err), requestID)
-	}
-	if pException.IsContextCanceled(streamCtx, err) {
-		return llmproto.ErrRequestCanceled
-	}
-	return llmproto.NewLlmStreamTransportError(err, requestID)
 }
 
 // BuildMemoryFileName 构造会话历史文件名:memory_{yyyyMMddHHmmss}.md
@@ -138,7 +291,7 @@ func BuildMemoryFileName(at *pCommon.DatetimeItem) string {
 	if at != nil {
 		datetime = at
 	}
-	return cCommon.ChatMemoryFilePrefix + FormatCompactDatetime(datetime) + cCommon.ChatMemoryFileExt
+	return ChatMemoryFilePrefix + FormatCompactDatetime(datetime) + ChatMemoryFileExt
 }
 
 // BuildHistoryLockKey 历史写入的会话级锁键。
@@ -168,4 +321,28 @@ func FormatCompactDatetime(at *pCommon.DatetimeItem) string {
 		return pCommon.BlankString
 	}
 	return fmt.Sprintf("%04d%02d%02d%02d%02d%02d", at.Year, at.Month, at.Day, at.Hour, at.Minute, at.Second)
+}
+
+// BuildTurnStreamKey 构造"进行中轮次"的注册键/中断键:<sender>:<turnId>。
+func BuildTurnStreamKey(sender, turnId string) string {
+	return strings.TrimSpace(sender) + ":" + strings.TrimSpace(turnId)
+}
+
+// StreamReadError 归一化流读取失败:
+// 流式读取失败的归一化:把底层读流错误分类为"客户端断开"或"传输层故障"。
+//   - 客户端断开(外层 ctx 取消)      → ErrRequestCanceled(静默,不重试)
+//   - 空闲超时(仅内层 streamCtx 取消) → 传输层错误(可重试)
+//   - 其它(连接重置/EOF 等)          → 传输层错误(可重试)
+func StreamReadError(ctx context.Context, streamCtx context.Context, err error, requestID string, idle time.Duration) error {
+	if ctx.Err() != nil {
+		return llmproto.ErrRequestCanceled
+	}
+	if idle > 0 && streamCtx.Err() != nil {
+		return llmproto.NewLlmStreamTransportError(
+			fmt.Errorf("stream idle timeout after %s without data: %v", idle, err), requestID)
+	}
+	if pException.IsContextCanceled(streamCtx, err) {
+		return llmproto.ErrRequestCanceled
+	}
+	return llmproto.NewLlmStreamTransportError(err, requestID)
 }

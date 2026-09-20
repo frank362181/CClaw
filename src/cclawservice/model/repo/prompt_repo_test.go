@@ -15,7 +15,6 @@ import (
 
 	cCommon "my.favorite/cclawservice/common"
 	hCommon "my.favorite/cclawservice/harness/common"
-	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/platformutility/exception"
 )
 
@@ -83,7 +82,7 @@ func TestGetStartupFile(t *testing.T) {
 	if file == nil {
 		t.Fatal("GetStartupFile returned nil")
 	}
-	if file.Kind != dataobject.AgentDocAgent || file.Required != true || file.Missing {
+	if file.Kind != hCommon.AgentDocAgent || file.Required != true || file.Missing {
 		t.Errorf("unexpected file meta: %+v", file)
 	}
 	if file.Content != content {

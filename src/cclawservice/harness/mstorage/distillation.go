@@ -23,7 +23,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	cCommon "my.favorite/cclawservice/common"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
@@ -88,11 +87,11 @@ type DistillResult struct {
 
 // memoryDocPath 返回某 Agent 的长期记忆文件路径
 func memoryDocPath(agent dataobject.TAgent) (string, bool) {
-	root, ok := cCommon.BuildAgentBootstrapRoot(agent)
+	root, ok := hCommon.BuildAgentBootstrapRoot(agent)
 	if !ok {
 		return pCommon.BlankString, false
 	}
-	return filepath.Join(root, cCommon.MemoryDocFileName), true
+	return filepath.Join(root, hCommon.MemoryDocFileName), true
 }
 
 // ============================== watermark(增量蒸馏) ==============================

@@ -109,7 +109,7 @@ func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm
 // 不执行工具:由调用方(工具循环)解析并执行返回的工具调用。
 // 429/5xx/断流(传输层)按指数退避重试(同步调用无副作用,可安全重试)。
 //   - toolChoice: llmproto.ToolChoice* 常量;空串表示不发送 tool_choice(默认 auto)
-func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool, toolChoice string) (string, []llmproto.ToolCall, error) {
+func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool /*[]llmproto.Tool*/, toolChoice string) (string, []llmproto.ToolCall, error) {
 	req := BuildChatCompletionRequestWithToolChoice(llmProvider, messages, tools, toolChoice, false)
 	var lastErr error
 	for attempt := 1; attempt <= c.retryMaxAttempts; attempt++ {
@@ -166,31 +166,6 @@ func (c *Client) ChatCompletionStreamMessages(ctx context.Context, llmProvider d
 	return c.streamRequest(ctx, llmProvider, req, onChunk, onReasoning)
 }
 
-// streamRequest 执行一次流式请求的重试编排(已构建好请求体)。
-// 重试约定:429/5xx/断流在"尚未向客户端输出任何增量"时按指数退避重试;
-// 一旦有增量输出则不再重试(避免重复内容)。
-func (c *Client) streamRequest(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest, onChunk func(delta string), onReasoning func(delta string)) (string, string, error) {
-	lastFinish := ""
-	var lastErr error
-	for attempt := 1; attempt <= c.retryMaxAttempts; attempt++ {
-		if attempt > 1 {
-			if err := c.retryWait(ctx, attempt, lastErr); err != nil {
-				return pCommon.BlankString, lastFinish, err
-			}
-		}
-		content, finishReason, emitted, err := c.chatCompletionStreamOnce(ctx, llmProvider, req, onChunk, onReasoning)
-		if err == nil {
-			return content, finishReason, nil
-		}
-		lastErr, lastFinish = err, finishReason
-		// 已输出过任何增量 → 不可重试(避免重复内容)
-		if emitted || !llmproto.IsRetryableLlmError(err) {
-			return pCommon.BlankString, finishReason, err
-		}
-	}
-	return pCommon.BlankString, lastFinish, lastErr
-}
-
 // StreamWithTools 流式执行一次 chat/completions(带工具):
 //   - onChunk:      正式内容增量
 //   - onReasoning:  思考增量(reasoning_content)
@@ -225,6 +200,32 @@ func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLl
 	return pCommon.BlankString, nil, lastFinish, lastErr
 }
 
+// streamRequest 执行一次流式请求的重试编排(已构建好请求体)。
+// 重试约定:429/5xx/断流在"尚未向客户端输出任何增量"时按指数退避重试;
+// 一旦有增量输出则不再重试(避免重复内容)。
+func (c *Client) streamRequest(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest, onChunk func(delta string), onReasoning func(delta string)) (string, string, error) {
+	lastFinish := ""
+	var lastErr error
+	for attempt := 1; attempt <= c.retryMaxAttempts; attempt++ {
+		if attempt > 1 {
+			if err := c.retryWait(ctx, attempt, lastErr); err != nil {
+				return pCommon.BlankString, lastFinish, err
+			}
+		}
+		content, finishReason, emitted, err := c.chatCompletionStreamOnce(ctx, llmProvider, req, onChunk, onReasoning)
+		if err == nil {
+			return content, finishReason, nil
+		}
+		lastErr, lastFinish = err, finishReason
+		// 已输出过任何增量 → 不可重试(避免重复内容)
+		if emitted || !llmproto.IsRetryableLlmError(err) {
+			return pCommon.BlankString, finishReason, err
+		}
+	}
+	return pCommon.BlankString, lastFinish, lastErr
+}
+
+// ================================== private functions & methods ========================================
 // completeWithToolsOnce 执行一次同步(带工具)chat/completions(不含重试)。
 func (c *Client) completeWithToolsOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (string, []llmproto.ToolCall, error) {
 	httpReq, err := c.prepareRequest(ctx, llmProvider, req)

@@ -11,6 +11,73 @@ import (
 
 // ==================== agent 启动文档与 skill 文档 ====================
 
+const (
+	AgentBootstrapDir = "cclaw" //系统 启动文件目录名称
+
+	AgentServiceWorkspaceDirName = "workspace"         //agent工作目录
+	DefaultAgentConfigFile       = "agentdefault.json" //agent 的默认配置所在的文件
+
+	SkillDirName = "skills" //skills 的目录
+)
+
+// AgentDocumentKind 启动文档种类(实体词汇:AgentDocument.Kind 的取值)。
+type AgentDocumentKind int
+
+const (
+	AgentDocUnknown   AgentDocumentKind = iota
+	AgentDocAgent                       // AGENTS.md
+	AgentDocSoul                        // SOUL.md
+	AgentDocTools                       // TOOLS.md
+	AgentDocMemory                      //MEMORY.md
+	AgentDocIdentity                    //IDENTITY.md
+	AgentDocUser                        //USER.md
+	AgentDocBootstrap                   //BOOTSTRAP.md
+)
+
+// 启动文档文件名(*DocFileName 属于"工作区布局配置",留在本包;
+// 文档种类 AgentDocumentKind 是实体词汇,定义在 model/dataobject)
+const (
+	AgentDocFileName     = "AGENTS.md"    //agent.md:运行规则(必需)
+	SoulDocFileName      = "SOUL.md"      //soul.md:人格/语气/边界(可选)
+	IdentityDocFileName  = "IDENTITY.md"  //身份:名称/形象/emoji(可选)
+	UserDocFileName      = "USER.md"      //用户模型:偏好/沟通风格(可选)
+	ToolsDocFileName     = "TOOLS.md"     //tools.md:工具使用指引(可选)
+	BootstrapDocFileName = "BOOTSTRAP.md" //首次运行的引导仪式(仅新工作区)
+	MemoryDocFileName    = "MEMORY.md"    //长期记忆文件(存在才注入)
+)
+
+// String 返回文档种类的可读名称
+func (kind AgentDocumentKind) String() string {
+	switch kind {
+	case AgentDocAgent:
+		return "agent"
+	case AgentDocSoul:
+		return "soul"
+	case AgentDocTools:
+		return "tools"
+	case AgentDocMemory:
+		return "memory"
+	case AgentDocIdentity:
+		return "identity"
+	case AgentDocUser:
+		return "user"
+	case AgentDocBootstrap:
+		return "bootstrap"
+	default:
+		return "unknown"
+	}
+}
+
+//// StartupDocSpec 启动文档清单中的一项(文件名/种类/是否必需)
+//type StartupDocSpec struct {
+//	Kind     AgentDocumentKind `json:"kind"`
+//	Name     string
+//	Required bool
+//}
+
+// MissingFileMarker 缺失文件标记(OpenClaw context-file: [MISSING] Expected at: <path>)
+const MissingFileMarker = "[MISSING]"
+
 // 启动文档注入预算(安全/性能,应用于 bootstrap-budget)
 const (
 	// StartupFileCacheTTLSeconds 启动文件列表缓存的 TTL(秒):管理界面可接受短暂延迟,换取高并发下免重复磁盘 IO
@@ -99,6 +166,18 @@ const (
 	HistoryRecordTypeTool        = "tool"
 	HistoryRecordTypeSummary     = "summary"     //表示该记录为summary,压缩摘要记录
 	HistoryRecordTypeInterrupted = "interrupted" //表示为中断标记
+)
+
+// 对应 data/ddl_sqlite3.sql 的 t_session / t_turn / t_turn_tool 三张表。
+// 设计:会话内容写入 memory_{yyyyMMddHHmmss}.md,t_session.chat_data 只保存该文件名,
+// 文件目录由 session_id 推导为 <exeDir>/cclaw/chat_history/<session_id>/。
+const (
+	ChatMemoryDirName    = "chat_history" // 会话历史文件根目录名(与 AgentBootstrapDir 同级)。
+	ChatMemoryFilePrefix = "memory_"      // 历史文件名前缀:memory_{yyyyMMddHHmmss}.md
+	ChatMemoryFileExt    = ".md"          // 历史文件扩展名。
+	SessionNameMaxLen    = 64             // 会话名称长度上限(对齐 t_session.session_name VARCHAR(64))。
+	SessionDefaultName   = "NewSession"   // 无可用标题时的会话名称(首条消息为空时兜底)。
+	TurnToolRespMaxLen   = 256            //工具输出截取的字符数
 )
 
 // Summarizer 摘要生成器:由调用方注入(service 层包装 LLM 客户端)。

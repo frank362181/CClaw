@@ -5,9 +5,74 @@
 package common
 
 import (
+	"encoding/json"
+
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 )
+
+// StartupDocSpec 启动文档清单中的一项(文件名/种类/是否必需)
+type StartupDocSpec struct {
+	Kind     AgentDocumentKind `json:"kind"`
+	Name     string
+	Required bool
+}
+
+// StartupDocFiles 启动文档清单,按固定顺序加载。
+// required=true 的必需文件缺失时,仍会生成带 Missing 标记的文档,由 prompt 组装层注入 [MISSING] 提示;
+// required=false 的可选文件缺失时直接省略。
+var StartupDocFiles = []StartupDocSpec{
+	{AgentDocAgent, AgentDocFileName, true},
+	{AgentDocSoul, SoulDocFileName, false},
+	{AgentDocIdentity, IdentityDocFileName, false},
+	{AgentDocUser, UserDocFileName, false},
+	{AgentDocTools, ToolsDocFileName, false},
+	{AgentDocBootstrap, BootstrapDocFileName, false},
+	{AgentDocMemory, MemoryDocFileName, false},
+}
+
+// AgentFrontMatter 是 agent 启动文档的 YAML 元数据
+type AgentFrontMatter struct {
+	Summary  string   `json:"summary,omitempty" yaml:"summary,omitempty"`
+	Title    string   `json:"title,omitempty" yaml:"title,omitempty"`
+	ReadWhen []string `json:"readWhen,omitempty" yaml:"read_when,omitempty"`
+}
+
+// AgentDocument 表示一个已解析的 agent 启动文档
+type AgentDocument struct {
+	Kind        AgentDocumentKind `json:"kind"`
+	FileName    string            `json:"fileName"`
+	FrontMatter AgentFrontMatter  `json:"frontMatter"`
+	Content     string            `json:"content"`
+	ByteSize    int64             `json:"byteSize"` // 原始文件字节数,用于缓存指纹与日志
+
+	Missing  bool `json:"missing"`  // 必需文件缺失(OpenClaw WorkspaceBootstrapFile.missing)
+	Required bool `json:"required"` // 是否为必需文件;缺失时注入 [MISSING] 标记,可选文件缺失则省略
+}
+
+// ToJsonString 序列化为 JSON 字符串
+func (doc *AgentDocument) ToJsonString() (string, error) {
+	jsonStr, err := json.Marshal(doc)
+	if err != nil {
+		return "", err
+	}
+
+	return string(jsonStr), nil
+}
+
+// FromJsonString 从 JSON 字符串反序列化
+func (doc *AgentDocument) FromJsonString(jsonStr string) error {
+	return json.Unmarshal([]byte(jsonStr), doc)
+}
+
+// ClassifyAgent 是路由分类 prompt 中的单个 Agent 候选。
+// Label 为用于意图判断的"简介",由调用方按优先级解析:
+// AGENTS.md 的 front matter summary > 数据库 description;两者皆空回退到Agent名称。
+type ClassifyAgent struct {
+	AgentId   string
+	AgentName string
+	Label     string
+}
 
 // ContextPolicy 上下文装配策略(来源:t_agent 与 t_llm 配置)。
 type ContextPolicy struct {

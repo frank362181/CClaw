@@ -56,7 +56,7 @@ func ComposeSystemMessage(systemPrompt, summaryText, summaryTitle string) llmpro
 
 // BuildClassifySystemPrompt 构建用来通过用户问题的意图询问LLM返回合适Agent的 prompt。
 // 简介优先使用各 Agent 工作区 AGENTS.md 的摘要(已由调用方解析进 ClassifyAgent.Label)。
-func BuildClassifySystemPrompt(agents []dataobject.ClassifyAgent) string {
+func BuildClassifySystemPrompt(agents []hCommon.ClassifyAgent) string {
 	var sb strings.Builder
 	sb.WriteString("你是一个智能体路由器。请根据用户的问题,从下面的智能体列表中选择最合适的一个。\n")
 	sb.WriteString("智能体列表(格式: 编号|名称|简介):\n")
@@ -120,7 +120,7 @@ func BuildChatCompletionRequest(llmProvider dataobject.TLlm, systemPrompt *datao
 
 // BuildChatCompletionRequestWithTool 构造带工具的 chat/completions 请求体(tool_choice 不发送)。
 // max_tokens 沿用与普通请求一致的动态推导(dynamicMaxTokens)。
-func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool, stream bool) llmproto.ChatCompletionRequest {
+func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool /*[]llmproto.Tool*/, stream bool) llmproto.ChatCompletionRequest {
 	return BuildChatCompletionRequestWithToolChoice(llmProvider, messages, tools, pCommon.BlankString, stream)
 }
 
@@ -129,7 +129,7 @@ func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []
 //
 // 为什么需要:技能正文不注入 system prompt,模型看不到"必须调用工具"的流程要求,
 // 可能直接用上下文里的历史工具结果作答 —— 对实时类工具(force-call)首轮必须强制调用。
-func BuildChatCompletionRequestWithToolChoice(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool, toolChoice string, stream bool) llmproto.ChatCompletionRequest {
+func BuildChatCompletionRequestWithToolChoice(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool /*[]llmproto.Tool*/, toolChoice string, stream bool) llmproto.ChatCompletionRequest {
 	req := llmproto.ChatCompletionRequest{
 		Model:      llmProvider.GetModelName(),
 		Messages:   messages,
@@ -141,6 +141,11 @@ func BuildChatCompletionRequestWithToolChoice(llmProvider dataobject.TLlm, messa
 	if !stream {
 		req.EnableThinking = new(llmProvider.ThkNonStreaming)
 	}
+	// 例外:强制调用(tool_choice=required)与 thinking 互斥,必须显式关闭思考(流式也要发)。
+	if req.ToolChoice == llmproto.ToolChoiceRequired {
+		req.EnableThinking = new(false)
+	}
+
 	mt := security.DynamicMaxTokens(llmProvider, messages)
 	if mt == 0 {
 		req.MaxTokens = nil // 应用供应商默认

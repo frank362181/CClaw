@@ -682,7 +682,7 @@ func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRe
 			ToolCalled: true,
 			CallTime:   tool.CallTime,
 			ToolName:   tool.ToolName,
-			ToolResp:   pCommon.TruncateRunes(strings.TrimSpace(tool.Result), cCommon.TurnToolRespMaxLen, pCommon.BlankString),
+			ToolResp:   pCommon.TruncateRunes(strings.TrimSpace(tool.Result), hCommon.TurnToolRespMaxLen, pCommon.BlankString),
 			RespTime:   tool.RespTime,
 		})
 		if fileName != "" {

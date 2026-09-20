@@ -17,7 +17,6 @@ import (
 	"sync"
 
 	"gopkg.in/yaml.v2"
-	cCommon "my.favorite/cclawservice/common"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
@@ -30,8 +29,8 @@ type agentPrompt struct {
 	agentId            string
 	agentBootstrapRoot string
 
-	documents *pCommon.SafeList[dataobject.AgentDocument]
-	skills    *pCommon.SafeList[dataobject.SkillDocument]
+	documents *pCommon.SafeList[hCommon.AgentDocument]
+	skills    *pCommon.SafeList[hCommon.SkillDocument]
 
 	// 加载时记录的文件指纹,用于判断文件是否发生变化
 	loadedFingerprint string
@@ -51,8 +50,8 @@ type IPromptRepository interface {
 	AddSkill(agentId, skillId, skillFile string) error
 	ClearSkills(agentId string)
 
-	GetAllDocuments(agentId string) []dataobject.AgentDocument
-	GetAllSkills(agentId string) []dataobject.SkillDocument
+	GetAllDocuments(agentId string) []hCommon.AgentDocument
+	GetAllSkills(agentId string) []hCommon.SkillDocument
 
 	Destroy()
 }
@@ -72,7 +71,7 @@ func GetPromptRepository() IPromptRepository {
 // 当工作区未变化(指纹相同)时直接复用缓存,避免重复读盘。
 // 单个文档缺失/失败不阻断整个工作区的加载。
 func (repo *PromptRepository) LoadAgentBootstrap(agent dataobject.TAgent) error {
-	agentBootstrapRoot, ok := cCommon.BuildAgentBootstrapRoot(agent)
+	agentBootstrapRoot, ok := hCommon.BuildAgentBootstrapRoot(agent)
 	if !ok {
 		return exception.ParameterEmptyErrorEx("prompt repo: workspace root is unavailable")
 	}
@@ -81,7 +80,7 @@ func (repo *PromptRepository) LoadAgentBootstrap(agent dataobject.TAgent) error 
 	defer repo.mu.Unlock()
 
 	var fileNames []string
-	for _, item := range cCommon.StartupDocFiles {
+	for _, item := range hCommon.StartupDocFiles {
 		fileNames = append(fileNames, item.Name)
 	}
 
@@ -102,13 +101,13 @@ func (repo *PromptRepository) LoadAgentBootstrap(agent dataobject.TAgent) error 
 		prompt = &agentPrompt{
 			agentId:            agent.AgentId,
 			agentBootstrapRoot: agentBootstrapRoot,
-			documents:          pCommon.NewSafeList[dataobject.AgentDocument](),
-			skills:             pCommon.NewSafeList[dataobject.SkillDocument](),
+			documents:          pCommon.NewSafeList[hCommon.AgentDocument](),
+			skills:             pCommon.NewSafeList[hCommon.SkillDocument](),
 			loadedFingerprint:  "",
 		}
 	}
 
-	for _, item := range cCommon.StartupDocFiles {
+	for _, item := range hCommon.StartupDocFiles {
 		doc, ok, err := repo.readAgentDocumentLocked(item.Kind, agentBootstrapRoot, item.Name, item.Required)
 		if err != nil {
 			logging.LogWarnF("prompt repo: load %s error:%s", item.Name, err.Error())
@@ -143,7 +142,7 @@ func (repo *PromptRepository) AddSkill(agentId, skillId, skillFile string) error
 	}
 
 	// 技能目录配置 → SKILL.md 绝对路径(相对 skills 根解析 + 越界校验都在 common 里单点收敛)
-	filePath, err := cCommon.ResolveSkillDocPath(skillFile)
+	filePath, err := hCommon.ResolveSkillDocPath(skillFile)
 	if err != nil {
 		return err
 	}
@@ -159,7 +158,7 @@ func (repo *PromptRepository) AddSkill(agentId, skillId, skillFile string) error
 
 	frontMatter, content := hCommon.SplitFrontMatter(data)
 
-	doc := &dataobject.SkillDocument{
+	doc := &hCommon.SkillDocument{
 		SkillId:   skillId,
 		SkillFile: filePath,
 		Content:   content,
@@ -188,7 +187,7 @@ func (repo *PromptRepository) ClearSkills(agentId string) {
 }
 
 // GetAllDocuments 返回全部启动文档的副本
-func (repo *PromptRepository) GetAllDocuments(agentId string) []dataobject.AgentDocument {
+func (repo *PromptRepository) GetAllDocuments(agentId string) []hCommon.AgentDocument {
 	agentId = strings.TrimSpace(agentId)
 	if len(agentId) == 0 {
 		return nil
@@ -199,8 +198,8 @@ func (repo *PromptRepository) GetAllDocuments(agentId string) []dataobject.Agent
 	}
 
 	documents := prompt.documents
-	out := make([]dataobject.AgentDocument, 0, documents.Len())
-	documents.Range(func(_ int, item dataobject.AgentDocument) bool {
+	out := make([]hCommon.AgentDocument, 0, documents.Len())
+	documents.Range(func(_ int, item hCommon.AgentDocument) bool {
 		out = append(out, item)
 		return true
 	})
@@ -209,7 +208,7 @@ func (repo *PromptRepository) GetAllDocuments(agentId string) []dataobject.Agent
 }
 
 // GetAllSkills 返回全部 skill 文档的副本
-func (repo *PromptRepository) GetAllSkills(agentId string) []dataobject.SkillDocument {
+func (repo *PromptRepository) GetAllSkills(agentId string) []hCommon.SkillDocument {
 	agentId = strings.TrimSpace(agentId)
 	if len(agentId) == 0 {
 		return nil
@@ -221,8 +220,8 @@ func (repo *PromptRepository) GetAllSkills(agentId string) []dataobject.SkillDoc
 	}
 
 	skills := prompt.skills
-	out := make([]dataobject.SkillDocument, 0, skills.Len())
-	skills.Range(func(_ int, item dataobject.SkillDocument) bool {
+	out := make([]hCommon.SkillDocument, 0, skills.Len())
+	skills.Range(func(_ int, item hCommon.SkillDocument) bool {
 		out = append(out, item)
 		return true
 	})
@@ -258,13 +257,13 @@ func (repo *PromptRepository) Destroy() {
 //   - ok=true 且 doc.Missing=false:文档存在
 //   - ok=true 且 doc.Missing=true:必需文件缺失,content 为空,由组装层注入 [MISSING] 标记
 //   - ok=false:可选文件缺失,直接省略
-func (repo *PromptRepository) readAgentDocumentLocked(kind dataobject.AgentDocumentKind, workspaceRoot, fileName string, required bool) (*dataobject.AgentDocument, bool, error) {
-	filePath, err := cCommon.ResolveStartupPath(workspaceRoot, fileName)
+func (repo *PromptRepository) readAgentDocumentLocked(kind hCommon.AgentDocumentKind, workspaceRoot, fileName string, required bool) (*hCommon.AgentDocument, bool, error) {
+	filePath, err := hCommon.ResolveStartupPath(workspaceRoot, fileName)
 	if err != nil {
 		return nil, false, err
 	}
 
-	base := &dataobject.AgentDocument{
+	base := &hCommon.AgentDocument{
 		Kind:     kind,
 		FileName: fileName,
 		Required: required,

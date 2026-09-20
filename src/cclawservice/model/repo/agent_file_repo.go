@@ -25,9 +25,7 @@ import (
 	"strings"
 	"sync"
 
-	cCommon "my.favorite/cclawservice/common"
 	hCommon "my.favorite/cclawservice/harness/common"
-	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/exception"
 )
@@ -45,7 +43,7 @@ type startupFileContent struct {
 //   - contents:单文件正文,按指纹命中
 type startupFileEntry struct {
 	loadedAt int64 // 列表加载时间(秒级时间戳)
-	list     []dataobject.AgentDocument
+	list     []hCommon.AgentDocument
 	contents map[string]startupFileContent // key: 文件名
 }
 
@@ -65,8 +63,8 @@ type AgentFileRepository struct {
 
 // IAgentFileRepository 定义启动文件仓库的对外能力
 type IAgentFileRepository interface {
-	GetStartupFiles(bootstrapRoot string) []dataobject.AgentDocument
-	GetStartupFile(bootstrapRoot, fileName string) (*dataobject.AgentDocument, error)
+	GetStartupFiles(bootstrapRoot string) []hCommon.AgentDocument
+	GetStartupFile(bootstrapRoot, fileName string) (*hCommon.AgentDocument, error)
 
 	Destroy()
 }
@@ -89,7 +87,7 @@ func GetAgentFileRepository() IAgentFileRepository {
 // 列表项复用 AgentDocument,不携带正文(Content/FrontMatter 为空)。
 // 性能:结果按工作区做 TTL 轻量缓存,TTL 内零磁盘访问。
 // 安全:只统计白名单内的启动文件;符号链接视为缺失(与正文读取的 O_NOFOLLOW 语义一致)。
-func (repo *AgentFileRepository) GetStartupFiles(agentBootstrapRoot string) []dataobject.AgentDocument {
+func (repo *AgentFileRepository) GetStartupFiles(agentBootstrapRoot string) []hCommon.AgentDocument {
 	agentBootstrapRoot = strings.TrimSpace(agentBootstrapRoot)
 	if len(agentBootstrapRoot) == 0 {
 		return nil
@@ -116,7 +114,7 @@ func (repo *AgentFileRepository) GetStartupFiles(agentBootstrapRoot string) []da
 // 内容受 MaxAgentDocSize 大小上限约束(防内存耗尽)。
 // 性能:单文件正文按 (size, mtime) 指纹缓存,文件未变则零读盘。
 // 文件缺失时返回 Missing=true 与空内容(不视为错误),便于前端展示"待创建"。
-func (repo *AgentFileRepository) GetStartupFile(agentBootstrapRoot, fileName string) (*dataobject.AgentDocument, error) {
+func (repo *AgentFileRepository) GetStartupFile(agentBootstrapRoot, fileName string) (*hCommon.AgentDocument, error) {
 	agentBootstrapRoot = strings.TrimSpace(agentBootstrapRoot)
 	fileName = strings.TrimSpace(fileName)
 	if len(agentBootstrapRoot) == 0 || len(fileName) == 0 {
@@ -124,17 +122,17 @@ func (repo *AgentFileRepository) GetStartupFile(agentBootstrapRoot, fileName str
 	}
 
 	// 白名单校验:仅允许 StartupDocFiles 清单中的启动文件
-	item, allowed := cCommon.FindStartupDocFile(fileName)
+	item, allowed := hCommon.FindStartupDocFile(fileName)
 	if !allowed {
 		return nil, exception.FilePathErrorEx("startup file repo: not a startup file: " + fileName)
 	}
 
-	filePath, err := cCommon.ResolveStartupPath(agentBootstrapRoot, fileName)
+	filePath, err := hCommon.ResolveStartupPath(agentBootstrapRoot, fileName)
 	if err != nil {
 		return nil, err
 	}
 
-	doc := &dataobject.AgentDocument{
+	doc := &hCommon.AgentDocument{
 		Kind:     item.Kind,
 		FileName: item.Name,
 		Required: item.Required,
@@ -195,16 +193,16 @@ func (repo *AgentFileRepository) Destroy() {
 // ======================= private functions & methods ================================
 // buildStartupFilesList 按白名单统计工作区启动文件的元数据(不读正文)。
 // 性能:一次性解析工作区根的真实路径,供全部文件复用(避免重复 EvalSymlinks)。
-func (repo *AgentFileRepository) buildStartupFilesList(agentBootstrapRoot string) []dataobject.AgentDocument {
+func (repo *AgentFileRepository) buildStartupFilesList(agentBootstrapRoot string) []hCommon.AgentDocument {
 	rootAbs, err := filepath.Abs(agentBootstrapRoot)
 	if err != nil {
 		return nil
 	}
 	realRoot := pCommon.ResolveRealPath(filepath.Clean(rootAbs))
 
-	list := make([]dataobject.AgentDocument, 0, len(cCommon.StartupDocFiles))
-	for _, item := range cCommon.StartupDocFiles {
-		doc := dataobject.AgentDocument{
+	list := make([]hCommon.AgentDocument, 0, len(hCommon.StartupDocFiles))
+	for _, item := range hCommon.StartupDocFiles {
+		doc := hCommon.AgentDocument{
 			Kind:     item.Kind,
 			FileName: item.Name,
 			Required: item.Required,

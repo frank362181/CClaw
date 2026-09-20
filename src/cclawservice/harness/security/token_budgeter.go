@@ -48,6 +48,7 @@ func EstimateToolsTokens(tools []llmproto.Tool) int {
 	if len(tools) == 0 {
 		return 0
 	}
+
 	payload, err := json.Marshal(tools)
 	if err != nil {
 		return 0

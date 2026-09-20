@@ -16,6 +16,7 @@ import (
 
 	myUtility "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
+	common2 "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/platformutility/common"
@@ -119,7 +120,7 @@ func (s *AgentService) RemoveAgent(ownerId, agentId string) error {
 
 // GetAgentStartupFiles 获取某 agent 的启动文件清单(不含正文)。
 // 先按 ownerId + agentId 校验归属,再从该 agent 的工作区读取启动文件元数据。
-func (s *AgentService) GetAgentStartupFiles(ownerId, agentId string) ([]dataobject.AgentDocument, error) {
+func (s *AgentService) GetAgentStartupFiles(ownerId, agentId string) ([]common2.AgentDocument, error) {
 	ownerId = strings.TrimSpace(ownerId)
 	agentId = strings.TrimSpace(agentId)
 	if len(ownerId) == 0 || len(agentId) == 0 {
@@ -139,7 +140,7 @@ func (s *AgentService) GetAgentStartupFiles(ownerId, agentId string) ([]dataobje
 
 // GetAgentStartupFile 获取某 agent 指定启动文件的原始内容。
 // 文件必须命中 StartupDocFiles 白名单;文件缺失时返回 Missing=true 与空内容。
-func (s *AgentService) GetAgentStartupFile(ownerId, agentId, fileName string) (*dataobject.AgentDocument, error) {
+func (s *AgentService) GetAgentStartupFile(ownerId, agentId, fileName string) (*common2.AgentDocument, error) {
 	ownerId = strings.TrimSpace(ownerId)
 	agentId = strings.TrimSpace(agentId)
 	fileName = strings.TrimSpace(fileName)
@@ -206,7 +207,7 @@ func (s *AgentService) resolveAgentWorkspace(ownerId, agentId string) (string, e
 		return "", err
 	}
 
-	workspaceRoot, ok := myUtility.BuildAgentBootstrapRoot(*agent)
+	workspaceRoot, ok := common2.BuildAgentBootstrapRoot(*agent)
 	if !ok {
 		return "", myException.AgentWorkspaceErrEx("agent workspace is unavailable: " + agentId)
 	}

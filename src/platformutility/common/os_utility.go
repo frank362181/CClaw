@@ -265,6 +265,7 @@ func IsLocalPath(path string) bool {
 	return true
 }
 
+// ResolveFile 将文件名返回绝对路径
 func ResolveFile(baseDir, name string) (string, error) {
 	if !IsDir(baseDir) {
 		return "", errors.New("should be a dir")
@@ -292,6 +293,7 @@ func ResolveFile(baseDir, name string) (string, error) {
 	return filepath.Clean(targetFileName), nil
 }
 
+// ResolvePath 将两个目录合并,并规范化后返回绝对路径
 func ResolvePath(input, baseDir string) string {
 	if baseDir == "" {
 		wd, _ := os.Getwd()

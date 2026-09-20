@@ -80,6 +80,35 @@ func NormalizeBlankLine(content string) string {
 	return strings.Join(out, "\n") + "\n"
 }
 
+// NormalizeStrings 对成员进行归一化处理:去空白、丢弃空串、去重、保持首次出现顺序。
+func NormalizeStrings(lines []string) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(lines))
+	out := make([]string, 0, len(lines))
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == BlankString {
+			continue
+		}
+
+		if _, ok := seen[line]; ok {
+			continue
+		}
+
+		seen[line] = struct{}{}
+		out = append(out, line)
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // FactShingles 把一条事实规范化为"字符二元组"集合,用于近似重复/更新判定。
 // 用字符二元组而不是分词:中文没有空格,二元组对"取值变了但句子没变"这种更新很敏感。
 func FactShingles(fact string) map[string]struct{} {

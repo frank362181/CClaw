@@ -31,7 +31,9 @@ import (
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/harness/mstorage"
+	"my.favorite/cclawservice/harness/scriptrunner"
 	"my.favorite/cclawservice/harness/security"
+	"my.favorite/cclawservice/harness/tool"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
@@ -108,32 +110,67 @@ type ToolEvent struct {
 	Detail string
 }
 
+// 一轮对话的准备产物(readonly;每turn新建,禁止缓存/池化)
+type chatTurn struct {
+	req          *request.ChatRequest
+	agent        dataobject.TAgent
+	systemPrompt *dataobject.SystemPrompt
+	llm          dataobject.TLlm
+
+	tools tool.FunctionBundle
+	plan  tool.FirstRoundToolPlan //首轮策略(由tools立刻算出)
+	scope string                  // "agent = xxx turn = yyy" ,日志与哨兵共用,只拼接一次
+}
+
+// scriptPathOf 取"工具名 → 脚本绝对路径",取不到时返回可读错误。
+//
+// 为什么要收在一处:同步与流式两条执行路径都要用它,而取值口径一旦分叉就会出现
+// "一处传名字、一处传路径"的事故 —— 实测 2026-09-20 流式路径把工具名当脚本路径交给
+// scriptrunner,报 `script tool: script not found: get_weather`。
+//
+// 键与值都按 TrimSpace 归一化:键要和发给模型的 function.name / 模型回传的
+// tool_calls[].function.name 严格同源;值必须是绝对路径(Scripts 已在 FunctionBundle
+// 构建时解析成绝对路径,相对路径会被 scriptrunner 当成相对进程 CWD 而 Stat 失败)。
+func (t *chatTurn) scriptPathOf(toolName string) (string, error) {
+	name := strings.TrimSpace(toolName)
+	if t == nil || len(t.tools.Scripts) == 0 {
+		return "", fmt.Errorf("tool %s: no script registered", name)
+	}
+
+	path := strings.TrimSpace(t.tools.Scripts[name])
+	if path == pCommon.BlankString {
+		return "", fmt.Errorf("tool %s: no script registered", name)
+	}
+
+	return path, nil
+}
+
 // SendMessage 接收并应答一条聊天消息(同步模式:等待完整回复后一次性返回)。
 //   - sender: 服务端认证得到的登录名(由认证 interceptor 写入请求上下文),覆盖请求体 senderId 防伪造
 //   - comCode: 服务端认证得到的单位编码,用于 Agent/Provider 的归属隔离(owner_id)
 func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest, sender, comCode string) (*request.ChatResponse, error) {
-	req, agent, systemPrompt, llmProvider, toolSet, err := s.prepareChat(ctx, req, sender, comCode)
+	turn, err := s.prepareChat(ctx, req, sender, comCode)
 	if err != nil {
 		return nil, err
 	}
 
 	// 每 Agent 并发闸:同一 agent 同时生成数不超过 max_concurrent,覆盖整段生成(含工具循环)
-	release, err := s.acquireAgentGate(ctx, agent)
+	release, err := s.acquireAgentGate(ctx, turn.agent)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
 
 	// 会话建档(阶段1双写:旁路,只写不读;失败不影响聊天)
-	session, recorded := s.memoryService.Begin(sender, agent, req)
+	session, recorded := s.memoryService.Begin(sender, turn.agent, req)
 
 	// 上下文读回装配
 	// (从历史文件读回本会话既有内容,拼成 system + 历史 + 本轮用户消息)
-	assembled, records := s.assembleChatContext(session, agent, llmProvider, systemPrompt, req)
+	assembled, records := s.assembleChatContext(session, turn.agent, turn.llm, turn.systemPrompt, req)
 
 	// 调用 LLM 引擎取回完整回复(function-calling 开启且该 Agent 有工具时可能经过工具循环)
 	recorder := mstorage.NewTurnRecorder()
-	reply, err := s.completeChat(ctx, llmProvider, assembled.Messages, toolSet, recorder)
+	reply, err := s.completeChat(ctx, turn, assembled.Messages, recorder)
 	if err != nil {
 		// 中断轮次记录(旁路):同步路径没有向客户端输出内容,
 		// 因此只在"本次失败确属中断/超时"时留痕(提问已发生,审计需要)。
@@ -157,12 +194,12 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 	// 记忆维护(旁路、异步):按需压缩历史、按需蒸馏长期记忆
 	s.memoryService.TriggerMemoryMaintenance(mstorage.MaintenanceRequest{
 		Session:       &session,
-		Agent:         &agent,
+		Agent:         &turn.agent,
 		Assembled:     &assembled,
 		Records:       records,
 		TurnSeq:       turnSeq,
-		ContextWindow: int(llmProvider.ContextWindow),
-	}, s.summarizer(llmProvider))
+		ContextWindow: int(turn.llm.ContextWindow),
+	}, s.summarizer(turn.llm))
 
 	// 组装应答
 	now := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
@@ -189,13 +226,13 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	if onStatus != nil {
 		onStatus(cCommon.ChatStatusPreparing, "正在解析任务…")
 	}
-	req, agent, systemPrompt, llmProvider, toolSet, err := s.prepareChat(ctx, req, sender, comCode)
+	turn, err := s.prepareChat(ctx, req, sender, comCode)
 	if err != nil {
 		return "", err
 	}
 
 	// 每 Agent 并发闸:同一 agent 同时生成数不超过 max_concurrent,覆盖整段流式生成(含工具循环)
-	release, err := s.acquireAgentGate(ctx, agent)
+	release, err := s.acquireAgentGate(ctx, turn.agent)
 	if err != nil {
 		return "", err
 	}
@@ -206,12 +243,13 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	// 注册键必须是 <sender>:<turnId>:中断 API 只收到 turnId,用同一规则构造才能命中;
 	// 以发送者为前缀则避免跨用户冒用 turnId 中断他人流。
 	streamCtx, cancel := context.WithCancel(ctx)
-	key := cCommon.BuildTurnStreamKey(sender, req.TurnId)
+	key := hCommon.BuildTurnStreamKey(sender, req.TurnId)
 	ctxmgr.GetTurnStreamMgr().Register(key, cancel)
 	defer ctxmgr.GetTurnStreamMgr().Unregister(key)
 
 	// 应用级运行超时:界定"这一轮任务最多跑多久"(工具循环 + LLM 生成整段)。
-	runCtx, runCancel := context.WithTimeout(streamCtx, time.Duration(pCommon.GetEnvIntDefault(hCommon.ChatRunTimeout, hCommon.AgentRunTimeout))*time.Millisecond)
+	timeout := time.Duration(pCommon.GetEnvIntDefault(hCommon.ChatRunTimeout, hCommon.AgentRunTimeout)) * time.Second
+	runCtx, runCancel := context.WithTimeout(streamCtx, timeout)
 	defer runCancel()
 
 	if onStatus != nil {
@@ -219,10 +257,10 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	}
 
 	// 会话建档(阶段1双写:旁路,只写不读;失败不影响聊天)
-	session, recorded := s.memoryService.Begin(sender, agent, req)
+	session, recorded := s.memoryService.Begin(sender, turn.agent, req)
 
 	// 将system,user,memory等信息进行装配
-	assembled, records := s.assembleChatContext(session, agent, llmProvider, systemPrompt, req)
+	assembled, records := s.assembleChatContext(session, turn.agent, turn.llm, turn.systemPrompt, req)
 
 	// 累计已产出的回复:中断/失败时也要把"用户已经看到的内容"记入历史,
 	// 否则下一轮读回会出现"问题在、回答不在"的断裂。
@@ -240,10 +278,10 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	// 否则保持原有的纯流式转发。
 	recorder := mstorage.NewTurnRecorder()
 	var reply, finishReason string
-	if s.functionCalling && toolSet != nil && len(toolSet.LLMTools()) > 0 {
-		reply, finishReason, err = s.streamToolLoop(runCtx, llmProvider, assembled.Messages, toolSet, forwardChunk, onStatus, onReasoning, onTool, onNotice, recorder)
+	if s.functionCalling && len(turn.tools.Tools) > 0 {
+		reply, finishReason, err = s.streamToolLoop(runCtx, turn, assembled.Messages, forwardChunk, onStatus, onReasoning, onTool, onNotice, recorder)
 	} else {
-		reply, finishReason, err = s.llmClient.ChatCompletionStreamMessages(runCtx, llmProvider, assembled.Messages, forwardChunk, onReasoning)
+		reply, finishReason, err = s.llmClient.ChatCompletionStreamMessages(runCtx, turn.llm, assembled.Messages, forwardChunk, onReasoning)
 	}
 	if err != nil {
 		// 中断轮次记录(旁路):已产出部分内容,或本次失败属中断/超时,都要留痕
@@ -278,12 +316,12 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	// 记忆维护(旁路、异步):与同步路径共用同一触发条件
 	s.memoryService.TriggerMemoryMaintenance(mstorage.MaintenanceRequest{
 		Session:       &session,
-		Agent:         &agent,
+		Agent:         &turn.agent,
 		Assembled:     &assembled,
 		Records:       records,
 		TurnSeq:       turnSeq,
-		ContextWindow: int(llmProvider.ContextWindow),
-	}, s.summarizer(llmProvider))
+		ContextWindow: int(turn.llm.ContextWindow),
+	}, s.summarizer(turn.llm))
 	return reply, nil
 }
 
@@ -329,7 +367,7 @@ func (s *ChatService) EndChatSession(session dataobject.TSession, agent dataobje
 // 仅在聊天已开始(流式进行中)时支持;该轮次不在聊天中则返回"未在聊天"错误。
 // 键与 ChatStream 注册时一致(<sender>:<turnId>),并以发送者隔离不同用户。
 func (s *ChatService) InterruptChat(sender, turnId string) error {
-	key := cCommon.BuildTurnStreamKey(sender, cCommon.NormalizeCompactId(turnId))
+	key := hCommon.BuildTurnStreamKey(sender, cCommon.NormalizeCompactId(turnId))
 	if !ctxmgr.GetTurnStreamMgr().Cancel(key) {
 		return myException.ChatNotActiveKind.Newf("chat stream not active: %s", turnId)
 	}
@@ -339,7 +377,16 @@ func (s *ChatService) InterruptChat(sender, turnId string) error {
 
 // =============================== private functions & methods===========================
 
-func (s *ChatService) normalizeRequest(comCode string, req *request.ChatRequest) *request.ChatRequest {
+// 会话/轮次标识:客户端可传入;为空则由服务端生成。
+// 统一规整为 <=40 字符的紧凑形式(t_session.session_id 与 t_turn.turn_id 均为 VARCHAR(40)):
+// 前端 crypto.randomUUID() 与服务端 GenerateUUID() 产出的是 36 字符标准 UUID,
+// 去分隔符后为 32 字符;服务端生成的带前缀 ID 最长 48 → 截断到 40。
+// 该值会被用作历史文件目录名,规整中的字符过滤顺带杜绝了路径穿越。
+func (s *ChatService) normalizeRequest(comCode, sender string, req *request.ChatRequest) *request.ChatRequest {
+	if strings.TrimSpace(sender) != pCommon.BlankString {
+		req.SenderId = sender
+	}
+
 	// 会话标识:统一带单位编码前缀 —— 无论客户端是否提供。
 	clientSessionId := cCommon.NormalizeCompactId(req.SessionId)
 	if clientSessionId == pCommon.BlankString {
@@ -404,59 +451,65 @@ func (s *ChatService) acquireAgentGate(ctx context.Context, agent dataobject.TAg
 // prepareChat 执行同步/流式两条聊天路径的公共前置步骤:
 // 校验/规整入参 → 覆盖 sender → 生成 sessionId → 缺省类型 → 解析 Agent/Provider → 组装 system prompt。
 // 返回规范化后的请求、目标 Agent、系统提示词与解析出的 Provider,供 SendMessage/ChatStream 复用。
-func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest, sender, comCode string) (*request.ChatRequest, dataobject.TAgent, *dataobject.SystemPrompt, dataobject.TLlm, *harness.ToolSet, error) {
+func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest, sender, comCode string) (*chatTurn, error) {
 	if req == nil {
-		return nil, dataobject.TAgent{}, nil, dataobject.TLlm{}, nil, pException.ParameterEmptyErrorEx("chat request is nil")
+		return nil, pException.ParameterEmptyErrorEx("chat request is nil")
 	}
 
 	// 1. 校验消息内容
 	req.ReqMsg = strings.TrimSpace(req.ReqMsg)
 	if req.ReqMsg == "" {
-		return nil, dataobject.TAgent{}, nil, dataobject.TLlm{}, nil, pException.ParameterEmptyErrorEx("chat message is empty")
+		return nil, pException.ParameterEmptyErrorEx("chat message is empty")
 	}
 	if len([]rune(req.ReqMsg)) > MaxChatMessageLen {
-		return nil, dataobject.TAgent{}, nil, dataobject.TLlm{}, nil, pException.ParameterEmptyErrorEx("chat message is too long")
+		return nil, pException.ParameterEmptyErrorEx("chat message is too long")
 	}
 
-	// 2. 发送者以服务端认证信息为准
-	if strings.TrimSpace(sender) != pCommon.BlankString {
-		req.SenderId = strings.TrimSpace(sender)
-	}
+	// 2. 对请求进行规整
+	s.normalizeRequest(comCode, sender, req)
 
-	// 3. 会话/轮次标识:客户端可传入;为空则由服务端生成。
-	//    统一规整为 <=40 字符的紧凑形式(t_session.session_id 与 t_turn.turn_id 均为 VARCHAR(40)):
-	//    前端 crypto.randomUUID() 与服务端 GenerateUUID() 产出的是 36 字符标准 UUID,
-	//    去分隔符后为 32 字符;服务端生成的带前缀 ID 最长 48 → 截断到 40。
-	//    该值会被用作历史文件目录名,规整中的字符过滤顺带杜绝了路径穿越。
-	s.normalizeRequest(comCode, req)
-
-	// 5. 解析目标 Agent(混合路由:显式 → 会话绑定 → 关键词 → LLM 分类 → 默认)
+	// 3. 解析目标 Agent(混合路由:显式 → 会话绑定 → 关键词 → LLM 分类 → 默认)
 	agent, err := s.resolveAgent(ctx, comCode, req.SessionId, req.ReqMsg, req.AgentId)
 	if err != nil {
-		return nil, dataobject.TAgent{}, nil, dataobject.TLlm{}, nil, err
+		return nil, err
 	}
 
-	// 6. 解析 LLM Provider(PrimaryModel 优先,Fallbacks 兜底)
+	// 4. 解析 LLM Provider(PrimaryModel 优先,Fallbacks 兜底)
 	llmProvider, err := s.resolveProvider(comCode, agent)
 	if err != nil {
-		return nil, dataobject.TAgent{}, nil, dataobject.TLlm{}, nil, err
+		return nil, err
 	}
 
-	// 7. 基于 Agent 工作区启动文档组装 system prompt,并解析其 skill 中声明的可用工具
+	// 5. 基于 Agent 工作区启动文档组装 system prompt,并解析其 skill 中声明的可用工具
 	skillFiles, skillRoot := s.collectSkillFiles(agent)
 	systemPrompt, err := ctxmgr.BuildSystemPromptEx(agent, skillFiles, dataobject.BootstrapScopeNormal)
 	if err != nil {
 		logging.LogErrorF("chat service: build system prompt error:%s", err.Error())
-		return nil, dataobject.TAgent{}, nil, dataobject.TLlm{}, nil, myException.ChatLLMKind.Newf("chat service: build system prompt error:%s", err.Error())
+		return nil, myException.ChatLLMKind.Newf("chat service: build system prompt error:%s", err.Error())
 	}
 
-	toolSet := harness.LoadToolSet(skillRoot, skillFiles)
+	//toolSet := tool.GetFunctionRepository().GetLLMTools(skillRoot, skillFiles) //harness.LoadToolSet(skillRoot, skillFiles)
+	bundle := tool.GetFunctionRepository().GetFunctionBundle(skillRoot, skillFiles)
+	callingPlan := tool.BuildFirstRoundToolPlan(bundle.Tools, bundle.ForcedNames)
+
 	// 工具 schema 占窗口但与历史竞争同一份额度:量一次并缓存(不量 = 预算永远偏乐观)
-	s.toolsReserveTokens(agent, toolSet)
+	s.toolsReserveTokens(agent, bundle.Tools)
 	// 上下文预算的配置异味(预留吃光窗口 / 把系统预留当历史旋钮)只报一次
 	s.warnPolicyIssues(agent, llmProvider, systemPrompt)
 
-	return req, agent, systemPrompt, llmProvider, toolSet, nil
+	turn := &chatTurn{
+		req:          req,
+		agent:        agent,
+		systemPrompt: systemPrompt,
+		llm:          llmProvider,
+		tools:        bundle,
+		scope:        fmt.Sprintf("agent=%s,turn=%s", agent.AgentId, req.TurnId),
+	}
+	turn.plan = tool.BuildFirstRoundToolPlan(bundle.Tools, bundle.ForcedNames)
+
+	logging.LogInfoF("chat service: tools plan = %s,calling plan:%s", turn.scope, callingPlan.String())
+
+	return turn, nil
 }
 
 // toolsReserveTokens 返回(并缓存)某 agent 的工具 schema token 估算。
@@ -464,14 +517,14 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 // 工具定义(JSON schema)随请求单独发送、不占 messages,但同样占窗口 ——
 // 早前的预算完全没算它,工具多的 agent 实际输入会比预算估的更大。
 // 缓存按 agentId:skill 集合变化后需要重启才能刷新(与启动文档缓存同量级的可接受延迟)。
-func (s *ChatService) toolsReserveTokens(agent dataobject.TAgent, toolSet *harness.ToolSet) int {
+func (s *ChatService) toolsReserveTokens(agent dataobject.TAgent, toolSet []llmproto.Tool /*harness.ToolSet*/) int {
 	if cached, ok := s.toolsTokens.Load(agent.AgentId); ok {
 		return cached.(int)
 	}
 
 	tokens := 0
 	if toolSet != nil {
-		tokens = security.EstimateToolsTokens(toolSet.LLMTools())
+		tokens = security.EstimateToolsTokens(toolSet)
 	}
 	s.toolsTokens.Store(agent.AgentId, tokens)
 	logging.LogDebugF("chat service: agent=%s tools schema reserves %d tokens (context budget)", agent.AgentId, tokens)
@@ -557,7 +610,7 @@ func (s *ChatService) resolveProvider(comCode string, agent dataobject.TAgent) (
 // 目录非法/文件缺失都不影响主流程:非法目录告警后跳过,文件缺失由仓库告警后跳过。
 // 返回值:SKILL.md 路径列表 + skills 根目录(供 ToolSet 解析脚本工具时做安全校验)。
 func (s *ChatService) collectSkillFiles(agent dataobject.TAgent) ([]string, string) {
-	skillRoot, _ := cCommon.BuildSkillRoot()
+	skillRoot, _ := hCommon.BuildSkillRoot()
 
 	if s.agentRepo == nil {
 		return nil, skillRoot
@@ -570,7 +623,7 @@ func (s *ChatService) collectSkillFiles(agent dataobject.TAgent) ([]string, stri
 
 	files := make([]string, 0, len(skills))
 	for i := range skills {
-		docPath, err := cCommon.ResolveSkillDocPath(skills[i].SkillDir)
+		docPath, err := hCommon.ResolveSkillDocPath(skills[i].SkillDir)
 		if err != nil {
 			logging.LogWarnF("chat service: agent=%s skill=%s has an illegal skill dir[%s]:%s",
 				agent.AgentId, skills[i].SkillId, skills[i].SkillDir, err.Error())
@@ -616,27 +669,27 @@ func (s *ChatService) assembleChatContext(session dataobject.TSession, agent dat
 // completeChat 取回完整回复:function-calling 开启且该 Agent 有可用工具时走工具循环,否则走普通同步调用。
 //   - messages: 已装配好的完整消息序列(system + 历史 + 本轮用户消息)
 //   - recorder: 旁路记录本轮调用过的工具(可为 nil)
-func (s *ChatService) completeChat(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet, recorder *mstorage.TurnRecorder) (string, error) {
-	if s.functionCalling && toolSet != nil && len(toolSet.LLMTools()) > 0 {
-		return s.runToolLoop(ctx, llmProvider, messages, toolSet, recorder)
+func (s *ChatService) completeChat(ctx context.Context, turn *chatTurn, messages []llmproto.ChatMessage, recorder *mstorage.TurnRecorder) (string, error) {
+	if s.functionCalling && len(turn.tools.Tools) > 0 {
+		return s.runToolLoop(ctx, turn, messages, recorder)
 	}
-	return s.llmClient.ChatCompletionMessages(ctx, llmProvider, messages)
+	return s.llmClient.ChatCompletionMessages(ctx, turn.llm, messages)
 }
 
 // runToolLoop 同步路径的工具调用循环:调用LLM → 执行工具 → 结果回填 → 再次调用,直到模型给出最终文本。
 //
 // 每轮请求前都做一次预算贴合(FitMessages):工具结果不断回填会持续挤压上下文窗口,
 // 长工具链必须随时把最老的历史裁掉,否则会遇到上游"超窗口"报错。
-func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet, recorder *mstorage.TurnRecorder) (string, error) {
-	policy := hCommon.ContextPolicy{ContextWindow: int(llmProvider.ContextWindow)}
+func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages []llmproto.ChatMessage, recorder *mstorage.TurnRecorder) (string, error) {
+	policy := hCommon.ContextPolicy{ContextWindow: int(turn.llm.ContextWindow)}
 	// 工具死循环守卫:一轮对话一个实例(局部变量),禁止做成服务字段/单例,原因见 chat_tool_guard.go。
 	guard := security.NewTurnLoopGuard()
-	// 首轮:含 force-call 工具(取实时数据)的技能强制模型调用工具;之后交回 auto,
-	// 否则会一直强制调用、永远收敛不出最终答复。
-	toolChoice := toolSet.ForceToolChoice() //forcedToolChoice(toolSet)
+
 	for i := 0; i < hCommon.AgentToolLoopMax; i++ {
-		content, calls, err := s.llmClient.CompleteWithTools(ctx, llmProvider, ctxmgr.FitMessages(llmProvider, messages, policy), toolSet.LLMTools(), toolChoice)
-		toolChoice = pCommon.BlankString
+		roundTools, toolChoice := turn.plan.RoundTools(turn.tools.Tools, i) //根据轮次决定required参数
+		content, calls, err := s.llmClient.CompleteWithTools(ctx, turn.llm, ctxmgr.FitMessages(turn.llm, messages, policy), roundTools, toolChoice)
+		tool.VerifyForcedCall(turn.plan, calls, turn.scope) //哨兵
+
 		if err != nil {
 			return "", myException.LlmError(err, "chat service: runtime tool call chat")
 		}
@@ -651,7 +704,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 		messages = append(messages, harness.BuildToolCallWithContentMessage(content, calls)) // 缺口1:工具轮文本一并回填
 		for _, call := range calls {
 			callTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
-			result, err := toolSet.Exec(ctx, call.Function.Name, call.Function.Arguments)
+			result, err := scriptrunner.RunScript(ctx, turn.tools.Scripts[call.Function.Name], call.Function.Arguments)
 			respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 			if err != nil {
 				result = fmt.Sprintf(`{"error":%q}`, err.Error())
@@ -669,21 +722,24 @@ func (s *ChatService) runToolLoop(ctx context.Context, llmProvider dataobject.TL
 // 工具调用阶段实时推送给用户:模型声明调用(intent)→开始执行(running)→结果(done/error),
 // 最终内容增量通过 onChunk 流式转发。底层仍为多次上游请求(OpenAI 兼容协议不支持服务端工具循环),
 // 此处把多轮编排为一条面向客户端的事件流。
-func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, toolSet *harness.ToolSet,
+func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messages []llmproto.ChatMessage,
 	onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent), onNotice func(code, msg string), recorder *mstorage.TurnRecorder) (string, string, error) {
 	seq := 0 // 本回合工具调用序号(跨轮自增,前端按 seq 追踪同一工具调用)
-	policy := hCommon.ContextPolicy{ContextWindow: int(llmProvider.ContextWindow)}
+	policy := hCommon.ContextPolicy{ContextWindow: int(turn.llm.ContextWindow)}
 
 	// 工具死循环守卫:一轮对话一个实例
 	guard := security.NewTurnLoopGuard()
 	// 首轮:含 force-call 工具(取实时数据)的技能强制模型调用工具;之后交回 auto(见 forcedToolChoice)
-	toolChoice := toolSet.ForceToolChoice() //forcedToolChoice(toolSet)
+	//toolChoice := toolSet.ForceToolChoice() //forcedToolChoice(toolSet)
 	for i := 0; i < hCommon.AgentToolLoopMax; i++ {
 		if i > 0 && onStatus != nil {
 			onStatus(cCommon.ChatStatusThinking, "正在思考…")
 		}
+
+		roundTools, toolChoice := turn.plan.RoundTools(turn.tools.Tools, i)
+
 		var roundIntents []int // 本轮模型声明的工具调用序号(与返回的 calls 一一对应)
-		content, calls, finishReason, err := s.llmClient.StreamWithTools(ctx, llmProvider, ctxmgr.FitMessages(llmProvider, messages, policy), toolSet.LLMTools(), toolChoice, onChunk, onReasoning,
+		content, calls, finishReason, err := s.llmClient.StreamWithTools(ctx, turn.llm, ctxmgr.FitMessages(turn.llm, messages, policy), roundTools, toolChoice, onChunk, onReasoning,
 			func(name string) { // onToolIntent:模型流式声明将调用某工具,立即告知前端
 				if onTool != nil {
 					seq++
@@ -691,7 +747,8 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 					onTool(ToolEvent{Phase: cCommon.ChatToolEventIntent, Seq: seq, Name: name})
 				}
 			})
-		toolChoice = pCommon.BlankString
+		tool.VerifyForcedCall(turn.plan, calls, turn.scope)
+
 		if err != nil {
 			return "", "", myException.LlmError(err, "chat service: runtime tool stream error")
 		}
@@ -712,6 +769,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 			name   string
 			callID string
 			arg    string
+			script string // 脚本绝对路径(派发前解析好;解析失败时填可读占位,见下)
 		}
 		runs := make([]toolRunItem, len(calls))
 		for k, call := range calls {
@@ -719,7 +777,8 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 			if k < len(roundIntents) {
 				callSeq = roundIntents[k]
 			}
-			runs[k] = toolRunItem{seq: callSeq, name: call.Function.Name, callID: call.ID, arg: call.Function.Arguments}
+
+			runs[k] = toolRunItem{seq: callSeq, name: call.Function.Name, callID: call.ID, arg: call.Function.Arguments, script: turn.tools.Scripts[call.Function.Name]}
 			if onTool != nil {
 				onTool(ToolEvent{Phase: cCommon.ChatToolEventRunning, Seq: callSeq, Name: call.Function.Name})
 			}
@@ -767,8 +826,8 @@ func (s *ChatService) streamToolLoop(ctx context.Context, llmProvider dataobject
 					}
 				}()
 
-				//执行具体的工具
-				res, err := toolSet.ExecStream(ctx, run.name, run.arg, func(line string) {
+				//执行具体的工具(run.script 已在派发前解析为绝对路径)
+				res, err := scriptrunner.RunScriptStream(ctx, run.script, run.arg, func(line string) {
 					lastOut.Store(pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().NanoTimestamp)
 					// json串不需要输出到UI界面上
 					if pCommon.LooksLikeJson(line) {
