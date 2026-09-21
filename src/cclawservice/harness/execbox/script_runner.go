@@ -1,7 +1,7 @@
 /**
 * 脚本工具执行器(ScriptRunner)
 *
-* 职责:执行 SKILL.md 声明的脚本工具(scripts/*.py 等)。
+* 职责:执行 系统工具以及SKILL.md 声明的脚本工具(scripts/*.py 等)。
 *   1. 参数 JSON 通过 stdin 传入(避免 argv 长度/转义/注入问题);
 *   2. stdout 为执行结果(约定 JSON 或文本),stderr 为错误信息;
 *   3. 退出码非 0 或输出超限视为失败,由上层以 tool 消息回填给 LLM。
@@ -10,7 +10,7 @@
 * 不使用 shell;内置超时与输出上限,防止脚本挂起/洪泛打爆内存。
 **/
 
-package scriptrunner
+package execbox
 
 import (
 	"bufio"

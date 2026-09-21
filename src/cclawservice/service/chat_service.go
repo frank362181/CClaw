@@ -30,8 +30,8 @@ import (
 	"my.favorite/cclawservice/harness"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
+	"my.favorite/cclawservice/harness/execbox"
 	"my.favorite/cclawservice/harness/mstorage"
-	"my.favorite/cclawservice/harness/scriptrunner"
 	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/harness/tool"
 	"my.favorite/cclawservice/llmproto"
@@ -126,11 +126,11 @@ type chatTurn struct {
 //
 // 为什么要收在一处:同步与流式两条执行路径都要用它,而取值口径一旦分叉就会出现
 // "一处传名字、一处传路径"的事故 —— 实测 2026-09-20 流式路径把工具名当脚本路径交给
-// scriptrunner,报 `script tool: script not found: get_weather`。
+// execbox,报 `script tool: script not found: get_weather`。
 //
 // 键与值都按 TrimSpace 归一化:键要和发给模型的 function.name / 模型回传的
 // tool_calls[].function.name 严格同源;值必须是绝对路径(Scripts 已在 FunctionBundle
-// 构建时解析成绝对路径,相对路径会被 scriptrunner 当成相对进程 CWD 而 Stat 失败)。
+// 构建时解析成绝对路径,相对路径会被 execbox 当成相对进程 CWD 而 Stat 失败)。
 func (t *chatTurn) scriptPathOf(toolName string) (string, error) {
 	name := strings.TrimSpace(toolName)
 	if t == nil || len(t.tools.Scripts) == 0 {
@@ -697,7 +697,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 		messages = append(messages, ctxmgr.BuildToolCallWithContentMessage(content, calls)) // 工具轮文本一并回填
 		for _, call := range calls {
 			callTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
-			result, err := scriptrunner.RunScript(ctx, turn.tools.Scripts[call.Function.Name], call.Function.Arguments)
+			result, err := execbox.RunScript(ctx, turn.tools.Scripts[call.Function.Name], call.Function.Arguments)
 			respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 			if err != nil {
 				result = fmt.Sprintf(`{"error":%q}`, err.Error())
@@ -820,7 +820,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 				}()
 
 				//执行具体的工具(run.script 已在派发前解析为绝对路径)
-				res, err := scriptrunner.RunScriptStream(ctx, run.script, run.arg, func(line string) {
+				res, err := execbox.RunScriptStream(ctx, run.script, run.arg, func(line string) {
 					lastOut.Store(pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().NanoTimestamp)
 					// json串不需要输出到UI界面上
 					if pCommon.LooksLikeJson(line) {
