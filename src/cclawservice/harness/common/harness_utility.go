@@ -172,6 +172,7 @@ func ParseSkillDocument(skillFile string) (SkillTool, bool) {
 	}
 
 	var out []BasicTool
+	var forced []string
 
 	for _, t := range doc.FrontMatter.Tools {
 		if len(strings.TrimSpace(t.Name)) == 0 {
@@ -180,12 +181,22 @@ func ParseSkillDocument(skillFile string) (SkillTool, bool) {
 		baseDir := filepath.Dir(skillFile)
 		t.Script, _ = pCommon.ResolveFile(baseDir, t.Script)
 		out = append(out, t)
+		if t.ForceCall {
+			forced = append(forced, strings.TrimSpace(t.Name))
+		}
 	}
 
 	return SkillTool{
+		BasicTool: BasicTool{
+			Source:      TSourceSkill,
+			Name:        strings.TrimSpace(doc.FrontMatter.Name),
+			Description: strings.TrimSpace(doc.FrontMatter.Description),
+		},
 		Tools:           out,
 		AllowedTools:    doc.FrontMatter.AllowedTools,
 		DisallowedTools: doc.FrontMatter.DisallowedTools,
+		TriggerKeywords: pCommon.NormalizeStrings(doc.FrontMatter.TriggerKeywords),
+		ForcedTools:     pCommon.NormalizeStrings(forced),
 		SkillFileName:   skillFile,
 	}, true
 }

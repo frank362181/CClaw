@@ -107,6 +107,18 @@ const (
 	MaxSkillsPromptChars = 18000      //skill 元数据目录的字符上限;单位 **rune**(与其它上限一致)
 )
 
+// 命中技能的正文(SOP)注入预算
+//
+// 只有意图门命中(问题命中该技能的 trigger-keywords)的技能才会注入正文,
+// 因此这里不是“所有技能正文之和”的上限,而是**单个技能单次注入**的上限 —— 超限截断
+// 并记入 truncated(会落成 Bootstrap Context Notice)。
+// 取值参考:启动文档单文件上限是 20K rune,而 SOP 只是“怎么做这一步”的操作规程,
+// 8K rune 足够装下完整的三步 SOP;写得更长说明该技能该拆分而不是靠拉大预算。
+const (
+	MaxActiveSkillDocRunes = 8 * 1024 //单个命中技能正文注入上限;单位 **rune**
+	MaxActiveSkillsPerTurn = 4        //单轮最多注入几个技能的正文(防全命中时吃光预算)
+)
+
 const (
 	AgentRoutingLLMEnabled        = true // 是否启用 LLM 智能分类路由(关键词未命中时的兜底路由方式)。
 	AgentRoutingLLMTimeoutSeconds = 10   // LLM 分类调用超时(秒),避免拖慢主聊天流程。

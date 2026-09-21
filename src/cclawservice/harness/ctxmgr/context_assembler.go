@@ -75,6 +75,20 @@ func BuildSystemPrompt(agent dataobject.TAgent, skillFiles []string) (*dataobjec
 
 // BuildSystemPromptEx 按指定会话范围组装system prompt
 func BuildSystemPromptEx(agent dataobject.TAgent, skillFiles []string, scope dataobject.BootstrapScope) (*dataobject.SystemPrompt, error) {
+	return BuildSystemPromptExWithActiveSkills(agent, skillFiles, scope, nil)
+}
+
+// BuildSystemPromptExWithActiveSkills 组装 system prompt,并把**命中技能的正文(SOP)**
+// 一并注入。
+//
+// activeSkillFiles:本轮意图门判定为相关的 SKILL.md 绝对路径(来自 tool.Activation.ActiveFiles);
+// 传空时行为与 BuildSystemPromptEx 完全一致(一个正文都不注入)。
+//
+// 为什么要注入正文:此前 system prompt 里只有 Available Skills 目录(名称+版本+描述),
+// 而 SKILL.md 正文里的流程与契约(三步链路、禁止传目录、对账门禁、落盘位置…)从未进过
+// prompt,模型只能靠 AGENTS.md 的几句概要根据猜 —— 历次“参数传错/流程跑飞”的主因。
+// 只注入命中的技能:未命中技能的正文对本轮无益,只会稀释注意力。
+func BuildSystemPromptExWithActiveSkills(agent dataobject.TAgent, skillFiles []string, scope dataobject.BootstrapScope, activeSkillFiles []string) (*dataobject.SystemPrompt, error) {
 	workspaceRoot, _ := hCommon.BuildAgentBootstrapRoot(agent)
 
 	// 1. 加载并缓存 agent 启动文件(文件fingerprint未变化则直接命中缓存)
@@ -97,7 +111,7 @@ func BuildSystemPromptEx(agent dataobject.TAgent, skillFiles []string, scope dat
 	}
 
 	// 3. 组装 system prompt
-	return assembleSystemPrompt(agent, workspaceRoot, scope)
+	return assembleSystemPrompt(agent, workspaceRoot, scope, activeSkillFiles)
 }
 
 // AssembleContext 装配完整上下文。
@@ -227,7 +241,7 @@ func FitMessages(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, p
 
 // ============================== private functions & methods ==============================
 
-func assembleSystemPrompt(agent dataobject.TAgent, workspaceRoot string, scope dataobject.BootstrapScope) (*dataobject.SystemPrompt, error) {
+func assembleSystemPrompt(agent dataobject.TAgent, workspaceRoot string, scope dataobject.BootstrapScope, activeSkillFiles []string) (*dataobject.SystemPrompt, error) {
 	documents := repo.GetPromptRepository().GetAllDocuments(agent.AgentId) // 已按规范顺序加载
 	skills := repo.GetPromptRepository().GetAllSkills(agent.AgentId)
 
@@ -282,6 +296,12 @@ func assembleSystemPrompt(agent dataobject.TAgent, workspaceRoot string, scope d
 		if skillsTruncated {
 			truncated = append(truncated, "Available Skills")
 		}
+	}
+
+	// ---- 命中技能的正文(SOP):只注入意图门判定相关的技能 ----
+	// 放在目录之后、预算裁剪之前:既让模型先知道“有哪些技能”,又让它拿到“怎么做”的规程。
+	for _, sop := range renderActiveSkillDocs(skills, activeSkillFiles, &truncated) {
+		sections = append(sections, sop)
 	}
 
 	// ---- 单 section 硬上限:任何 section 都不得超过 MaxPromptSectionLen ----
@@ -454,6 +474,66 @@ func truncateTailBudget(sections []dataobject.SystemPromptSection, cap int, trun
 	}
 
 	return kept, truncated
+}
+
+// renderActiveSkillDocs 把“命中技能的正文”渲染成 section(一技能一段)。
+//   - skills:            prompt repo 缓存的技能文档(含 Content = 已剥离 front matter 的正文)
+//   - activeSkillFiles:  意图门命中的 SKILL.md 绝对路径
+//   - truncated:         超限时把技能名记进去(会落成 Bootstrap Context Notice)
+//
+// 匹配用 filepath.Clean 后的绝对路径:两份数据分别来自 tool 层与 prompt repo,
+// 但都以同一份 skillFiles 为源,归一后可比。
+func renderActiveSkillDocs(skills []hCommon.SkillDocument, activeSkillFiles []string, truncated *[]string) []dataobject.SystemPromptSection {
+	if len(skills) == 0 || len(activeSkillFiles) == 0 {
+		return nil
+	}
+
+	want := make(map[string]struct{}, len(activeSkillFiles))
+	for _, f := range activeSkillFiles {
+		if f = strings.TrimSpace(f); f != pCommon.BlankString {
+			want[filepath.Clean(f)] = struct{}{}
+		}
+	}
+	if len(want) == 0 {
+		return nil
+	}
+
+	out := make([]dataobject.SystemPromptSection, 0, len(want))
+	for i := range skills {
+		doc := &skills[i]
+		if _, ok := want[filepath.Clean(doc.SkillFile)]; !ok {
+			continue
+		}
+
+		content := strings.TrimSpace(doc.Content)
+		if len(content) == 0 {
+			continue
+		}
+
+		name := strings.TrimSpace(doc.FrontMatter.Name)
+		if name == pCommon.BlankString {
+			name = filepath.Base(filepath.Dir(doc.SkillFile)) // 回退到技能目录名
+		}
+
+		// 单技能正文预算:超限截断并可见(而不是默默把一个技能的 SOP 截断一半还继续塞下一个)
+		if runeLen := len([]rune(content)); runeLen > hCommon.MaxActiveSkillDocRunes {
+			content = pCommon.TruncateRunes(content, hCommon.MaxActiveSkillDocRunes, pCommon.BlankString)
+			*truncated = append(*truncated, "Skill: "+name)
+		}
+
+		out = append(out, dataobject.SystemPromptSection{
+			Title:   "Skill: " + name,
+			Content: content,
+		})
+		if len(out) >= hCommon.MaxActiveSkillsPerTurn {
+			break
+		}
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // renderSkillsCatalog 渲染 skill 元数据目录(参考 OpenClaw formatSkillsForPromptBounded):

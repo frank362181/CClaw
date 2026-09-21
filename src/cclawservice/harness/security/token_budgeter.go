@@ -43,8 +43,7 @@ type DistillPressure struct {
 	Closing        bool // 会话收尾(空闲超时/主动结束):必须把尾巴带走
 }
 
-// EstimateToolsTokens 估算工具 schema 占用的 token。
-func EstimateToolsTokens(tools []llmproto.Tool) int {
+func EstimateToolReserveTokens(agentId string, tools []llmproto.Tool) int {
 	if len(tools) == 0 {
 		return 0
 	}
@@ -53,7 +52,9 @@ func EstimateToolsTokens(tools []llmproto.Tool) int {
 	if err != nil {
 		return 0
 	}
-	return EstimateInputTokens([]llmproto.ChatMessage{{Role: hCommon.RoleSystem, Content: string(payload)}})
+
+	toolsReservedTokens := EstimateInputTokens([]llmproto.ChatMessage{{Role: hCommon.RoleSystem, Content: string(payload)}})
+	return toolsReservedTokens
 }
 
 // PolicyWarnings 报告策略里"一看就会出问题"的配置(供调用方记日志;无问题时返回 nil)。
@@ -89,8 +90,6 @@ func PolicyWarnings(policy hCommon.ContextPolicy, systemTokens int) []string {
 	}
 
 	// 维护调用(蒸馏/压缩/合并)同样要装进窗口:装不下时它们会被**整批跳过**,
-	// 表现为"记忆不再更新",而日志里只有后台的 debug 级跳过记录 —— 这里明确指向配置。
-	// 口径与 maintenanceBudgetsFor 一致(窗口 - 维护输出额度 - 系统提示余量)。
 	if avail := CalcMaintenanceAvailableTokens(policy.ContextWindow, hCommon.SummaryMaxTokens, ""); avail <= 0 {
 		warnings = append(warnings, fmt.Sprintf(
 			"context window (%d) minus the maintenance output budget (%d tokens) leaves no room for a maintenance call: "+

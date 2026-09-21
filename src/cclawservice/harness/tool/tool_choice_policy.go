@@ -7,13 +7,13 @@
 *   而工具调用循环的约束是**整轮生效**的 —— 两者粒度不同,必须有一处显式做转换,
 *   否则只能像旧实现那样退化成一个 bool(任一工具声明就整轮 required),带来三个问题:
 *
-*   1) 过宽:tool_choice="required" 的语义是"必须调用**某个**函数",不是"必须调用
-*      get_weather"。A/B/C 三个工具的 schema 都发给模型时,模型完全可以调 A 或 C 来
-*      满足约束 —— 声明写在 B 上、强制却落在全体上,语义错位。
-*      做法:恰好 1 个强制工具时,首轮只发该工具的 schema(+required),保证度最高,
-*      且不依赖供应商对 tool_choice 对象形式({"type":"function","function":{"name":..}})
-*      的支持(部分供应商/模板对对象形式只是"前缀注入"的软约束,且 DashScope 在
-*      thinking 模式下对 required 与 object 形式**一律拒绝**)。
+*   1) 过宽/归因错误:tool_choice="required" 的语义是"必须调用**某个**函数",不是"必须调用
+*      get_weather"。A/B/C 三个工具的 schema 都发给模型时,模型完全可以调 A 或 C
+*      来满足约束 —— 声明写在 B 上、强制却落在全体上,语义错位。
+*      做法(2026-09-20 修正):**工具全量可见** + required。曾经试过"恰好 1 个强制
+*      工具时首轮只发它",实测反而更糟 —— 首轮工具命名空间不完整会让模型判定
+*      "其它工具未注册"(报告任务的首轮只看到 get_weather),而降级到 auto 后仍看不到。
+*      详见 BuildFirstRoundToolPlan 内的注释。
 *
 *   2) 触发条件是工具集、不是本轮意图:只要 agent 挂了带 force-call 的技能,它这一轮
 *      的**任何**问题(哪怕"你好")首轮都会带 required —— 会白烧一次工具调用,在
@@ -24,22 +24,6 @@
 *   3) 失效无信号:若供应商/模板对 required 只做软约束而模型回了文本,调用方会把文本
 *      当最终答复,强制调用**静默失效**。VerifyForcedCall 提供哨兵:发了 required 却
 *      没等到 tool_calls 就告警。
-*
-* 与缓存无关:本文件全是纯函数,不做任何缓存。强制工具名来自每轮构建的声明数据
-* (LoadToolSet/FunctionRepository 每请求跑一次),天然随内容变化;
-* 若要省解析,应放在按 SKILL.md 指纹失效的那一层(skillToolsCache),不要做成
-* service 级字段 —— 反面案例见 chat_service.toolsTokens(只增不减,skill 变化后
-* 必须重启才刷新)。
-*
-* 集成方式(调用方三条线,不改本文件):
-*   a) 声明层投影:把解析出的工具映射成本文件的 ForcedCallDecl 再聚合
-*        decls := make([]hCommon.ForcedCallDecl, 0, len(parsed))
-*        for _, pt := range parsed { decls = append(decls, hCommon.ForcedCallDecl{Name: pt.name, ForceCall: pt.forceCall}) }
-*        forced := hCommon.CollectForcedToolNames(decls)
-*   b) 首轮计划:plan := hCommon.BuildFirstRoundToolPlan(toolSet.LLMTools(), forced)
-*   c) 发送:tools, choice := plan.RoundTools(toolSet.LLMTools(), round)
-*      并要求 message_builder 在 plan.ThinkingOff 时对**流式**请求也下发 enable_thinking=false
-*      (当前 BuildChatCompletionRequestWithToolChoice 只在非流式发,流式留 nil → 踩过 400)。
 **/
 
 package tool
@@ -230,12 +214,21 @@ func BuildFirstRoundToolPlan(all []llmproto.Tool, forcedNames []string) FirstRou
 	plan.ToolChoice = llmproto.ToolChoiceRequired
 	plan.ThinkingOff = true
 
-	if len(effective) == 1 {
-		plan.Tools = FilterToolsByName(all, effective) // 精确:只让模型看到这一个工具
-		return plan
-	}
-
-	plan.Tools = all // 多个强制工具:只能"任意一个",保留全量供模型自选
+	// 刻意**不再**把工具列表裁成“只有被强制的那一个”。
+	//
+	// 曾经的写法是“恰好 1 个强制工具 → 首轮只发它”(为了精确到具体函数),
+	// 2026-09-20 实测证明这个收益不成立、代价很大:
+	//   - 两家供应商的 thinking 模型都拒 required/object(DashScope 需关 thinking 才接受,
+	//     DeepSeek 的思考是模型固有的、enable_thinking 无效)⇒ “精确强制”本来就不稳;
+	//   - 而首轮工具命名空间不完整会直接误导模型:报告任务的首轮只看到 get_weather,
+	//     模型据此宣称“npa_* 本轮未注册/可见”(AGENTS.md 说存在、schema 里没有);
+	//   - 降级为 auto 重试时工具列表也不变 ⇒ 模型仍然看不到其它工具,任务直接做不了;
+	//   - 首轮若 len(calls)==0 就当作最终答复返回,后面的轮次(本可恢复全量)根本不会发生。
+	//
+	// 结论:工具**全量可见**(最坏情况是模型调错一个工具,但它知道有哪些工具可用),
+	// 由 required 保证“至少调用一个”。精确到具体函数如果需要,应走 tool_choice 对象形式,
+	// 而那需要先改 llmproto.ToolChoice 的类型(目前是 string)。
+	plan.Tools = all
 	return plan
 }
 
@@ -265,19 +258,10 @@ func FilterOverlapToolNames(want []string, available []string) []string {
 // ==================== 强制生效哨兵 ====================
 
 // VerifyForcedCall 校验"下发了 required,模型是否真的给了工具调用",返回是否达标。
-//
-// 为什么需要:required 的保证强度取决于供应商实现(受限解码是硬保证,模板提示是软保证)。
-// 一旦只做软约束而模型回了普通文本,调用方会把文本当最终答复 —— 强制调用**静默失效**,
-// 日志里毫无痕迹。这条哨兵让"force-call 不生效"至少可见。
-//
-//   - plan.ToolChoice 非 required → 无需校验,恒返回 true;
-//   - 收到 >=1 个 tool_call → 达标(注意 required 只保证"至少一个",不保证是哪个);
-//   - 未收到 → 告警并返回 false。调用方可据此重试一次或降级。
-//
 // scope 用于定位来源(如 "agent=agent_002 turn=xxx"),便于从日志反查。
-func VerifyForcedCall(plan FirstRoundToolPlan, calls []llmproto.ToolCall, scope string) bool {
-	if !plan.RequiresForcedCall() {
-		return true
+func VerifyForcedCall(plan FirstRoundToolPlan, calls []llmproto.ToolCall, roundToolChoice, scope string) bool {
+	if roundToolChoice != llmproto.ToolChoiceRequired {
+		return true // 本轮没要求强制,不校验(否则会误报)
 	}
 	if len(calls) > 0 {
 		return true

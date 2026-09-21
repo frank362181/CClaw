@@ -1,6 +1,24 @@
 ---
 name: weather
 description: 查询实时天气与未来三天预报，返回 JSON。回答天气问题必须实时调用 get_weather 取数（历史结果可能已过期，不得复用）。
+# 触发词(意图门):命中才强制调用 get_weather 并注入本技能正文。
+# 刻意只收“真在问天气”的词,不收「晴/阴/冷/热」这种单字(「冷启动」「阴影」会误命中);
+# 收起会重新变成“agent 级强制”——写报告时被逼着调天气工具。
+trigger-keywords:
+  - 天气
+  - 天气预报
+  - 气温
+  - 温度
+  - 多少度
+  - 几度
+  - 体感
+  - 下雨
+  - 降雨
+  - 雨
+  - 下雪
+  - 风力
+  - 冷不冷
+  - 热不热
 user-invocable: true
 disable-mode-invocation: false
 emoji: 🌤️

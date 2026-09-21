@@ -26,7 +26,6 @@ func BuildChatMessage(systemPrompt *dataobject.SystemPrompt, req *request.ChatRe
 		{Role: hCommon.RoleSystem, Content: systemPrompt.Prompt},
 		{Role: hCommon.RoleUser, Content: req.ReqMsg},
 	}
-
 }
 
 // BuildToolCallWithContentMessage 构造携带文本与工具调用的 assistant 消息(工具循环回填历史用)。

@@ -63,10 +63,6 @@ type ChatService struct {
 
 	functionCalling bool // 是否启用 function-calling(由 ini [sandBox] functionCalling 控制)
 
-	// toolsTokens 工具 schema 的 token 估算缓存(按 agentId)。
-	// 工具定义随每次请求单独发送,但其内容是静态的(skill 声明),不值得每轮都 marshal 一遍。
-	toolsTokens sync.Map // map[string]int
-
 	// policyWarned 已报告过的"上下文预算配置异味"(按 agentId):
 	// 配置问题只报一次,避免每轮请求刷屏(改配置后重启生效)。
 	policyWarned sync.Map // map[string]bool
@@ -117,8 +113,12 @@ type chatTurn struct {
 	systemPrompt *dataobject.SystemPrompt
 	llm          dataobject.TLlm
 
-	tools tool.FunctionBundle
+	tools        tool.FunctionBundle //与skill.md文件绑定的，以及系统工具合成的实际工具列表
+	visibleTools []llmproto.Tool     //本轮实际下发的工具列表
+	toolsReserve int                 //本轮工具schema的token预算(每轮现算,不能缓存)
+
 	plan  tool.FirstRoundToolPlan //首轮策略(由tools立刻算出)
+	gate  tool.Activation         //意图门结果(命中技能/强制工具/被抑制的强制)
 	scope string                  // "agent = xxx turn = yyy" ,日志与哨兵共用,只拼接一次
 }
 
@@ -166,7 +166,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 
 	// 上下文读回装配
 	// (从历史文件读回本会话既有内容,拼成 system + 历史 + 本轮用户消息)
-	assembled, records := s.assembleChatContext(session, turn.agent, turn.llm, turn.systemPrompt, req)
+	assembled, records := s.assembleChatContext(session, turn.agent, turn.llm, turn.systemPrompt, req, turn.toolsReserve)
 
 	// 调用 LLM 引擎取回完整回复(function-calling 开启且该 Agent 有工具时可能经过工具循环)
 	recorder := mstorage.NewTurnRecorder()
@@ -260,7 +260,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	session, recorded := s.memoryService.Begin(sender, turn.agent, req)
 
 	// 将system,user,memory等信息进行装配
-	assembled, records := s.assembleChatContext(session, turn.agent, turn.llm, turn.systemPrompt, req)
+	assembled, records := s.assembleChatContext(session, turn.agent, turn.llm, turn.systemPrompt, req, turn.toolsReserve)
 
 	// 累计已产出的回复:中断/失败时也要把"用户已经看到的内容"记入历史,
 	// 否则下一轮读回会出现"问题在、回答不在"的断裂。
@@ -482,20 +482,31 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 
 	// 5. 基于 Agent 工作区启动文档组装 system prompt,并解析其 skill 中声明的可用工具
 	skillFiles, skillRoot := s.collectSkillFiles(agent)
-	systemPrompt, err := ctxmgr.BuildSystemPromptEx(agent, skillFiles, dataobject.BootstrapScopeNormal)
+
+	// 5.1 先解析工具与“服务它们的技能”(技能级元数据:触发词/正文/强制工具)
+	bundle := tool.GetFunctionRepository().GetFunctionBundle(skillRoot, skillFiles)
+
+	// 5.2 意图门:按**本轮问题**判定哪些技能相关。根据用户的请求命中关键词，或force-call决定哪些skill文件注入system prompt
+	// 命中才允许该技能的 force-call 生效、才注入其正文(SOP)。
+	gate := bundle.Activate(req.ReqMsg)
+
+	// 5.3 组装 system prompt(命中技能的正文一并注入;未命中不注入,避免稀释注意力)
+	systemPrompt, err := ctxmgr.BuildSystemPromptExWithActiveSkills(agent, skillFiles, dataobject.BootstrapScopeNormal, gate.ActiveFiles)
 	if err != nil {
 		logging.LogErrorF("chat service: build system prompt error:%s", err.Error())
 		return nil, myException.ChatLLMKind.Newf("chat service: build system prompt error:%s", err.Error())
 	}
 
-	//toolSet := tool.GetFunctionRepository().GetLLMTools(skillRoot, skillFiles) //harness.LoadToolSet(skillRoot, skillFiles)
-	bundle := tool.GetFunctionRepository().GetFunctionBundle(skillRoot, skillFiles)
-	callingPlan := tool.BuildFirstRoundToolPlan(bundle.Tools, bundle.ForcedNames)
+	// 5.4 首轮策略:只对“命中技能内的 force-call 工具”强制调用(工具列表保持全量)
+	visibleTools := bundle.VisibleTools(gate)
+	plan := tool.BuildFirstRoundToolPlan(visibleTools, gate.ForcedTools) //近对本轮可见的工具有效
 
-	// 工具 schema 占窗口但与历史竞争同一份额度:量一次并缓存(不量 = 预算永远偏乐观)
-	s.toolsReserveTokens(agent, bundle.Tools)
+	// 工具 schema 占窗口但与历史竞争同一份额度:按**本轮实际下发的工具**现算,
+	// 不做按 agentId 的跨轮缓存(可见工具会随门/配置变化,旧实现无失效键 + 空值写死)。
+	toolsReserveTokens := security.EstimateToolReserveTokens(agent.AgentId, visibleTools)
+
 	// 上下文预算的配置异味(预留吃光窗口 / 把系统预留当历史旋钮)只报一次
-	s.warnPolicyIssues(agent, llmProvider, systemPrompt)
+	s.warnPolicyIssues(agent, llmProvider, systemPrompt, toolsReserveTokens)
 
 	turn := &chatTurn{
 		req:          req,
@@ -503,33 +514,17 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 		systemPrompt: systemPrompt,
 		llm:          llmProvider,
 		tools:        bundle,
+		visibleTools: visibleTools,
+		toolsReserve: toolsReserveTokens,
+		plan:         plan,
+		gate:         gate,
 		scope:        fmt.Sprintf("agent=%s,turn=%s", agent.AgentId, req.TurnId),
 	}
-	turn.plan = tool.BuildFirstRoundToolPlan(bundle.Tools, bundle.ForcedNames)
 
-	logging.LogInfoF("chat service: tools plan = %s,calling plan:%s", turn.scope, callingPlan.String())
-
+	// active=命中的技能,keyword=命中的触发词,visible tools=本轮下发数/总工具数,reserve=占用的窗口额度
+	logging.LogInfoF("chat service: %s gate=%s visible_tools=%d/%d reserve=%dt plan=%s",
+		turn.scope, gate.String(), len(visibleTools), len(bundle.Tools), toolsReserveTokens, plan.String())
 	return turn, nil
-}
-
-// toolsReserveTokens 返回(并缓存)某 agent 的工具 schema token 估算。
-//
-// 工具定义(JSON schema)随请求单独发送、不占 messages,但同样占窗口 ——
-// 早前的预算完全没算它,工具多的 agent 实际输入会比预算估的更大。
-// 缓存按 agentId:skill 集合变化后需要重启才能刷新(与启动文档缓存同量级的可接受延迟)。
-func (s *ChatService) toolsReserveTokens(agent dataobject.TAgent, toolSet []llmproto.Tool /*harness.ToolSet*/) int {
-	if cached, ok := s.toolsTokens.Load(agent.AgentId); ok {
-		return cached.(int)
-	}
-
-	tokens := 0
-	if toolSet != nil {
-		tokens = security.EstimateToolsTokens(toolSet)
-	}
-	s.toolsTokens.Store(agent.AgentId, tokens)
-	logging.LogDebugF("chat service: agent=%s tools schema reserves %d tokens (context budget)", agent.AgentId, tokens)
-
-	return tokens
 }
 
 // warnPolicyIssues 报告"上下文预算"上明显不合理的配置(每个 agent 只报一次)。
@@ -537,7 +532,7 @@ func (s *ChatService) toolsReserveTokens(agent dataobject.TAgent, toolSet []llmp
 // 典型两类错误:
 //   - 系统提示预留 + 输出预留 + 工具预留 ≥ 窗口 ⇒ 历史永不回放且压缩被禁用(静默失效);
 //   - 系统提示预留远大于实测系统提示 ⇒ 多半是想调"历史回放多少",应该用 max_history_tokens。
-func (s *ChatService) warnPolicyIssues(agent dataobject.TAgent, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt) {
+func (s *ChatService) warnPolicyIssues(agent dataobject.TAgent, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, toolsReserve int) {
 	window := int(llmProvider.ContextWindow)
 	if window <= 0 {
 		return
@@ -547,9 +542,7 @@ func (s *ChatService) warnPolicyIssues(agent dataobject.TAgent, llmProvider data
 	}
 
 	policy := hCommon.GetContextPolicy(agent, window)
-	if tokens, ok := s.toolsTokens.Load(agent.AgentId); ok {
-		policy.ToolsReserveTokens = tokens.(int)
-	}
+	policy.ToolsReserveTokens = toolsReserve
 
 	systemText := pCommon.BlankString
 	if systemPrompt != nil {
@@ -645,12 +638,10 @@ func (s *ChatService) collectSkillFiles(agent dataobject.TAgent) ([]string, stri
 // 返回结果同时给出"是否因预算裁掉了历史"等判定,供记忆压缩编排使用;
 // 并回传本次读回的记录 —— 维护触发要按"水位之后还剩多少"决定要不要蒸,
 // 直接复用这份读回结果,避免在请求路径上再读一次。
-func (s *ChatService) assembleChatContext(session dataobject.TSession, agent dataobject.TAgent, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest) (hCommon.AssembleResult, []hCommon.MemoryRecord) {
+func (s *ChatService) assembleChatContext(session dataobject.TSession, agent dataobject.TAgent, llmProvider dataobject.TLlm,
+	systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest, toolsReserveTokens int) (hCommon.AssembleResult, []hCommon.MemoryRecord) {
 	policy := hCommon.GetContextPolicy(agent, int(llmProvider.ContextWindow))
-	// 工具 schema 的预留由 prepareChat 量好并缓存(它知道 toolSet);这里只取用
-	if tokens, ok := s.toolsTokens.Load(agent.AgentId); ok {
-		policy.ToolsReserveTokens = tokens.(int)
-	}
+	policy.ToolsReserveTokens = toolsReserveTokens
 
 	systemText := pCommon.BlankString
 	if systemPrompt != nil {
@@ -670,7 +661,7 @@ func (s *ChatService) assembleChatContext(session dataobject.TSession, agent dat
 //   - messages: 已装配好的完整消息序列(system + 历史 + 本轮用户消息)
 //   - recorder: 旁路记录本轮调用过的工具(可为 nil)
 func (s *ChatService) completeChat(ctx context.Context, turn *chatTurn, messages []llmproto.ChatMessage, recorder *mstorage.TurnRecorder) (string, error) {
-	if s.functionCalling && len(turn.tools.Tools) > 0 {
+	if s.functionCalling && len(turn.visibleTools) > 0 {
 		return s.runToolLoop(ctx, turn, messages, recorder)
 	}
 	return s.llmClient.ChatCompletionMessages(ctx, turn.llm, messages)
@@ -686,9 +677,9 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 	guard := security.NewTurnLoopGuard()
 
 	for i := 0; i < hCommon.AgentToolLoopMax; i++ {
-		roundTools, toolChoice := turn.plan.RoundTools(turn.tools.Tools, i) //根据轮次决定required参数
+		roundTools, toolChoice := turn.plan.RoundTools(turn.visibleTools, i) //根据轮次决定required参数
 		content, calls, err := s.llmClient.CompleteWithTools(ctx, turn.llm, ctxmgr.FitMessages(turn.llm, messages, policy), roundTools, toolChoice)
-		tool.VerifyForcedCall(turn.plan, calls, turn.scope) //哨兵
+		tool.VerifyForcedCall(turn.plan, calls, toolChoice, turn.scope) //哨兵:按本轮实际发送的 choice 判断
 
 		if err != nil {
 			return "", myException.LlmError(err, "chat service: runtime tool call chat")
@@ -701,7 +692,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 			// 这一轮已产出的文本仍带回调用方(用于留痕/日志,避免"内容全丢")。
 			return content, guard.StopError("chat service: tool loop")
 		}
-		messages = append(messages, harness.BuildToolCallWithContentMessage(content, calls)) // 缺口1:工具轮文本一并回填
+		messages = append(messages, harness.BuildToolCallWithContentMessage(content, calls)) // 工具轮文本一并回填
 		for _, call := range calls {
 			callTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 			result, err := scriptrunner.RunScript(ctx, turn.tools.Scripts[call.Function.Name], call.Function.Arguments)
@@ -736,7 +727,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 			onStatus(cCommon.ChatStatusThinking, "正在思考…")
 		}
 
-		roundTools, toolChoice := turn.plan.RoundTools(turn.tools.Tools, i)
+		roundTools, toolChoice := turn.plan.RoundTools(turn.visibleTools, i)
 
 		var roundIntents []int // 本轮模型声明的工具调用序号(与返回的 calls 一一对应)
 		content, calls, finishReason, err := s.llmClient.StreamWithTools(ctx, turn.llm, ctxmgr.FitMessages(turn.llm, messages, policy), roundTools, toolChoice, onChunk, onReasoning,
@@ -747,7 +738,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 					onTool(ToolEvent{Phase: cCommon.ChatToolEventIntent, Seq: seq, Name: name})
 				}
 			})
-		tool.VerifyForcedCall(turn.plan, calls, turn.scope)
+		tool.VerifyForcedCall(turn.plan, calls, toolChoice, turn.scope) //哨兵:按本轮实际发送的 choice 判断
 
 		if err != nil {
 			return "", "", myException.LlmError(err, "chat service: runtime tool stream error")

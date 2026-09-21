@@ -110,7 +110,10 @@ type SkillFrontMatter struct {
 	Requires              SkillRequires `json:"requires,omitempty" yaml:"requires,omitempty"`
 	AllowedTools          []string      `json:"allowedTools,omitempty" yaml:"allowedTools,omitempty"`
 	DisallowedTools       []string      `json:"disallowedTools,omitempty" yaml:"disallowedTools,omitempty"`
-	Tools                 []BasicTool   `json:"tools,omitempty" yaml:"tools,omitempty"`
+
+	TriggerKeywords []string `json:"triggerKeywords,omitempty" yaml:"trigger-keywords,omitempty"`
+
+	Tools []BasicTool `json:"tools,omitempty" yaml:"tools,omitempty"`
 }
 
 // SkillDocument 表示一个已解析的 SKILL.md 文档
