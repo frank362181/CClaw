@@ -118,8 +118,13 @@ type SkillFrontMatter struct {
 
 // SkillDocument 表示一个已解析的 SKILL.md 文档
 type SkillDocument struct {
-	SkillId     string           `json:"skillId"`
-	SkillFile   string           `json:"skillFile"` // SKILL.md 的完整路径
+	SkillId   string `json:"skillId"`   // 技能目录名(如 weather / npa-report)
+	SkillFile string `json:"skillFile"` // SKILL.md 的完整路径
+
+	// Fingerprint 读盘时的文件指纹(size:mtime),属**缓存簿记**:内容未变即直接复用本文档。
+	// 读盘与 YAML 解析的唯一入口是 PromptRepository.LoadSkills(工具层只消费本文档)。
+	Fingerprint string `json:"fingerprint,omitempty"`
+
 	FrontMatter SkillFrontMatter `json:"frontMatter"`
 	Content     string           `json:"content"`
 	ByteSize    int64            `json:"byteSize"`

@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v2"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
@@ -48,7 +47,7 @@ func ResolveStartupPath(workspaceRoot, fileName string) (string, error) {
 // BuildSkillRoot 返回技能根目录 <exeDir>/cclaw/skills。
 // 所有技能都位于该目录之下,一个子目录一个技能(目录名即 t_skill.skill_dir)。
 func BuildSkillRoot() (string, bool) {
-	skillRoot := filepath.Join(pCommon.GetExecutableDir(), AgentBootstrapDir, SkillDirName)
+	skillRoot := filepath.Join(pCommon.GetExecutableDir(), AgentBootstrapDir, SkillDirRoot)
 	return skillRoot, true
 }
 
@@ -83,8 +82,7 @@ func NormalizeSkillDir(skillDir string) (string, error) {
 // 支持三种输入:
 //   - 技能目录名(推荐,与 t_skill.skill_dir 的入库格式一致):"npa-report"
 //   - 历史文档路径:"npa-report/SKILL.md"
-//   - 已解析的绝对路径(调用链内部产物,如 collectSkillFiles 的输出):
-//     必须位于 skills 根内且文件名为 SKILL.md
+//   - 已解析的绝对路径(调用链内部产物):必须位于 skills 根内且文件名为 SKILL.md
 //
 // 安全:结果的真实路径必须落在 skills 根内(防目录穿越/符号链接逃逸)。
 func ResolveSkillDocPath(skillDir string) (string, error) {
@@ -95,9 +93,14 @@ func ResolveSkillDocPath(skillDir string) (string, error) {
 		return pCommon.BlankString, pException.ParameterEmptyErrorEx("skill dir is empty")
 	}
 
+	// 根的真实路径只解析一次、两条分支共用:
+	//   - 让两条分支的"越界"基准同源(不再一处传未解析根、一处走又解析一次的内部逻辑);
+	//   - 也省掉目录名分支里 SafeJoin 的那次重复根解析。
+	realRoot := pCommon.ResolveRealPath(skillRoot)
+
 	// 已解析的绝对路径:只校验"仍在 skills 根内 + 名为 SKILL.md"
 	if filepath.IsAbs(cfg) {
-		absPath, err := pCommon.SafeJoin(skillRoot, cfg)
+		absPath, err := pCommon.SafeJoinWithRoot(realRoot, cfg)
 		if err != nil {
 			return pCommon.BlankString, pException.FilePathErrorEx("skill doc escapes skill root: " + skillDir)
 		}
@@ -112,8 +115,8 @@ func ResolveSkillDocPath(skillDir string) (string, error) {
 		return pCommon.BlankString, err
 	}
 
-	// 目录名已是安全相对路径,仍走 SafeJoin 兜底符号链接逃逸
-	absPath, err := pCommon.SafeJoin(skillRoot, filepath.Join(skillRoot, dir, SkillDocFileName))
+	// 目录名已是安全相对路径,仍走真实路径包含性校验兜底符号链接逃逸
+	absPath, err := pCommon.SafeJoinWithRoot(realRoot, filepath.Join(skillRoot, dir, SkillDocFileName))
 	if err != nil {
 		return pCommon.BlankString, pException.FilePathErrorEx("skill doc escapes skill root: " + skillDir)
 	}
@@ -165,9 +168,19 @@ func IsKindAllowedInScope(kind AgentDocumentKind, scope dataobject.BootstrapScop
 	}
 }
 
-func ParseSkillDocument(skillFile string) (SkillTool, bool) {
-	doc, ok := LoadSkillDocument(skillFile)
-	if !ok {
+func ParseJsonDocument(jsonFile string) (SystemicTool, bool) {
+	return SystemicTool{}, false
+}
+
+// BuildSkillTool 把一份**已解析**的 SKILL.md 文档组装成技能级工具视图(SkillTool)。
+//
+// 读盘与 YAML 解析都不在这里 —— 唯一入口是 prompt repo 的 LoadSkills(带文件指纹缓存),
+// 本函数只做派生:把 front matter 里声明的工具脚本解析成绝对路径(相对 SKILL.md 所在目录),
+// 并挑出声明了 force-call 的工具名。
+// 文档未携带文件路径(未落盘的文档)时返回 ok=false。
+func BuildSkillTool(doc SkillDocument) (SkillTool, bool) {
+	skillFile := strings.TrimSpace(doc.SkillFile)
+	if len(skillFile) == 0 {
 		return SkillTool{}, false
 	}
 
@@ -192,30 +205,14 @@ func ParseSkillDocument(skillFile string) (SkillTool, bool) {
 			Name:        strings.TrimSpace(doc.FrontMatter.Name),
 			Description: strings.TrimSpace(doc.FrontMatter.Description),
 		},
-		Tools:           out,
-		AllowedTools:    doc.FrontMatter.AllowedTools,
-		DisallowedTools: doc.FrontMatter.DisallowedTools,
-		TriggerKeywords: pCommon.NormalizeStrings(doc.FrontMatter.TriggerKeywords),
-		ForcedTools:     pCommon.NormalizeStrings(forced),
-		SkillFileName:   skillFile,
+		Tools:            out,
+		AllowedTools:     doc.FrontMatter.AllowedTools,
+		DisallowedTools:  doc.FrontMatter.DisallowedTools,
+		TriggerKeywords:  pCommon.NormalizeStrings(doc.FrontMatter.TriggerKeywords),
+		ForcedTools:      pCommon.NormalizeStrings(forced),
+		SkillFileName:    skillFile,
+		SkillFingerprint: doc.Fingerprint,
 	}, true
-}
-
-func LoadSkillDocument(skillFile string) (*SkillDocument, bool) {
-	data, _, err := pCommon.ReadFile(skillFile, MaxSkillDocSize)
-	if err != nil {
-		return nil, false
-	}
-
-	frontMatter, _ := SplitFrontMatter(data)
-	doc := &SkillDocument{SkillFile: skillFile}
-	if len(frontMatter) > 0 {
-		if err := yaml.Unmarshal([]byte(frontMatter), &doc.FrontMatter); err != nil {
-			return nil, false
-		}
-	}
-
-	return doc, true
 }
 
 func BasicToolToLLMTool(t BasicTool) (llmproto.Tool, bool) {

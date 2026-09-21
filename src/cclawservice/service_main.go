@@ -16,6 +16,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 	selfController "my.favorite/cclawservice/controller"
 	hCommon "my.favorite/cclawservice/harness/common"
+	"my.favorite/cclawservice/harness/tool"
 	selfInterceptor "my.favorite/cclawservice/interceptor"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/cclawservice/service"
@@ -311,6 +312,7 @@ func (m *ServiceMain) Destroy() {
 	}
 
 	serviceCore.GetAgentGateRegistry().Destroy() //释放agent gate
+	tool.GetFunctionRepository().Destroy()       //释放工具仓库
 
 	if m.defaultAgentConfigHelper != nil {
 		m.defaultAgentConfigHelper.Destroy()
@@ -341,7 +343,7 @@ func (m *ServiceMain) loadAgentConfigurations() error {
 
 	// 3.1 agent 配置缓存 TTL(多实例下各实例从 DB 刷新配置;单位秒,<=0 禁用)
 	ttlSec, _ := m.configHelper.GetIntValueDefault("database", "reloadCacheTTL", cCommon.DefaultReloadDatabaseCacheTTLSeconds)
-	agents := m.agentRepo.LoadAllAgents(int64(ttlSec))
+	agents, systemTools := m.agentRepo.LoadAllAgents(int64(ttlSec))
 
 	// 4. warm up the prompt repository with the default workspace (best-effort)
 	if m.promptRepo == nil {
@@ -355,6 +357,9 @@ func (m *ServiceMain) loadAgentConfigurations() error {
 			logging.LogWarnF("warm up default workspace error:%s", err.Error())
 		}
 	}
+
+	// 5. warmup the system tool
+	tool.GetFunctionRepository().InitializeSystemTool(systemTools)
 
 	return nil
 }

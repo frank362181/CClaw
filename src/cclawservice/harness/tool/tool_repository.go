@@ -3,17 +3,8 @@
 *	1.从数据库表t_tool中加载
 *	2.从 SKILL.md 声明解析可用工具
 *
-* 目的:"加一个 SKILL.md + scripts/xx.py = 一个新工具,免重编译"。
-*   每个 SKILL.md 通过 front matter 的 tools 声明 0..N 个工具;
-*   每个工具声明 name/description/parameters(生成 LLM function schema)与 script(相对 SKILL.md 的脚本路径)。
-*
-* 职责:
-*   - LoadToolSet:扫描某 Agent 启用的 skill 文件,解析 tools 声明,建立 工具名 → 脚本绝对路径 映射;
-*   - LLMTools:返回全部工具声明(供 function-calling schema);
-*   - Exec:按工具名执行对应脚本(stdin 传参数 JSON,stdout 取结果)。
-*
-* 安全:脚本路径必须解析在 agent extension 根内(防目录穿越/符号链接逃逸);
-* 单个 SKILL.md 解析失败或脚本缺失时跳过该工具,不影响其余工具(与"缺失技能不影响主流程"语义一致)。
+* SKILL.md 的读盘与 YAML 解析**不在这里**:唯一入口是 prompt repo 的 LoadSkills(按文件指纹缓存)。
+* 本层只把已解析的文档派生成:LLM 侧工具 schema、脚本绝对路径、技能级元数据(意图门用)。
 **/
 
 package tool
@@ -64,9 +55,9 @@ type Activation struct {
 
 // FunctionBundle 用来构建function-calling计划使用
 type FunctionBundle struct {
-	Tools       []llmproto.Tool   // 写一层schema,GetLLMTools的产出
+	Tools       []llmproto.Tool   // 下发给 LLM 的工具 schema(由 SKILL.md 文档派生)
 	ForcedNames []string          // 声明了force-call的工具名
-	Scripts     map[string]string // 工具名 --> 脚本路径
+	Scripts     map[string]string // 工具名 --> 脚本路径(绝对路径)
 	Slots       []SkillSlot       // 技能级元数据(意图门 + SOP 注入的输入)
 }
 
@@ -140,22 +131,12 @@ func (a Activation) String() string {
 type FunctionRepository struct {
 	mu sync.RWMutex
 
-	systemTools []hCommon.SystemicTool //基础工具
-
-	skillTools map[string]hCommon.SkillTool //skill工具,与一个文件skill.md文件挂钩
-
-	// 用来维护skill中的took
-	capacity int
-	hits     int
-	misses   int
+	systemTools map[string]hCommon.SystemicTool //基础工具
 }
 
 var functionRepository = common.GetSingleton(func() *FunctionRepository {
 	return &FunctionRepository{
-		systemTools: []hCommon.SystemicTool{},
-		skillTools:  make(map[string]hCommon.SkillTool),
-
-		capacity: 256, //支持256个skill document
+		systemTools: make(map[string]hCommon.SystemicTool),
 	}
 }).Instance()
 
@@ -163,44 +144,34 @@ func GetFunctionRepository() *FunctionRepository {
 	return functionRepository
 }
 
-// InitializeBaseTool 从数据库中加载基础工具，系统启动时加载
-func (repo *FunctionRepository) InitializeBaseTool(tools []dataobject.TTool) {
+// InitializeSystemTool 从数据库中加载基础工具，系统启动时加载
+func (repo *FunctionRepository) InitializeSystemTool(tools []dataobject.TTool) {
 	if len(tools) == 0 {
 		//没有基础工具,系统照样运行
 		return
 	}
 
 	// 将基础工具解析到agent中
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	repo.initializeSystemTools(tools)
 }
 
-// GetLLMTools 每轮对话时,根据skill.md文件加载可调用的工具,返回可调用的工具
-// 先解析skill.md是为了对skill.md解析两次
-func (repo *FunctionRepository) GetLLMTools(skillRoot string, skillFiles []string) []llmproto.Tool {
-	basicTools := repo.collectBasicTools(skillRoot, skillFiles)
-
-	// 转换为llm tool
-	result := make([]llmproto.Tool, 0, len(basicTools))
-	for _, tool := range basicTools {
-		llmTool, ok := hCommon.BasicToolToLLMTool(tool)
-		if ok {
-			result = append(result, llmTool)
-		}
-	}
-	return result
-}
-
-// GetFunctionBundle 每轮对话的所有的function-calling的输入
+// GetFunctionBundle 每轮对话的所有的 function-calling 输入。
 //
-// 三份视图(schema / 强制名 / 脚本路径)全部出自同一次收集(collectBasicToolsWithScripts),
+// skillDocs:prompt repo 已解析的 SKILL.md 文档(SKILL.md 的唯一读盘/解析入口的产物);
+// 本层不读盘、不解析 YAML,只做派生(脚本绝对路径、LLM schema、技能级元数据)。
+//
+// 三份视图(schema / 强制名 / 脚本路径)全部出自同一次收集,
 // 保证顺序与过滤口径完全一致:否则会出现"某个工具被过滤掉了、却仍在强制名单里"
 // (策略层判为"强制工具不在可用集"→ 静默降级)。
-func (repo *FunctionRepository) GetFunctionBundle(skillRoot string, skillFiles []string) FunctionBundle {
-	basicTools, skills := repo.collectToolsAndSkills(skillRoot, skillFiles)
+func (repo *FunctionRepository) GetFunctionBundle(skillDocs []hCommon.SkillDocument) FunctionBundle {
+	basicTools, slots := repo.collectToolsAndSkills(skillDocs)
 	bundle := FunctionBundle{
 		Tools:       make([]llmproto.Tool, 0, len(basicTools)),
 		ForcedNames: make([]string, 0, len(basicTools)),
 		Scripts:     make(map[string]string),
-		Slots:       skills,
+		Slots:       slots,
 	}
 
 	for _, t := range basicTools {
@@ -215,85 +186,86 @@ func (repo *FunctionRepository) GetFunctionBundle(skillRoot string, skillFiles [
 			bundle.ForcedNames = append(bundle.ForcedNames, llmTool.Function.Name)
 		}
 		bundle.Scripts[t.Name] = t.Script //此时执行脚本是绝对路径
-
-		//bundle.Slots = append(bundle.Slots, repo.buildSkillSlot(t))
 	}
 
 	bundle.ForcedNames = pCommon.NormalizeStrings(bundle.ForcedNames) //规范化名称,去重等
 	return bundle
 }
 
-// ===================================== private functions & methods ==================================
-func (repo *FunctionRepository) collectBasicTools(skillRoot string, skillFiles []string) []hCommon.BasicTool {
-	tools, _ := repo.collectToolsAndSkills(skillRoot, skillFiles)
-	return tools
+func (repo *FunctionRepository) Destroy() {
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+
+	repo.systemTools = nil
 }
 
-// collectToolsAndSkills 收集本轮可用的工具声明与**技能级元数据**。
-//
-// 两份产物出自同一次遍历、同一份缓存(getToolsFromSkill 按 SKILL.md 指纹命中),
-// 因此不需要额外 IO;技能元数据(关键词/正文/强制工具)与工具列表也不会错位。
-func (repo *FunctionRepository) collectToolsAndSkills(skillRoot string, skillFiles []string) ([]hCommon.BasicTool, []SkillSlot) {
-	var disallowedTools []string
-	var skillTools []hCommon.BasicTool
-	var skills []SkillSlot
+// ===================================== private functions & methods ==================================
 
-	if len(skillFiles) > 0 {
-		skillRootCleaned, err := filepath.Abs(skillRoot)
-		if err == nil {
-			for _, skillFile := range skillFiles {
-				if filepath.Base(skillFile) != hCommon.SkillDocFileName {
-					continue
-				}
+func (repo *FunctionRepository) initializeSystemTools(tools []dataobject.TTool) {
+	for _, t := range tools {
+		if t.ToolName == pCommon.BlankString || t.Script == pCommon.BlankString {
+			continue
+		}
 
-				//解析skill.md文件
-				repo.mu.Lock()
-				skillTool, ok := repo.getToolsFromSkill(skillRootCleaned, skillFile)
-				repo.mu.Unlock()
-
-				//将结果添加到数组中
-				if ok {
-					skillTools = append(skillTools, skillTool.Tools...)
-					disallowedTools = append(disallowedTools, skillTool.DisallowedTools...)
-					skills = append(skills, repo.buildSkillSlot(skillTool))
-				}
+		toolSchemaFile := resolveSystemFile(t.ToolName, t.InputSchema)
+		schemaFp := pCommon.ComputeFileFingerprint(toolSchemaFile)
+		systemTool, ok := repo.systemTools[t.ToolId]
+		if ok {
+			//库中已经存在
+			if strings.EqualFold(schemaFp, systemTool.SchemaFingerprint) {
+				//此时schema 文件没有被修改过
+				continue
 			}
 		}
+
+		//新增或修改
+		tempSysTool := hCommon.SystemicTool{
+			SchemaFileName:    toolSchemaFile,
+			SchemaFingerprint: schemaFp,
+		}
+
+		if len(repo.systemTools) > 16 {
+			//保护system tool 溢出
+			repo.systemTools = make(map[string]hCommon.SystemicTool)
+		}
+		repo.systemTools[t.ToolId] = tempSysTool
+	}
+}
+
+// collectToolsAndSkills 由已解析的技能文档收集工具声明与**技能级元数据**。
+//
+// 两份产物出自同一次遍历、同一份数据(prompt repo 缓存的文档),因此不需要任何 IO;
+// 技能元数据(关键词/强制工具)与工具列表也不会错位。
+func (repo *FunctionRepository) collectToolsAndSkills(skillDocs []hCommon.SkillDocument) ([]hCommon.BasicTool, []SkillSlot) {
+	var disallowedTools []string
+	var skillTools []hCommon.BasicTool
+	var slots []SkillSlot
+
+	for i := range skillDocs {
+		// front matter 的工具声明 → 工具 schema + 脚本绝对路径(相对 SKILL.md 所在目录)
+		skillTool, ok := hCommon.BuildSkillTool(skillDocs[i])
+		if !ok {
+			continue
+		}
+
+		skillTools = append(skillTools, skillTool.Tools...)
+		disallowedTools = append(disallowedTools, skillTool.DisallowedTools...)
+		slots = append(slots, buildSkillSlot(&skillTool))
 	}
 
 	// 此时无skill文件,仅返回基础工具
 	repo.mu.Lock()
-	baseTools := repo.getToolsFromBaseTool(disallowedTools) //若disallowedTools为空,则表示所有系统工具均可用
+	baseTools := repo.getToolsFromSystemTool(disallowedTools) //若disallowedTools为空,则表示所有系统工具均可用
 	repo.mu.Unlock()
 
 	result := make([]hCommon.BasicTool, 0, len(baseTools)+len(skillTools))
 	result = append(result, skillTools...)
 	result = append(result, baseTools...)
 
-	return result, skills
+	return result, slots
 }
 
-// buildSkillSlot 把一个已解析的技能转成技能级元数据(只取“技能自己的”属性)。
-func (repo *FunctionRepository) buildSkillSlot(skillTool *hCommon.SkillTool) SkillSlot {
-	toolNames := make([]string, 0, len(skillTool.Tools))
-	for _, t := range skillTool.Tools {
-		if name := strings.TrimSpace(t.Name); name != pCommon.BlankString {
-			toolNames = append(toolNames, name)
-		}
-	}
-
-	return SkillSlot{
-		SkillId:     filepath.Base(filepath.Dir(skillTool.SkillFileName)), // 技能目录名(如 weather)
-		File:        skillTool.SkillFileName,
-		Name:        skillTool.Name,
-		Description: skillTool.Description,
-		Keywords:    skillTool.TriggerKeywords,
-		ForcedTools: skillTool.ForcedTools,
-		ToolNames:   toolNames,
-	}
-}
-
-func (repo *FunctionRepository) getToolsFromBaseTool(disallowedList []string) []hCommon.BasicTool {
+func (repo *FunctionRepository) getToolsFromSystemTool(disallowedList []string) []hCommon.BasicTool {
 	var out []hCommon.BasicTool
 
 	//
@@ -321,36 +293,31 @@ func (repo *FunctionRepository) getToolsFromBaseTool(disallowedList []string) []
 	return out
 }
 
-func (repo *FunctionRepository) getToolsFromSkill(skillRoot, skillFile string) (*hCommon.SkillTool, bool) {
-	skillFile, err := pCommon.ResolveFile(skillRoot, skillFile)
-	if err != nil {
-		return nil, false
-	}
-
-	fp := pCommon.ComputeFileFingerprint(skillFile)
-	skillTool, ok := repo.skillTools[skillFile]
-	if ok {
-		if strings.EqualFold(skillTool.GetSchemaFingerprint(), fp) {
-			repo.hits++
-
-			return &skillTool, true
+// buildSkillSlot 把一个已解析的技能转成技能级元数据(只取“技能自己的”属性)。
+func buildSkillSlot(skillTool *hCommon.SkillTool) SkillSlot {
+	toolNames := make([]string, 0, len(skillTool.Tools))
+	for _, t := range skillTool.Tools {
+		if name := strings.TrimSpace(t.Name); name != pCommon.BlankString {
+			toolNames = append(toolNames, name)
 		}
 	}
 
-	//skill.md文件改动过 或不存在系统中,reload again
-	repo.misses++
-	var st hCommon.SkillTool
-	st, ok = hCommon.ParseSkillDocument(skillFile)
-	if !ok {
-		return nil, false
+	return SkillSlot{
+		SkillId:     filepath.Base(filepath.Dir(skillTool.SkillFileName)), // 技能目录名(如 weather)
+		File:        skillTool.SkillFileName,
+		Name:        skillTool.Name,
+		Description: skillTool.Description,
+		Keywords:    skillTool.TriggerKeywords,
+		ForcedTools: skillTool.ForcedTools,
+		ToolNames:   toolNames,
 	}
+}
 
-	//保护skill document的整体容量,满则整体充值
-	st.SkillFingerprint = fp
-	if len(repo.skillTools) > repo.capacity {
-		repo.skillTools = make(map[string]hCommon.SkillTool)
-	}
-	repo.skillTools[skillFile] = st
+// ================
+func resolveSystemFile(toolName, inputFile string) string {
+	systemToolRoot := filepath.Join(pCommon.GetExecutableDir(), hCommon.AgentBootstrapDir, hCommon.SystemToolDirRoot) //
+	basePath := filepath.Dir(inputFile)
 
-	return &st, true
+	outputFile, _ := pCommon.ResolveFile(filepath.Join(systemToolRoot, toolName, basePath), inputFile)
+	return outputFile
 }

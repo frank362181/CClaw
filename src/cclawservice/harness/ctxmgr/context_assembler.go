@@ -88,29 +88,28 @@ func BuildSystemPromptEx(agent dataobject.TAgent, skillFiles []string, scope dat
 // prompt,模型只能靠 AGENTS.md 的几句概要根据猜 —— 历次“参数传错/流程跑飞”的主因。
 // 只注入命中的技能:未命中技能的正文对本轮无益,只会稀释注意力。
 func BuildSystemPromptExWithActiveSkills(agent dataobject.TAgent, skillFiles []string, scope dataobject.BootstrapScope, activeSkillFiles []string) (*dataobject.SystemPrompt, error) {
-	workspaceRoot, _ := hCommon.BuildAgentBootstrapRoot(agent)
+	// SKILL.md 的唯一读盘 + 唯一 YAML 解析入口在 prompt repo(按文件指纹缓存)。
+	skills, report := repo.GetPromptRepository().LoadSkills(skillFiles)
+	report.LogSummary(fmt.Sprintf("prompt service: agent=%s scope=%s", agent.AgentId, scope.String()))
 
-	// 1. 加载并缓存 agent 启动文件(文件fingerprint未变化则直接命中缓存)
+	return BuildSystemPromptWithSkills(agent, skills, scope, activeSkillFiles)
+}
+
+// BuildSystemPromptWithSkills 用**已解析**的技能文档组装 system prompt(技能侧不再读盘)。
+//
+// skills:prompt repo 的 LoadSkills 产物(front matter + 正文)。让调用方复用同一份文档,既省掉
+// 重复的路径解析/stat,也保证"工具侧看到的关键词/force-call"与"prompt 侧注入的目录/正文"
+// 出自**同一份数据**(不会出现两份缓存各自失效的漂移)。
+//
+// 主链路(prepareChat)走本入口;BuildSystemPromptExWithActiveSkills 自行加载后委托到本入口,
+// 因此两条路径最终都落在同一段组装逻辑上。
+func BuildSystemPromptWithSkills(agent dataobject.TAgent, skills []hCommon.SkillDocument, scope dataobject.BootstrapScope, activeSkillFiles []string) (*dataobject.SystemPrompt, error) {
+	// 加载并缓存 agent 启动文件(文件fingerprint未变化则直接命中缓存)
 	if err := repo.GetPromptRepository().LoadAgentBootstrap(agent); err != nil {
 		return nil, err
 	}
 
-	// 2. 加载skill元数据 (front matter部分)
-	repo.GetPromptRepository().ClearSkills(agent.AgentId)
-	for _, skillFile := range skillFiles {
-		skillFile = strings.TrimSpace(skillFile)
-		if len(skillFile) == 0 {
-			continue
-		}
-
-		skillId := filepath.Base(skillFile)
-		if err := repo.GetPromptRepository().AddSkill(agent.AgentId, skillId, skillFile); err != nil {
-			logging.LogWarnF("prompt service: load skill %s,error:%s", skillFile, err.Error())
-		}
-	}
-
-	// 3. 组装 system prompt
-	return assembleSystemPrompt(agent, workspaceRoot, scope, activeSkillFiles)
+	return assembleSystemPrompt(agent, scope, activeSkillFiles, skills)
 }
 
 // AssembleContext 装配完整上下文。
@@ -240,9 +239,14 @@ func FitMessages(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, p
 
 // ============================== private functions & methods ==============================
 
-func assembleSystemPrompt(agent dataobject.TAgent, workspaceRoot string, scope dataobject.BootstrapScope, activeSkillFiles []string) (*dataobject.SystemPrompt, error) {
+// assembleSystemPrompt 组装 system prompt 的全部 section。
+//
+// skills:本轮技能文档(prompt repo 已解析的产物)。不再按 agentId 从仓库取 —— 技能文档与
+// agent 无关,同一份 SKILL.md 对所有 agent 都是同一份数据,调用方传入即可避免"按 agent 存"
+// 带来的每轮重读盘与跨 agent 残留问题。
+func assembleSystemPrompt(agent dataobject.TAgent, scope dataobject.BootstrapScope, activeSkillFiles []string, skills []hCommon.SkillDocument) (*dataobject.SystemPrompt, error) {
+	workspaceRoot, _ := hCommon.BuildAgentBootstrapRoot(agent)
 	documents := repo.GetPromptRepository().GetAllDocuments(agent.AgentId) // 已按规范顺序加载
-	skills := repo.GetPromptRepository().GetAllSkills(agent.AgentId)
 
 	var missing, truncated []string
 	sections := make([]dataobject.SystemPromptSection, 0, len(documents)+1)
@@ -480,8 +484,8 @@ func truncateTailBudget(sections []dataobject.SystemPromptSection, cap int, trun
 //   - activeSkillFiles:  意图门命中的 SKILL.md 绝对路径
 //   - truncated:         超限时把技能名记进去(会落成 Bootstrap Context Notice)
 //
-// 匹配用 filepath.Clean 后的绝对路径:两份数据分别来自 tool 层与 prompt repo,
-// 但都以同一份 skillFiles 为源,归一后可比。
+// 匹配用 filepath.Clean 后的绝对路径:activeSkillFiles 来自意图门(tool 层只是转发 prompt repo
+// 解析出的 doc.SkillFile),两侧同源,仍做一层归一以防调用方自行拼路径时的大小写/分隔符差异。
 func renderActiveSkillDocs(skills []hCommon.SkillDocument, activeSkillFiles []string, truncated *[]string) []dataobject.SystemPromptSection {
 	if len(skills) == 0 || len(activeSkillFiles) == 0 {
 		return nil

@@ -372,39 +372,24 @@ func MarkPathIgnoreByCloudSync(path string) {
 	}
 }
 
-// SafeJoin 解析目标路径并校验其真实路径必须位于 workspaceRoot 之内,
+// SafeJoin 解析目标路径并校验其真实路径必须位于 base 之内,
 // 用于防目录穿越与符号链接逃逸。
+// 省掉重复的根路径解析 —— 包含性判断与错误文案只有 SafeJoinWithRoot 一份实现。
 func SafeJoin(base, target string) (string, error) {
 	rootAbs, err := filepath.Abs(base)
 	if err != nil {
 		return "", err
 	}
-	rootAbs = filepath.Clean(rootAbs)
 
-	targetAbs, err := filepath.Abs(target)
-	if err != nil {
-		return "", err
-	}
-	targetAbs = filepath.Clean(targetAbs)
-
-	// 防符号链接逃逸:解析真实路径后仍须位于 workspace 内。
-	// 注意:目标文件可能不存在(如缺失的必需文档),此时 EvalSymlinks 会失败,
-	// 需按"最近存在的祖先"解析真实路径,否则 macOS(/var->/private/var)等
-	// 带符号链接的根目录会对缺失文件误报越界。
-	realRoot := ResolveRealPath(rootAbs)
-	realTarget := ResolveRealPath(targetAbs)
-
-	sep := string(filepath.Separator)
-	if realTarget != realRoot && !strings.HasPrefix(realTarget, realRoot+sep) {
-		return "", errors.New("prompt repo: document escapes workspace root: " + target)
-	}
-
-	return targetAbs, nil
+	return SafeJoinWithRoot(ResolveRealPath(filepath.Clean(rootAbs)), target)
 }
 
-// SafeJoinWithRoot 使用已解析好的真实根路径校验目标路径并返回其绝对路径,
-// 行为与 SafeJoin 一致,但省去对根路径的重复 EvalSymlinks
-// (同一请求内对多个文件校验时,根路径的真实路径只解析一次后复用)。
+// SafeJoinWithRoot 使用**已解析的真实根路径**校验目标路径并返回其绝对路径。
+//
+// 前置条件:realRoot 必须是目标所在根的 ResolveRealPath 结果。传未解析的根
+// (如 /var/... 而真实路径是 /private/var/...)会与 realTarget 前缀不匹配,
+// 把合法路径误判为"越界"(fail-closed)。行为与 SafeJoin 完全一致,差别只是
+// 根解析改由调用方负责 —— 便于"一处解析、多处复用"。
 func SafeJoinWithRoot(realRoot, target string) (string, error) {
 	targetAbs, err := filepath.Abs(target)
 	if err != nil {
@@ -412,6 +397,9 @@ func SafeJoinWithRoot(realRoot, target string) (string, error) {
 	}
 	targetAbs = filepath.Clean(targetAbs)
 
+	// 防符号链接逃逸:按真实路径比较。注意目标可能还不存在(如缺失的可选文档),
+	// 此时 EvalSymlinks 会失败,ResolveRealPath 会按"最近存在的祖先"解析,
+	// 否则 macOS(/var->/private/var)等带符号链接的目录会对缺失文件误报越界。
 	realTarget := ResolveRealPath(targetAbs)
 
 	sep := string(filepath.Separator)
@@ -420,21 +408,6 @@ func SafeJoinWithRoot(realRoot, target string) (string, error) {
 	}
 
 	return targetAbs, nil
-}
-
-// SafeJoinExisting 是 SafeJoin 的"必须存在且为普通文件"变体:
-// 用于脚本等可执行资源路径的解析——SafeJoin 本身容忍目标缺失(用于可缺失的启动文档)。
-// 校验通过返回解析后的绝对路径与 true;越界/缺失/目录返回 false。
-func SafeJoinExisting(root, target string) (string, bool) {
-	abs, err := SafeJoin(root, target)
-	if err != nil {
-		return "", false
-	}
-	info, err := os.Stat(abs)
-	if err != nil || info.IsDir() {
-		return "", false
-	}
-	return abs, true
 }
 
 func ComputeStringFingerprint(text string, maxBytes int) string {

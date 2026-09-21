@@ -480,24 +480,30 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 		return nil, err
 	}
 
-	// 5. 基于 Agent 工作区启动文档组装 system prompt,并解析其 skill 中声明的可用工具
-	skillFiles, skillRoot := s.collectSkillFiles(agent)
+	// 5. 收集本 Agent 绑定的技能目录(原始配置值;路径解析与越界校验统一在 prompt repo 内做一次)
+	skillDirs := s.collectSkillDirs(agent)
 
-	// 5.1 先解析工具与“服务它们的技能”(技能级元数据:触发词/正文/强制工具)
-	bundle := tool.GetFunctionRepository().GetFunctionBundle(skillRoot, skillFiles)
+	// 5.1 SKILL.md 的唯一读盘 + 唯一路径解析 + YAML 解析入口(prompt repo,按文件指纹缓存)
+	skillDocs, skillReport := repo.GetPromptRepository().LoadSkills(skillDirs)
+	skillReport.LogSummary(fmt.Sprintf("chat service: agent=%s,turn=%s", agent.AgentId, req.TurnId))
 
-	// 5.2 意图门:按**本轮问题**判定哪些技能相关。根据用户的请求命中关键词，或force-call决定哪些skill文件注入system prompt
+	// 5.2 由已解析文档派生工具与技能级元数据(触发词/正文/强制工具,零 IO)
+	bundle := tool.GetFunctionRepository().GetFunctionBundle(skillDocs)
+
+	// 5.3 意图门:按**本轮问题**判定哪些技能相关。根据用户的请求命中关键词，或force-call决定哪些skill文件注入system prompt
 	// 命中才允许该技能的 force-call 生效、才注入其正文(SOP)。
 	gate := bundle.Activate(req.ReqMsg)
 
-	// 5.3 组装 system prompt(命中技能的正文一并注入;未命中不注入,避免稀释注意力)
-	systemPrompt, err := ctxmgr.BuildSystemPromptExWithActiveSkills(agent, skillFiles, dataobject.BootstrapScopeNormal, gate.ActiveFiles)
+	// 5.4 组装 system prompt(命中技能的正文一并注入;未命中不注入,避免稀释注意力)
+	//
+	// 复用 5.1 已经解析好的文档:技能侧本轮只读一次盘,不再让组装层重新加载。
+	systemPrompt, err := ctxmgr.BuildSystemPromptWithSkills(agent, skillDocs, dataobject.BootstrapScopeNormal, gate.ActiveFiles)
 	if err != nil {
 		logging.LogErrorF("chat service: build system prompt error:%s", err.Error())
 		return nil, myException.ChatLLMKind.Newf("chat service: build system prompt error:%s", err.Error())
 	}
 
-	// 5.4 首轮策略:只对“命中技能内的 force-call 工具”强制调用(工具列表保持全量)
+	// 5.5 首轮策略:只对“命中技能内的 force-call 工具”强制调用(工具列表保持全量)
 	visibleTools := bundle.VisibleTools(gate)
 	plan := tool.BuildFirstRoundToolPlan(visibleTools, gate.ForcedTools) //近对本轮可见的工具有效
 
@@ -598,48 +604,30 @@ func (s *ChatService) resolveProvider(comCode string, agent dataobject.TAgent) (
 	return dataobject.TLlm{}, pException.UnMatchErrorEx2("no available runtime provider for agent: %s", agent.AgentId)
 }
 
-// collectSkillFiles 收集当前 Agent 启用的 skill 文档路径(SKILL.md 绝对路径),并返回 skills 根目录。
-//
-// 布局约定:所有技能统一位于 <exeDir>/cclaw/skills/<skill_dir>/SKILL.md,
-// 由 t_skill.skill_dir 定位(相对 skills 根的安全相对路径,一个目录一个技能)。
-// 目录非法/文件缺失都不影响主流程:非法目录告警后跳过,文件缺失由仓库告警后跳过。
-// 返回值:SKILL.md 路径列表 + skills 根目录(供 ToolSet 解析脚本工具时做安全校验)。
-func (s *ChatService) collectSkillFiles(agent dataobject.TAgent) ([]string, string) {
-	skillRoot, _ := hCommon.BuildSkillRoot()
-
+// collectSkillDirs 收集当前 Agent 绑定的技能目录配置(t_skill.skill_dir 的原始值)。
+func (s *ChatService) collectSkillDirs(agent dataobject.TAgent) []string {
 	if s.agentRepo == nil {
-		return nil, skillRoot
+		return nil
 	}
 
 	skills := s.agentRepo.GetSkillsByAgent(agent)
 	if len(skills) == 0 {
-		return nil, skillRoot
+		return nil
 	}
 
-	files := make([]string, 0, len(skills))
+	dirs := make([]string, 0, len(skills))
 	for i := range skills {
-		docPath, err := hCommon.ResolveSkillDocPath(skills[i].SkillDir)
-		if err != nil {
-			logging.LogWarnF("chat service: agent=%s skill=%s has an illegal skill dir[%s]:%s",
-				agent.AgentId, skills[i].SkillId, skills[i].SkillDir, err.Error())
-			continue
+		if dir := strings.TrimSpace(skills[i].SkillDir); len(dir) > 0 {
+			dirs = append(dirs, dir)
 		}
-		files = append(files, docPath)
 	}
 
-	return files, skillRoot
+	return dirs
 }
 
 // assembleChatContext 读回会话历史并装配成本轮完整的 LLM 消息序列。
 //
 // 装配形态:[system(系统提示 + 历史摘要)] + [历史消息(预算内)] + [本轮用户消息]。
-//
-// 旁路语义:读回失败一律降级为"仅系统提示 + 本轮问题"(与阶段1行为一致),只记日志,
-// 绝不影响本轮对话 —— 记忆能力是增强,不是聊天链路的硬依赖。
-//
-// 返回结果同时给出"是否因预算裁掉了历史"等判定,供记忆压缩编排使用;
-// 并回传本次读回的记录 —— 维护触发要按"水位之后还剩多少"决定要不要蒸,
-// 直接复用这份读回结果,避免在请求路径上再读一次。
 func (s *ChatService) assembleChatContext(session dataobject.TSession, agent dataobject.TAgent, llmProvider dataobject.TLlm,
 	systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest, toolsReserveTokens int) (hCommon.AssembleResult, []hCommon.MemoryRecord) {
 	policy := hCommon.GetContextPolicy(agent, int(llmProvider.ContextWindow))

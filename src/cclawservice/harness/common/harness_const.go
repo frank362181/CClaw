@@ -17,7 +17,8 @@ const (
 	AgentServiceWorkspaceDirName = "workspace"         //agent工作目录
 	DefaultAgentConfigFile       = "agentdefault.json" //agent 的默认配置所在的文件
 
-	SkillDirName = "skills" //skills 的目录
+	SystemToolDirRoot = "systemtool"
+	SkillDirRoot      = "skills" //skills 的目录
 )
 
 // AgentDocumentKind 启动文档种类(实体词汇:AgentDocument.Kind 的取值)。

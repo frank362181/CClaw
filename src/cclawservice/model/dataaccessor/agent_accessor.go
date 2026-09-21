@@ -26,10 +26,10 @@ type IAgentAccessor interface {
 	UpdateAgent(agent *dataobject.TAgent) error
 	DeleteAgent(ownerId, agentId string) error
 
-	GetBaseTools() ([]dataobject.TTool, error)
-	CreateBaseTool(tool *dataobject.TTool) error
-	UpdateBaseTool(tool *dataobject.TTool) error
-	DeleteBaseTool(toolId string) error
+	GetSystemTools() ([]dataobject.TTool, error)
+	CreateSystemTool(tool *dataobject.TTool) error
+	UpdateSystemTool(tool *dataobject.TTool) error
+	DeleteSystemTool(toolId string) error
 
 	GetAllSkills() ([]dataobject.TSkill, error)
 	CreateSkill(skill *dataobject.TSkill) error
@@ -109,11 +109,10 @@ func (g *AgentAccessor) GetAllAgents() ([]dataobject.TAgent, error) {
 		return nil, exception2.DatabaseQueryErrEx2("load agents error:%s", err.Error())
 	}
 
-	for index, _ := range list {
+	for index := range list {
 		for _, tmp := range rows {
 			if tmp.AgentId == list[index].AgentId {
 				list[index].SkillIds = append(list[index].SkillIds, tmp.SkillId)
-				//tmpAgent.SkillIds = append(tmpAgent.SkillIds, tmp.SkillId)
 			}
 		}
 	}
@@ -299,9 +298,9 @@ func (g *AgentAccessor) DeleteAgent(ownerId, agentId string) error {
 
 // ============================== base tool 管理操作 ========================
 
-func (g *AgentAccessor) GetBaseTools() ([]dataobject.TTool, error) {
+func (g *AgentAccessor) GetSystemTools() ([]dataobject.TTool, error) {
 	var tools []dataobject.TTool
-	err := g.gormDb.Where("deleted = 0").Find(&tools).Error
+	err := g.gormDb.Where("disabled = 0 and deleted = 0").Find(&tools).Error
 	if err != nil {
 		return nil, exception2.DatabaseQueryErrEx2("get tools error:%s", err.Error())
 	}
@@ -309,7 +308,7 @@ func (g *AgentAccessor) GetBaseTools() ([]dataobject.TTool, error) {
 	return tools, nil
 }
 
-func (g *AgentAccessor) CreateBaseTool(tool *dataobject.TTool) error {
+func (g *AgentAccessor) CreateSystemTool(tool *dataobject.TTool) error {
 	var count int64
 	if err := g.gormDb.Model(&dataobject.TTool{}).
 		Where("tool_id = ? AND deleted = 0", tool.ToolId).Count(&count).Error; err != nil {
@@ -342,7 +341,7 @@ func (g *AgentAccessor) CreateBaseTool(tool *dataobject.TTool) error {
 	return nil
 }
 
-func (g *AgentAccessor) UpdateBaseTool(tool *dataobject.TTool) error {
+func (g *AgentAccessor) UpdateSystemTool(tool *dataobject.TTool) error {
 	var curTool dataobject.TTool
 	err := g.gormDb.Where("tool_id = ? and deleted = 0", tool.ToolId).First(&curTool).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -373,7 +372,7 @@ func (g *AgentAccessor) UpdateBaseTool(tool *dataobject.TTool) error {
 	return nil
 }
 
-func (g *AgentAccessor) DeleteBaseTool(toolId string) error {
+func (g *AgentAccessor) DeleteSystemTool(toolId string) error {
 	res := g.gormDb.Model(&dataobject.TTool{}).
 		Where("tool_id = ? AND deleted = 0", toolId).
 		Update("deleted", 1)

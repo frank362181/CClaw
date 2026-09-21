@@ -26,7 +26,7 @@ type AgentRepository struct {
 	dataAccessor dataaccessor.IAgentAccessor
 
 	llmProviders *common.SafeList[dataobject.TLlm]
-	baseTools    *common.SafeList[dataobject.TTool]
+	systemTools  *common.SafeList[dataobject.TTool]
 	agents       *common.SafeList[dataobject.TAgent]
 	skills       *common.SafeList[dataobject.TSkill]
 	routeRules   *common.SafeList[dataobject.TAgentRouteRule]
@@ -43,7 +43,7 @@ type AgentRepository struct {
 }
 
 type IAgentRepository interface {
-	LoadAllAgents(ttl int64) []dataobject.TAgent
+	LoadAllAgents(ttl int64) ([]dataobject.TAgent, []dataobject.TTool)
 
 	GetLLMProviders(comCode string) []dataobject.TLlm
 	AddLLMProvider(provider dataobject.TLlm) error
@@ -56,10 +56,10 @@ type IAgentRepository interface {
 	UpdateAgent(agent dataobject.TAgent) error
 	RemoveAgent(ownerId, agentId string) error
 
-	GetBaseTools() []dataobject.TTool
-	GetBaseTool(toolId string) (dataobject.TTool, bool)
-	AddBaseTool(tool dataobject.TTool) error
-	UpdateBaseTool(tool dataobject.TTool) error
+	GetSystemTools() []dataobject.TTool
+	GetSystemTool(toolId string) (dataobject.TTool, bool)
+	AddSystemTool(tool dataobject.TTool) error
+	UpdateSystemTool(tool dataobject.TTool) error
 	RemoveBaseTool(toolId string) error
 
 	GetSkills(comCode string) []dataobject.TSkill
@@ -90,7 +90,7 @@ func GetAgentRepository(db core.IBaseDatabase) IAgentRepository {
 	return agentRepository
 }
 
-func (repo *AgentRepository) LoadAllAgents(ttl int64) []dataobject.TAgent {
+func (repo *AgentRepository) LoadAllAgents(ttl int64) ([]dataobject.TAgent, []dataobject.TTool) {
 	repo.mu.Lock()
 	repo.configTTL = int64(math.Max(0, float64(ttl)))
 	repo.mu.Unlock()
@@ -100,15 +100,21 @@ func (repo *AgentRepository) LoadAllAgents(ttl int64) []dataobject.TAgent {
 
 	repo.mu.RLock()
 	agents := repo.agents
+	systemTools := repo.systemTools
 	repo.mu.RUnlock()
 
-	out := make([]dataobject.TAgent, 0, agents.Len())
+	outAgents := make([]dataobject.TAgent, 0, agents.Len())
 	agents.Range(func(_ int, item dataobject.TAgent) bool {
-		out = append(out, item)
+		outAgents = append(outAgents, item)
 		return true
 	})
 
-	return out
+	outTools := make([]dataobject.TTool, 0, systemTools.Len())
+	systemTools.Range(func(_ int, item dataobject.TTool) bool {
+		outTools = append(outTools, item)
+		return true
+	})
+	return outAgents, outTools
 }
 
 func (repo *AgentRepository) GetLLMProviders(comCode string) []dataobject.TLlm {
@@ -274,11 +280,11 @@ func (repo *AgentRepository) RemoveAgent(ownerId, agentId string) error {
 	return nil
 }
 
-func (repo *AgentRepository) GetBaseTools() []dataobject.TTool {
+func (repo *AgentRepository) GetSystemTools() []dataobject.TTool {
 	repo.refreshIfExpired()
 
-	out := make([]dataobject.TTool, 0, repo.baseTools.Len())
-	repo.baseTools.Range(func(_ int, item dataobject.TTool) bool {
+	out := make([]dataobject.TTool, 0, repo.systemTools.Len())
+	repo.systemTools.Range(func(_ int, item dataobject.TTool) bool {
 		out = append(out, item)
 		return true
 	})
@@ -286,12 +292,12 @@ func (repo *AgentRepository) GetBaseTools() []dataobject.TTool {
 	return out
 }
 
-func (repo *AgentRepository) GetBaseTool(toolId string) (dataobject.TTool, bool) {
+func (repo *AgentRepository) GetSystemTool(toolId string) (dataobject.TTool, bool) {
 	repo.refreshIfExpired()
 
 	var found dataobject.TTool
 	ok := false
-	repo.baseTools.Range(func(_ int, item dataobject.TTool) bool {
+	repo.systemTools.Range(func(_ int, item dataobject.TTool) bool {
 		if strings.EqualFold(toolId, item.ToolId) {
 			found = item
 			ok = true
@@ -303,39 +309,39 @@ func (repo *AgentRepository) GetBaseTool(toolId string) (dataobject.TTool, bool)
 	return found, ok
 }
 
-func (repo *AgentRepository) AddBaseTool(tool dataobject.TTool) error {
+func (repo *AgentRepository) AddSystemTool(tool dataobject.TTool) error {
 	if err := repo.requireAccessor(); err != nil {
 		return err
 	}
 
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
-	if err := repo.dataAccessor.CreateBaseTool(&tool); err != nil {
+	if err := repo.dataAccessor.CreateSystemTool(&tool); err != nil {
 		return err
 	}
 
-	repo.baseTools.Append(tool)
+	repo.systemTools.Append(tool)
 	repo.lastLoaded = common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 	repo.dataVersion++
 	return nil
 }
 
-func (repo *AgentRepository) UpdateBaseTool(tool dataobject.TTool) error {
+func (repo *AgentRepository) UpdateSystemTool(tool dataobject.TTool) error {
 	if err := repo.requireAccessor(); err != nil {
 		return err
 	}
 
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
-	if err := repo.dataAccessor.UpdateBaseTool(&tool); err != nil {
+	if err := repo.dataAccessor.UpdateSystemTool(&tool); err != nil {
 		return err
 	}
-	idx := common.FindIndex(repo.baseTools, func(t dataobject.TTool) bool {
+	idx := common.FindIndex(repo.systemTools, func(t dataobject.TTool) bool {
 		return t.ToolId == tool.ToolId
 	})
 
 	if idx >= 0 {
-		_ = repo.baseTools.Update(idx, tool)
+		_ = repo.systemTools.Update(idx, tool)
 	}
 	repo.lastLoaded = common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 	repo.dataVersion++
@@ -350,15 +356,15 @@ func (repo *AgentRepository) RemoveBaseTool(toolId string) error {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 
-	if err := repo.dataAccessor.DeleteBaseTool(toolId); err != nil {
+	if err := repo.dataAccessor.DeleteSystemTool(toolId); err != nil {
 		return err
 	}
 
-	idx := common.FindIndex(repo.baseTools, func(t dataobject.TTool) bool {
+	idx := common.FindIndex(repo.systemTools, func(t dataobject.TTool) bool {
 		return t.ToolId == toolId
 	})
 	if idx >= 0 {
-		_ = repo.baseTools.Remove(idx)
+		_ = repo.systemTools.Remove(idx)
 	}
 	repo.lastLoaded = common.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 	repo.dataVersion++
@@ -482,8 +488,8 @@ func (repo *AgentRepository) Destroy() {
 		repo.agents.Clear()
 	}
 
-	if repo.baseTools != nil {
-		repo.baseTools.Clear()
+	if repo.systemTools != nil {
+		repo.systemTools.Clear()
 	}
 
 	if repo.skills != nil {
@@ -531,7 +537,7 @@ func (repo *AgentRepository) loadAllFromDB() (*common.SafeList[dataobject.TLlm],
 		return nil, nil, nil, nil, nil, err
 	}
 
-	tools, err := repo.dataAccessor.GetBaseTools()
+	tools, err := repo.dataAccessor.GetSystemTools()
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
@@ -547,7 +553,7 @@ func (repo *AgentRepository) loadAllFromDB() (*common.SafeList[dataobject.TLlm],
 	return newSafeListFrom(providers), newSafeListFrom(agents), newSafeListFrom(tools), newSafeListFrom(skills), newSafeListFrom(rules), nil
 }
 
-// reloadIfNeeded 在 TTL 到期(或 force)时,以 singleflight 方式执行一次全量重载:
+// reloadIfNeeded 在 TTL 到期(或 force)时,以 single flight 方式执行一次全量重载:
 //   - 未过期时仅一次 RLock 快判,不持写锁、不发 IO;
 //   - 过期后由单个 goroutine 认领(锁外 DB 读取),其余调用者见 reloading=true 直接使用旧快照;
 //   - 成功后以"整体换引用(copy-on-write)"更新缓存(短临界区),避免持锁做 IO;
@@ -601,7 +607,7 @@ func (repo *AgentRepository) reloadIfNeeded(force bool) {
 		// copy-on-write:整体换引用(短临界区)
 		repo.llmProviders = providers
 		repo.agents = agents
-		repo.baseTools = tools
+		repo.systemTools = tools
 		repo.skills = skills
 		repo.routeRules = rules
 		repo.lastLoaded = repo.currentTimestamp()
