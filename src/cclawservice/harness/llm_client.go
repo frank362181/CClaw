@@ -29,6 +29,8 @@ import (
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/harness/common"
 	hCommon "my.favorite/cclawservice/harness/common"
+	"my.favorite/cclawservice/harness/ctxmgr"
+	"my.favorite/cclawservice/harness/tool"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
@@ -89,7 +91,7 @@ func NewClient() *Client {
 // 用来根据用户问题的意图匹配最适合的agent的函数
 // 用于"Agent 路由分类"等短输出场景;maxTokens 限制输出上限(<=0 时由供应商默认,仍受 context_window 约束)。
 func (c *Client) Complete(ctx context.Context, llmProvider dataobject.TLlm, system, user string, maxTokens int) (string, string, error) {
-	req := BuildChatCompletionRequestWithString(llmProvider, system, user, maxTokens, false)
+	req := ctxmgr.BuildChatCompletionRequestWithString(llmProvider, system, user, maxTokens, false)
 	content, finishReason, err := c.doCompletion(ctx, llmProvider, req)
 	return content, finishReason, err
 }
@@ -100,7 +102,7 @@ func (c *Client) Complete(ctx context.Context, llmProvider dataobject.TLlm, syst
 //
 // 错误语义:网络/HTTP/协议错误均包装后返回,由上层映射为业务错误。
 func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *request.ChatRequest) (string, error) {
-	req := BuildChatCompletionRequest(llmProvider, systemPrompt, chatReq, false)
+	req := ctxmgr.BuildChatCompletionRequest(llmProvider, systemPrompt, chatReq, false)
 	content, _, err := c.doCompletion(ctx, llmProvider, req)
 	return content, err
 }
@@ -110,7 +112,7 @@ func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm
 // 429/5xx/断流(传输层)按指数退避重试(同步调用无副作用,可安全重试)。
 //   - toolChoice: llmproto.ToolChoice* 常量;空串表示不发送 tool_choice(默认 auto)
 func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool /*[]llmproto.Tool*/, toolChoice string) (string, []llmproto.ToolCall, error) {
-	req := BuildChatCompletionRequestWithToolChoice(llmProvider, messages, tools, toolChoice, false)
+	req := ctxmgr.BuildChatCompletionRequestWithToolChoice(llmProvider, messages, tools, toolChoice, false)
 	var lastErr error
 	for attempt := 1; attempt <= c.retryMaxAttempts; attempt++ {
 		if attempt > 1 {
@@ -125,7 +127,7 @@ func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.T
 		lastErr = err
 		// 供应商不接受强制调用相关参数(tool_choice / enable_thinking):降级重试一次 ——
 		// 强制调用失败不该让整轮对话失败,退回"由模型自行决定"仍优于把 502 抛给用户。
-		if dropped := DegradeChatRequest(&req, err); dropped {
+		if dropped := ctxmgr.DegradeChatRequest(&req, err); dropped {
 			continue
 		}
 		if !llmproto.IsRetryableLlmError(err) {
@@ -144,7 +146,7 @@ func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.T
 //   - 说明:       内容安全拦截(finish_reason=content_filter)可能无任何正式内容,此时不报"空流"错误,
 //     而是原样透出 finish_reason,由上层给出"内容合规"提示。
 func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *request.ChatRequest, onChunk func(delta string), onReasoning func(delta string)) (string, string, error) {
-	req := BuildChatCompletionRequest(llmProvider, systemPrompt, chatReq, true) // 已强制 stream=true
+	req := ctxmgr.BuildChatCompletionRequest(llmProvider, systemPrompt, chatReq, true) // 已强制 stream=true
 	return c.streamRequest(ctx, llmProvider, req, onChunk, onReasoning)
 }
 
@@ -154,7 +156,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobjec
 // 无法携带历史;上下文读回装配后必须走本方法(max_tokens 的动态推导不变,见
 // BuildChatCompletionRequestWithTool,它会按整段消息估算输入)。
 func (c *Client) ChatCompletionMessages(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage) (string, error) {
-	req := BuildChatCompletionRequestWithTool(llmProvider, messages, nil, false)
+	req := ctxmgr.BuildChatCompletionRequestWithTool(llmProvider, messages, nil, false)
 	content, _, err := c.doCompletion(ctx, llmProvider, req)
 	return content, err
 }
@@ -162,7 +164,7 @@ func (c *Client) ChatCompletionMessages(ctx context.Context, llmProvider dataobj
 // ChatCompletionStreamMessages 以**完整消息序列**做流式 chat/completions。
 // 语义与 ChatCompletionStream 完全一致(含"已输出增量即不重试"),仅消息来源不同。
 func (c *Client) ChatCompletionStreamMessages(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, onChunk func(delta string), onReasoning func(delta string)) (string, string, error) {
-	req := BuildChatCompletionRequestWithTool(llmProvider, messages, nil, true)
+	req := ctxmgr.BuildChatCompletionRequestWithTool(llmProvider, messages, nil, true)
 	return c.streamRequest(ctx, llmProvider, req, onChunk, onReasoning)
 }
 
@@ -175,7 +177,7 @@ func (c *Client) ChatCompletionStreamMessages(ctx context.Context, llmProvider d
 //   - 重试:         429/5xx/断流在"尚未输出任何内容/思考/工具意图"时按指数退避重试。
 //   - toolChoice:   llmproto.ToolChoice* 常量;空串表示不发送 tool_choice(默认 auto)
 func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool, toolChoice string, onChunk func(string), onReasoning func(string), onToolIntent func(name string)) (string, []llmproto.ToolCall, string, error) {
-	req := BuildChatCompletionRequestWithToolChoice(llmProvider, messages, tools, toolChoice, true)
+	req := ctxmgr.BuildChatCompletionRequestWithToolChoice(llmProvider, messages, tools, toolChoice, true)
 	lastFinish := ""
 	var lastErr error
 	for attempt := 1; attempt <= c.retryMaxAttempts; attempt++ {
@@ -190,7 +192,7 @@ func (c *Client) StreamWithTools(ctx context.Context, llmProvider dataobject.TLl
 		}
 		lastErr, lastFinish = err, finishReason
 		// 供应商不接受强制调用相关参数:降级重试一次(已向客户端输出增量时不可重试)
-		if !emitted && DegradeChatRequest(&req, err) {
+		if !emitted && ctxmgr.DegradeChatRequest(&req, err) {
 			continue
 		}
 		if emitted || !llmproto.IsRetryableLlmError(err) {
@@ -421,7 +423,7 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 	finishReason := ""
 	emitted := false
 	eventName := ""
-	acc := newToolCallAccumulator()
+	acc := tool.NewToolCallAccumulator()
 	reportedIntent := make(map[int]bool) // 已上报过工具意图的 index,避免同 index 分片重复上报
 	scanner := bufio.NewScanner(httpResp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), hCommon.MaxResponseBytes)
@@ -477,7 +479,7 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 			}
 		}
 		for _, tc := range delta.ToolCalls {
-			acc.add(tc)
+			acc.Add(tc)
 			if onToolIntent != nil && tc.Function.Name != "" && !reportedIntent[tc.Index] {
 				reportedIntent[tc.Index] = true
 				emitted = true
@@ -489,7 +491,7 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 		return "", nil, finishReason, emitted, common.StreamReadError(ctx, streamCtx, err, requestID, idle)
 	}
 
-	return strings.TrimSpace(sb.String()), acc.result(), finishReason, emitted, nil
+	return strings.TrimSpace(sb.String()), acc.Result(), finishReason, emitted, nil
 }
 
 // retryWait 退避等待后继续重试(nextAttempt 为即将执行的尝试序号,从 2 开始);

@@ -564,7 +564,9 @@ func (s *ChatService) resolveAgent(ctx context.Context, comCode, sessionId, reqM
 	if s.agentRouter == nil {
 		return dataobject.TAgent{}, pException.RuntimeErr("chat service: agent router not initialized")
 	}
-	return s.agentRouter.Resolve(ctx, comCode, sessionId, reqMsg, agentId)
+
+	agentRouter := harness.NewClient()
+	return s.agentRouter.Resolve(ctx, comCode, sessionId, reqMsg, agentId, agentRouter.Complete)
 }
 
 // resolveProvider 解析 Agent 使用的 LLM Provider:优先 PrimaryModel,再按 Fallbacks 逐个回退。
@@ -692,7 +694,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 			// 这一轮已产出的文本仍带回调用方(用于留痕/日志,避免"内容全丢")。
 			return content, guard.StopError("chat service: tool loop")
 		}
-		messages = append(messages, harness.BuildToolCallWithContentMessage(content, calls)) // 工具轮文本一并回填
+		messages = append(messages, ctxmgr.BuildToolCallWithContentMessage(content, calls)) // 工具轮文本一并回填
 		for _, call := range calls {
 			callTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 			result, err := scriptrunner.RunScript(ctx, turn.tools.Scripts[call.Function.Name], call.Function.Arguments)
@@ -703,7 +705,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 			recorder.Record(call.Function.Name, callTime, respTime, result) // 旁路记录(recorder 为 nil 时静默)
 			// 死循环判定:同步路径本身串行执行,顺序天然等于"模型声明的顺序"(同步接口无 notice 通道)
 			result = guard.ApplyLoopGuard(call.Function.Name, call.Function.Arguments, err == nil, result, nil)
-			messages = append(messages, harness.BuildToolResultMessage(call.ID, result))
+			messages = append(messages, ctxmgr.BuildToolResultMessage(call.ID, result))
 		}
 	}
 	return "", myException.ChatToolLoopKind.Newf("chat service: tool loop exceeded max iterations(%d)", hCommon.AgentToolLoopMax)
@@ -751,7 +753,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 			// 已提示过且**再次命中**守卫(模型没换策略)→ 终止本轮,不再执行工具。
 			return content, finishReason, guard.StopError("chat service: stream tool loop")
 		}
-		messages = append(messages, harness.BuildToolCallWithContentMessage(content, calls)) // 工具调用+文本一并回填
+		messages = append(messages, ctxmgr.BuildToolCallWithContentMessage(content, calls)) // 工具调用+文本一并回填
 
 		// 同轮多个工具调用并行执行(goroutine 各自跑脚本);
 		// 脚本 stdout 经 lineCh 逐行汇集,由唯一转发 goroutine 串行推送 progress 事件(保证 SSE 无并发写)。
@@ -862,7 +864,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 
 				// 死循环判定必须落在串行回填点(同轮工具是并发执行的,这里才是"模型声明的顺序")
 				loopGuardResult := guard.ApplyLoopGuard(r.item.name, r.item.arg, false, result, onNotice)
-				messages = append(messages, harness.BuildToolResultMessage(r.item.callID, loopGuardResult))
+				messages = append(messages, ctxmgr.BuildToolResultMessage(r.item.callID, loopGuardResult))
 				continue
 			}
 			if onTool != nil {
@@ -872,7 +874,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 			}
 			recorder.Record(r.item.name, r.callTime, r.respTime, r.result) // 旁路记录(recorder 为 nil 时静默)
 			loopGuardResult := guard.ApplyLoopGuard(r.item.name, r.item.arg, true, r.result, onNotice)
-			messages = append(messages, harness.BuildToolResultMessage(r.item.callID, loopGuardResult))
+			messages = append(messages, ctxmgr.BuildToolResultMessage(r.item.callID, loopGuardResult))
 		}
 	}
 	return "", "", myException.ChatToolLoopKind.Newf("chat service: tool stream loop exceeded max iterations(%d)", hCommon.AgentToolLoopMax)

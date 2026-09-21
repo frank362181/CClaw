@@ -26,7 +26,6 @@ import (
 	"strings"
 	"time"
 
-	"my.favorite/cclawservice/harness"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
@@ -38,7 +37,6 @@ import (
 // AgentRouter 负责将一条用户消息解析到目标 Agent。
 type AgentRouter struct {
 	agentRepo     repo.IAgentRepository
-	llmClient     *harness.Client
 	sessionAgents *ChatSessionAgentRegistry
 
 	llmRoutingOn bool          // 是否启用 LLM 智能分类路由
@@ -49,7 +47,6 @@ type AgentRouter struct {
 var agentRouter = common.GetSingleton(func() *AgentRouter {
 	return &AgentRouter{
 		agentRepo:     nil,
-		llmClient:     harness.NewClient(),
 		sessionAgents: GetChatSessionAgentMgr(),
 		llmRoutingOn:  hCommon.AgentRoutingLLMEnabled,
 		llmTimeout:    time.Duration(hCommon.AgentRoutingLLMTimeoutSeconds) * time.Second,
@@ -66,7 +63,7 @@ func GetAgentRouter(agentRepo repo.IAgentRepository) *AgentRouter {
 // Resolve 解析本次会话的目标 Agent(混合路由)。
 //   - 返回 error 仅发生在:显式指定但 Agent 不存在/禁用,或该 comCode 下无任何可用 Agent;
 //   - 命中(含默认兜底)后会把结果绑定到会话,保证会话内上下文一致。
-func (r *AgentRouter) Resolve(ctx context.Context, comCode, sessionId, reqMsg, explicitAgentId string) (dataobject.TAgent, error) {
+func (r *AgentRouter) Resolve(ctx context.Context, comCode, sessionId, reqMsg, explicitAgentId string, classifyAgent hCommon.ClassifyAgent) (dataobject.TAgent, error) {
 	agents := r.availableAgents(comCode) //获取当前comCode的agent
 	if len(agents) == 0 {
 		return dataobject.TAgent{}, pException.UnMatchErrorEx2("no available chat agent for comCode:%s", comCode)
@@ -102,8 +99,8 @@ func (r *AgentRouter) Resolve(ctx context.Context, comCode, sessionId, reqMsg, e
 	}
 
 	// 4. LLM 分类(可选;失败/未命中静默回落)
-	if r.llmRoutingOn {
-		if agent, ok := r.classifyByLLM(ctx, comCode, agents, reqMsg); ok {
+	if r.llmRoutingOn && classifyAgent != nil {
+		if agent, ok := r.classifyByLLM(ctx, comCode, agents, reqMsg, classifyAgent); ok {
 			r.bind(comCode, sessionId, agent.AgentId)
 			return agent, nil
 		}
@@ -189,7 +186,7 @@ func (r *AgentRouter) matchKeyword(agents []dataobject.TAgent, comCode, reqMsg s
 
 // classifyByLLM 用 LLM 从可用 Agent 中挑选最合适者。
 // 输出仅接受"已配置 AgentId 的精确匹配",否则视为未命中(回落默认),绝不信任模型自由文本。
-func (r *AgentRouter) classifyByLLM(ctx context.Context, comCode string, agents []dataobject.TAgent, reqMsg string) (dataobject.TAgent, bool) {
+func (r *AgentRouter) classifyByLLM(ctx context.Context, comCode string, agents []dataobject.TAgent, reqMsg string, classifyAgent hCommon.ClassifyAgent) (dataobject.TAgent, bool) {
 	if strings.TrimSpace(reqMsg) == "" {
 		return dataobject.TAgent{}, false
 	}
@@ -204,17 +201,18 @@ func (r *AgentRouter) classifyByLLM(ctx context.Context, comCode string, agents 
 
 	// 每个候选 Agent 的"简介"优先取工作区 AGENTS.md 的 front matter summary,
 	// 无摘要时回退数据库 description
-	candidates := make([]hCommon.ClassifyAgent, 0, len(agents))
+	candidates := make([]hCommon.ClassificationAgent, 0, len(agents))
 	for i := range agents {
 		agent := &agents[i]
-		candidates = append(candidates, hCommon.ClassifyAgent{
+		candidates = append(candidates, hCommon.ClassificationAgent{
 			AgentId:   agent.AgentId,
 			AgentName: agent.AgentName,
 			Label:     r.classifyLabel(*agent),
 		})
 	}
 
-	content, _, err := r.llmClient.Complete(classifyCtx, provider, harness.BuildClassifySystemPrompt(candidates), reqMsg, r.llmMaxTokens)
+	//content, _, err := r.llmClient.Complete(classifyCtx, provider, harness.BuildClassifySystemPrompt(candidates), reqMsg, r.llmMaxTokens)
+	content, _, err := classifyAgent(classifyCtx, provider, BuildClassifySystemPrompt(candidates), reqMsg, r.llmMaxTokens)
 	if err != nil {
 		logging.LogDebugF("agent router: runtime classify skipped, err:%s", err.Error())
 		return dataobject.TAgent{}, false

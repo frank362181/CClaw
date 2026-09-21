@@ -5,6 +5,7 @@
 package common
 
 import (
+	"context"
 	"encoding/json"
 
 	"my.favorite/cclawservice/llmproto"
@@ -65,10 +66,11 @@ func (doc *AgentDocument) FromJsonString(jsonStr string) error {
 	return json.Unmarshal([]byte(jsonStr), doc)
 }
 
-// ClassifyAgent 是路由分类 prompt 中的单个 Agent 候选。
-// Label 为用于意图判断的"简介",由调用方按优先级解析:
-// AGENTS.md 的 front matter summary > 数据库 description;两者皆空回退到Agent名称。
-type ClassifyAgent struct {
+type ClassifyAgent func(ctx context.Context, llm dataobject.TLlm, system, user string, maxTokens int) (string, string, error)
+
+// ClassificationAgent 是路由分类 prompt 中的单个 Agent 候选。
+// AGENTS.md 的 front matter的 description;两者皆空回退到Agent名称。
+type ClassificationAgent struct {
 	AgentId   string
 	AgentName string
 	Label     string

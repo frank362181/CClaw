@@ -8,7 +8,7 @@
 * 工具执行不在本包:调用方拿到 ToolCall 后调用执行器,再把结果以 tool 消息回填后继续循环。
 **/
 
-package harness
+package tool
 
 import (
 	"strings"
@@ -16,21 +16,21 @@ import (
 	"my.favorite/cclawservice/llmproto"
 )
 
-// toolCallAccumulator 流式工具调用累积器:按 index 保存调用,并拼接分片的 function.arguments。
-type toolCallAccumulator struct {
+// FunctionCallAccumulator 流式工具调用累积器:按 index 保存调用,并拼接分片的 function.arguments。
+type FunctionCallAccumulator struct {
 	calls map[int]*llmproto.ToolCall
 	args  map[int]*strings.Builder
 	order []int
 }
 
-func newToolCallAccumulator() *toolCallAccumulator {
-	return &toolCallAccumulator{
+func NewToolCallAccumulator() *FunctionCallAccumulator {
+	return &FunctionCallAccumulator{
 		calls: make(map[int]*llmproto.ToolCall),
 		args:  make(map[int]*strings.Builder),
 	}
 }
 
-func (a *toolCallAccumulator) add(delta llmproto.ToolCallDelta) {
+func (a *FunctionCallAccumulator) Add(delta llmproto.ToolCallDelta) {
 	if _, ok := a.calls[delta.Index]; !ok {
 		a.calls[delta.Index] = &llmproto.ToolCall{}
 		a.args[delta.Index] = &strings.Builder{}
@@ -51,8 +51,8 @@ func (a *toolCallAccumulator) add(delta llmproto.ToolCallDelta) {
 	}
 }
 
-// result 按出现顺序返回完整的工具调用列表(arguments 已拼接完整)。
-func (a *toolCallAccumulator) result() []llmproto.ToolCall {
+// Result 按出现顺序返回完整的工具调用列表(arguments 已拼接完整)。
+func (a *FunctionCallAccumulator) Result() []llmproto.ToolCall {
 	out := make([]llmproto.ToolCall, 0, len(a.order))
 	for _, idx := range a.order {
 		call := a.calls[idx]

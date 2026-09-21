@@ -1,4 +1,4 @@
-package harness
+package ctxmgr
 
 import (
 	"fmt"
@@ -55,7 +55,7 @@ func ComposeSystemMessage(systemPrompt, summaryText, summaryTitle string) llmpro
 
 // BuildClassifySystemPrompt 构建用来通过用户问题的意图询问LLM返回合适Agent的 prompt。
 // 简介优先使用各 Agent 工作区 AGENTS.md 的摘要(已由调用方解析进 ClassifyAgent.Label)。
-func BuildClassifySystemPrompt(agents []hCommon.ClassifyAgent) string {
+func BuildClassifySystemPrompt(agents []hCommon.ClassificationAgent) string {
 	var sb strings.Builder
 	sb.WriteString("你是一个智能体路由器。请根据用户的问题,从下面的智能体列表中选择最合适的一个。\n")
 	sb.WriteString("智能体列表(格式: 编号|名称|简介):\n")

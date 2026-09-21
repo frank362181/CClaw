@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
@@ -117,7 +118,7 @@ func TestComplete_ThinkingFlagForQwen(t *testing.T) {
 
 	t.Run("streaming keeps nil even if thkNonStreaming=true", func(t *testing.T) {
 		p := dataobject.TLlm{ProviderId: "qwen3-8b", Model: "qwen3-8b", Vendor: "alibaba", ThkNonStreaming: true, BaseUrl: "http://x", ContextWindow: 8192, MaxTokens: 4096}
-		req := BuildChatCompletionRequest(p, systemPrompt("s"), chatReq("hi"), true)
+		req := ctxmgr.BuildChatCompletionRequest(p, systemPrompt("s"), chatReq("hi"), true)
 		if req.EnableThinking != nil {
 			t.Errorf("streaming should NOT send enable_thinking, got %v", *req.EnableThinking)
 		}
@@ -397,7 +398,7 @@ func TestChatCompletionStream_NoOverallTimeout(t *testing.T) {
 // ==================== 构造器测试 ====================
 
 func TestBuildChatMessage(t *testing.T) {
-	messages := BuildChatMessage(systemPrompt("系统提示"), chatReq("用户消息"))
+	messages := ctxmgr.BuildChatMessage(systemPrompt("系统提示"), chatReq("用户消息"))
 	if len(messages) != 2 {
 		t.Fatalf("messages len = %d, want 2", len(messages))
 	}
@@ -411,7 +412,7 @@ func TestBuildChatMessage(t *testing.T) {
 
 func TestBuildChatCompletionRequest(t *testing.T) {
 	p := providerModel("http://x", "k", "deep_seek_v4_pro", 0)
-	req := BuildChatCompletionRequest(p, systemPrompt("sys"), chatReq("hi"), true)
+	req := ctxmgr.BuildChatCompletionRequest(p, systemPrompt("sys"), chatReq("hi"), true)
 	if req.Model != "deep_seek_v4_pro" {
 		t.Errorf("model = %q, want deep_seek_v4_pro", req.Model)
 	}
@@ -423,7 +424,7 @@ func TestBuildChatCompletionRequest(t *testing.T) {
 	}
 
 	// 未配置 Model 时回退 ProviderId
-	req2 := BuildChatCompletionRequest(provider("http://x", "k", 0), systemPrompt("sys"), chatReq("hi"), false)
+	req2 := ctxmgr.BuildChatCompletionRequest(provider("http://x", "k", 0), systemPrompt("sys"), chatReq("hi"), false)
 	if req2.Model != "p" {
 		t.Errorf("model = %q, want fallback ProviderId p", req2.Model)
 	}
@@ -445,7 +446,7 @@ func TestBuildChatCompletionRequest_DynamicMaxTokens(t *testing.T) {
 		MaxTokens:     4096, // 供应商单次输出上限(未配置时当前生产逻辑不发 max_tokens)
 	}
 	longInput := strings.Repeat("中", 3000)
-	req := BuildChatCompletionRequest(p, systemPrompt(longInput), chatReq("hi"), false)
+	req := ctxmgr.BuildChatCompletionRequest(p, systemPrompt(longInput), chatReq("hi"), false)
 	if req.MaxTokens == nil {
 		t.Fatal("max_tokens should be set when ContextWindow > 0")
 	}
@@ -473,7 +474,7 @@ func TestBuildChatCompletionRequest_DynamicMaxTokens_Room(t *testing.T) {
 		ContextWindow: 1_000_000,
 		MaxTokens:     4096, // 供应商单次输出上限(DB 配置)
 	}
-	req := BuildChatCompletionRequest(p, systemPrompt("你是助手"), chatReq("你好"), false)
+	req := ctxmgr.BuildChatCompletionRequest(p, systemPrompt("你是助手"), chatReq("你好"), false)
 	if req.MaxTokens == nil {
 		t.Fatal("max_tokens should be set when ContextWindow > 0")
 	}
@@ -491,7 +492,7 @@ func TestBuildChatCompletionRequest_DynamicMaxTokens_Room(t *testing.T) {
 // max_tokens 保持 nil(不发送该字段,由供应商使用其默认输出上限)。
 func TestBuildChatCompletionRequest_DynamicMaxTokens_NoWindow(t *testing.T) {
 	p := dataobject.TLlm{ProviderId: "p", Model: "m", BaseUrl: "http://x"}
-	req := BuildChatCompletionRequest(p, systemPrompt("sys"), chatReq("hi"), false)
+	req := ctxmgr.BuildChatCompletionRequest(p, systemPrompt("sys"), chatReq("hi"), false)
 	if req.MaxTokens != nil {
 		t.Errorf("max_tokens = %v, want nil when ContextWindow==0", req.MaxTokens)
 	}

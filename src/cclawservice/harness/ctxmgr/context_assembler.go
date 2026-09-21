@@ -38,7 +38,6 @@ import (
 	"sort"
 	"strings"
 
-	"my.favorite/cclawservice/harness"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/llmproto"
@@ -127,7 +126,7 @@ func AssembleContext(systemPrompt string, records []hCommon.MemoryRecord, curren
 	summaryText, active := splitSummaryAndActive(records)
 	items := buildHistoryItems(active, policy.ToolReplayMaxRunes)
 
-	system := harness.ComposeSystemMessage(systemPrompt, summaryText, historySummaryTitle) //composeSystemMessage(systemPrompt, summaryText)
+	system := ComposeSystemMessage(systemPrompt, summaryText, historySummaryTitle) //composeSystemMessage(systemPrompt, summaryText)
 	current := llmproto.ChatMessage{Role: hCommon.RoleUser, Content: currentUserMsg}
 
 	result := hCommon.AssembleResult{Summary: summaryText}
