@@ -18,6 +18,14 @@ func EndsWithBlankLine(s string) bool {
 	return len(s) > 0 && len(s)-len(trimmed) >= 2
 }
 
+func StringsToLower(list []string) []string {
+	for i, str := range list {
+		list[i] = strings.ToLower(str)
+	}
+
+	return list
+}
+
 func ContainsString(text string, substrings []string) bool {
 	for _, s := range substrings {
 		if s != BlankString && strings.Contains(text, s) {
@@ -107,6 +115,21 @@ func NormalizeStrings(lines []string) []string {
 		return nil
 	}
 	return out
+}
+
+// NormalizeStringsSet 将一组字符串归一化为 所有元素无重复的非空字符串数组
+func NormalizeStringsSet(lines []string) map[string]struct{} {
+	normalized := NormalizeStrings(lines)
+	if len(normalized) == 0 {
+		return nil
+	}
+
+	set := make(map[string]struct{}, len(normalized))
+	for _, line := range normalized {
+		set[strings.ToLower(line)] = struct{}{}
+	}
+
+	return set
 }
 
 // FactShingles 把一条事实规范化为"字符二元组"集合,用于近似重复/更新判定。

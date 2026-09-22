@@ -56,15 +56,16 @@ type BasicTool struct {
 }
 
 type SystemToolSchemaMeta struct {
-	Name        string   `json:"name,omitempty" yaml:"name,omitempty"`
-	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
-	InputSchema string   `json:"inputSchema,omitempty" yaml:"inputSchema,omitempty"`
-	Required    []string `json:"required,omitempty" yaml:"required,omitempty"`
+	Name        string         `json:"name,omitempty" yaml:"name,omitempty"`
+	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
+	InputSchema map[string]any `json:"input_schema,omitempty" yaml:"input_schema,omitempty"`
 }
 
-// SystemToolSchema 系统工具的schema
-type SystemToolSchema struct {
+// SystemToolSchemaDocument 系统工具的schema,一般是JSON文件
+type SystemToolSchemaDocument struct {
 	ToolName          string `json:"toolName,omitempty" yaml:"toolName,omitempty"`
+	Visible           bool   `json:"visible,omitempty" yaml:"visible,omitempty"`
+	Script            string `json:"script,omitempty" yaml:"script,omitempty"`
 	SchemaFileName    string `json:"schemaFileName,omitempty" yaml:"schemaFileName,omitempty"`
 	SchemaFingerprint string `json:"schemaFingerprint,omitempty" yaml:"schemaFingerprint,omitempty"`
 	ByteSize          int64  `json:"byteSize,omitempty" yaml:"byteSize,omitempty"`
@@ -78,14 +79,6 @@ type SystemicTool struct {
 	Tool              BasicTool
 	SchemaFileName    string //对应的schema input所对应的文件
 	SchemaFingerprint string //对应的schema文件的fingerprint
-}
-
-func NewSystemicTool() *SystemicTool {
-	return &SystemicTool{
-		BasicTool: BasicTool{
-			Source: TSourceSystem,
-		},
-	}
 }
 
 func (st *SystemicTool) GetSchemaFileName() string {

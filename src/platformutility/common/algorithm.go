@@ -26,3 +26,21 @@ func IsAlternative[T comparable](a []T) bool {
 
 	return true
 }
+
+// RemoveInB 从a中删除出现在b中元素
+func RemoveInB[T comparable](a, b []T) []T {
+	set := make(map[T]struct{}, len(b))
+
+	for _, v := range b {
+		set[v] = struct{}{}
+	}
+
+	result := make([]T, 0, len(a))
+	for _, v := range a {
+		if _, ok := set[v]; !ok {
+			result = append(result, v)
+		}
+	}
+
+	return result
+}

@@ -111,3 +111,34 @@ func TestResolveStartupPath(t *testing.T) {
 		}
 	}
 }
+
+// TestNormalNameSet 名单归一化:大小写不敏感 + 去空白/去空项 + **不改写入参**。
+// 最后一条是硬约束:入参可能是缓存中的 front matter 切片,pCommon.StringsToLower 的原地改写
+// 会变成无锁改写缓存(见函数注释)。
+func TestNormalNameSet(t *testing.T) {
+	set := NormalNameSet([]string{" Read ", "READ", "read", "", "   ", "Edit"})
+
+	if len(set) != 2 {
+		t.Fatalf("set size mismatch: got=%d want=2 (%v)", len(set), set)
+	}
+	for _, key := range []string{"read", "edit"} {
+		if _, ok := set[key]; !ok {
+			t.Errorf("normalized key %q should be present: %v", key, set)
+		}
+	}
+
+	// 空名单/纯空白名单 → nil(调用方据此判断"未声明名单")
+	if got := NormalNameSet(nil); got != nil {
+		t.Errorf("nil input should return nil set, got=%v", got)
+	}
+	if got := NormalNameSet([]string{"", "  "}); got != nil {
+		t.Errorf("blank-only input should return nil set, got=%v", got)
+	}
+
+	// 不改写入参:调用方切片必须保持原样(含空白与大小写)
+	input := []string{" Read ", "Edit"}
+	_ = NormalNameSet(input)
+	if input[0] != " Read " || input[1] != "Edit" {
+		t.Errorf("input slice must not be mutated in place: %v", input)
+	}
+}

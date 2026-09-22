@@ -29,8 +29,8 @@ import (
 type AgentService struct {
 	baseService.BaseService
 
-	agentRepo       repo.IAgentRepository
-	startupFileRepo repo.IAgentFileRepository
+	agentRepo       *repo.AgentRepository
+	startupFileRepo *repo.AgentFileRepository
 }
 
 var agentService = common.GetSingleton(func() *AgentService {

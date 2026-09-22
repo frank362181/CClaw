@@ -42,37 +42,6 @@ type AgentRepository struct {
 	dataVersion int64
 }
 
-type IAgentRepository interface {
-	LoadAllAgents(ttl int64) []dataobject.TAgent
-
-	GetLLMProviders(comCode string) []dataobject.TLlm
-	AddLLMProvider(provider dataobject.TLlm) error
-	UpdateLLMProvider(provider dataobject.TLlm) error
-	RemoveLLMProvider(owerId, providerId string) error
-
-	GetAgents(comCode string) []dataobject.TAgent
-	GetAgent(ownerId, agentId string) (dataobject.TAgent, bool)
-	AddAgent(agent dataobject.TAgent) error
-	UpdateAgent(agent dataobject.TAgent) error
-	RemoveAgent(ownerId, agentId string) error
-
-	GetSystemTools() []dataobject.TTool
-	GetSystemTool(toolId string) (dataobject.TTool, bool)
-	AddSystemTool(tool dataobject.TTool) error
-	UpdateSystemTool(tool dataobject.TTool) error
-	RemoveBaseTool(toolId string) error
-
-	GetSkills(comCode string) []dataobject.TSkill
-	GetSkillsByAgent(agent dataobject.TAgent) []dataobject.TSkill
-	AddSkill(skill dataobject.TSkill) error
-	UpdateSkill(skill dataobject.TSkill) error
-	RemoveSkill(ownerId, skillId string) error
-
-	GetAgentRouteRules(comCode string) []dataobject.TAgentRouteRule
-
-	Destroy()
-}
-
 var agentRepository = common.GetSingleton(func() *AgentRepository {
 	return &AgentRepository{
 		dataAccessor: nil,
@@ -85,7 +54,7 @@ var agentRepository = common.GetSingleton(func() *AgentRepository {
 	}
 }).Instance()
 
-func GetAgentRepository(db core.IBaseDatabase) IAgentRepository {
+func GetAgentRepository(db core.IBaseDatabase) *AgentRepository {
 	agentRepository.dataAccessor, _ = dataaccessor.GetAgentAccessor(db)
 	return agentRepository
 }

@@ -61,14 +61,6 @@ type AgentFileRepository struct {
 	startupCache *startupFileCache
 }
 
-// IAgentFileRepository 定义启动文件仓库的对外能力
-type IAgentFileRepository interface {
-	GetStartupFiles(bootstrapRoot string) []hCommon.AgentDocument
-	GetStartupFile(bootstrapRoot, fileName string) (*hCommon.AgentDocument, error)
-
-	Destroy()
-}
-
 var agentFileRepository = pCommon.GetSingleton(func() *AgentFileRepository {
 	return &AgentFileRepository{
 		startupCache: &startupFileCache{
@@ -78,7 +70,7 @@ var agentFileRepository = pCommon.GetSingleton(func() *AgentFileRepository {
 }).Instance()
 
 // GetAgentFileRepository 返回全局唯一的启动文件仓库实例
-func GetAgentFileRepository() IAgentFileRepository {
+func GetAgentFileRepository() *AgentFileRepository {
 	return agentFileRepository
 }
 

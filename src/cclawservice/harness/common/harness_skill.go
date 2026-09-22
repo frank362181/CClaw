@@ -29,12 +29,12 @@ type SkillFrontMatter struct {
 	UserInvocable         bool          `json:"userInvocable,omitempty" yaml:"user-invocable,omitempty"`
 	DisableModeInvocation bool          `json:"disableModeInvocation,omitempty" yaml:"disable-mode-invocation,omitempty"`
 	Emoji                 string        `json:"emoji,omitempty" yaml:"emoji,omitempty"`
-	HomePage              string        `json:"homePage,omitempty" yaml:"home_page,omitempty"`
+	HomePage              string        `json:"home-page,omitempty" yaml:"home-page,omitempty"`
 	OS                    []string      `json:"os,omitempty" yaml:"os,omitempty"`
 	Version               string        `json:"version,omitempty" yaml:"version,omitempty"`
 	Requires              SkillRequires `json:"requires,omitempty" yaml:"requires,omitempty"`
-	AllowedTools          []string      `json:"allowedTools,omitempty" yaml:"allowedTools,omitempty"`
-	DisallowedTools       []string      `json:"disallowedTools,omitempty" yaml:"disallowedTools,omitempty"`
+	AllowedTools          []string      `json:"allowed-tools,omitempty" yaml:"allowed-tools,omitempty"`
+	DisallowedTools       []string      `json:"disallowed-tools,omitempty" yaml:"disallowed-tools,omitempty"`
 
 	TriggerKeywords []string `json:"triggerKeywords,omitempty" yaml:"trigger-keywords,omitempty"`
 

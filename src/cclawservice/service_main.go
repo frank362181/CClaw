@@ -53,9 +53,9 @@ type ServiceMain struct {
 
 	// agents related
 	defaultAgentConfigHelper *config.ConfigurationHelper
-	agentRepo                repo.IAgentRepository
-	promptRepo               ctxmgr.IPromptRepository
-	startupFileRepo          repo.IAgentFileRepository
+	agentRepo                *repo.AgentRepository
+	promptRepo               *ctxmgr.PromptRepository
+	startupFileRepo          *repo.AgentFileRepository
 
 	// 并发闸:流式(SSE)在飞连接数、全局聊天在飞请求数(各自上限在 Init 按 ini 配置)
 	streamGate *serviceCore.ConcurrencyGate
@@ -361,7 +361,7 @@ func (m *ServiceMain) loadAgentConfigurations() error {
 
 	// 5.warm up the system tools when startup
 	systemTools := m.agentRepo.GetSystemTools()
-	m.promptRepo.LoadSystemTools(systemTools)
+	_ = m.promptRepo.LoadSystemTools(systemTools)
 
 	return nil
 }

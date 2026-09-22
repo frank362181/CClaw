@@ -52,7 +52,7 @@ const MaxChatMessageLen = 4096
 type ChatService struct {
 	baseService.BaseService
 
-	agentRepo   repo.IAgentRepository
+	agentRepo   *repo.AgentRepository
 	llmClient   *harness.Client
 	agentRouter *ctxmgr.AgentRouter
 

@@ -21,8 +21,9 @@ trigger-keywords:
   - 热不热
 user-invocable: true
 disable-mode-invocation: false
+disallowed-tools: ["edit","write","bash"]
 emoji: 🌤️
-home_page:
+home-page:
 os:
   - darwin
   - linux

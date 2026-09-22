@@ -246,6 +246,7 @@ CREATE TABLE IF NOT EXISTS t_tool (
     tool_name    VARCHAR(32)  NOT NULL,                 -- tool名称
     description  VARCHAR(64)   NOT NULL,                -- 描述
     script       VARCHAR(128)      NOT NULL,            -- 脚本相对路径
+    visible    INTEGER      NOT NULL DEFAULT 1,            -- 是否可见：0 否/1 是
     input_schema VARCHAR(128)      NOT NULL,            -- schema 相对路径
     disabled     INTEGER NOT NULL DEFAULT 0,            -- 是否禁用：0 否/1 是
     deleted      INTEGER NOT NULL DEFAULT 0,            -- 是否删除 0 否 / 1 是

@@ -36,7 +36,7 @@ import (
 
 // AgentRouter 负责将一条用户消息解析到目标 Agent。
 type AgentRouter struct {
-	agentRepo     repo.IAgentRepository
+	agentRepo     *repo.AgentRepository
 	sessionAgents *ChatSessionAgentRegistry
 
 	llmRoutingOn bool          // 是否启用 LLM 智能分类路由
@@ -55,7 +55,7 @@ var agentRouter = common.GetSingleton(func() *AgentRouter {
 }).Instance()
 
 // GetAgentRouter 单例模式。
-func GetAgentRouter(agentRepo repo.IAgentRepository) *AgentRouter {
+func GetAgentRouter(agentRepo *repo.AgentRepository) *AgentRouter {
 	agentRouter.agentRepo = agentRepo
 	return agentRouter
 }
@@ -280,7 +280,7 @@ func (r *AgentRouter) agentDocSummary(agent dataobject.TAgent) string {
 	if err := promptRepo.LoadAgentBootstrap(agent); err != nil {
 		return ""
 	}
-	for _, doc := range promptRepo.GetAllDocuments(agent.AgentId) {
+	for _, doc := range promptRepo.GetAgentDocuments(agent.AgentId) {
 		if doc.Kind == hCommon.AgentDocAgent {
 			return strings.TrimSpace(doc.FrontMatter.Summary)
 		}

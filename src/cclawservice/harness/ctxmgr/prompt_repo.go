@@ -15,6 +15,7 @@
 package ctxmgr
 
 import (
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -48,38 +49,25 @@ const maxSkillDocCacheEntries = 256
 type PromptRepository struct {
 	mu sync.RWMutex
 
-	systemTools map[string]hCommon.SystemToolSchema
-
-	promptMap map[string]*agentPrompt
+	// 系统工具schema缓存文档
+	systemToolSchemaCache map[string]hCommon.SystemToolSchemaDocument
 
 	// skillCache 已解析的 SKILL.md 文档缓存:key = SKILL.md 绝对路径。
 	skillCache map[string]hCommon.SkillDocument
-}
 
-// IPromptRepository 定义 prompt 文档仓库的对外能力
-type IPromptRepository interface {
-	LoadAgentBootstrap(agent dataobject.TAgent) error
-
-	// LoadSystemTools 加载系统工具
-	LoadSystemTools(tools []dataobject.TTool) ([]hCommon.SystemToolSchema, observatory.SkillLoadReport)
-
-	// LoadSkills 是 SKILL.md 的唯一读盘 + YAML 解析入口(按文件指纹缓存)。
-	LoadSkills(skillFiles []string) ([]hCommon.SkillDocument, observatory.SkillLoadReport)
-
-	GetAllDocuments(agentId string) []hCommon.AgentDocument
-
-	Destroy()
+	promptMap map[string]*agentPrompt
 }
 
 var promptRepository = pCommon.GetSingleton(func() *PromptRepository {
 	return &PromptRepository{
-		promptMap:  make(map[string]*agentPrompt),
-		skillCache: make(map[string]hCommon.SkillDocument),
+		promptMap:             make(map[string]*agentPrompt),
+		skillCache:            make(map[string]hCommon.SkillDocument),
+		systemToolSchemaCache: make(map[string]hCommon.SystemToolSchemaDocument),
 	}
 }).Instance()
 
 // GetPromptRepository 返回全局唯一的 prompt 仓库实例
-func GetPromptRepository() IPromptRepository {
+func GetPromptRepository() *PromptRepository {
 	return promptRepository
 }
 
@@ -137,21 +125,104 @@ func (repo *PromptRepository) LoadAgentBootstrap(agent dataobject.TAgent) error 
 	return nil
 }
 
-// LoadSystemTools 将系统工具的schema 加载进来
-func (repo *PromptRepository) LoadSystemTools(tools []dataobject.TTool) ([]hCommon.SystemToolSchema, observatory.SkillLoadReport) {
+// LoadSystemTools 将系统工具的schema 加载进来,从数据库中的配置加载而来
+func (repo *PromptRepository) LoadSystemTools(tools []dataobject.TTool) observatory.SkillLoadReport {
 	observer := observatory.NewObserver(len(tools))
 	if len(tools) == 0 {
-		return nil, observer
+		return observer
 	}
 
+	//系统工具的基础目录
+	systemToolRoot := filepath.Join(pCommon.GetExecutableDir(), hCommon.AgentBootstrapDir, hCommon.SystemToolDirRoot)
+
+	// ---1) 归一化检查
+	sysTools := make(map[string]dataobject.TTool, len(tools))
+	seenTools := make(map[string]struct{}, len(tools))
+
 	for _, tool := range tools {
-		if len(strings.TrimSpace(tool.ToolName)) == 0 {
+		toolName := strings.ToLower(strings.TrimSpace(tool.ToolName))
+		if len(toolName) == 0 {
 			observer.Skip(tool.ToolName, "empty tool name")
 			continue
 		}
+
+		// 目录越界检查
+		schemaFile, err := pCommon.ResolveFile(filepath.Join(systemToolRoot, toolName), tool.SchemaFile)
+		if err != nil {
+			observer.Skip(tool.ToolName, "invalid tool schema file")
+			continue
+		}
+
+		//重复检查
+		if _, dup := seenTools[toolName]; dup {
+			observer.Duplicated++
+			continue
+		}
+
+		tool.ToolName = toolName //回填归一化后的toolName
+		seenTools[toolName] = struct{}{}
+		sysTools[schemaFile] = tool //此时key是input schema的路径名,绝对路径
 	}
 
-	return nil, observer
+	// ---2.从缓存中取出内容
+	cached := make(map[string]hCommon.SystemToolSchemaDocument, len(sysTools))
+	repo.mu.Lock()
+	for _, tool := range sysTools {
+		if doc, hit := repo.systemToolSchemaCache[tool.ToolName]; hit {
+			cached[tool.ToolName] = doc
+		}
+	}
+	repo.mu.Unlock()
+
+	// -- 3. 命中取缓存;未命中读盘
+	out := make(map[string]hCommon.SystemToolSchemaDocument, len(sysTools))
+	fresh := make(map[string]hCommon.SystemToolSchemaDocument, len(sysTools))
+	for key, tool := range sysTools {
+		fingerprint := pCommon.ComputeFileFingerprint(key) //此时key就是schema的路径
+		if len(fingerprint) == 0 {
+			observer.Skip(tool.ToolName, "file not found")
+			continue
+		}
+
+		//指纹是否命中
+		if doc, hit := cached[tool.ToolName]; hit && fingerprint == doc.SchemaFingerprint {
+			out[key] = doc
+			observer.Cached++
+			continue
+		}
+
+		doc, err := hCommon.ReadSystemToolSchemaDocument(key, fingerprint)
+		if err != nil {
+			observer.Skip(tool.ToolName, err.Error())
+			continue
+		}
+
+		scriptFile, err := pCommon.ResolveFile(filepath.Join(systemToolRoot, tool.ToolName), tool.Script)
+		if err != nil {
+			observer.Skip(tool.ToolName, err.Error())
+			continue
+		}
+
+		doc.Visible = tool.Visible //设置对LLM是否可见的属性
+		doc.Script = scriptFile
+
+		fresh[key] = *doc
+		out[key] = *doc
+		observer.Reloaded++
+	}
+
+	// ---4 回写新的条目
+	if len(fresh) > 0 {
+		repo.mu.Lock()
+		for key := range fresh {
+			toolName := strings.ToLower(strings.TrimSpace(fresh[key].ToolName))
+			repo.systemToolSchemaCache[toolName] = fresh[key]
+		}
+		repo.mu.Unlock()
+	}
+
+	observer.Loaded = len(out)
+	return observer
 }
 
 // LoadSkills 解析并缓存一组 SKILL.md,返回本轮可用的技能文档(按入参顺序去重)与加载统计。
@@ -202,8 +273,6 @@ func (repo *PromptRepository) LoadSkills(skillFiles []string) ([]hCommon.SkillDo
 	out := make([]hCommon.SkillDocument, 0, len(paths))
 	fresh := make([]hCommon.SkillDocument, 0, len(paths))
 	for _, filePath := range paths {
-		// 指纹必须在**读之前**取:这样落进缓存的指纹永远不新于正文 —— 与写入竞态时最坏是
-		// “下一轮多读一次”,绝不会把旧正文挂在新指纹下(顺序反过来就会变成“改了也不重读”)。
 		fingerprint := pCommon.ComputeFileFingerprint(filePath)
 		if len(fingerprint) == 0 {
 			report.Skip(filePath, "file not found")
@@ -241,8 +310,8 @@ func (repo *PromptRepository) LoadSkills(skillFiles []string) ([]hCommon.SkillDo
 	return out, report
 }
 
-// GetAllDocuments 返回全部启动文档的副本
-func (repo *PromptRepository) GetAllDocuments(agentId string) []hCommon.AgentDocument {
+// GetAgentDocuments 返回全部启动文档的副本
+func (repo *PromptRepository) GetAgentDocuments(agentId string) []hCommon.AgentDocument {
 	agentId = strings.TrimSpace(agentId)
 	if len(agentId) == 0 {
 		return nil
@@ -267,6 +336,42 @@ func (repo *PromptRepository) GetAllDocuments(agentId string) []hCommon.AgentDoc
 	return out
 }
 
+func (repo *PromptRepository) GetSystemToolSchemaDocument(allowedList, disallowedList []string) ([]hCommon.SystemToolSchemaDocument, error) {
+	var visibleList []string
+
+	repo.mu.RLock()
+	for key := range repo.systemToolSchemaCache {
+		if repo.systemToolSchemaCache[key].Visible {
+			//将默认读的系统工具加载进来
+			visibleList = append(visibleList, key)
+		}
+	}
+	repo.mu.RUnlock()
+
+	if len(disallowedList) > 0 {
+		denied := pCommon.NormalizeStringsSet(disallowedList)
+		if len(denied) > 0 {
+			kept := make([]string, 0, len(visibleList))
+			for _, name := range visibleList {
+				if _, no := denied[name]; no {
+					continue
+				}
+				kept = append(kept, name)
+			}
+			visibleList = kept
+		}
+	}
+
+	var documents []hCommon.SystemToolSchemaDocument
+	repo.mu.RLock()
+	defer repo.mu.RUnlock()
+	for _, item := range visibleList {
+		documents = append(documents, repo.systemToolSchemaCache[item])
+	}
+
+	return documents, nil
+}
+
 // Destroy 释放仓库持有的全部缓存
 func (repo *PromptRepository) Destroy() {
 	repo.mu.Lock()
@@ -284,7 +389,9 @@ func (repo *PromptRepository) Destroy() {
 		}
 	}
 
-	repo.skillCache = make(map[string]hCommon.SkillDocument)
+	repo.skillCache = nil
+	repo.systemToolSchemaCache = nil
+	repo.promptMap = nil
 }
 
 // ======================================= private methods =====================================

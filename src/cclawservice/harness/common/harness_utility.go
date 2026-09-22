@@ -6,6 +6,7 @@ package common
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -170,8 +171,35 @@ func IsKindAllowedInScope(kind AgentDocumentKind, scope BootstrapScope) bool {
 	}
 }
 
-func ParseJsonDocument(jsonFile string) (SystemicTool, bool) {
-	return SystemicTool{}, false
+func ReadSystemToolSchemaDocument(schemaFile string, fingerprint string) (*SystemToolSchemaDocument, error) {
+	data, size, err := pCommon.ReadFile(schemaFile, MaxSkillDocSize)
+	if err != nil {
+		return nil, err
+	}
+
+	var schemaMeta SystemToolSchemaMeta
+	err = json.Unmarshal([]byte(data), &schemaMeta)
+	if err != nil {
+		logging.LogErrorF("Failed to unmarshal system tool %s schema meta: %s", schemaFile, err.Error())
+		return nil, err
+	}
+
+	name := strings.TrimSpace(schemaMeta.Name)
+	if len(name) == 0 || len(schemaMeta.InputSchema) == 0 {
+		logging.LogErrorF("invalid schema file: %s", schemaFile)
+		return nil, pException.FilePathErrorEx("invalid schema file: " + schemaFile)
+	}
+
+	schemaDoc := &SystemToolSchemaDocument{
+		ToolName:          schemaMeta.Name,
+		SchemaFileName:    schemaFile,
+		SchemaFingerprint: fingerprint,
+		ByteSize:          size,
+
+		SysToolSchemaMeta: schemaMeta,
+	}
+
+	return schemaDoc, nil
 }
 
 // ReadSkillDocument 读取并解析一个 SKILL.md(唯一的读盘 + 唯一的 YAML 解析点)。

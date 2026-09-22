@@ -16,7 +16,8 @@ type TTool struct {
 	ToolName    string `gorm:"column:tool_name" json:"ToolName"`
 	Description string `gorm:"column:description" json:"Description"`
 	Script      string `gorm:"column:script" json:"Script"`
-	InputSchema string `gorm:"column:input_schema" json:"InputSchema"`
+	SchemaFile  string `gorm:"column:schema_file" json:"SchemaFile"`
+	Visible     bool   `gorm:"column:visible" json:"Visible"`
 	Disabled    bool   `gorm:"column:disabled" json:"Disabled"`
 	Deleted     bool   `gorm:"column:deleted" json:"Deleted"`
 
@@ -33,7 +34,8 @@ func ToolValues(t *TTool) map[string]interface{} {
 		"tool_name":    t.ToolName,
 		"description":  t.Description,
 		"script":       t.Script,
-		"input_schema": t.InputSchema,
+		"input_schema": t.SchemaFile,
+		"visible":      t.Visible,
 		"disabled":     t.Disabled,
 		"deleted":      t.Deleted,
 		"dVersion":     t.DVersion,

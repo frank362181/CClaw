@@ -44,3 +44,19 @@ func NormalizeYamlValue(v any) any {
 		return v
 	}
 }
+
+// =========================== private functions for module ============================
+func deepCopyJsonValue(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		return deepCopyJsonValue(val)
+	case []any:
+		newSlice := make([]any, len(val))
+		for i, item := range val {
+			newSlice[i] = deepCopyJsonValue(item)
+		}
+		return newSlice
+	default:
+		return v
+	}
+}

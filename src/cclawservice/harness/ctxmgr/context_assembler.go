@@ -374,7 +374,7 @@ func buildSystemMessage(systemPrompt, summaryText, summaryTitle string) llmproto
 // 带来的每轮重读盘与跨 agent 残留问题。
 func assembleSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope, activeSkillFiles []string, skills []hCommon.SkillDocument) (*hCommon.SystemPrompt, error) {
 	workspaceRoot, _ := hCommon.BuildAgentBootstrapRoot(agent)
-	documents := GetPromptRepository().GetAllDocuments(agent.AgentId) // 已按规范顺序加载
+	documents := GetPromptRepository().GetAgentDocuments(agent.AgentId) // 已按规范顺序加载
 
 	var missing, truncated []string
 	sections := make([]hCommon.SystemPromptSection, 0, len(documents)+1)

@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	hCommon "my.favorite/cclawservice/harness/common"
+	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/platformutility/common"
 	pCommon "my.favorite/platformutility/common"
@@ -30,13 +31,15 @@ import (
 //     由 prompt repo 取 SKILL.md 正文注入 system prompt —— 正文**不在这里存**,一份数据
 //     只缓存一处(prompt repo 已按文件缓存,含 Content)。
 type SkillSlot struct {
-	SkillId     string   // 技能目录名(如 weather / npa-report)
-	File        string   // SKILL.md 绝对路径(与 prompt repo 的 SkillFile 对齐,用于 SOP 取文)
-	Name        string   // front matter name
-	Description string   // front matter description
-	Keywords    []string // front matter trigger-keywords
-	ForcedTools []string // 本技能内 force-call 的工具名
-	ToolNames   []string // 本技能贡献的工具名(仅观测/日志用)
+	SkillId         string   // 技能目录名(如 weather / npa-report)
+	File            string   // SKILL.md 绝对路径(与 prompt repo 的 SkillFile 对齐,用于 SOP 取文)
+	Name            string   // front matter name
+	Description     string   // front matter description
+	AllowedTools    []string //被allowed的系统工具列表
+	DisallowedTools []string // disallowed的系统工具列表
+	Keywords        []string // front matter trigger-keywords
+	ForcedTools     []string // 本技能内 force-call 的工具名
+	ToolNames       []string // 本技能贡献的工具名(仅观测/日志用)
 }
 
 // Activation 一轮对话的“技能激活”结果(意图门)。
@@ -144,15 +147,9 @@ func GetFunctionRepository() *FunctionRepository {
 }
 
 // GetFunctionBundle 每轮对话的所有的 function-calling 输入。
-//
-// skillDocs:prompt repo 已解析的 SKILL.md 文档(SKILL.md 的唯一读盘/解析入口的产物);
-// 本层不读盘、不解析 YAML,只做派生(脚本绝对路径、LLM schema、技能级元数据)。
-//
-// 三份视图(schema / 强制名 / 脚本路径)全部出自同一次收集,
-// 保证顺序与过滤口径完全一致:否则会出现"某个工具被过滤掉了、却仍在强制名单里"
-// (策略层判为"强制工具不在可用集"→ 静默降级)。
+// 根据skill.md文件中定义的allowed,disallowed加载系统工具
 func (repo *FunctionRepository) GetFunctionBundle(skillDocs []hCommon.SkillDocument) FunctionBundle {
-	basicTools, slots := repo.collectToolsAndSkills(skillDocs)
+	basicTools, slots := repo.collectToolsFromSkill(skillDocs)
 	bundle := FunctionBundle{
 		Tools:       make([]llmproto.Tool, 0, len(basicTools)),
 		ForcedNames: make([]string, 0, len(basicTools)),
@@ -183,13 +180,13 @@ func (repo *FunctionRepository) Destroy() {}
 
 // ===================================== private functions & methods ==================================
 
-// collectToolsAndSkills 由已解析的技能文档收集工具声明与**技能级元数据**。
+// collectToolsFromSkill 由已解析的技能文档收集工具声明与**技能级元数据**。
 // 技能元数据(关键词/强制工具)与工具列表也不可能错位:
 //   - 只有**解析出脚本绝对路径**的工具才进入 tools —— 其余既不下发 schema,也不进
 //     forcedTools(否则意图门会强制模型去调一个必然失败的工具);
 //   - buildSkillSlot 复用同一份 tools,保证 ToolNames 与实际下发的工具严格同源。
-func (repo *FunctionRepository) collectToolsAndSkills(skillDocs []hCommon.SkillDocument) ([]hCommon.BasicTool, []SkillSlot) {
-	var skillTools []hCommon.BasicTool
+func (repo *FunctionRepository) collectToolsFromSkill(skillDocs []hCommon.SkillDocument) ([]hCommon.BasicTool, []SkillSlot) {
+	var visibleTools []hCommon.BasicTool
 	var slots []SkillSlot
 
 	for i := range skillDocs {
@@ -232,13 +229,43 @@ func (repo *FunctionRepository) collectToolsAndSkills(skillDocs []hCommon.SkillD
 			}
 		}
 
-		skillTools = append(skillTools, tools...)
+		visibleTools = append(visibleTools, tools...)
 
 		// 将元数据提取出来(与上面下发的 tools 同源)
 		slots = append(slots, buildSkillSlot(doc, tools, forcedTools))
 	}
 
-	return skillTools, slots
+	// 已经从skill.md中解析出allowed-tools,disallowed-tools等对系统工具的调用属性
+	var allowedTools []string
+	var disabledTools []string
+	for _, slot := range slots {
+		allowedTools = append(allowedTools, slot.AllowedTools...)
+		disabledTools = append(disabledTools, slot.DisallowedTools...)
+	}
+	documents, err := ctxmgr.GetPromptRepository().GetSystemToolSchemaDocument(allowedTools, disabledTools)
+	if err != nil {
+		logging.LogWarnF("failed to load system tool for skills: %s", err.Error())
+	}
+
+	for _, doc := range documents {
+		scriptFile := strings.TrimSpace(doc.Script)
+		if scriptFile == pCommon.BlankString {
+			logging.LogWarnF("tool repository: system tool %s has no resolved script, skip", doc.ToolName)
+			continue
+		}
+
+		sysTool := hCommon.BasicTool{
+			Source:      hCommon.TSourceSystem,
+			Name:        strings.ToLower(strings.TrimSpace(doc.ToolName)),
+			Description: doc.SysToolSchemaMeta.Description,
+			Script:      scriptFile,
+			Parameters:  doc.SysToolSchemaMeta.InputSchema,
+		}
+
+		visibleTools = append(visibleTools, sysTool)
+	}
+
+	return visibleTools, slots
 }
 
 // buildSkillSlot 把一个已解析的技能转成技能级元数据(只取“技能自己的”属性)。
@@ -254,12 +281,14 @@ func buildSkillSlot(doc hCommon.SkillDocument, tools []hCommon.BasicTool, forced
 	}
 
 	return SkillSlot{
-		SkillId:     doc.SkillId,
-		File:        doc.SkillFile,
-		Name:        strings.TrimSpace(doc.FrontMatter.Name),
-		Description: strings.TrimSpace(doc.FrontMatter.Description),
-		Keywords:    pCommon.NormalizeStrings(doc.FrontMatter.TriggerKeywords),
-		ForcedTools: pCommon.NormalizeStrings(forcedTools),
-		ToolNames:   pCommon.NormalizeStrings(toolNames),
+		SkillId:         doc.SkillId,
+		File:            doc.SkillFile,
+		Name:            strings.TrimSpace(doc.FrontMatter.Name),
+		Description:     strings.TrimSpace(doc.FrontMatter.Description),
+		AllowedTools:    pCommon.NormalizeStrings(doc.FrontMatter.AllowedTools),
+		DisallowedTools: pCommon.NormalizeStrings(doc.FrontMatter.DisallowedTools),
+		Keywords:        pCommon.NormalizeStrings(doc.FrontMatter.TriggerKeywords),
+		ForcedTools:     pCommon.NormalizeStrings(forcedTools),
+		ToolNames:       pCommon.NormalizeStrings(toolNames),
 	}
 }
