@@ -11,7 +11,6 @@
 *   5. 基于 Agent 工作区启动文档组装 system prompt
 *   6. 调用 LLM chat/completions 取回真实回复
 *
-* 与 LoginService/AgentService 保持一致:组合 baseService.BaseService + 工厂 GetChatService()。
 **/
 
 package service
@@ -110,7 +109,7 @@ type ToolEvent struct {
 type chatTurn struct {
 	req          *request.ChatRequest
 	agent        dataobject.TAgent
-	systemPrompt *dataobject.SystemPrompt
+	systemPrompt *hCommon.SystemPrompt
 	llm          dataobject.TLlm
 
 	tools        tool.FunctionBundle //与skill.md文件绑定的，以及系统工具合成的实际工具列表
@@ -123,14 +122,7 @@ type chatTurn struct {
 }
 
 // scriptPathOf 取"工具名 → 脚本绝对路径",取不到时返回可读错误。
-//
-// 为什么要收在一处:同步与流式两条执行路径都要用它,而取值口径一旦分叉就会出现
-// "一处传名字、一处传路径"的事故 —— 实测 2026-09-20 流式路径把工具名当脚本路径交给
-// execbox,报 `script tool: script not found: get_weather`。
-//
-// 键与值都按 TrimSpace 归一化:键要和发给模型的 function.name / 模型回传的
-// tool_calls[].function.name 严格同源;值必须是绝对路径(Scripts 已在 FunctionBundle
-// 构建时解析成绝对路径,相对路径会被 execbox 当成相对进程 CWD 而 Stat 失败)。
+// 由于LLM理解意图时可能会出现幻觉,导致无法找到对应的执行脚本
 func (t *chatTurn) scriptPathOf(toolName string) (string, error) {
 	name := strings.TrimSpace(toolName)
 	if t == nil || len(t.tools.Scripts) == 0 {
@@ -378,10 +370,6 @@ func (s *ChatService) InterruptChat(sender, turnId string) error {
 // =============================== private functions & methods===========================
 
 // 会话/轮次标识:客户端可传入;为空则由服务端生成。
-// 统一规整为 <=40 字符的紧凑形式(t_session.session_id 与 t_turn.turn_id 均为 VARCHAR(40)):
-// 前端 crypto.randomUUID() 与服务端 GenerateUUID() 产出的是 36 字符标准 UUID,
-// 去分隔符后为 32 字符;服务端生成的带前缀 ID 最长 48 → 截断到 40。
-// 该值会被用作历史文件目录名,规整中的字符过滤顺带杜绝了路径穿越。
 func (s *ChatService) normalizeRequest(comCode, sender string, req *request.ChatRequest) *request.ChatRequest {
 	if strings.TrimSpace(sender) != pCommon.BlankString {
 		req.SenderId = sender
@@ -484,7 +472,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 	skillDirs := s.collectSkillDirs(agent)
 
 	// 5.1 SKILL.md 的唯一读盘 + 唯一路径解析 + YAML 解析入口(prompt repo,按文件指纹缓存)
-	skillDocs, skillReport := repo.GetPromptRepository().LoadSkills(skillDirs)
+	skillDocs, skillReport := ctxmgr.GetPromptRepository().LoadSkills(skillDirs)
 	skillReport.LogSummary(fmt.Sprintf("chat service: agent=%s,turn=%s", agent.AgentId, req.TurnId))
 
 	// 5.2 由已解析文档派生工具与技能级元数据(触发词/正文/强制工具,零 IO)
@@ -497,7 +485,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 	// 5.4 组装 system prompt(命中技能的正文一并注入;未命中不注入,避免稀释注意力)
 	//
 	// 复用 5.1 已经解析好的文档:技能侧本轮只读一次盘,不再让组装层重新加载。
-	systemPrompt, err := ctxmgr.BuildSystemPromptWithSkills(agent, skillDocs, dataobject.BootstrapScopeNormal, gate.ActiveFiles)
+	systemPrompt, err := ctxmgr.BuildSystemPromptWithSkills(agent, skillDocs, hCommon.BootstrapScopeNormal, gate.ActiveFiles)
 	if err != nil {
 		logging.LogErrorF("chat service: build system prompt error:%s", err.Error())
 		return nil, myException.ChatLLMKind.Newf("chat service: build system prompt error:%s", err.Error())
@@ -538,7 +526,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 // 典型两类错误:
 //   - 系统提示预留 + 输出预留 + 工具预留 ≥ 窗口 ⇒ 历史永不回放且压缩被禁用(静默失效);
 //   - 系统提示预留远大于实测系统提示 ⇒ 多半是想调"历史回放多少",应该用 max_history_tokens。
-func (s *ChatService) warnPolicyIssues(agent dataobject.TAgent, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, toolsReserve int) {
+func (s *ChatService) warnPolicyIssues(agent dataobject.TAgent, llmProvider dataobject.TLlm, systemPrompt *hCommon.SystemPrompt, toolsReserve int) {
 	window := int(llmProvider.ContextWindow)
 	if window <= 0 {
 		return
@@ -629,7 +617,7 @@ func (s *ChatService) collectSkillDirs(agent dataobject.TAgent) []string {
 //
 // 装配形态:[system(系统提示 + 历史摘要)] + [历史消息(预算内)] + [本轮用户消息]。
 func (s *ChatService) assembleChatContext(session dataobject.TSession, agent dataobject.TAgent, llmProvider dataobject.TLlm,
-	systemPrompt *dataobject.SystemPrompt, req *request.ChatRequest, toolsReserveTokens int) (hCommon.AssembleResult, []hCommon.MemoryRecord) {
+	systemPrompt *hCommon.SystemPrompt, req *request.ChatRequest, toolsReserveTokens int) (hCommon.AssembleResult, []hCommon.MemoryRecord) {
 	policy := hCommon.GetContextPolicy(agent, int(llmProvider.ContextWindow))
 	policy.ToolsReserveTokens = toolsReserveTokens
 
@@ -685,7 +673,21 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 		messages = append(messages, ctxmgr.BuildToolCallWithContentMessage(content, calls)) // 工具轮文本一并回填
 		for _, call := range calls {
 			callTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
-			result, err := execbox.RunScript(ctx, turn.tools.Scripts[call.Function.Name], call.Function.Arguments)
+
+			// 取不到脚本(模型回传了未注册的工具名等)不能 continue:assistant 消息里的 tool_calls
+			// 必须逐条拿到 role=tool 应答,缺一条下一轮会被上游判协议错(整轮失败)。
+			scriptFile, err := turn.scriptPathOf(call.Function.Name)
+			if err != nil {
+				result := fmt.Sprintf(`{"error":%q}`, err.Error())
+				respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
+				recorder.Record(call.Function.Name, callTime, respTime, result) // 旁路记录(recorder 为 nil 时静默)
+				result = guard.ApplyLoopGuard(call.Function.Name, call.Function.Arguments, false, result, nil)
+				messages = append(messages, ctxmgr.BuildToolResultMessage(call.ID, result))
+				continue
+			}
+
+			result, err := execbox.RunScript(ctx, scriptFile, call.Function.Arguments)
+
 			respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 			if err != nil {
 				result = fmt.Sprintf(`{"error":%q}`, err.Error())
@@ -710,8 +712,6 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 
 	// 工具死循环守卫:一轮对话一个实例
 	guard := security.NewTurnLoopGuard()
-	// 首轮:含 force-call 工具(取实时数据)的技能强制模型调用工具;之后交回 auto(见 forcedToolChoice)
-	//toolChoice := toolSet.ForceToolChoice() //forcedToolChoice(toolSet)
 	for i := 0; i < hCommon.AgentToolLoopMax; i++ {
 		if i > 0 && onStatus != nil {
 			onStatus(cCommon.ChatStatusThinking, "正在思考…")
@@ -750,7 +750,8 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 			name   string
 			callID string
 			arg    string
-			script string // 脚本绝对路径(派发前解析好;解析失败时填可读占位,见下)
+			script string // 脚本绝对路径(派发前解析好)
+			err    error  // 脚本解析失败的原因:非 nil 时不进 execbox(空串只会 Stat 失败),直接按执行失败收尾
 		}
 		runs := make([]toolRunItem, len(calls))
 		for k, call := range calls {
@@ -759,7 +760,9 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 				callSeq = roundIntents[k]
 			}
 
-			runs[k] = toolRunItem{seq: callSeq, name: call.Function.Name, callID: call.ID, arg: call.Function.Arguments, script: turn.tools.Scripts[call.Function.Name]}
+			scriptFile, err := turn.scriptPathOf(call.Function.Name)
+
+			runs[k] = toolRunItem{seq: callSeq, name: call.Function.Name, callID: call.ID, arg: call.Function.Arguments, script: scriptFile, err: err}
 			if onTool != nil {
 				onTool(ToolEvent{Phase: cCommon.ChatToolEventRunning, Seq: callSeq, Name: call.Function.Name})
 			}
@@ -807,15 +810,20 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 					}
 				}()
 
-				//执行具体的工具(run.script 已在派发前解析为绝对路径)
-				res, err := execbox.RunScriptStream(ctx, run.script, run.arg, func(line string) {
-					lastOut.Store(pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().NanoTimestamp)
-					// json串不需要输出到UI界面上
-					if pCommon.LooksLikeJson(line) {
-						return
-					}
-					lineCh <- ToolEvent{Phase: cCommon.ChatToolEventProgress, Seq: run.seq, Name: run.name, Detail: line}
-				})
+				// 执行具体的工具(run.script 已在派发前解析为绝对路径)。
+				// 解析失败时不进 execbox:os.Stat("") 只会得到连工具名都没有的 not found,
+				// 直接把原因交给下面的串行回填段(按执行失败收尾)。
+				res, err := pCommon.BlankString, run.err
+				if run.err == nil {
+					res, err = execbox.RunScriptStream(ctx, run.script, run.arg, func(line string) {
+						lastOut.Store(pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().NanoTimestamp)
+						// json串不需要输出到UI界面上
+						if pCommon.LooksLikeJson(line) {
+							return
+						}
+						lineCh <- ToolEvent{Phase: cCommon.ChatToolEventProgress, Seq: run.seq, Name: run.name, Detail: line}
+					})
+				}
 				respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 				close(stopHeart)
 				<-heartDone

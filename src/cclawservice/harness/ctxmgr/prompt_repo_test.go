@@ -4,7 +4,7 @@
 * 覆盖:清单元数据、单文件读取、缺失文件占位、白名单拦截、目录穿越拦截、超大文件拦截、缓存失效。
 **/
 
-package repo
+package ctxmgr
 
 import (
 	"errors"
@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	hCommon "my.favorite/cclawservice/harness/common"
+	repo2 "my.favorite/cclawservice/model/repo"
 	"my.favorite/platformutility/exception"
 )
 
@@ -35,7 +36,7 @@ func TestGetStartupFiles(t *testing.T) {
 	writeRepoFile(t, filepath.Join(root, hCommon.AgentDocFileName), "# Rules\n")
 	writeRepoFile(t, filepath.Join(root, hCommon.SoulDocFileName), "# Soul\n")
 
-	repo := GetAgentFileRepository()
+	repo := repo2.GetAgentFileRepository()
 	list := repo.GetStartupFiles(root)
 
 	if len(list) != len(hCommon.StartupDocFiles) {
@@ -72,7 +73,7 @@ func TestGetStartupFile(t *testing.T) {
 	content := "---\nsummary: \"rules\"\n---\n# Rules\n- Read before edit.\n"
 	writeRepoFile(t, filepath.Join(root, hCommon.AgentDocFileName), content)
 
-	repo := GetAgentFileRepository()
+	repo := repo2.GetAgentFileRepository()
 	file, err := repo.GetStartupFile(root, hCommon.AgentDocFileName)
 	if err != nil {
 		t.Fatalf("GetStartupFile error:%s", err.Error())
@@ -96,7 +97,7 @@ func TestGetStartupFileMissing(t *testing.T) {
 	root := t.TempDir()
 	writeRepoFile(t, filepath.Join(root, hCommon.AgentDocFileName), "# Rules\n")
 
-	repo := GetAgentFileRepository()
+	repo := repo2.GetAgentFileRepository()
 	file, err := repo.GetStartupFile(root, hCommon.ToolsDocFileName) // 可选文件缺失
 	if err != nil {
 		t.Fatalf("GetStartupFile error:%s", err.Error())
@@ -110,7 +111,7 @@ func TestGetStartupFileRejectsNonWhitelisted(t *testing.T) {
 	root := t.TempDir()
 	writeRepoFile(t, filepath.Join(root, "notes.txt"), "secret")
 
-	repo := GetAgentFileRepository()
+	repo := repo2.GetAgentFileRepository()
 	_, err := repo.GetStartupFile(root, "notes.txt")
 	if err == nil {
 		t.Fatal("expected error for non-whitelisted file")
@@ -126,7 +127,7 @@ func TestGetStartupFileRejectsTraversal(t *testing.T) {
 	// 工作区外的敏感文件
 	writeRepoFile(t, filepath.Join(filepath.Dir(root), "AGENTS.md"), "outside")
 
-	repo := GetAgentFileRepository()
+	repo := repo2.GetAgentFileRepository()
 	for _, name := range []string{"../AGENTS.md", "sub/AGENTS.md"} {
 		if _, err := repo.GetStartupFile(root, name); err == nil {
 			t.Errorf("expected error for traversal name:%s", name)
@@ -140,7 +141,7 @@ func TestGetStartupFileRejectsOversize(t *testing.T) {
 	big := make([]byte, hCommon.MaxAgentDocSize+1)
 	writeRepoFile(t, filepath.Join(root, hCommon.AgentDocFileName), string(big))
 
-	repo := GetAgentFileRepository()
+	repo := repo2.GetAgentFileRepository()
 	if _, err := repo.GetStartupFile(root, hCommon.AgentDocFileName); err == nil {
 		t.Fatal("expected error for oversize file")
 	}
@@ -151,7 +152,7 @@ func TestGetStartupFileCacheDetectsChange(t *testing.T) {
 	path := filepath.Join(root, hCommon.AgentDocFileName)
 	writeRepoFile(t, path, "v1")
 
-	repo := GetAgentFileRepository()
+	repo := repo2.GetAgentFileRepository()
 
 	file, err := repo.GetStartupFile(root, hCommon.AgentDocFileName)
 	if err != nil || file.Content != "v1" {
@@ -181,7 +182,7 @@ func TestGetStartupFileRejectsSymlink(t *testing.T) {
 		t.Fatalf("symlink error:%s", err.Error())
 	}
 
-	repo := GetAgentFileRepository()
+	repo := repo2.GetAgentFileRepository()
 
 	// 符号链接在列表中被视为缺失(与正文读取的 O_NOFOLLOW 语义一致)
 	for _, doc := range repo.GetStartupFiles(root) {

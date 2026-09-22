@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/llmproto"
@@ -67,8 +68,8 @@ func providerModel(baseURL, apiKey, modelName string, contextWindow uint32) data
 }
 
 // systemPrompt 构造测试用的 system prompt。
-func systemPrompt(content string) *dataobject.SystemPrompt {
-	return &dataobject.SystemPrompt{Prompt: content}
+func systemPrompt(content string) *common.SystemPrompt {
+	return &common.SystemPrompt{Prompt: content}
 }
 
 // chatReq 构造测试用的聊天请求。

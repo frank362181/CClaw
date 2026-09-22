@@ -276,7 +276,7 @@ func (r *AgentRouter) classifyLabel(agent dataobject.TAgent) string {
 // agentDocSummary 读取 agent 工作区 AGENTS.md 的 front matter summary。
 // 复用 PromptRepository 的指纹缓存(文件未变零读盘);读取失败或缺少摘要返回空串。
 func (r *AgentRouter) agentDocSummary(agent dataobject.TAgent) string {
-	promptRepo := repo.GetPromptRepository()
+	promptRepo := GetPromptRepository()
 	if err := promptRepo.LoadAgentBootstrap(agent); err != nil {
 		return ""
 	}

@@ -43,7 +43,7 @@ type AgentRepository struct {
 }
 
 type IAgentRepository interface {
-	LoadAllAgents(ttl int64) ([]dataobject.TAgent, []dataobject.TTool)
+	LoadAllAgents(ttl int64) []dataobject.TAgent
 
 	GetLLMProviders(comCode string) []dataobject.TLlm
 	AddLLMProvider(provider dataobject.TLlm) error
@@ -90,7 +90,7 @@ func GetAgentRepository(db core.IBaseDatabase) IAgentRepository {
 	return agentRepository
 }
 
-func (repo *AgentRepository) LoadAllAgents(ttl int64) ([]dataobject.TAgent, []dataobject.TTool) {
+func (repo *AgentRepository) LoadAllAgents(ttl int64) []dataobject.TAgent {
 	repo.mu.Lock()
 	repo.configTTL = int64(math.Max(0, float64(ttl)))
 	repo.mu.Unlock()
@@ -100,7 +100,6 @@ func (repo *AgentRepository) LoadAllAgents(ttl int64) ([]dataobject.TAgent, []da
 
 	repo.mu.RLock()
 	agents := repo.agents
-	systemTools := repo.systemTools
 	repo.mu.RUnlock()
 
 	outAgents := make([]dataobject.TAgent, 0, agents.Len())
@@ -109,12 +108,7 @@ func (repo *AgentRepository) LoadAllAgents(ttl int64) ([]dataobject.TAgent, []da
 		return true
 	})
 
-	outTools := make([]dataobject.TTool, 0, systemTools.Len())
-	systemTools.Range(func(_ int, item dataobject.TTool) bool {
-		outTools = append(outTools, item)
-		return true
-	})
-	return outAgents, outTools
+	return outAgents
 }
 
 func (repo *AgentRepository) GetLLMProviders(comCode string) []dataobject.TLlm {

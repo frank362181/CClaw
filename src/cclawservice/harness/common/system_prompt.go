@@ -4,7 +4,7 @@
 * 面向单个 agent,由启动文档与 skill 元数据组装而成。
 **/
 
-package dataobject
+package common
 
 import (
 	"encoding/json"

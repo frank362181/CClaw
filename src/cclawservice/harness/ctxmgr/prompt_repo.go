@@ -12,16 +12,16 @@
 * 与 AgentRepository 保持一致:common.GetSingleton 单例 + common.SafeList 线程安全缓存。
 **/
 
-package repo
+package ctxmgr
 
 import (
-	"path/filepath"
 	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v2"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
+	"my.favorite/cclawservice/observatory"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
@@ -41,50 +41,14 @@ type agentPrompt struct {
 // maxSkillDocCacheEntries 技能文档缓存条目上限,超过则整体清空(防陈旧条目无限累积)
 const maxSkillDocCacheEntries = 256
 
-// SkillLoadReport 一次 LoadSkills 的观测结果(命中/重载/跳过 + 原因)
-type SkillLoadReport struct {
-	Requested  int // 入参技能数
-	Loaded     int // 返回的可用技能数
-	Cached     int // 命中缓存(零读盘零解析)
-	Reloaded   int // 首次加载或指纹变化:读盘 + YAML 解析
-	Duplicated int // 重复绑定被去掉的条数
-
-	// Skipped 被跳过的技能:分两批记录 —— 先记入参非法(目录为空/越界),
-	// 再记读盘阶段失败(文件缺失/过大/YAML 处理失败)。每条带 SkillFile 可唯一定位。
-	Skipped []SkillSkipReason
-}
-
-// SkillSkipReason 一个被跳过的技能及其原因
-type SkillSkipReason struct {
-	SkillFile string
-	Reason    string
-}
-
-// skip 记录一次跳过
-func (r *SkillLoadReport) skip(skillFile, reason string) {
-	r.Skipped = append(r.Skipped, SkillSkipReason{SkillFile: skillFile, Reason: reason})
-}
-
-// LogSummary 按调用方给定的 scope(如 "chat service: agent=...,turn=...")打一行加载结果。
-//   - 无跳过:debug 一行 —— 命中/重载计数就是“每轮零读盘”的线上证据;
-//   - 有跳过:warn 并列出原因 —— 否则技能文件坏了只会表现为“模型忽然不再调该工具”。
-func (r *SkillLoadReport) LogSummary(scope string) {
-	if len(r.Skipped) == 0 {
-		logging.LogDebugF("%s skills: requested=%d loaded=%d cached=%d reloaded=%d duplicated=%d",
-			scope, r.Requested, r.Loaded, r.Cached, r.Reloaded, r.Duplicated)
-		return
-	}
-
-	logging.LogWarnF("%s skills: requested=%d loaded=%d cached=%d reloaded=%d duplicated=%d skipped=%v",
-		scope, r.Requested, r.Loaded, r.Cached, r.Reloaded, r.Duplicated, r.Skipped)
-}
-
 // PromptRepository 负责从文件系统加载并缓存 prompt 相关的文档
 //
 // 并发约定:mu 只保护 map/列表的读改;磁盘 IO(路径解析/stat/读文件/YAML 解析)**一律在锁外**,
 // 只把“取快照”与“回写新条目”两段极短操作放进锁内 —— 否则一个慢盘或大文件会阻塞所有 agent。
 type PromptRepository struct {
 	mu sync.RWMutex
+
+	systemTools map[string]hCommon.SystemToolSchema
 
 	promptMap map[string]*agentPrompt
 
@@ -96,8 +60,11 @@ type PromptRepository struct {
 type IPromptRepository interface {
 	LoadAgentBootstrap(agent dataobject.TAgent) error
 
+	// LoadSystemTools 加载系统工具
+	LoadSystemTools(tools []dataobject.TTool) ([]hCommon.SystemToolSchema, observatory.SkillLoadReport)
+
 	// LoadSkills 是 SKILL.md 的唯一读盘 + YAML 解析入口(按文件指纹缓存)。
-	LoadSkills(skillFiles []string) ([]hCommon.SkillDocument, SkillLoadReport)
+	LoadSkills(skillFiles []string) ([]hCommon.SkillDocument, observatory.SkillLoadReport)
 
 	GetAllDocuments(agentId string) []hCommon.AgentDocument
 
@@ -170,12 +137,29 @@ func (repo *PromptRepository) LoadAgentBootstrap(agent dataobject.TAgent) error 
 	return nil
 }
 
+// LoadSystemTools 将系统工具的schema 加载进来
+func (repo *PromptRepository) LoadSystemTools(tools []dataobject.TTool) ([]hCommon.SystemToolSchema, observatory.SkillLoadReport) {
+	observer := observatory.NewObserver(len(tools))
+	if len(tools) == 0 {
+		return nil, observer
+	}
+
+	for _, tool := range tools {
+		if len(strings.TrimSpace(tool.ToolName)) == 0 {
+			observer.Skip(tool.ToolName, "empty tool name")
+			continue
+		}
+	}
+
+	return nil, observer
+}
+
 // LoadSkills 解析并缓存一组 SKILL.md,返回本轮可用的技能文档(按入参顺序去重)与加载统计。
 //
 // 这是 SKILL.md 的**唯一读盘 + 唯一 YAML 解析入口**:工具层只消费返回文档的 FrontMatter,
 // prompt 层只消费目录与正文 —— 都不再自己读文件。
-func (repo *PromptRepository) LoadSkills(skillFiles []string) ([]hCommon.SkillDocument, SkillLoadReport) {
-	report := SkillLoadReport{Requested: len(skillFiles)}
+func (repo *PromptRepository) LoadSkills(skillFiles []string) ([]hCommon.SkillDocument, observatory.SkillLoadReport) {
+	report := observatory.NewObserver(len(skillFiles))
 	if len(skillFiles) == 0 {
 		return nil, report
 	}
@@ -186,14 +170,14 @@ func (repo *PromptRepository) LoadSkills(skillFiles []string) ([]hCommon.SkillDo
 	for _, skillFile := range skillFiles {
 		skillFile = strings.TrimSpace(skillFile)
 		if len(skillFile) == 0 {
-			report.skip(skillFile, "empty skill dir")
+			report.Skip(skillFile, "empty skill dir")
 			continue
 		}
 
 		// 越界校验(相对 skills 根解析 + 真实路径包含性)在 common 里单点收敛
 		filePath, err := hCommon.ResolveSkillDocPath(skillFile)
 		if err != nil {
-			report.skip(skillFile, err.Error())
+			report.Skip(skillFile, err.Error())
 			continue
 		}
 		if _, dup := seen[filePath]; dup {
@@ -222,7 +206,7 @@ func (repo *PromptRepository) LoadSkills(skillFiles []string) ([]hCommon.SkillDo
 		// “下一轮多读一次”,绝不会把旧正文挂在新指纹下(顺序反过来就会变成“改了也不重读”)。
 		fingerprint := pCommon.ComputeFileFingerprint(filePath)
 		if len(fingerprint) == 0 {
-			report.skip(filePath, "file not found")
+			report.Skip(filePath, "file not found")
 			continue
 		}
 
@@ -233,9 +217,9 @@ func (repo *PromptRepository) LoadSkills(skillFiles []string) ([]hCommon.SkillDo
 			continue
 		}
 
-		doc, err := readSkillDoc(filePath, fingerprint)
+		doc, err := hCommon.ReadSkillDocument(filePath, fingerprint)
 		if err != nil {
-			report.skip(filePath, err.Error()) // 超大/不可读:整份跳过(不截断)
+			report.Skip(filePath, err.Error()) // 超大/不可读:整份跳过(不截断)
 			continue
 		}
 
@@ -346,33 +330,6 @@ func (repo *PromptRepository) readAgentDocumentLocked(kind hCommon.AgentDocument
 	}
 
 	return base, true, nil
-}
-
-// readSkillDoc 读取并解析一个 SKILL.md(唯一的读盘 + 唯一的 YAML 解析点)。
-// YAML 失败只告警不丢弃文档:正文是 SOP 注入的唯一来源,一个 front matter 笔误不该让
-// 技能连正文都进不了 prompt(元数据为空时目录/关键词自然也就为空)。
-func readSkillDoc(filePath, fingerprint string) (*hCommon.SkillDocument, error) {
-	data, size, err := pCommon.ReadFile(filePath, hCommon.MaxSkillDocSize)
-	if err != nil {
-		return nil, err
-	}
-
-	frontMatter, content := hCommon.SplitFrontMatter(data)
-
-	doc := &hCommon.SkillDocument{
-		SkillId:     filepath.Base(filepath.Dir(filePath)), // 技能目录名(如 weather / npa-report)
-		SkillFile:   filePath,
-		Fingerprint: fingerprint,
-		Content:     content,
-		ByteSize:    size,
-	}
-	if len(frontMatter) > 0 {
-		if err := yaml.Unmarshal([]byte(frontMatter), &doc.FrontMatter); err != nil {
-			logging.LogWarnF("prompt repo: parse skill %s front matter error:%s", filePath, err.Error())
-		}
-	}
-
-	return doc, nil
 }
 
 // cacheSkillLocked 写入技能解析缓存(调用方需持有 repo.mu)

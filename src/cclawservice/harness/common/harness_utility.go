@@ -11,10 +11,12 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v2"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
+	"my.favorite/platformutility/logging"
 )
 
 // BuildAgentBootstrapRoot 根据agent的信息构建agent的工作目录
@@ -150,18 +152,18 @@ func ReleaseMaintenanceSlot() {
 //   - subagent: 仅 AGENTS.md(不继承父 agent 的人格/用户/记忆)
 //   - cron:     AGENTS/SOUL/IDENTITY/USER,不含 MEMORY.md
 //   - heartbeat: 不注入启动文件
-func IsKindAllowedInScope(kind AgentDocumentKind, scope dataobject.BootstrapScope) bool {
+func IsKindAllowedInScope(kind AgentDocumentKind, scope BootstrapScope) bool {
 	switch scope {
-	case dataobject.BootstrapScopeSubagent:
+	case BootstrapScopeSubagent:
 		return kind == AgentDocAgent
-	case dataobject.BootstrapScopeCron:
+	case BootstrapScopeCron:
 		switch kind {
 		case AgentDocAgent, AgentDocSoul,
 			AgentDocIdentity, AgentDocUser:
 			return true
 		}
 		return false
-	case dataobject.BootstrapScopeHeartbeat:
+	case BootstrapScopeHeartbeat:
 		return false
 	default:
 		return true
@@ -172,47 +174,31 @@ func ParseJsonDocument(jsonFile string) (SystemicTool, bool) {
 	return SystemicTool{}, false
 }
 
-// BuildSkillTool 把一份**已解析**的 SKILL.md 文档组装成技能级工具视图(SkillTool)。
-//
-// 读盘与 YAML 解析都不在这里 —— 唯一入口是 prompt repo 的 LoadSkills(带文件指纹缓存),
-// 本函数只做派生:把 front matter 里声明的工具脚本解析成绝对路径(相对 SKILL.md 所在目录),
-// 并挑出声明了 force-call 的工具名。
-// 文档未携带文件路径(未落盘的文档)时返回 ok=false。
-func BuildSkillTool(doc SkillDocument) (SkillTool, bool) {
-	skillFile := strings.TrimSpace(doc.SkillFile)
-	if len(skillFile) == 0 {
-		return SkillTool{}, false
+// ReadSkillDocument 读取并解析一个 SKILL.md(唯一的读盘 + 唯一的 YAML 解析点)。
+// YAML 失败只告警不丢弃文档:正文是 SOP 注入的唯一来源,一个 front matter 笔误不该让
+// 技能连正文都进不了 prompt(元数据为空时目录/关键词自然也就为空)。
+func ReadSkillDocument(filePath string, fingerprint string) (*SkillDocument, error) {
+	data, size, err := pCommon.ReadFile(filePath, MaxSkillDocSize)
+	if err != nil {
+		return nil, err
 	}
 
-	var out []BasicTool
-	var forced []string
+	frontMatter, content := SplitFrontMatter(data)
+	doc := &SkillDocument{
+		SkillId:     filepath.Base(filepath.Dir(filePath)), //技能名称
+		SkillFile:   filePath,
+		Fingerprint: fingerprint,
+		Content:     content,
+		ByteSize:    size,
+	}
 
-	for _, t := range doc.FrontMatter.Tools {
-		if len(strings.TrimSpace(t.Name)) == 0 {
-			continue // 工具名称为空即放弃
-		}
-		baseDir := filepath.Dir(skillFile)
-		t.Script, _ = pCommon.ResolveFile(baseDir, t.Script)
-		out = append(out, t)
-		if t.ForceCall {
-			forced = append(forced, strings.TrimSpace(t.Name))
+	if len(frontMatter) > 0 {
+		if err := yaml.Unmarshal([]byte(frontMatter), &doc.FrontMatter); err != nil {
+			logging.LogWarnF("prompt repo: parse skill %s front matter error:%s", filePath, err.Error())
 		}
 	}
 
-	return SkillTool{
-		BasicTool: BasicTool{
-			Source:      TSourceSkill,
-			Name:        strings.TrimSpace(doc.FrontMatter.Name),
-			Description: strings.TrimSpace(doc.FrontMatter.Description),
-		},
-		Tools:            out,
-		AllowedTools:     doc.FrontMatter.AllowedTools,
-		DisallowedTools:  doc.FrontMatter.DisallowedTools,
-		TriggerKeywords:  pCommon.NormalizeStrings(doc.FrontMatter.TriggerKeywords),
-		ForcedTools:      pCommon.NormalizeStrings(forced),
-		SkillFileName:    skillFile,
-		SkillFingerprint: doc.Fingerprint,
-	}, true
+	return doc, nil
 }
 
 func BasicToolToLLMTool(t BasicTool) (llmproto.Tool, bool) {

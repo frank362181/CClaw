@@ -101,7 +101,7 @@ func (c *Client) Complete(ctx context.Context, llmProvider dataobject.TLlm, syst
 //   - req: 模型与消息;max_tokens 已按 context_window 动态推导(BuildChatCompletionRequest)
 //
 // 错误语义:网络/HTTP/协议错误均包装后返回,由上层映射为业务错误。
-func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *request.ChatRequest) (string, error) {
+func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *hCommon.SystemPrompt, chatReq *request.ChatRequest) (string, error) {
 	req := ctxmgr.BuildChatCompletionRequest(llmProvider, systemPrompt, chatReq, false)
 	content, _, err := c.doCompletion(ctx, llmProvider, req)
 	return content, err
@@ -145,7 +145,7 @@ func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.T
 //     一旦有增量输出则不再重试(避免重复内容)。
 //   - 说明:       内容安全拦截(finish_reason=content_filter)可能无任何正式内容,此时不报"空流"错误,
 //     而是原样透出 finish_reason,由上层给出"内容合规"提示。
-func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *dataobject.SystemPrompt, chatReq *request.ChatRequest, onChunk func(delta string), onReasoning func(delta string)) (string, string, error) {
+func (c *Client) ChatCompletionStream(ctx context.Context, llmProvider dataobject.TLlm, systemPrompt *hCommon.SystemPrompt, chatReq *request.ChatRequest, onChunk func(delta string), onReasoning func(delta string)) (string, string, error) {
 	req := ctxmgr.BuildChatCompletionRequest(llmProvider, systemPrompt, chatReq, true) // 已强制 stream=true
 	return c.streamRequest(ctx, llmProvider, req, onChunk, onReasoning)
 }

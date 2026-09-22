@@ -11,11 +11,6 @@
 *   assistant 记录 → role=assistant(被中断的记录同样按普通助手消息回放)
 *   summary 记录   → 折叠进 system 消息的"历史摘要"段,并使其 covers 区间内的旧记录不再回放
 *
-* 为什么工具结果要"折叠"而不是重建 role=tool 消息:
-*   历史文件不保存 tool_call_id 与原始 tool_calls 数组,若凭猜测合成配对关系,
-*   一旦与协议要求不一致(缺 tool_call_id、配对错位),上游会直接报协议错误。
-*   折叠成文本块既保住了工具产出的信息,又永远不会破坏协议契约。
-*
 * 预算裁剪(性能与稳定性):
 *   - 只在"组边界"(以 user 消息为起点)上裁剪,绝不切散 assistant/tool 配对;
 *   - `SystemPromptReserveTokens`(DB 列名仍是 `t_agent.reverse_token_floor`)是**为系统提示
@@ -42,7 +37,7 @@ import (
 	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
-	"my.favorite/cclawservice/model/repo"
+	"my.favorite/cclawservice/request"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging"
 )
@@ -67,49 +62,169 @@ type historyItem struct {
 	msg      llmproto.ChatMessage
 }
 
-// BuildSystemPrompt 以正常会话烦诶组装 system prompt，包含skills文件
-func BuildSystemPrompt(agent dataobject.TAgent, skillFiles []string) (*dataobject.SystemPrompt, error) {
-	return BuildSystemPromptEx(agent, skillFiles, dataobject.BootstrapScopeNormal)
+// ============================= block for building chat message ================================
+
+// BuildSimpleChatMessage 以system/user 文本构建简单的prompt
+func BuildSimpleChatMessage(sysMsg, userMsg string) []llmproto.ChatMessage {
+	return []llmproto.ChatMessage{
+		{Role: hCommon.RoleSystem, Content: sysMsg},
+		{Role: hCommon.RoleUser, Content: userMsg},
+	}
 }
 
-// BuildSystemPromptEx 按指定会话范围组装system prompt
-func BuildSystemPromptEx(agent dataobject.TAgent, skillFiles []string, scope dataobject.BootstrapScope) (*dataobject.SystemPrompt, error) {
-	return BuildSystemPromptExWithActiveSkills(agent, skillFiles, scope, nil)
+func BuildChatMessage(systemPrompt *hCommon.SystemPrompt, req *request.ChatRequest) []llmproto.ChatMessage {
+	return []llmproto.ChatMessage{
+		{Role: hCommon.RoleSystem, Content: systemPrompt.Prompt},
+		{Role: hCommon.RoleUser, Content: req.ReqMsg},
+	}
 }
 
-// BuildSystemPromptExWithActiveSkills 组装 system prompt,并把**命中技能的正文(SOP)**
-// 一并注入。
+// BuildToolCallWithContentMessage 构造携带文本与工具调用的 assistant 消息(工具循环回填历史用)。
+// 模型可能在一轮里既输出文本又请求工具(OpenAI 规范允许 content 与 tool_calls 并存),
+// 文本须一并回填,否则下一轮 LLM 看不到自己刚说的话(上下文缺失)。
+func BuildToolCallWithContentMessage(content string, calls []llmproto.ToolCall) llmproto.ChatMessage {
+	return llmproto.ChatMessage{Role: hCommon.RoleAssistant, Content: content, ToolCalls: calls}
+}
+
+// BuildToolResultMessage 构造工具执行结果消息(role=tool,按 tool_call_id 关联)。
+func BuildToolResultMessage(toolCallID, content string) llmproto.ChatMessage {
+	return llmproto.ChatMessage{Role: hCommon.RoleTool, ToolCallID: toolCallID, Content: content}
+}
+
+// =========================== block for building for request ===========================
+
+func BuildChatCompletionRequestWithString(llmProvider dataobject.TLlm, sysMsg string, userMsg string, maxTokens int, stream bool) llmproto.ChatCompletionRequest {
+	messages := BuildSimpleChatMessage(sysMsg, userMsg)
+	req := llmproto.ChatCompletionRequest{
+		Model:     llmProvider.GetModelName(),
+		Messages:  messages,
+		Stream:    stream,
+		MaxTokens: nil,
+	}
+	if maxTokens > 0 {
+		req.MaxTokens = &maxTokens
+	}
+
+	// 仅非流式请求按 provider 配置发送 enable_thinking(非流模式下是否思考);
+	// 流式请求保持 nil:thinking 由流式默认开启并经 reasoning_content 返回,不在此关闭。
+	if !stream {
+		req.EnableThinking = new(llmProvider.ThkNonStreaming)
+	}
+	return req
+}
+
+// BuildChatCompletionRequest 构造 chat/completions 请求体。
+// max_tokens 按输入 token 估算做动态计算,保证"估算输入 + max_tokens ≤ context_window",
+// 避免长输入时因超出供应商上下文窗口而报错(同步/流式两条路径共用)。
+// 未配置 ContextWindow(0)时不发送 max_tokens,由供应商使用其默认输出上限。
+func BuildChatCompletionRequest(llmProvider dataobject.TLlm, systemPrompt *hCommon.SystemPrompt, chatReq *request.ChatRequest, stream bool) llmproto.ChatCompletionRequest {
+	messages := BuildChatMessage(systemPrompt, chatReq)
+	req := llmproto.ChatCompletionRequest{
+		Model:    llmProvider.GetModelName(),
+		Messages: messages,
+		Stream:   stream,
+	}
+	// 仅非流式请求按 provider 配置发送 enable_thinking;流式保持 nil(不关闭 thinking)
+	if !stream {
+		req.EnableThinking = new(llmProvider.ThkNonStreaming)
+	}
+
+	// 动态裁剪 max_tokens:仅当 ContextWindow 已配置时才计算,否则返回 nil
+	maxTokens := security.DynamicMaxTokens(llmProvider, messages)
+	if maxTokens == 0 {
+		req.MaxTokens = nil //应用供应商的默认配置
+	} else {
+		req.MaxTokens = new(maxTokens)
+	}
+
+	return req
+}
+
+// BuildChatCompletionRequestWithTool 构造带工具的 chat/completions 请求体(tool_choice 不发送)。
+// max_tokens 沿用与普通请求一致的动态推导(dynamicMaxTokens)。
+func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool /*[]llmproto.Tool*/, stream bool) llmproto.ChatCompletionRequest {
+	return BuildChatCompletionRequestWithToolChoice(llmProvider, messages, tools, pCommon.BlankString, stream)
+}
+
+// BuildChatCompletionRequestWithToolChoice 在带工具请求的基础上附上工具选择策略。
+//   - toolChoice: llmproto.ToolChoice* 常量;空串则不发送 tool_choice 字段(等价 auto)
 //
-// activeSkillFiles:本轮意图门判定为相关的 SKILL.md 绝对路径(来自 tool.Activation.ActiveFiles);
-// 传空时行为与 BuildSystemPromptEx 完全一致(一个正文都不注入)。
-//
-// 为什么要注入正文:此前 system prompt 里只有 Available Skills 目录(名称+版本+描述),
-// 而 SKILL.md 正文里的流程与契约(三步链路、禁止传目录、对账门禁、落盘位置…)从未进过
-// prompt,模型只能靠 AGENTS.md 的几句概要根据猜 —— 历次“参数传错/流程跑飞”的主因。
-// 只注入命中的技能:未命中技能的正文对本轮无益,只会稀释注意力。
-func BuildSystemPromptExWithActiveSkills(agent dataobject.TAgent, skillFiles []string, scope dataobject.BootstrapScope, activeSkillFiles []string) (*dataobject.SystemPrompt, error) {
-	// SKILL.md 的唯一读盘 + 唯一 YAML 解析入口在 prompt repo(按文件指纹缓存)。
-	skills, report := repo.GetPromptRepository().LoadSkills(skillFiles)
-	report.LogSummary(fmt.Sprintf("prompt service: agent=%s scope=%s", agent.AgentId, scope.String()))
+// 为什么需要:技能正文不注入 system prompt,模型看不到"必须调用工具"的流程要求,
+// 可能直接用上下文里的历史工具结果作答 —— 对实时类工具(force-call)首轮必须强制调用。
+func BuildChatCompletionRequestWithToolChoice(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool /*[]llmproto.Tool*/, toolChoice string, stream bool) llmproto.ChatCompletionRequest {
+	req := llmproto.ChatCompletionRequest{
+		Model:      llmProvider.GetModelName(),
+		Messages:   messages,
+		Stream:     stream,
+		Tools:      tools,
+		ToolChoice: strings.TrimSpace(toolChoice),
+	}
+	// 仅非流式请求按 provider 配置发送 enable_thinking;流式保持 nil(不关闭 thinking)
+	if !stream {
+		req.EnableThinking = new(llmProvider.ThkNonStreaming)
+	}
+	// 例外:强制调用(tool_choice=required)与 thinking 互斥,必须显式关闭思考(流式也要发)。
+	if req.ToolChoice == llmproto.ToolChoiceRequired {
+		req.EnableThinking = new(false)
+	}
 
-	return BuildSystemPromptWithSkills(agent, skills, scope, activeSkillFiles)
+	mt := security.DynamicMaxTokens(llmProvider, messages)
+	if mt == 0 {
+		req.MaxTokens = nil // 应用供应商默认
+	} else {
+		req.MaxTokens = &mt
+	}
+	return req
 }
+
+// DegradeChatRequest 错误信息中包含的信息对chat request降级
+func DegradeChatRequest(req *llmproto.ChatCompletionRequest, err error) bool {
+	if req == nil || err == nil || req.ToolChoice == pCommon.BlankString {
+		return false
+	}
+
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "tool_choice") && !strings.Contains(msg, "enable_thinking") {
+		return false
+	}
+
+	logging.LogWarnF("llm client: provider rejected tool forced-call params (clear tool_choice=%s/enable_thinking), retry: %s",
+		req.ToolChoice, err.Error())
+
+	//对强制工具调用进行降级
+	req.ToolChoice = pCommon.BlankString
+	req.EnableThinking = nil
+
+	return true
+}
+
+// =========================== block for building prompt =================================
 
 // BuildSystemPromptWithSkills 用**已解析**的技能文档组装 system prompt(技能侧不再读盘)。
-//
-// skills:prompt repo 的 LoadSkills 产物(front matter + 正文)。让调用方复用同一份文档,既省掉
-// 重复的路径解析/stat,也保证"工具侧看到的关键词/force-call"与"prompt 侧注入的目录/正文"
-// 出自**同一份数据**(不会出现两份缓存各自失效的漂移)。
-//
-// 主链路(prepareChat)走本入口;BuildSystemPromptExWithActiveSkills 自行加载后委托到本入口,
-// 因此两条路径最终都落在同一段组装逻辑上。
-func BuildSystemPromptWithSkills(agent dataobject.TAgent, skills []hCommon.SkillDocument, scope dataobject.BootstrapScope, activeSkillFiles []string) (*dataobject.SystemPrompt, error) {
+func BuildSystemPromptWithSkills(agent dataobject.TAgent, skills []hCommon.SkillDocument, scope hCommon.BootstrapScope, activeSkillFiles []string) (*hCommon.SystemPrompt, error) {
 	// 加载并缓存 agent 启动文件(文件fingerprint未变化则直接命中缓存)
-	if err := repo.GetPromptRepository().LoadAgentBootstrap(agent); err != nil {
+	if err := GetPromptRepository().LoadAgentBootstrap(agent); err != nil {
 		return nil, err
 	}
 
 	return assembleSystemPrompt(agent, scope, activeSkillFiles, skills)
+}
+
+// BuildClassifySystemPrompt 构建用来通过用户问题的意图询问LLM返回合适Agent的 prompt。
+// 简介优先使用各 Agent 工作区 AGENTS.md 的摘要(已由调用方解析进 ClassifyAgent.Label)。
+func BuildClassifySystemPrompt(agents []hCommon.ClassificationAgent) string {
+	var sb strings.Builder
+	sb.WriteString("你是一个智能体路由器。请根据用户的问题,从下面的智能体列表中选择最合适的一个。\n")
+	sb.WriteString("智能体列表(格式: 编号|名称|简介):\n")
+	for _, a := range agents {
+		label := strings.TrimSpace(a.Label)
+		if label == "" {
+			label = strings.TrimSpace(a.AgentName)
+		}
+		_, _ = fmt.Fprintf(&sb, "- %s|%s|%s\n", a.AgentId, a.AgentName, label)
+	}
+	sb.WriteString("只回答最合适的智能体编号(如 agent_001),不要输出任何其他内容;如果不确定,回答 default。")
+	return sb.String()
 }
 
 // AssembleContext 装配完整上下文。
@@ -125,7 +240,7 @@ func AssembleContext(systemPrompt string, records []hCommon.MemoryRecord, curren
 	summaryText, active := splitSummaryAndActive(records)
 	items := buildHistoryItems(active, policy.ToolReplayMaxRunes)
 
-	system := ComposeSystemMessage(systemPrompt, summaryText, historySummaryTitle) //composeSystemMessage(systemPrompt, summaryText)
+	system := buildSystemMessage(systemPrompt, summaryText, historySummaryTitle) //composeSystemMessage(systemPrompt, summaryText)
 	current := llmproto.ChatMessage{Role: hCommon.RoleUser, Content: currentUserMsg}
 
 	result := hCommon.AssembleResult{Summary: summaryText}
@@ -237,19 +352,32 @@ func FitMessages(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, p
 	return fitted
 }
 
-// ============================== private functions & methods ==============================
+// ================================ private functions & methods for the module==============================
+
+// buildSystemMessage 组装 system 消息:系统提示 + 历史摘要(摘要追加在系统提示之后)。
+//
+// 摘要刻意不单独成一条 system 消息:部分供应商对"非首条 system"支持不一致,
+// 折进同一条 system 消息可以完全规避该类兼容问题。
+func buildSystemMessage(systemPrompt, summaryText, summaryTitle string) llmproto.ChatMessage {
+	content := strings.TrimSpace(systemPrompt)
+	if summary := strings.TrimSpace(summaryText); summary != pCommon.BlankString {
+		content = strings.TrimSpace(content + "\n\n" + summaryTitle + "\n" + summary)
+	}
+
+	return llmproto.ChatMessage{Role: hCommon.RoleSystem, Content: content}
+}
 
 // assembleSystemPrompt 组装 system prompt 的全部 section。
 //
 // skills:本轮技能文档(prompt repo 已解析的产物)。不再按 agentId 从仓库取 —— 技能文档与
 // agent 无关,同一份 SKILL.md 对所有 agent 都是同一份数据,调用方传入即可避免"按 agent 存"
 // 带来的每轮重读盘与跨 agent 残留问题。
-func assembleSystemPrompt(agent dataobject.TAgent, scope dataobject.BootstrapScope, activeSkillFiles []string, skills []hCommon.SkillDocument) (*dataobject.SystemPrompt, error) {
+func assembleSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope, activeSkillFiles []string, skills []hCommon.SkillDocument) (*hCommon.SystemPrompt, error) {
 	workspaceRoot, _ := hCommon.BuildAgentBootstrapRoot(agent)
-	documents := repo.GetPromptRepository().GetAllDocuments(agent.AgentId) // 已按规范顺序加载
+	documents := GetPromptRepository().GetAllDocuments(agent.AgentId) // 已按规范顺序加载
 
 	var missing, truncated []string
-	sections := make([]dataobject.SystemPromptSection, 0, len(documents)+1)
+	sections := make([]hCommon.SystemPromptSection, 0, len(documents)+1)
 
 	// ---- 启动文档(顺序:AGENTS -> SOUL -> IDENTITY -> USER -> TOOLS -> BOOTSTRAP -> MEMORY) ----
 	for i := range documents {
@@ -260,7 +388,7 @@ func assembleSystemPrompt(agent dataobject.TAgent, scope dataobject.BootstrapSco
 
 		// 必需文件缺失:注入 [MISSING] 标记
 		if doc.Missing {
-			sections = append(sections, dataobject.SystemPromptSection{
+			sections = append(sections, hCommon.SystemPromptSection{
 				Title:   doc.FileName,
 				Content: hCommon.MissingFileMarker + " Expected at: " + filepath.Join(workspaceRoot, doc.FileName),
 			})
@@ -283,7 +411,7 @@ func assembleSystemPrompt(agent dataobject.TAgent, scope dataobject.BootstrapSco
 			truncated = append(truncated, doc.FileName)
 		}
 
-		sections = append(sections, dataobject.SystemPromptSection{
+		sections = append(sections, hCommon.SystemPromptSection{
 			Title:   doc.FileName,
 			Content: content,
 		})
@@ -292,7 +420,7 @@ func assembleSystemPrompt(agent dataobject.TAgent, scope dataobject.BootstrapSco
 	// ---- skill 元数据目录(仅元数据,正文按需加载) ----
 	skillCatalog, skillsTruncated := renderSkillsCatalog(skills)
 	if len(skillCatalog) > 0 {
-		sections = append(sections, dataobject.SystemPromptSection{
+		sections = append(sections, hCommon.SystemPromptSection{
 			Title:   "Available Skills",
 			Content: skillCatalog,
 		})
@@ -339,7 +467,7 @@ func assembleSystemPrompt(agent dataobject.TAgent, scope dataobject.BootstrapSco
 	if len(truncated) > 0 {
 		notice := "⚠️ Some bootstrap files were truncated to stay within the prompt budget: " +
 			strings.Join(pCommon.UniqueStrings(truncated), ", ") + "."
-		sections = append(sections, dataobject.SystemPromptSection{
+		sections = append(sections, hCommon.SystemPromptSection{
 			Title:   "Bootstrap Context Notice",
 			Content: notice,
 		})
@@ -371,7 +499,7 @@ func assembleSystemPrompt(agent dataobject.TAgent, scope dataobject.BootstrapSco
 	sb.WriteString("你面向中文用户。所有呈现给用户的输出一律使用简体中文:包括正式回复、思考/推理过程、" +
 		"进度说明与工具调用说明;除非用户明确要求使用其他语言。")
 
-	return &dataobject.SystemPrompt{
+	return &hCommon.SystemPrompt{
 		AgentId:   agent.AgentId,
 		Workspace: workspaceRoot,
 		Scope:     scope,
@@ -394,7 +522,7 @@ func assembleSystemPrompt(agent dataobject.TAgent, scope dataobject.BootstrapSco
 // 三者都小于 MaxPromptSectionLen,因此本函数在当前常量下**不会截断任何东西** ——
 // 它的价值是将来新增一种没有来源上限的 section 时兜底。改动上述任一常量前,
 // 先看 TestSectionCapIsBackstopOnly(那条测试把这个前提显式化了)。
-func capSections(sections []dataobject.SystemPromptSection, limit int, truncated []string) ([]dataobject.SystemPromptSection, []string) {
+func capSections(sections []hCommon.SystemPromptSection, limit int, truncated []string) ([]hCommon.SystemPromptSection, []string) {
 	if limit <= 0 {
 		return sections, truncated
 	}
@@ -412,7 +540,7 @@ func capSections(sections []dataobject.SystemPromptSection, limit int, truncated
 
 // sectionOverheadRunes section 除正文之外的开销(标题 + 段间分隔),与最终拼接严格一致。
 // first=true 表示它是输出里的第一段(不加分隔符)。
-func sectionOverheadRunes(sec dataobject.SystemPromptSection, first bool) int {
+func sectionOverheadRunes(sec hCommon.SystemPromptSection, first bool) int {
 	overhead := 0
 	if len(sec.Title) > 0 {
 		overhead += len(sectionTitlePrefix) + len([]rune(sec.Title)) + len(sectionSeparator)
@@ -435,7 +563,7 @@ func sectionOverheadRunes(sec dataobject.SystemPromptSection, first bool) int {
 //
 // 仍在预算外(有意):总预算之后追加的 `Bootstrap Context Notice` 与末尾「输出语言」尾巴,
 // 以及它们各自贡献的那一个分隔符 —— 它们是固定开销,由调用方按需预留。
-func truncateTailBudget(sections []dataobject.SystemPromptSection, cap int, truncated []string) ([]dataobject.SystemPromptSection, []string) {
+func truncateTailBudget(sections []hCommon.SystemPromptSection, cap int, truncated []string) ([]hCommon.SystemPromptSection, []string) {
 	if cap <= 0 {
 		return sections, truncated
 	}
@@ -449,7 +577,7 @@ func truncateTailBudget(sections []dataobject.SystemPromptSection, cap int, trun
 	}
 
 	budget := cap
-	kept := make([]dataobject.SystemPromptSection, 0, len(sections))
+	kept := make([]hCommon.SystemPromptSection, 0, len(sections))
 	for i := range sections {
 		// first 以"它在输出里的位置"为准(已保留数),而非输入下标:
 		// 若前面有 section 连标题都放不下而被整体丢弃,它就不是第一段了。
@@ -465,7 +593,7 @@ func truncateTailBudget(sections []dataobject.SystemPromptSection, cap int, trun
 		// 该文件超出剩余预算:先扣掉标题/分隔开销,余下留给正文;连标题都放不下则整体丢弃。
 		// 一旦截断,预算即耗尽(后续 section 只可能更放不下)。
 		if available := budget - overhead; available > 0 {
-			kept = append(kept, dataobject.SystemPromptSection{
+			kept = append(kept, hCommon.SystemPromptSection{
 				Title:   sections[i].Title,
 				Content: pCommon.TruncateRunes(sections[i].Content, available, pCommon.BlankString),
 			})
@@ -486,7 +614,7 @@ func truncateTailBudget(sections []dataobject.SystemPromptSection, cap int, trun
 //
 // 匹配用 filepath.Clean 后的绝对路径:activeSkillFiles 来自意图门(tool 层只是转发 prompt repo
 // 解析出的 doc.SkillFile),两侧同源,仍做一层归一以防调用方自行拼路径时的大小写/分隔符差异。
-func renderActiveSkillDocs(skills []hCommon.SkillDocument, activeSkillFiles []string, truncated *[]string) []dataobject.SystemPromptSection {
+func renderActiveSkillDocs(skills []hCommon.SkillDocument, activeSkillFiles []string, truncated *[]string) []hCommon.SystemPromptSection {
 	if len(skills) == 0 || len(activeSkillFiles) == 0 {
 		return nil
 	}
@@ -501,7 +629,7 @@ func renderActiveSkillDocs(skills []hCommon.SkillDocument, activeSkillFiles []st
 		return nil
 	}
 
-	out := make([]dataobject.SystemPromptSection, 0, len(want))
+	out := make([]hCommon.SystemPromptSection, 0, len(want))
 	for i := range skills {
 		doc := &skills[i]
 		if _, ok := want[filepath.Clean(doc.SkillFile)]; !ok {
@@ -524,7 +652,7 @@ func renderActiveSkillDocs(skills []hCommon.SkillDocument, activeSkillFiles []st
 			*truncated = append(*truncated, "Skill: "+name)
 		}
 
-		out = append(out, dataobject.SystemPromptSection{
+		out = append(out, hCommon.SystemPromptSection{
 			Title:   "Skill: " + name,
 			Content: content,
 		})

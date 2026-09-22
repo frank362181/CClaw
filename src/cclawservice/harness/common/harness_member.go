@@ -82,14 +82,9 @@ type ContextPolicy struct {
 	OutputReserve int // 为输出预留的 tokens;<=0 取默认
 
 	// SystemPromptReserveTokens 系统提示(7 个启动文档 + 折叠进 system 的历史摘要)的最小预留额度。
-	// 来自 t_agent.reverse_token_floor(列名保留,语义已按实际用途澄清)。
-	// 只在**大于实测估量**时生效,取值应与 MaxSummaryTotalRunes 同量级,不要拿它当历史旋钮。
 	SystemPromptReserveTokens int
 
 	// MaxHistoryTokens 历史回放上限:<0 表示不限制;0 表示用默认;
-	// >0 时历史回放预算取 min(窗口预算, 本值)—— 只作用于历史回放,不作用于工具循环。
-	// 注意是**软上限**:裁剪以"组"为单位且永远保留最新一组(否则会一条历史都不带),
-	// 因此实际回放可能比本值多出最新一组的体积。
 	MaxHistoryTokens int
 
 	// ToolsReserveTokens 工具 schema(随请求单独发送,不占 messages)的 token 预留。

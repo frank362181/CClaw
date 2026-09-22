@@ -16,6 +16,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 	selfController "my.favorite/cclawservice/controller"
 	hCommon "my.favorite/cclawservice/harness/common"
+	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/harness/tool"
 	selfInterceptor "my.favorite/cclawservice/interceptor"
 	"my.favorite/cclawservice/model/repo"
@@ -53,7 +54,7 @@ type ServiceMain struct {
 	// agents related
 	defaultAgentConfigHelper *config.ConfigurationHelper
 	agentRepo                repo.IAgentRepository
-	promptRepo               repo.IPromptRepository
+	promptRepo               ctxmgr.IPromptRepository
 	startupFileRepo          repo.IAgentFileRepository
 
 	// 并发闸:流式(SSE)在飞连接数、全局聊天在飞请求数(各自上限在 Init 按 ini 配置)
@@ -343,11 +344,11 @@ func (m *ServiceMain) loadAgentConfigurations() error {
 
 	// 3.1 agent 配置缓存 TTL(多实例下各实例从 DB 刷新配置;单位秒,<=0 禁用)
 	ttlSec, _ := m.configHelper.GetIntValueDefault("database", "reloadCacheTTL", cCommon.DefaultReloadDatabaseCacheTTLSeconds)
-	agents, systemTools := m.agentRepo.LoadAllAgents(int64(ttlSec))
+	agents := m.agentRepo.LoadAllAgents(int64(ttlSec))
 
 	// 4. warm up the prompt repository with the default workspace (best-effort)
 	if m.promptRepo == nil {
-		m.promptRepo = repo.GetPromptRepository()
+		m.promptRepo = ctxmgr.GetPromptRepository()
 	}
 	if m.startupFileRepo == nil {
 		m.startupFileRepo = repo.GetAgentFileRepository()
@@ -358,8 +359,9 @@ func (m *ServiceMain) loadAgentConfigurations() error {
 		}
 	}
 
-	// 5. warmup the system tool
-	tool.GetFunctionRepository().InitializeSystemTool(systemTools)
+	// 5.warm up the system tools when startup
+	systemTools := m.agentRepo.GetSystemTools()
+	m.promptRepo.LoadSystemTools(systemTools)
 
 	return nil
 }
