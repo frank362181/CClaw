@@ -132,10 +132,7 @@ func (a Activation) String() string {
 }
 
 // FunctionRepository 工具仓库。
-//
-// 当前**无自有状态**:系统工具(t_tool)的加载入口已迁到 prompt repo
-// (PromptRepository.LoadSystemTools),本层只剩"已解析技能文档 → function-calling 输入"
-// 这条无状态派生路径,因此不需要锁,也没有跨轮缓存要失效 —— 每轮都从本轮文档现算。
+// 包含skill tool和system tool
 type FunctionRepository struct{}
 
 var functionRepository = common.GetSingleton(func() *FunctionRepository {
