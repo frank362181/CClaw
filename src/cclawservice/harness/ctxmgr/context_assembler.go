@@ -8,7 +8,8 @@
 *
 *   user 记录      → role=user
 *   tool 记录      → 折叠进"同轮 assistant 消息"的工具结果块(见下),不单独成消息
-*   assistant 记录 → role=assistant(被中断的记录同样按普通助手消息回放)
+*   assistant 记录 → role=assistant(被中断的记录以 hCommon.InterruptedReplyNotice 前缀回放:
+*                    正文是残缺的,不标注会被模型当成"已经说完的完整发言")
 *   summary 记录   → 折叠进 system 消息的"历史摘要"段,并使其 covers 区间内的旧记录不再回放
 *
 * 预算裁剪(性能与稳定性):
@@ -201,13 +202,18 @@ func DegradeChatRequest(req *llmproto.ChatCompletionRequest, err error) bool {
 // =========================== block for building prompt =================================
 
 // BuildSystemPromptWithSkills 用**已解析**的技能文档组装 system prompt(技能侧不再读盘)。
-func BuildSystemPromptWithSkills(agent dataobject.TAgent, skills []hCommon.SkillDocument, scope hCommon.BootstrapScope, activeSkillFiles []string) (*hCommon.SystemPrompt, error) {
+//
+// tools 必须是**本轮实际下发的工具**派生的清单项(tool.FunctionBundle.PromptItems):
+// system prompt 里的工具清单与请求体 tools 必须同源,否则会重新出现"模型宣称某工具本轮
+// 未注册/可见"那类事故(详见 hCommon.ToolPromptItem 的注释)。
+func BuildSystemPromptWithSkills(agent dataobject.TAgent, skills []hCommon.SkillDocument, scope hCommon.BootstrapScope,
+	activeSkillFiles []string, tools []hCommon.ToolPromptItem) (*hCommon.SystemPrompt, error) {
 	// 加载并缓存 agent 启动文件(文件fingerprint未变化则直接命中缓存)
 	if err := GetPromptRepository().LoadAgentBootstrap(agent); err != nil {
 		return nil, err
 	}
 
-	return assembleSystemPrompt(agent, scope, activeSkillFiles, skills)
+	return assembleSystemPrompt(agent, scope, activeSkillFiles, skills, tools)
 }
 
 // BuildClassifySystemPrompt 构建用来通过用户问题的意图询问LLM返回合适Agent的 prompt。
@@ -372,7 +378,16 @@ func buildSystemMessage(systemPrompt, summaryText, summaryTitle string) llmproto
 // skills:本轮技能文档(prompt repo 已解析的产物)。不再按 agentId 从仓库取 —— 技能文档与
 // agent 无关,同一份 SKILL.md 对所有 agent 都是同一份数据,调用方传入即可避免"按 agent 存"
 // 带来的每轮重读盘与跨 agent 残留问题。
-func assembleSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope, activeSkillFiles []string, skills []hCommon.SkillDocument) (*hCommon.SystemPrompt, error) {
+//
+// tools:本轮实际下发的工具清单项(由 tool.FunctionBundle.PromptItems 派生)。
+//
+// section 顺序(前面稳定、后面易变,便于上游前缀缓存):
+//
+//	启动文档(AGENTS→…→MEMORY) → Available Skills → Available Tools → Skill: <name> → 截断提示
+//
+// 末尾再追加固定尾巴(当前时间 / 输出语言),它们不受预算截断。
+func assembleSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope, activeSkillFiles []string,
+	skills []hCommon.SkillDocument, tools []hCommon.ToolPromptItem) (*hCommon.SystemPrompt, error) {
 	workspaceRoot, _ := hCommon.BuildAgentBootstrapRoot(agent)
 	documents := GetPromptRepository().GetAgentDocuments(agent.AgentId) // 已按规范顺序加载
 
@@ -426,6 +441,23 @@ func assembleSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope,
 		})
 		if skillsTruncated {
 			truncated = append(truncated, "Available Skills")
+		}
+	}
+
+	// ---- 本轮实际下发的工具清单(名字 + 一句话用途 + 归属技能) ----
+	//
+	// 紧邻 Available Skills:两者都是"能力清单",且都只由**配置**(技能绑定 / t_tool.visible)
+	// 决定、与本轮问题无关 ⇒ 属于稳定前缀。
+	// 刻意排在 Skill 正文之前:尾部预算从后往前丢,而技能正文有单技能上限兜底;
+	// 工具清单一旦被丢光,就会退化成"模型不知道本轮有哪些工具"的事故。
+	toolCatalog, toolsTruncated := renderToolsCatalog(tools)
+	if len(toolCatalog) > 0 {
+		sections = append(sections, hCommon.SystemPromptSection{
+			Title:   "Available Tools",
+			Content: toolCatalog,
+		})
+		if toolsTruncated {
+			truncated = append(truncated, "Available Tools")
 		}
 	}
 
@@ -499,6 +531,13 @@ func assembleSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope,
 	sb.WriteString("你面向中文用户。所有呈现给用户的输出一律使用简体中文:包括正式回复、思考/推理过程、" +
 		"进度说明与工具调用说明;除非用户明确要求使用其他语言。")
 
+	// ---- 工具调用纪律(固定尾巴:与 `Available Tools` 段互补) ----
+	//
+	// `Available Tools` 回答"本轮有哪些工具",这里回答"不许怎么做";放固定尾而不并进那一段的
+	// 原因(无工具时仍要生效 + 跨 agent 只写一次)见 toolUsagePolicy 的注释。
+	sb.WriteString("\n\n## 工具调用\n\n")
+	sb.WriteString(toolUsagePolicy)
+
 	return &hCommon.SystemPrompt{
 		AgentId:   agent.AgentId,
 		Workspace: workspaceRoot,
@@ -561,8 +600,9 @@ func sectionOverheadRunes(sec hCommon.SystemPromptSection, first bool) int {
 // 记账口径 = **最终 prompt 里实际占用的 rune**(正文 + 标题 `## <Title>` + 段间分隔),
 // 以前只算正文,于是实际 prompt 会比 cap 多出「#section × (标题+分隔)」。
 //
-// 仍在预算外(有意):总预算之后追加的 `Bootstrap Context Notice` 与末尾「输出语言」尾巴,
-// 以及它们各自贡献的那一个分隔符 —— 它们是固定开销,由调用方按需预留。
+// 仍在预算外(有意):总预算之后追加的 `Bootstrap Context Notice` 与末尾固定尾巴
+// (`当前时间`/`输出语言`/`工具调用`),以及它们各自贡献的那一个分隔符 ——
+// 它们是固定开销,由调用方按需预留。
 func truncateTailBudget(sections []hCommon.SystemPromptSection, cap int, truncated []string) ([]hCommon.SystemPromptSection, []string) {
 	if cap <= 0 {
 		return sections, truncated
@@ -605,6 +645,104 @@ func truncateTailBudget(sections []hCommon.SystemPromptSection, cap int, truncat
 	}
 
 	return kept, truncated
+}
+
+// toolsCatalogFooter 工具清单末尾的"事实源"提醒(对应 OpenClaw Tooling 段的 source-of-truth reminder):
+// 清单负责\"有哪些\",权威定义(参数/长描述)仍在请求体 tools 里。
+const toolsCatalogFooter = "名称以本清单为准(参数与权威定义见请求体 tools);未列出的工具本轮不可用。"
+
+// toolUsagePolicy 工具调用纪律:作为**固定尾巴**注入(不受预算截断),对所有 agent、所有轮次生效。
+//
+// 为什么不并进 `Available Tools` 段:
+//   - 该段可能整体省略(本轮无工具时),但"不许编造工具调用"这条纪律仍然适用 ——
+//     实测出现过模型在正文里输出 `<invoke name="exec">…</invoke>` 这类未注册调用;
+//   - 它是跨 agent 的通用政策:写在这里一次生效,不必每份 AGENTS.md 各抄一遍(抄了就迟早漂移)。
+const toolUsagePolicy = "只使用本轮实际下发的工具(若 prompt 中有 `Available Tools` 段,以该清单为准);" +
+	"技能清单(`Available Skills`)中出现、但不在工具清单里的能力本轮无法执行,须如实说明,不得虚构结果(技能已登记 ≠ 本轮有工具)。" +
+	"禁止在回复中编造、杜撰或原样粘贴未注册的工具调用(例如 `<invoke name=\"exec\">…</invoke>`、`bash -c …`);" +
+	"工具返回错误时如实说明并尝试修正参数后重试,不得假装执行成功。"
+
+// renderToolsCatalog 渲染"本轮可调用工具"清单:一行一个工具(Name + 归属 + 一句话用途)。
+//
+// 解决的问题:工具 schema 只存在于请求体里,模型对"本轮究竟有哪些工具可见"没有权威依据 ——
+// 历史上出现过模型据此宣称某个工具"本轮未注册/可见"(技能正文/AGENTS.md 说有、schema 里没有)。
+//
+// 【数据来源唯一】入参必须是**本轮实际下发的工具**派生出的清单项
+// (tool.FunctionBundle.PromptItems,其来源就是 b.Tools = request.tools);本函数不读配置、不读盘。
+//
+// 预算两层(与 renderSkillsCatalog 同口径,单位一律 rune):
+//  1. 单条描述截断到 MaxToolDescPromptRunes —— 只影响这份\"清单\",完整描述仍在 schema 里;
+//  2. 仍超 MaxToolsPromptChars 则逐条丢弃尾部工具。
+//
+// 返回 (清单文本, 是否被截断)。
+func renderToolsCatalog(tools []hCommon.ToolPromptItem) (string, bool) {
+	if len(tools) == 0 {
+		return pCommon.BlankString, false
+	}
+
+	items := make([]hCommon.ToolPromptItem, 0, len(tools))
+	for i := range tools {
+		name := strings.TrimSpace(tools[i].Name)
+		if len(name) == 0 {
+			continue // 无名字无法定位工具:schema 侧本就不会下发,这里也跳过
+		}
+		item := tools[i]
+		item.Name = name
+		items = append(items, item)
+	}
+	if len(items) == 0 {
+		return pCommon.BlankString, false
+	}
+
+	// 1) 单条描述上限:加省略号让"这里是节选"可见 —— 但不计入 truncated:
+	// 完整描述仍在 schema 里,不该因此触发 Bootstrap Context Notice(那不是内容丢失)。
+	for i := range items {
+		if len([]rune(items[i].Description)) > hCommon.MaxToolDescPromptRunes {
+			items[i].Description = pCommon.TruncateRunes(items[i].Description, hCommon.MaxToolDescPromptRunes, "…")
+		}
+	}
+
+	runes := func(s string) int { return len([]rune(s)) }
+	render := func(list []hCommon.ToolPromptItem) string {
+		var sb strings.Builder
+		for i := range list {
+			sb.WriteString("- **")
+			sb.WriteString(list[i].Name)
+			sb.WriteString("**")
+			if tag := list[i].OwnerTag(); len(tag) > 0 {
+				sb.WriteString("(")
+				sb.WriteString(tag)
+				sb.WriteString(")")
+			}
+			if desc := strings.TrimSpace(list[i].Description); len(desc) > 0 {
+				sb.WriteString(" — ")
+				sb.WriteString(desc)
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString(toolsCatalogFooter)
+		return sb.String()
+	}
+
+	if full := render(items); runes(full) <= hCommon.MaxToolsPromptChars {
+		return full, false
+	}
+
+	// 2) 描述已压到上限仍超总预算:按下发顺序保留前面的工具,丢弃尾部。
+	//(三索引切片:每轮候选都另起底层数组,避免 append 复用 keep 的底层数组造成误改)
+	keep := make([]hCommon.ToolPromptItem, 0, len(items))
+	for i := range items {
+		candidate := append(keep[:len(keep):len(keep)], items[i])
+		if runes(render(candidate)) > hCommon.MaxToolsPromptChars {
+			break
+		}
+		keep = candidate
+	}
+	if len(keep) == 0 {
+		return pCommon.BlankString, true
+	}
+
+	return render(keep), true
 }
 
 // renderActiveSkillDocs 把“命中技能的正文”渲染成 section(一技能一段)。
@@ -827,11 +965,18 @@ func buildHistoryItems(records []hCommon.MemoryRecord, toolMaxRunes int) []histo
 			pending = append(pending, rec)
 		case hCommon.HistoryRecordTypeAssistant: //mstorage.HistoryRecordAssistant:
 			// 空助手消息(模型只输出思考内容、或内容被安全策略拦下)不回放:
-			if strings.TrimSpace(rec.Content) == "" {
+			content := strings.TrimSpace(rec.Content)
+			if content == "" {
 				continue
 			}
+			// 被中断的回复是**残缺**的:不标注,模型会把它当成完整发言
+			// (接着半句话继续说、或以为已回答过而不再补充)。
+			// 压缩/蒸馏侧已有 "assistant(被中断)" 标签(compaction.recordLabel),此处补齐同一语义。
+			if rec.IsInterrupted() {
+				content = hCommon.InterruptedReplyNotice + "\n" + content
+			}
 			item := historyItem{index: rec.Index, minIndex: rec.Index, records: 1,
-				msg: llmproto.ChatMessage{Role: hCommon.RoleAssistant, Content: rec.Content}}
+				msg: llmproto.ChatMessage{Role: hCommon.RoleAssistant, Content: content}}
 			flush(&item, rec.Index)
 			items = append(items, item)
 		}

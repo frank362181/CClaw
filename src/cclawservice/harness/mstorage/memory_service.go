@@ -16,6 +16,7 @@ package mstorage
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -38,7 +39,14 @@ type TurnToolRecord struct {
 	ToolName string // 工具名
 	Result   string // 工具返回值(完整内容写历史文件,DB 只存截断摘要)
 	CallTime int64  // 调用时间(Unix 秒)
-	RespTime int64  // 返回时间(Unix 秒)
+	RespTime int64  // 返回时间(Unix 秒);0 表示"已发起但未返回"(执行中被中断/取消)
+}
+
+// Unfinished 报告这次调用"已发起但没拿到结果"。
+// 为什么要区分:中断可能落在工具执行中 —— 只记"结束"的写法会让这类调用从
+// t_turn_tool 与历史文件里彻底消失,而它可能已经产生了副作用(见 M3)。
+func (r TurnToolRecord) Unfinished() bool {
+	return r.RespTime <= 0
 }
 
 // TurnRecorder 收集"本轮调用过的工具"。
@@ -52,20 +60,45 @@ func NewTurnRecorder() *TurnRecorder {
 	return &TurnRecorder{}
 }
 
-// Record 登记一次工具调用(rec 为 nil 时静默忽略,便于同步/流式共用同一份工具循环代码)。
-func (r *TurnRecorder) Record(toolName string, callTime, respTime int64, result string) {
+// Start 登记"工具开始执行",返回本次调用在快照中的下标(供 Finish 回填结果)。
+//
+// 两阶段(Start/Finish)而非一步到位:工具执行中被打断时,并发收尾之后的串行回填段
+// 已经走不到,只记"结束"会让"这次调用发生过"在审计上完全不可见。
+func (r *TurnRecorder) Start(toolName string, callTime int64) int {
 	if r == nil {
-		return
+		return -1
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.tools = append(r.tools, TurnToolRecord{
 		ToolName: strings.TrimSpace(toolName),
-		Result:   result,
 		CallTime: callTime,
-		RespTime: respTime,
 	})
+	return len(r.tools) - 1
+}
+
+// Finish 回填一次已开始调用的结果;下标非法时静默忽略
+// (并发下的防御,recorder 为 nil 时同样适用)。
+func (r *TurnRecorder) Finish(idx int, respTime int64, result string) {
+	if r == nil || idx < 0 {
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if idx >= len(r.tools) {
+		return
+	}
+
+	r.tools[idx].Result = result
+	r.tools[idx].RespTime = respTime
+}
+
+// Record 登记一次"不经过执行阶段"的完整调用(如脚本未注册:调用被拒绝,没有起止之分)。
+// recorder 为 nil 时静默忽略,便于同步/流式共用同一份工具循环代码。
+func (r *TurnRecorder) Record(toolName string, callTime, respTime int64, result string) {
+	r.Finish(r.Start(toolName, callTime), respTime, result)
 }
 
 // Snapshot 返回已登记工具的快照(按登记顺序,即真实执行顺序)。
@@ -126,17 +159,30 @@ func (s *MemoryService) Enabled() bool {
 	return s.usable()
 }
 
+// ErrSessionOwnershipConflict 会话已属于另一个 sender:sender 是当前唯一可用的归属凭据,
+// 不一致时不能把本轮问答写进别人的会话与历史文件。
+//
+// 为什么要作为一个可区分的原因返回(而不是只返回 ok=false):
+// 静默丢弃的表现是“每轮都答得出、历史永远为空”,用户与运维都无法定位(见 A2 / M4)。
+// 调用方据此选择“告知用户”而不是默默承受 —— 但它**不是致命错误**,记忆是旁路,
+// 调用方仍应继续聊天流程。
+var ErrSessionOwnershipConflict = errors.New("memory service: session belongs to another sender")
+
 // Begin 会话建档(幂等):不存在则创建 t_session + 历史文件,已存在则复用并按需补齐历史文件名。
-// 返回值 ok=false 表示记录不可用(未启用/出错),调用方应继续聊天流程。
-func (s *MemoryService) Begin(sender string, agent dataobject.TAgent, req *request.ChatRequest) (dataobject.TSession, bool) {
+//
+// 返回值:
+//   - ok=true:记录可用,session 有效(新建或复用成功);
+//   - ok=false:记录不可用,调用方应继续聊天流程(记忆是旁路,不阻断对话);
+//   - err 非 nil 时给出**可区分**的不可用原因(目前只有 ErrSessionOwnershipConflict)。
+func (s *MemoryService) Begin(sender string, agent dataobject.TAgent, req *request.ChatRequest) (dataobject.TSession, bool, error) {
 	if !s.usable() || req == nil {
-		return dataobject.TSession{}, false
+		return dataobject.TSession{}, false, nil
 	}
 
 	sessionId := cCommon.NormalizeCompactId(req.SessionId)
 	if sessionId == "" {
 		logging.LogWarnF("memory service: empty session id, skip record")
-		return dataobject.TSession{}, false
+		return dataobject.TSession{}, false, nil
 	}
 
 	unlock := GetStorageLocks().Lock(sessionId)
@@ -148,16 +194,17 @@ func (s *MemoryService) Begin(sender string, agent dataobject.TAgent, req *reque
 	existing, err := s.sessionAccessor.GetSession(sessionId)
 	if err != nil {
 		logging.LogWarnF("memory service: load session %s error:%s", sessionId, err.Error())
-		return dataobject.TSession{}, false
+		return dataobject.TSession{}, false, nil
 	}
 	if existing != nil {
 		// sender 是唯一可用的归属凭据。若不一致,说明客户端在复用他人会话 ——
 		// 必须拒绝记录,否则会把 B 的问答追加进 A 的会话与历史文件。
 		if !strings.EqualFold(strings.TrimSpace(sender), strings.TrimSpace(existing.Sender)) {
-			logging.LogWarnF("memory service: session %s belongs to another sender, skip record", existing.SessionId)
-			return dataobject.TSession{}, false
+			logging.LogErrorF("memory service: session %s belongs to sender %q but the request comes from %q, this turn will not be recorded",
+				existing.SessionId, existing.Sender, strings.TrimSpace(sender))
+			return dataobject.TSession{}, false, ErrSessionOwnershipConflict
 		}
-		return s.ensureMemoryFile(sessionId, *existing, now), true
+		return s.ensureMemoryFile(sender, sessionId, *existing, now), true, nil
 	}
 
 	// 2. 首条消息 → 建档
@@ -172,7 +219,7 @@ func (s *MemoryService) Begin(sender string, agent dataobject.TAgent, req *reque
 	}
 
 	// 先落历史文件:文件名要一并写进 t_session.chat_data
-	fileName, fileErr := GetMemoryFileWriter().Ensure(sessionId, now, s.memoryFileHeaderLines(session, now))
+	fileName, fileErr := GetMemoryFileWriter().Ensure(sender, sessionId, now, s.memoryFileHeaderLines(session, now))
 	if fileErr != nil {
 		// 文件失败不阻断建档:chat_data 留空,后续轮次会再尝试补齐
 		logging.LogWarnF("memory service: create history file for %s error:%s", sessionId, fileErr.Error())
@@ -183,13 +230,22 @@ func (s *MemoryService) Begin(sender string, agent dataobject.TAgent, req *reque
 	if err = s.sessionAccessor.CreateSession(&session); err != nil {
 		// 并发下可能已被其它请求建档(唯一键冲突):回读一次,复用先到者
 		if again, loadErr := s.sessionAccessor.GetSession(sessionId); loadErr == nil && again != nil {
-			return s.ensureMemoryFile(sessionId, *again, now), true
+			return s.ensureMemoryFile(sender, sessionId, *again, now), true, nil
 		}
 		logging.LogWarnF("memory service: create session %s error:%s", sessionId, err.Error())
-		return dataobject.TSession{}, false
+		return dataobject.TSession{}, false, nil
 	}
 
-	return session, true
+	return session, true, nil
+}
+
+// TurnOutcome 本轮的结果维度(决定 t_turn.status / t_turn.interrupt_reason)。
+//
+// 为什么合成一个结构:两者必须一起算、一起写 —— 拆成两个独立参数,调用方漏传其一时
+// 会写出"status 说残缺、reason 说未中断"这种自相矛盾的行。
+type TurnOutcome struct {
+	Interrupted bool                       // 本轮回复残缺(被中断,或流错误导致没写完)
+	Reason      dataobject.InterruptReason // 残缺来源;Interrupted=false 时应为 InterruptNone
 }
 
 // AppendTurn 记录一轮:写入 t_turn + t_turn_tool,并把内容追加到历史文件。
@@ -198,28 +254,14 @@ func (s *MemoryService) Begin(sender string, agent dataobject.TAgent, req *reque
 // 返回本轮分配的会话内轮次序号(实际记下的序号;未记录/失败返回 0)。
 // 调用方(记忆维护)据此判断是否需要蒸馏 —— 避免再跑一次 SELECT MAX(seq)。
 func (s *MemoryService) AppendTurn(sess dataobject.TSession, req *request.ChatRequest, reply string, tools []TurnToolRecord) int {
-	return s.appendTurn(sess, req, reply, tools, false)
+	return s.appendTurn(sess, req, reply, tools, TurnOutcome{})
 }
 
-// AppendInterruptedTurn 记录一轮**被中断**的轮次(用户点中断/客户端断开/任务超时)。
-//
-// 为什么必须记录:
-//   - 用户已经看到了（部分）回复,历史却不记,下一轮读回时会出现"问题在、回答不在"的断裂,
-//     模型会把用户随后的追问当成无源之问;
-//   - 该轮调用过的工具已经产生副作用,不记就无法审计。
-//
-// 表示方式(不新增列/表):
-//   - 历史文件中助手记录头标记为 assistant:interrupted,正文为中断前已产出的部分;
-//   - t_turn.resp_index 指向该记录(内容为空时不写助手记录,resp_index = 0)。
-//
-// reason 仅用于日志(如 context canceled / run timeout),不落库。
-// 返回本轮分配的轮次序号(未记录返回 0)。
-func (s *MemoryService) AppendInterruptedTurn(sess dataobject.TSession, req *request.ChatRequest, partial string, tools []TurnToolRecord, reason string) int {
-	seq := s.appendTurn(sess, req, partial, tools, true)
-	if strings.TrimSpace(reason) != pCommon.BlankString {
-		logging.LogInfoF("chat session service: interrupted turn recorded, session=%s turn=%s reason=%s partial_chars=%d",
-			sess.SessionId, req.TurnId, reason, len([]rune(partial)))
-	}
+// AppendInterruptedTurn 记录一轮**残缺**的轮次(用户点中断/客户端断开/运行超时/流错误)。
+func (s *MemoryService) AppendInterruptedTurn(sess dataobject.TSession, req *request.ChatRequest, partial string, tools []TurnToolRecord, reason dataobject.InterruptReason) int {
+	seq := s.appendTurn(sess, req, partial, tools, TurnOutcome{Interrupted: true, Reason: reason})
+	logging.LogInfoF("chat session service: interrupted turn recorded, session=%s turn=%s reason=%s partial_chars=%d seq=%d",
+		sess.SessionId, req.TurnId, reason, len([]rune(partial)), seq)
 	return seq
 }
 
@@ -237,7 +279,7 @@ func (s *MemoryService) ReadRecords(session dataobject.TSession) ([]hCommon.Memo
 	if fileName == pCommon.BlankString {
 		return nil, nil
 	}
-	return GetMemoryFileWriter().Read(session.SessionId, fileName)
+	return GetMemoryFileWriter().Read(session.Sender, session.SessionId, fileName)
 }
 
 // TriggerMemoryMaintenance 触发后台记忆维护(旁路、异步):按需蒸馏、按需压缩、按需合并摘要。
@@ -566,7 +608,7 @@ func (s *MemoryService) EndSession(sessionId string, reason int) error {
 // Read 有增量缓存(头指纹 + parsedOffset),文件只追加时只解析新增字节,代价很低。
 func (s *MemoryService) reloadForCompaction(session dataobject.TSession, fileName string,
 	fallback []hCommon.MemoryRecord) []hCommon.MemoryRecord {
-	latest, err := GetMemoryFileWriter().Read(session.SessionId, fileName)
+	latest, err := GetMemoryFileWriter().Read(session.Sender, session.SessionId, fileName)
 	if err != nil {
 		logging.LogDebugF("chat memory compact: reload records of %s error:%s (fallback to caller snapshot)",
 			session.SessionId, err.Error())
@@ -588,12 +630,12 @@ func (s *MemoryService) fileStorageUsable() bool {
 }
 
 // ensureMemoryFile 保证会话已有历史文件:chat_data 为空(此前创建失败)时补建并回写。
-func (s *MemoryService) ensureMemoryFile(sessionId string, session dataobject.TSession, now *pCommon.DatetimeItem) dataobject.TSession {
+func (s *MemoryService) ensureMemoryFile(sender, sessionId string, session dataobject.TSession, now *pCommon.DatetimeItem) dataobject.TSession {
 	if strings.TrimSpace(session.ChatData) != "" {
 		return session
 	}
 
-	fileName, err := GetMemoryFileWriter().Ensure(sessionId, now, s.memoryFileHeaderLines(session, now))
+	fileName, err := GetMemoryFileWriter().Ensure(sender, sessionId, now, s.memoryFileHeaderLines(session, now))
 	if err != nil {
 		logging.LogWarnF("memory service: ensure history file for %s error:%s", sessionId, err.Error())
 		return session
@@ -606,9 +648,38 @@ func (s *MemoryService) ensureMemoryFile(sessionId string, session dataobject.TS
 	return session
 }
 
-// appendTurn 轮次记录的公共实现;interrupted=true 时助手记录带中断标记。
+// turnStatusOf 计算 t_turn.status(纯函数,便于单测;取值见 dataobject.TurnStatus*)。
+//
+// 优先级:有助手记录 > 中断且设计上不写 > 其余(无历史文件 / 写失败)。
+// 后两种都归 3,靠 chat_index 区分 —— chat_index==0 说明整轮都没进文件(会话当时无历史文件)。
+func turnStatusOf(interrupted bool, hasHistoryFile bool, respIndex int, appendFailed bool) int {
+	switch {
+	case respIndex > 0:
+		if interrupted {
+			return dataobject.TurnStatusInterruptedPartial
+		}
+		return dataobject.TurnStatusNormal
+	case interrupted && hasHistoryFile && !appendFailed:
+		return dataobject.TurnStatusInterruptedEmpty
+	default:
+		return dataobject.TurnStatusRespNotWritten
+	}
+}
+
+// interruptReasonOf 归一落库来源:status 为 1/2 的轮次必须有非零来源,否则按来源聚合时会漏。
+func interruptReasonOf(outcome TurnOutcome) dataobject.InterruptReason {
+	if !outcome.Interrupted {
+		return dataobject.InterruptNone
+	}
+	if outcome.Reason == dataobject.InterruptNone {
+		return dataobject.InterruptOther // 兜底:残缺但没给来源 ⇒ 归为其它错误
+	}
+	return outcome.Reason
+}
+
+// appendTurn 轮次记录的公共实现;outcome.Interrupted=true 时助手记录带残缺标记,并落到 t_turn.status。
 // 返回本轮落库的会话内轮次序号(未记录/失败返回 0)。
-func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRequest, reply string, tools []TurnToolRecord, interrupted bool) int {
+func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRequest, reply string, tools []TurnToolRecord, outcome TurnOutcome) int {
 	if !s.usable() || req == nil {
 		return 0
 	}
@@ -668,7 +739,7 @@ func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRe
 	//    写入器会取"DB 序号与本进程缓存"的最大值,保证序号只增不减(见写入器的序号契约)。
 	chatIndex := 0
 	if fileName != "" {
-		if idx, err := writer.Append(sessionId, fileName, hCommon.HistoryRecordTypeUser, "", req.ReqMsg, pCommon.TimestampText(chatTime), nextIndex); err == nil {
+		if idx, err := writer.Append(sess.Sender, sessionId, fileName, hCommon.HistoryRecordTypeUser, "", req.ReqMsg, pCommon.TimestampText(chatTime), nextIndex); err == nil {
 			chatIndex = idx
 		} else {
 			logging.LogWarnF("memory service: append user record error:%s", err.Error())
@@ -677,44 +748,57 @@ func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRe
 
 	toolRows := make([]dataobject.TTurnTool, 0, len(tools))
 	for i, tool := range tools {
+		result := tool.Result
+		if tool.Unfinished() {
+			// 已发起但没拿到结果(执行中被中断/取消/超时):不能留空 ——
+			// 调用已经发生且可能已有副作用,"这次调用发生过"本身就是审计信息(见 M3)。
+			result = hCommon.TurnToolUnfinishedResult
+			logging.LogWarnF("memory service: tool %s of turn %s started but never returned a result, recorded as unfinished", tool.ToolName, turnId)
+		}
 		toolRows = append(toolRows, dataobject.TTurnTool{
 			Seq:        i + 1,
 			ToolCalled: true,
 			CallTime:   tool.CallTime,
 			ToolName:   tool.ToolName,
-			ToolResp:   pCommon.TruncateRunes(strings.TrimSpace(tool.Result), hCommon.TurnToolRespMaxLen, pCommon.BlankString),
+			ToolResp:   pCommon.TruncateRunes(strings.TrimSpace(result), hCommon.TurnToolRespMaxLen, pCommon.BlankString),
 			RespTime:   tool.RespTime,
 		})
 		if fileName != "" {
-			if _, err := writer.Append(sessionId, fileName, hCommon.HistoryRecordTypeTool, tool.ToolName, tool.Result, pCommon.TimestampText(tool.CallTime), nextIndex+1+i); err != nil {
+			if _, err := writer.Append(sess.Sender, sessionId, fileName, hCommon.HistoryRecordTypeTool, tool.ToolName, result, pCommon.TimestampText(tool.CallTime), nextIndex+1+i); err != nil {
 				logging.LogWarnF("memory service: append tool record error:%s", err.Error())
 			}
 		}
 	}
 
 	respIndex := 0
+	appendFailed := false
 	assistantTitle := pCommon.BlankString
-	if interrupted {
+	if outcome.Interrupted {
 		assistantTitle = hCommon.HistoryRecordTypeInterrupted
 	}
 	// 中断且没有任何产出时不写助手记录:空记录无信息量,徒增噪声(resp_index 保持 0)
-	if fileName != "" && (!interrupted || strings.TrimSpace(reply) != pCommon.BlankString) {
-		if idx, err := writer.Append(sessionId, fileName, hCommon.HistoryRecordTypeAssistant, assistantTitle, reply, pCommon.TimestampText(now.Timestamp), nextIndex+1+len(tools)); err == nil {
+	if fileName != "" && (!outcome.Interrupted || strings.TrimSpace(reply) != pCommon.BlankString) {
+		if idx, err := writer.Append(sess.Sender, sessionId, fileName, hCommon.HistoryRecordTypeAssistant, assistantTitle, reply, pCommon.TimestampText(now.Timestamp), nextIndex+1+len(tools)); err == nil {
 			respIndex = idx
 		} else {
+			appendFailed = true
 			logging.LogWarnF("memory session service: append assistant record error:%s", err.Error())
 		}
 	}
 
+	status := turnStatusOf(outcome.Interrupted, fileName != "", respIndex, appendFailed)
+
 	// 6. 落库轮次(turn_id 用客户端传入值,t_turn.turn_id 唯一约束作为最后一道幂等防线)
 	turn := dataobject.TTurn{
-		TurnId:    turnId,
-		SessionId: sessionId,
-		Seq:       maxSeq + 1,
-		ChatTime:  chatTime,
-		ChatIndex: chatIndex,
-		RespTime:  now.Timestamp,
-		RespIndex: respIndex,
+		TurnId:          turnId,
+		SessionId:       sessionId,
+		Seq:             maxSeq + 1,
+		ChatTime:        chatTime,
+		ChatIndex:       chatIndex,
+		RespTime:        now.Timestamp,
+		RespIndex:       respIndex,
+		Status:          status,
+		InterruptReason: interruptReasonOf(outcome),
 	}
 	if err = s.sessionAccessor.CreateTurn(&turn); err != nil {
 		logging.LogWarnF("chat session service: create turn of %s error:%s", sessionId, err.Error())
@@ -871,7 +955,7 @@ func (s *MemoryService) compactWithBudget(ctx context.Context, session dataobjec
 	}
 
 	content := buildSummaryRecordContent(coverFrom, coverTo, summaryText)
-	index, err := GetMemoryFileWriter().Append(session.SessionId, fileName, hCommon.HistoryRecordTypeSummary, pCommon.BlankString,
+	index, err := GetMemoryFileWriter().Append(session.Sender, session.SessionId, fileName, hCommon.HistoryRecordTypeSummary, pCommon.BlankString,
 		content, pCommon.BlankString, 0)
 	if err != nil {
 		GetCompactionThrottle().RecordFailure(session.SessionId, now)
@@ -1085,7 +1169,7 @@ func (s *MemoryService) mergeAttempt(ctx context.Context, session dataobject.TSe
 	}
 
 	content := buildSummaryRecordContent(from, to, text)
-	index, err := GetMemoryFileWriter().Append(session.SessionId, fileName, hCommon.HistoryRecordTypeSummary, pCommon.BlankString,
+	index, err := GetMemoryFileWriter().Append(session.Sender, session.SessionId, fileName, hCommon.HistoryRecordTypeSummary, pCommon.BlankString,
 		content, pCommon.BlankString, 0)
 	if err != nil {
 		return result, mergeNoCandidate, err

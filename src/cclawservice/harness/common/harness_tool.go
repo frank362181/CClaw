@@ -1,5 +1,11 @@
 package common
 
+import (
+	"strings"
+
+	pCommon "my.favorite/platformutility/common"
+)
+
 type TSource int // tool的来源
 const (
 	TSourceSystem TSource = iota // 基础工具
@@ -81,10 +87,31 @@ type SystemicTool struct {
 	SchemaFingerprint string //对应的schema文件的fingerprint
 }
 
+// ToolPromptItem system prompt 里"本轮可调用工具"清单的一项(**渲染输入**,不是工具定义本身)
+type ToolPromptItem struct {
+	Name        string  // 工具名(与本轮 request.tools 的 function.name 严格同源)
+	Description string  // 一句话用途(取自同一份 schema 的 description)
+	Source      TSource // 来源:技能工具 / 系统工具
+	SkillId     string  // 归属技能目录名(系统工具为空)
+}
+
 func (st *SystemicTool) GetSchemaFileName() string {
 	return st.SchemaFileName
 }
 
 func (st *SystemicTool) GetSchemaFingerprint() string {
 	return st.SchemaFingerprint
+}
+
+// OwnerTag 渲染归属标签:技能工具给"技能 <skill_dir>",系统工具给"系统工具";都判定不了时返回空串。
+func (t ToolPromptItem) OwnerTag() string {
+	if skillId := strings.TrimSpace(t.SkillId); len(skillId) > 0 {
+		return "技能 " + skillId
+	}
+
+	if t.Source == TSourceSystem {
+		return "系统工具"
+	}
+
+	return pCommon.BlankString
 }

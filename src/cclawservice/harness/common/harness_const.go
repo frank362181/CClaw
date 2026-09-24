@@ -108,6 +108,15 @@ const (
 	MaxSkillsPromptChars = 18000      //skill 元数据目录的字符上限;单位 **rune**(与其它上限一致)
 )
 
+// system prompt 里"本轮可调用工具"清单(Available Tools 段)的预算。
+//
+// 该段由**本轮实际下发的工具 schema** 派生(见 tool.FunctionBundle.PromptItems),只放
+// 名字 + 一句话用途 + 归属技能 —— 完整参数/长描述仍在请求体 tools 里,不在这里重复(否则双倍 token)。
+const (
+	MaxToolsPromptChars    = 6 * 1024 // 工具清单的字符上限;单位 **rune**。超限先缩短描述,再逐条丢弃尾部
+	MaxToolDescPromptRunes = 240      // 单个工具描述的注入上限;单位 **rune**(完整描述见 schema)
+)
+
 // 命中技能的正文(SOP)注入预算
 //
 // 只有意图门命中(问题命中该技能的 trigger-keywords)的技能才会注入正文,
@@ -179,6 +188,20 @@ const (
 	HistoryRecordTypeTool        = "tool"
 	HistoryRecordTypeSummary     = "summary"     //表示该记录为summary,压缩摘要记录
 	HistoryRecordTypeInterrupted = "interrupted" //表示为中断标记
+)
+
+// 中断语义的两处共享文案(读回装配 + 工具留痕)。
+const (
+	// InterruptedReplyNotice 回放"被中断的助手回复"时加在正文前的标记。
+	// 为什么必须标:中断时写进历史的是**残缺**内容,不标注模型会把它当成完整发言
+	// (接着半句话继续说、或以为已经回答过而不再补充)。
+	// 压缩/蒸馏侧的 recordLabel 已有 "assistant(被中断)" 语义,装配侧必须补齐同一语义。
+	InterruptedReplyNotice = "[该轮回复被用户中断,以下为中断前已产出的不完整内容]"
+
+	// TurnToolUnfinishedResult 工具"已发起但没拿到结果"时写进历史与 t_turn_tool 的占位正文。
+	// 场景:工具执行中被用户中断/取消/超时。调用**已经发生**(可能已产生副作用),
+	// 不能因为它没有结果就从审计记录里消失。
+	TurnToolUnfinishedResult = `{"status":"unfinished","note":"tool call started but was interrupted before returning a result"}`
 )
 
 // 对应 data/ddl_sqlite3.sql 的 t_session / t_turn / t_turn_tool 三张表。

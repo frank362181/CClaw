@@ -202,6 +202,8 @@ CREATE TABLE IF NOT EXISTS t_turn (
     chat_index  INTEGER,                            -- 问题的索引（在 memory_{datetime}.md 中的位置）
     resp_time   INTEGER      NOT NULL,              -- 响应时间
     resp_index  INTEGER,                            -- 回复消息的索引位置
+    status      INTEGER      NOT NULL DEFAULT 0,    -- 轮次落库状态：0=正常 / 1=中断且无产出 / 2=中断且有产出 / 3=助手记录未落盘（写失败，或该会话当时无历史文件）
+    interrupt_reason INTEGER NOT NULL DEFAULT 0,    -- 未正常结束的来源：0=未中断 / 1=用户中断 / 2=客户端断开 / 3=运行超时 / 4=上游流取消 / 5=其它错误 / 6=历史数据未区分
     FOREIGN KEY (session_id) REFERENCES t_session(session_id)
 );
 

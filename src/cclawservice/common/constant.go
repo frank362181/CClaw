@@ -114,12 +114,20 @@ const (
 	// 再次命中会以 chat.tool_loop_guard 错误收尾,不再重复下发本提示。
 	ChatNoticeToolLoopGuard = "tool_loop_guard"
 
+	// ChatNoticeNotRecorded 本轮对话未被记入会话历史(会话归属校验失败:该会话属于其他用户)。
+	// 记忆是旁路、不阻断对话;但"每轮都答得出、历史永远为空"必须让用户看得见,
+	// 否则用户与运维都无从排查(见 history-memory-review.md A2)。
+	ChatNoticeNotRecorded = "not_recorded"
+
 	// ChatNoticeLevelError 通知级别:错误级(前端用醒目样式渲染,如红色图标与描边)。
 	ChatNoticeLevelError = "error"
 
 	ConstChatNoticeTruncatedMsg     = "回答已达长度上限,可能不完整"
 	ConstChatNoticeContentFilterMsg = "回答未通过模型内容安全审核,可能不完整"
 	ConstChatNoticeIncompleteMsg    = "回答生成中断,可能不完整"
+
+	// ConstChatNoticeNotRecordedMsg 会话归属校验失败的提示话术:说明"这轮不进历史"并给出可行动作。
+	ConstChatNoticeNotRecordedMsg = "本轮未记入会话历史(该会话不属于当前用户);如需保留历史,请新建会话"
 
 	// ConstChatNoticeToolLoopGuardWarnMsg 工具死循环守卫命中提示(按判定级别取话术,见 security.LoopGuardLevel)
 	ConstChatNoticeToolLoopGuardWarnMsg = "模型在重复调用工具,已提醒它换一种方式"

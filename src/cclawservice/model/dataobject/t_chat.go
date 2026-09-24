@@ -22,6 +22,53 @@ const (
 	SessionEndReasonCompact = 2 // 触发 compact
 )
 
+// 轮次落库状态(t_turn.status):回答"这一轮有没有落成助手记录、为什么"。
+//
+// 为什么需要:resp_index = 0 有三种来源(中断无产出 / 会话当时无历史文件 / 写回复失败),
+// 单看 resp_index 无法区分;而 resp_index > 0 也不能排除中断(中断但有产出就是这样)。
+const (
+	TurnStatusNormal             = 0 // 正常:助手记录已落盘
+	TurnStatusInterruptedEmpty   = 1 // 中断且无产出:按设计不写助手记录(空记录无信息量)
+	TurnStatusInterruptedPartial = 2 // 中断但有部分产出:已落 assistant:interrupted 记录
+	TurnStatusRespNotWritten     = 3 // 助手记录未落盘:写失败,或该会话当时无历史文件(看 chat_index 区分)
+)
+
+// InterruptReason 未正常结束的来源(t_turn.interrupt_reason)。
+//
+// 与 status **正交**:status 说"回复有没有落盘",它说"谁/什么打断了本轮"。
+// 为什么不定成字符串:枚举要能稳定聚合统计(日志文案会改,数值不会)。
+type InterruptReason int
+
+const (
+	InterruptNone     InterruptReason = 0 // 未中断(正常完成)
+	InterruptByUser   InterruptReason = 1 // 用户主动点中断(中断 API 命中)
+	InterruptByClient InterruptReason = 2 // 客户端断开(关页面/断网)
+	InterruptTimeout  InterruptReason = 3 // 应用级运行超时(chatRunTimeout)
+	InterruptUpstream InterruptReason = 4 // 上游流被取消
+	InterruptOther    InterruptReason = 5 // 其它错误(上游报错/流错误导致残缺)
+	InterruptLegacy   InterruptReason = 6 // 历史数据:来源未区分(旧日志把用户中断与客户端断开合并成一句)
+)
+
+// String 返回人读文案(日志用;落库用数值)。
+func (r InterruptReason) String() string {
+	switch r {
+	case InterruptByUser:
+		return "interrupted by user"
+	case InterruptByClient:
+		return "client disconnected"
+	case InterruptTimeout:
+		return "run timeout"
+	case InterruptUpstream:
+		return "upstream stream canceled"
+	case InterruptOther:
+		return "stream/upstream error"
+	case InterruptLegacy:
+		return "interrupted (legacy, source unknown)"
+	default:
+		return "not interrupted"
+	}
+}
+
 // TSession 会话:一次完整对话会话的元数据。
 // 业务主键为 SessionId(DDL 中 ID 仅作自增主键);ChatData 保存内容文件名,不含目录。
 type TSession struct {
@@ -48,14 +95,16 @@ func (TSession) TableName() string { return "t_session" }
 // TTurn 轮次:一次"用户提问 + 助手回复"。
 // Seq 为会话内轮次序号(从 1 开始);ChatIndex/RespIndex 指向历史文件中的记录序号。
 type TTurn struct {
-	Id        int64  `gorm:"column:id;primaryKey" json:"Id"`     // 自增主键
-	TurnId    string `gorm:"column:turn_id" json:"TurnId"`       // 轮次业务主键(<=32 字符)
-	SessionId string `gorm:"column:session_id" json:"SessionId"` // 所属会话
-	Seq       int    `gorm:"column:seq" json:"Seq"`              // 会话内轮次序号(从 1 开始)
-	ChatTime  int64  `gorm:"column:chat_time" json:"ChatTime"`   // 提问时间(Unix 秒)
-	ChatIndex int    `gorm:"column:chat_index" json:"ChatIndex"` // 问题在历史文件中的记录序号
-	RespTime  int64  `gorm:"column:resp_time" json:"RespTime"`   // 回复时间(Unix 秒)
-	RespIndex int    `gorm:"column:resp_index" json:"RespIndex"` // 回复在历史文件中的记录序号
+	Id              int64           `gorm:"column:id;primaryKey" json:"Id"`                 // 自增主键
+	TurnId          string          `gorm:"column:turn_id" json:"TurnId"`                   // 轮次业务主键(<=32 字符)
+	SessionId       string          `gorm:"column:session_id" json:"SessionId"`             // 所属会话
+	Seq             int             `gorm:"column:seq" json:"Seq"`                          // 会话内轮次序号(从 1 开始)
+	ChatTime        int64           `gorm:"column:chat_time" json:"ChatTime"`               // 提问时间(Unix 秒)
+	ChatIndex       int             `gorm:"column:chat_index" json:"ChatIndex"`             // 问题在历史文件中的记录序号
+	RespTime        int64           `gorm:"column:resp_time" json:"RespTime"`               // 回复时间(Unix 秒)
+	RespIndex       int             `gorm:"column:resp_index" json:"RespIndex"`             // 回复在历史文件中的记录序号(0=未落盘)
+	Status          int             `gorm:"column:status" json:"Status"`                    // 见 TurnStatus*
+	InterruptReason InterruptReason `gorm:"column:interrupt_reason" json:"InterruptReason"` // 见 Interrupt*
 }
 
 // TableName 显式声明表名。

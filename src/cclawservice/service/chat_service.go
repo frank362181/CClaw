@@ -154,7 +154,8 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 	defer release()
 
 	// 会话建档(阶段1双写:旁路,只写不读;失败不影响聊天)
-	session, recorded := s.memoryService.Begin(sender, turn.agent, req)
+	session, recorded, recordErr := s.memoryService.Begin(sender, turn.agent, req)
+	s.noteRecordNotAvailable(req, nil, recordErr)
 
 	// 上下文读回装配
 	// (从历史文件读回本会话既有内容,拼成 system + 历史 + 本轮用户消息)
@@ -164,10 +165,17 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 	recorder := mstorage.NewTurnRecorder()
 	reply, err := s.completeChat(ctx, turn, assembled.Messages, recorder)
 	if err != nil {
-		// 中断轮次记录(旁路):同步路径没有向客户端输出内容,
-		// 因此只在"本次失败确属中断/超时"时留痕(提问已发生,审计需要)。
+		reason := cCommon.ClassifyInterrupt(ctx, ctx, nil, err) // 记录停止的原因
+		turnSeq := 0
 		if recorded && cCommon.IsInterrupted(ctx, err) {
-			s.memoryService.AppendInterruptedTurn(session, req, pCommon.BlankString, recorder.Snapshot(), cCommon.InterruptionReason(ctx, err))
+			turnSeq = s.memoryService.AppendInterruptedTurn(session, req, pCommon.BlankString, recorder.Snapshot(), reason)
+			// 被中断的轮次同样要推进记忆维护:否则"节拍点那一轮被中断"会永久吞掉一次蒸馏,
+			// 装配阶段已裁掉的区间也永远落不成摘要(见 interrupt-memory-chain.md M1)。
+			s.triggerMemoryMaintenance(session, turn, assembled, records, turnSeq)
+		} else if cCommon.IsInterrupted(ctx, err) {
+			// 中断但记录不可用:历史与 t_turn 都没有 —— 必须显式留痕,不能只剩"什么都没有"
+			logging.LogErrorF("chat service: interrupted turn of session %s was not recorded (recorded=%v reason=%s)",
+				req.SessionId, recorded, reason)
 		}
 		// 工具循环被守卫中止时可能已有产出文本:同步接口只返回 err,不会把它交给客户端,
 		// 但必须留下痕迹 —— 否则"模型到底说了什么"在日志与历史里都查不到(流式路径靠已下发的增量自然留痕)。
@@ -184,14 +192,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 	}
 
 	// 记忆维护(旁路、异步):按需压缩历史、按需蒸馏长期记忆
-	s.memoryService.TriggerMemoryMaintenance(mstorage.MaintenanceRequest{
-		Session:       &session,
-		Agent:         &turn.agent,
-		Assembled:     &assembled,
-		Records:       records,
-		TurnSeq:       turnSeq,
-		ContextWindow: int(turn.llm.ContextWindow),
-	}, s.summarizer(turn.llm))
+	s.triggerMemoryMaintenance(session, turn, assembled, records, turnSeq)
 
 	// 组装应答
 	now := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
@@ -249,7 +250,8 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	}
 
 	// 会话建档(阶段1双写:旁路,只写不读;失败不影响聊天)
-	session, recorded := s.memoryService.Begin(sender, turn.agent, req)
+	session, recorded, recordErr := s.memoryService.Begin(sender, turn.agent, req)
+	s.noteRecordNotAvailable(req, onNotice, recordErr)
 
 	// 将system,user,memory等信息进行装配
 	assembled, records := s.assembleChatContext(session, turn.agent, turn.llm, turn.systemPrompt, req, turn.toolsReserve)
@@ -276,9 +278,18 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 		reply, finishReason, err = s.llmClient.ChatCompletionStreamMessages(runCtx, turn.llm, assembled.Messages, forwardChunk, onReasoning)
 	}
 	if err != nil {
-		// 中断轮次记录(旁路):已产出部分内容,或本次失败属中断/超时,都要留痕
+		reason := cCommon.ClassifyInterrupt(ctx, runCtx, streamCtx, err) //获取停止的原因
+		turnSeq := 0
 		if recorded && (strings.TrimSpace(streamed.String()) != pCommon.BlankString || cCommon.IsInterrupted(runCtx, err)) {
-			s.memoryService.AppendInterruptedTurn(session, req, streamed.String(), recorder.Snapshot(), cCommon.InterruptionReason(runCtx, err))
+			turnSeq = s.memoryService.AppendInterruptedTurn(session, req, streamed.String(), recorder.Snapshot(), reason)
+		} else if cCommon.IsInterrupted(runCtx, err) {
+			// 中断但记录不可用:历史与 t_turn 都没有 —— 必须显式留痕(见 interrupt-memory-chain.md M4)
+			logging.LogErrorF("chat service: interrupted turn of session %s was not recorded (recorded=%v reason=%s)",
+				req.SessionId, recorded, reason)
+		}
+		if recorded {
+			// 被中断的轮次同样推进记忆维护:中断不该吞掉蒸馏节拍点、也不该让被裁区间永远落不成摘要(M1)
+			s.triggerMemoryMaintenance(session, turn, assembled, records, turnSeq)
 		}
 
 		// 应用级运行超时:给可读错误,而不是笼统的 "request canceled by client"
@@ -306,14 +317,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	}
 
 	// 记忆维护(旁路、异步):与同步路径共用同一触发条件
-	s.memoryService.TriggerMemoryMaintenance(mstorage.MaintenanceRequest{
-		Session:       &session,
-		Agent:         &turn.agent,
-		Assembled:     &assembled,
-		Records:       records,
-		TurnSeq:       turnSeq,
-		ContextWindow: int(turn.llm.ContextWindow),
-	}, s.summarizer(turn.llm))
+	s.triggerMemoryMaintenance(session, turn, assembled, records, turnSeq)
 	return reply, nil
 }
 
@@ -482,10 +486,8 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 	// 命中才允许该技能的 force-call 生效、才注入其正文(SOP)。
 	gate := bundle.Activate(req.ReqMsg)
 
-	// 5.4 组装 system prompt(命中技能的正文一并注入;未命中不注入,避免稀释注意力)
-	//
-	// 复用 5.1 已经解析好的文档:技能侧本轮只读一次盘,不再让组装层重新加载。
-	systemPrompt, err := ctxmgr.BuildSystemPromptWithSkills(agent, skillDocs, hCommon.BootstrapScopeNormal, gate.ActiveFiles)
+	// 5.4 组装 system prompt(命中技能的正文 + 本轮实际下发的工具清单,未命中的技能不注入,避免稀释注意力)
+	systemPrompt, err := ctxmgr.BuildSystemPromptWithSkills(agent, skillDocs, hCommon.BootstrapScopeNormal, gate.ActiveFiles, bundle.PromptItems())
 	if err != nil {
 		logging.LogErrorF("chat service: build system prompt error:%s", err.Error())
 		return nil, myException.ChatLLMKind.Newf("chat service: build system prompt error:%s", err.Error())
@@ -678,7 +680,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 			// 必须逐条拿到 role=tool 应答,缺一条下一轮会被上游判协议错(整轮失败)。
 			scriptFile, err := turn.scriptPathOf(call.Function.Name)
 			if err != nil {
-				result := fmt.Sprintf(`{"error":%q}`, err.Error())
+				result := toolResultForRecord(pCommon.BlankString, err)
 				respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 				recorder.Record(call.Function.Name, callTime, respTime, result) // 旁路记录(recorder 为 nil 时静默)
 				result = guard.ApplyLoopGuard(call.Function.Name, call.Function.Arguments, false, result, nil)
@@ -686,13 +688,16 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 				continue
 			}
 
+			// 两阶段留痕:执行前先登记"已发起",执行后回填结果 ——
+			// 工具执行中被中断时,"这次调用发生过"仍会留在历史与 t_turn_tool
+			toolIdx := recorder.Start(call.Function.Name, callTime)
+
 			result, err := execbox.RunScript(ctx, scriptFile, call.Function.Arguments)
 
 			respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
-			if err != nil {
-				result = fmt.Sprintf(`{"error":%q}`, err.Error())
-			}
-			recorder.Record(call.Function.Name, callTime, respTime, result) // 旁路记录(recorder 为 nil 时静默)
+			result = toolResultForRecord(result, err)
+			recorder.Finish(toolIdx, respTime, result) // 旁路记录(recorder 为 nil 时静默)
+
 			// 死循环判定:同步路径本身串行执行,顺序天然等于"模型声明的顺序"(同步接口无 notice 通道)
 			result = guard.ApplyLoopGuard(call.Function.Name, call.Function.Arguments, err == nil, result, nil)
 			messages = append(messages, ctxmgr.BuildToolResultMessage(call.ID, result))
@@ -810,9 +815,11 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 					}
 				}()
 
-				// 执行具体的工具(run.script 已在派发前解析为绝对路径)。
-				// 解析失败时不进 execbox:os.Stat("") 只会得到连工具名都没有的 not found,
-				// 直接把原因交给下面的串行回填段(按执行失败收尾)。
+				// 两阶段留痕:执行前先登记"已发起"(见 M3)——
+				// 中断时本轮的串行回填段走不到,只记"结束"会让这次调用彻底消失。
+				toolIdx := recorder.Start(run.name, startTime.Timestamp)
+
+				// 执行具体的工具(run.script 已在派发前解析为绝对路径)
 				res, err := pCommon.BlankString, run.err
 				if run.err == nil {
 					res, err = execbox.RunScriptStream(ctx, run.script, run.arg, func(line string) {
@@ -825,6 +832,9 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 					})
 				}
 				respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
+				// 结果在**本协程内**即时回填,而不是等全部工具收尾后的串行回填段:
+				// 中断时那一段走不到,这一轮的工具有没有跑过就查不到了(见 M3)。
+				recorder.Finish(toolIdx, respTime, toolResultForRecord(res, err))
 				close(stopHeart)
 				<-heartDone
 				results[k] = toolResultItem{item: run, result: res, err: err, callTime: startTime.Timestamp, respTime: respTime}
@@ -849,14 +859,14 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 			return "", "", llmproto.ErrRequestCanceled
 		}
 
-		// 全部执行完成:按原始顺序回填 tool 消息并派发 done/error 事件
+		// 全部执行完成:按原始顺序回填 tool 消息并派发 done/error 事件。
+		// 工具留痕已在各自执行协程内完成(见上面的 Finish),这里不再重复记录。
 		for _, r := range results {
 			if r.err != nil {
 				if onTool != nil {
 					onTool(ToolEvent{Phase: cCommon.ChatToolEventError, Seq: r.item.seq, Name: r.item.name, Detail: r.err.Error()})
 				}
-				recorder.Record(r.item.name, r.callTime, r.respTime, r.err.Error()) // 旁路记录(recorder 为 nil 时静默)
-				result := fmt.Sprintf(`{"error":%q}`, r.err.Error())
+				result := toolResultForRecord(pCommon.BlankString, r.err)
 
 				// 死循环判定必须落在串行回填点(同轮工具是并发执行的,这里才是"模型声明的顺序")
 				loopGuardResult := guard.ApplyLoopGuard(r.item.name, r.item.arg, false, result, onNotice)
@@ -868,12 +878,53 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 				// (前端按 phase 显示 "✓ 完成";失败仍走 error 事件携带错误文本,便于排查)
 				onTool(ToolEvent{Phase: cCommon.ChatToolEventDone, Seq: r.item.seq, Name: r.item.name})
 			}
-			recorder.Record(r.item.name, r.callTime, r.respTime, r.result) // 旁路记录(recorder 为 nil 时静默)
 			loopGuardResult := guard.ApplyLoopGuard(r.item.name, r.item.arg, true, r.result, onNotice)
 			messages = append(messages, ctxmgr.BuildToolResultMessage(r.item.callID, loopGuardResult))
 		}
 	}
 	return "", "", myException.ChatToolLoopKind.Newf("chat service: tool stream loop exceeded max iterations(%d)", hCommon.AgentToolLoopMax)
+}
+
+// noteRecordNotAvailable 把"本轮记录不可用"的原因显式暴露出来(不静默丢弃)。
+//
+// 记忆是旁路、不阻断对话,但"每轮都答得出、历史永远为空"是**用户可感知**的异常:
+//   - 有 notice 通道(流式路径)时下发一条提示,用户据此知道该新建会话;
+//   - 没有通道(同步接口)时至少落到错误日志,运维可查。
+func (s *ChatService) noteRecordNotAvailable(req *request.ChatRequest, onNotice func(code, msg string), err error) {
+	if !errors.Is(err, mstorage.ErrSessionOwnershipConflict) {
+		return
+	}
+
+	logging.LogErrorF("chat service: session %s belongs to another sender, this turn will not be recorded", req.SessionId)
+	if onNotice != nil {
+		onNotice(cCommon.ChatNoticeNotRecorded, cCommon.ConstChatNoticeNotRecordedMsg)
+	}
+}
+
+// triggerMemoryMaintenance 触发旁路记忆维护(按需蒸馏/压缩/合并摘要)。
+//
+// turnSeq 必须是本轮**实际落库**的轮次序号:传 0 时维护会退回一次 SELECT MAX(seq),
+// 而中断轮同样推进了 seq —— 用 0 会让节拍判定基于过时的轮次数(见 interrupt-memory-chain.md M1)。
+func (s *ChatService) triggerMemoryMaintenance(session dataobject.TSession, turn *chatTurn,
+	assembled hCommon.AssembleResult, records []hCommon.MemoryRecord, turnSeq int) {
+	s.memoryService.TriggerMemoryMaintenance(mstorage.MaintenanceRequest{
+		Session:       &session,
+		Agent:         &turn.agent,
+		Assembled:     &assembled,
+		Records:       records,
+		TurnSeq:       turnSeq,
+		ContextWindow: int(turn.llm.ContextWindow),
+	}, s.summarizer(turn.llm))
+}
+
+// toolResultForRecord 归一"工具结果 → 落库文本":成功用原始输出,失败用 {"error":…}
+// (与回填给模型的文本一致)。抽成函数是为了让**执行协程内**与**串行回填段**两处
+// 不可能写出不同格式(见 interrupt-memory-chain.md M3)。
+func toolResultForRecord(result string, err error) string {
+	if err != nil {
+		return fmt.Sprintf(`{"error":%q}`, err.Error())
+	}
+	return result
 }
 
 // summarizer 把 LLM 客户端包装为"摘要生成器"注入 mstorage。

@@ -125,17 +125,27 @@ func IsInterrupted(runCtx context.Context, err error) bool {
 	return err != nil && errors.Is(err, llmproto.ErrRequestCanceled)
 }
 
-// InterruptionReason 归类中断原因
-func InterruptionReason(runCtx context.Context, err error) string {
+// ClassifyInterrupt 归类"本轮为什么没正常结束"(落库到 t_turn.interrupt_reason,日志共用同一判定)。
+//
+// 三个上下文分工不同,缺一不可 —— 这是唯一能区分"用户点中断"与"客户端断开"的地方:
+//   - reqCtx   :请求上下文。客户端断开 → HTTP 层先取消它;
+//   - runCtx   :本轮运行上下文(WithTimeout(streamCtx))。运行超时 → DeadlineExceeded;
+//   - streamCtx:注册给中断 API 的上下文。用户点中断 → 它被取消,**而 reqCtx 仍然存活**。
+//
+// 判定顺序即优先级:超时 > 客户端断开 > 用户中断 > 上游取消 > 其它错误。
+// 同步路径(SendMessage)没有 streamCtx、也没有运行超时,传 nil 即可。
+func ClassifyInterrupt(reqCtx, runCtx, streamCtx context.Context, err error) dataobject.InterruptReason {
 	switch {
 	case runCtx != nil && errors.Is(runCtx.Err(), context.DeadlineExceeded):
-		return "run timeout"
-	case runCtx != nil && errors.Is(runCtx.Err(), context.Canceled):
-		return "interrupted by user or client disconnected"
+		return dataobject.InterruptTimeout
+	case reqCtx != nil && reqCtx.Err() != nil:
+		return dataobject.InterruptByClient
+	case streamCtx != nil && errors.Is(streamCtx.Err(), context.Canceled):
+		return dataobject.InterruptByUser
 	case err != nil && errors.Is(err, llmproto.ErrRequestCanceled):
-		return "upstream stream canceled"
+		return dataobject.InterruptUpstream
 	default:
-		return "stream error"
+		return dataobject.InterruptOther
 	}
 }
 

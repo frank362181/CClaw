@@ -301,7 +301,7 @@ func ResolvePath(input, baseDir string) string {
 	}
 
 	normalized := NormalizePath(input, "", false, false, false, false)
-	normalizedBaseDir := NormalizePath("", baseDir, false, true, false, false)
+	normalizedBaseDir := NormalizePath(baseDir, "", false, true, false, false)
 
 	if filepath.IsAbs(normalized) {
 		return filepath.Clean(normalized)

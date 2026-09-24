@@ -306,14 +306,30 @@ func BuildSessionName(message string) string {
 	return name
 }
 
+func BuildMemoryRoot(sender string) string {
+	sender = strings.TrimSpace(sender)
+
+	memoryRoot := filepath.Join(pCommon.GetExecutableDir(), AgentBootstrapDir, ChatMemoryDirName)
+	memoryDir := pCommon.ResolvePath(sender, memoryRoot)
+
+	_ = pCommon.CreateDir(memoryDir)
+
+	return memoryDir
+}
+
 // BuildMemoryFileName 构造会话历史文件名:memory_{yyyyMMddHHmmss}.md
 // 与 DDL 注释中的 "memory_{datetime}.md" 保持一致。
-func BuildMemoryFileName(at *pCommon.DatetimeItem) string {
-	datetime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime()
+func BuildMemoryFileName(sender, sessionId string, at *pCommon.DatetimeItem) (string, string) {
+	//datetime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime()
+	memoryRoot := BuildMemoryRoot(sender)
+
+	var datetime = &pCommon.DatetimeItem{}
 	if at != nil {
 		datetime = at
 	}
-	return ChatMemoryFilePrefix + FormatCompactDatetime(datetime) + ChatMemoryFileExt
+
+	memoryFileName := ChatMemoryFilePrefix + sessionId + FormatCompactDatetime(datetime) + ChatMemoryFileExt
+	return memoryRoot, memoryFileName
 }
 
 // BuildHistoryLockKey 历史写入的会话级锁键。

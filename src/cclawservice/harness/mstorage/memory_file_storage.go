@@ -66,13 +66,6 @@ import (
 	pException "my.favorite/platformutility/exception"
 )
 
-//// 历史记录类型(写入 markdown 的记录头)
-//const (
-//	HistoryRecordUser      = "user"      // 用户问题
-//	HistoryRecordAssistant = "assistant" // 助手回复
-//	HistoryRecordTool      = "tool"      // 工具调用
-//)
-
 // 写入器默认配置
 const (
 	defaultHistoryIndexMaxEntries = 8192 // 每个.md文件最大的turn条数
@@ -132,34 +125,20 @@ func GetMemoryFileWriter() IMemoryStorage { //*MemoryFileRWriter {
 	return memoryFileRWriter
 }
 
-// MemoryDir 返回某会话的历史文件目录:<exeDir>/cclaw/chat_history/<session_id>。
-// session_id 直接参与路径拼接,必须满足两个条件:
-//  1. 是安全的相对路径(非绝对、无 . / .. 段)—— 由 IsSafeDir 保证;
-//  2. 是"单一路径段"(不含任何目录分隔符)。
-func (w *MemoryFileRWriter) MemoryDir(sessionId string) (string, error) {
-	sessionId = strings.TrimSpace(sessionId)
-	if !pCommon.IsSafeDir(sessionId) || strings.ContainsAny(sessionId, `/\`) {
-		return pCommon.BlankString, pException.FilePathErrorEx("illegal session id for history dir: " + sessionId)
-	}
-	return filepath.Join(pCommon.GetExecutableDir(), hCommon.AgentBootstrapDir, hCommon.ChatMemoryDirName, sessionId), nil
-}
-
 // Ensure 确保会话历史文件存在并返回其文件名(不含目录)。
 //   - 文件不存在时写入头部(会话标识 + 元数据行);
 //   - 文件已存在时直接返回文件名,不覆盖既有内容。
-func (w *MemoryFileRWriter) Ensure(sessionId string, at *pCommon.DatetimeItem, headerLines []string) (string, error) {
-	fileName := hCommon.BuildMemoryFileName(at)
-	path, err := w.resolvePath(sessionId, fileName)
-	if err != nil {
-		return pCommon.BlankString, err
-	}
+func (w *MemoryFileRWriter) Ensure(sender, sessionId string, at *pCommon.DatetimeItem, headerLines []string) (string, error) {
+	memoryDir, memoryFileName := hCommon.BuildMemoryFileName(sender, sessionId, at)
 
 	// 与 Append 共用同一把会话锁:避免"判不存在"与"追加写"交错写出重复头部
 	unlock := GetStorageLocks().Lock(hCommon.BuildHistoryLockKey(sessionId))
 	defer unlock()
 
+	path := filepath.Join(memoryDir, memoryFileName)
 	if pCommon.FileExists(path) {
-		return fileName, nil
+		//说明文件已经创建过了
+		return memoryFileName, nil
 	}
 
 	var sb strings.Builder
@@ -178,7 +157,8 @@ func (w *MemoryFileRWriter) Ensure(sessionId string, at *pCommon.DatetimeItem, h
 	if err := w.appendToFile(path, sb.String()); err != nil {
 		return pCommon.BlankString, err
 	}
-	return fileName, nil
+
+	return memoryFileName, nil
 }
 
 // Append 追加一条记录,返回该记录在文件中的序号(从 1 开始)。
@@ -195,8 +175,9 @@ func (w *MemoryFileRWriter) Ensure(sessionId string, at *pCommon.DatetimeItem, h
 //  3. 兜底:从文件末尾反向扫描最后一个记录头。
 //
 // 取最大值同时满足两个目标:DB 更新时立即跟上,DB 陈旧时也不会回退。
-func (w *MemoryFileRWriter) Append(sessionId, fileName, recordType, title, content, timeText string, hintIndex int) (int, error) {
-	path, err := w.resolvePath(sessionId, fileName)
+func (w *MemoryFileRWriter) Append(sender, sessionId, fileName, recordType, title, content, timeText string, hintIndex int) (int, error) {
+	memoryDir := hCommon.BuildMemoryRoot(sender)
+	path, err := pCommon.ResolveFile(memoryDir, fileName)
 	if err != nil {
 		return 0, err
 	}
@@ -232,8 +213,9 @@ func (w *MemoryFileRWriter) Append(sessionId, fileName, recordType, title, conte
 //   - 文件不存在时返回 (nil, nil):会话尚未写入历史属正常状态,不是错误;
 //   - 返回的切片是缓存内部数据,**调用方只读、不得修改**;
 //   - 半条记录(写入中断)不会被解析进来,下次读回会自动补上。
-func (w *MemoryFileRWriter) Read(sessionId, fileName string) ([]hCommon.MemoryRecord, error) {
-	path, err := w.resolvePathEx(sessionId, fileName, false)
+func (w *MemoryFileRWriter) Read(sender, sessionId, fileName string) ([]hCommon.MemoryRecord, error) {
+	memoryDir := hCommon.BuildMemoryRoot(sender)
+	path, err := pCommon.ResolveFile(memoryDir, fileName)
 	if err != nil {
 		return nil, err
 	}
@@ -267,6 +249,33 @@ func (w *MemoryFileRWriter) Read(sessionId, fileName string) ([]hCommon.MemoryRe
 	w.readRecords(path, snapshot)
 	return snapshot.records, nil
 }
+
+// ForgetSession 丢弃某会话历史文件的序号缓存与读回快照(测试与运维用)。
+//
+// 两个缓存都按**历史文件绝对路径**键控,而路径由"会话号 + 文件名(含时间戳)"决定。
+// 删掉磁盘上的历史文件之后必须一并丢弃缓存,否则紧接着复用的同号会话会从缓存的序号
+// 继续分配(序号看起来"跳号"),测试之间也会互相污染。
+func (w *MemoryFileRWriter) ForgetSession(sender, sessionId string) {
+	//dir, err := w.MemoryDir(sessionId)
+	dir := hCommon.BuildMemoryRoot(sender)
+
+	prefix := dir + string(filepath.Separator)
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for path := range w.nextIndex {
+		if strings.HasPrefix(path, prefix) {
+			delete(w.nextIndex, path)
+		}
+	}
+	for path := range w.records {
+		if strings.HasPrefix(path, prefix) {
+			delete(w.records, path)
+		}
+	}
+}
+
+// ============================== private functions & methods ==============================
 
 // nextIndexFor 解析本次写入应使用的序号(详见 Append 的序号取值顺序)。
 // 注意:可能触发磁盘扫描,故**不**在 w.mu 内调用。
@@ -302,60 +311,6 @@ func (w *MemoryFileRWriter) setNextIndex(path string, next int) {
 		w.nextIndex = make(map[string]int)
 	}
 	w.nextIndex[path] = next
-}
-
-// ForgetSession 丢弃某会话历史文件的序号缓存与读回快照(测试与运维用)。
-//
-// 两个缓存都按**历史文件绝对路径**键控,而路径由"会话号 + 文件名(含时间戳)"决定。
-// 删掉磁盘上的历史文件之后必须一并丢弃缓存,否则紧接着复用的同号会话会从缓存的序号
-// 继续分配(序号看起来"跳号"),测试之间也会互相污染。
-func (w *MemoryFileRWriter) ForgetSession(sessionId string) {
-	dir, err := w.MemoryDir(sessionId)
-	if err != nil {
-		return
-	}
-	prefix := dir + string(filepath.Separator)
-
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	for path := range w.nextIndex {
-		if strings.HasPrefix(path, prefix) {
-			delete(w.nextIndex, path)
-		}
-	}
-	for path := range w.records {
-		if strings.HasPrefix(path, prefix) {
-			delete(w.records, path)
-		}
-	}
-}
-
-// ============================== private functions & methods ==============================
-
-// resolvePath 把(会话标识, 文件名)解析为历史文件绝对路径,并确保目录存在。
-func (w *MemoryFileRWriter) resolvePath(sessionId, fileName string) (string, error) {
-	return w.resolvePathEx(sessionId, fileName, true)
-}
-
-// resolvePathEx 解析历史文件绝对路径;createDir=false 时不创建目录(读路径不该产生副作用)。
-// 文件名必须是纯文件名,防止穿越出会话目录。
-func (w *MemoryFileRWriter) resolvePathEx(sessionId, fileName string, createDir bool) (string, error) {
-	dir, err := w.MemoryDir(sessionId)
-	if err != nil {
-		return pCommon.BlankString, err
-	}
-
-	fileName = strings.TrimSpace(fileName)
-	if fileName == pCommon.BlankString || filepath.Base(fileName) != fileName {
-		return pCommon.BlankString, pException.FilePathErrorEx("illegal history file name: " + fileName)
-	}
-
-	if createDir {
-		if err := pCommon.CreateDir(dir); err != nil {
-			return pCommon.BlankString, pException.FilePathErrorEx("create history dir error: " + err.Error())
-		}
-	}
-	return filepath.Join(dir, fileName), nil
 }
 
 // appendToFile 以追加方式写入文本;文件不存在则创建。

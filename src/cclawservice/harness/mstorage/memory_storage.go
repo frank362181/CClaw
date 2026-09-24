@@ -22,17 +22,16 @@ const (
 type IMemoryStorage interface {
 	StorageType() MemoryStorageType
 
-	MemoryDir(sessionId string) (string, error)
-	Ensure(sessionId string, at *pCommon.DatetimeItem, headerLines []string) (string, error)
-	Append(sessionId, fileName, recordType, title, content, timeText string, hintIndex int) (int, error)
+	Ensure(sender, sessionId string, at *pCommon.DatetimeItem, headerLines []string) (string, error)
+	Append(sender, sessionId, fileName, recordType, title, content, timeText string, hintIndex int) (int, error)
 
 	// Read 读回某会话历史文件的全部记录(按序号升序);文件不存在返回 (nil, nil)。
 	// 返回的切片是内部缓存,调用方只读。
-	Read(sessionId, fileName string) ([]common.MemoryRecord, error)
+	Read(sender, sessionId, fileName string) ([]common.MemoryRecord, error)
 
 	// ForgetSession 丢弃某会话的进程内缓存(序号分配 + 读回快照)。
 	// 删掉磁盘上的历史文件后必须一并丢弃缓存,否则复用的同号会话会从缓存序号继续分配。
-	ForgetSession(sessionId string)
+	ForgetSession(sender, sessionId string)
 }
 
 type MemoryStorage struct {

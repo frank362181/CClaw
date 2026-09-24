@@ -1,9 +1,6 @@
 /**
 * 工具集合:当前只来自 SKILL.md 的工具声明(front matter)。
 *
-* 系统工具(t_tool)的加载入口已迁到 prompt repo(PromptRepository.LoadSystemTools),
-* 不再经过本层 —— 等它接回来时,要连同 FrontMatter.DisallowedTools 的过滤一并恢复。
-*
 * SKILL.md 的读盘与 YAML 解析**不在这里**:唯一入口是 prompt repo 的 LoadSkills(按文件指纹缓存)。
 * 本层只把已解析的文档派生成:LLM 侧工具 schema、脚本绝对路径、技能级元数据(意图门用)。
 **/
@@ -117,6 +114,42 @@ func (b FunctionBundle) Activate(question string) Activation {
 // VisibleTools 返回本轮实际下发给LLM的工具列表
 func (b FunctionBundle) VisibleTools(gate Activation) []llmproto.Tool {
 	return b.Tools
+}
+
+// PromptItems 把**本轮实际下发的工具**投影成 system prompt 的清单项(名字 + 一句话用途 + 归属技能)。
+// 【唯一事实源】只读 b.Tools(即 request.tools 的来源)与 b.Slots(同一批过滤后的名字):
+// 两者在生产端就已对齐(见 collectToolsFromSkill 的注释),所以 prompt 清单不可能与 schema 漂移，且顺序与slots一致
+func (b FunctionBundle) PromptItems() []hCommon.ToolPromptItem {
+	owner := make(map[string]string, len(b.Tools))
+	for i := range b.Slots {
+		for _, name := range b.Slots[i].ToolNames {
+			if _, dup := owner[name]; !dup {
+				owner[name] = b.Slots[i].SkillId
+			}
+		}
+	}
+
+	items := make([]hCommon.ToolPromptItem, 0, len(b.Tools))
+	for i := range b.Tools {
+		name := strings.TrimSpace(b.Tools[i].Function.Name)
+		if name == pCommon.BlankString {
+			continue
+		}
+
+		item := hCommon.ToolPromptItem{
+			Name:        name,
+			Description: strings.TrimSpace(b.Tools[i].Function.Description),
+			Source:      hCommon.TSourceSystem, // 默认按系统工具,命中技能声明再改写
+		}
+		if skillId, ok := owner[name]; ok {
+			item.Source = hCommon.TSourceSkill
+			item.SkillId = skillId
+		}
+
+		items = append(items, item)
+	}
+
+	return items
 }
 
 // String 便于日志一眼核对门的结果。
