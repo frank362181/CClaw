@@ -169,8 +169,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 		turnSeq := 0
 		if recorded && cCommon.IsInterrupted(ctx, err) {
 			turnSeq = s.memoryService.AppendInterruptedTurn(session, req, pCommon.BlankString, recorder.Snapshot(), reason)
-			// 被中断的轮次同样要推进记忆维护:否则"节拍点那一轮被中断"会永久吞掉一次蒸馏,
-			// 装配阶段已裁掉的区间也永远落不成摘要(见 interrupt-memory-chain.md M1)。
+			// 被中断的轮次同样要推进记忆维护:否则"节拍点那一轮被中断"会永久吞掉一次蒸馏
 			s.triggerMemoryMaintenance(session, turn, assembled, records, turnSeq)
 		} else if cCommon.IsInterrupted(ctx, err) {
 			// 中断但记录不可用:历史与 t_turn 都没有 —— 必须显式留痕,不能只剩"什么都没有"
@@ -321,14 +320,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	return reply, nil
 }
 
-// EndChatSession 结束会话:写结束标记,并做一次**收尾蒸馏**(把尾巴带走)。
-//
-// 为什么收尾必须蒸一次:蒸馏节拍是每 DistillIntervalTurns 轮一次,而会话在哪一轮停下是随机的 ——
-// 最后不足一个节拍窗口的那几轮如果不在这里带走,就永远进不了长期记忆。
-// 真实数据:22 轮会话只在第 10/20 轮蒸过(第 21-22 轮没蒸);只聊到 8 轮的会话一次都没蒸过。
-//
-// 异步执行(与其它维护一致):收尾蒸馏要调一次 LLM,不该阻塞结束会话的调用方。
-// 调用方:空闲超时扫描 / 手动结束会话的接口(目前没有生产调用点,先把编排与判定做好)。
+// EndChatSession 结束会话:写结束标记,并做一次**收尾蒸馏**(把尾巴带走)
 func (s *ChatService) EndChatSession(session dataobject.TSession, agent dataobject.TAgent,
 	llmProvider dataobject.TLlm, reason int) error {
 	if s.memoryService == nil || !s.memoryService.Enabled() {
