@@ -22,10 +22,30 @@ const (
 	SessionEndReasonCompact = 2 // 触发 compact
 )
 
-// 轮次落库状态(t_turn.status):回答"这一轮有没有落成助手记录、为什么"。
-//
-// 为什么需要:resp_index = 0 有三种来源(中断无产出 / 会话当时无历史文件 / 写回复失败),
-// 单看 resp_index 无法区分;而 resp_index > 0 也不能排除中断(中断但有产出就是这样)。
+// TSession 会话:一次完整对话会话的元数据。
+// 业务主键为 SessionId(DDL 中 ID 仅作自增主键);ChatData 保存内容文件名,不含目录。
+type TSession struct {
+	Id                int64  `gorm:"column:id;primaryKey" json:"Id"`                     // 自增主键
+	SessionId         string `gorm:"column:session_id" json:"SessionId"`                 // 会话业务主键(<=32 字符)
+	SessionName       string `gorm:"column:session_name" json:"SessionName"`             // 会话名称(首条消息截断生成)
+	AgentId           string `gorm:"column:agent_id" json:"AgentId"`                     // 会话绑定的 Agent(替代仅内存存在的绑定)
+	BeginTimestamp    int64  `gorm:"column:begin_timestamp" json:"BeginTimestamp"`       // 会话开始时间(Unix 秒)
+	ChatType          int    `gorm:"column:chat_type" json:"ChatType"`                   // 0/1:私聊/群聊
+	ChatChannel       int    `gorm:"column:chat_channel" json:"ChatChannel"`             // 聊天渠道
+	Sender            string `gorm:"column:sender" json:"Sender"`                        // 创建会话的用户名(服务端认证)
+	Archived          bool   `gorm:"column:archived" json:"Archived"`                    // 是否归档
+	ArchivedTimestamp int64  `gorm:"column:archived_timestamp" json:"ArchivedTimestamp"` // 归档时间
+	ChatData          string `gorm:"column:chat_data" json:"ChatData"`                   // 聊天历史文件名(memory_xxx.md)
+	Ended             bool   `gorm:"column:ended" json:"Ended"`                          // 是否已结束
+	EndReason         int    `gorm:"column:end_reason" json:"EndReason"`                 // 见 SessionEndReason*
+	EndTimestamp      int64  `gorm:"column:end_timestamp" json:"EndTimestamp"`           // 结束时间
+	Removed           bool   `gorm:"column:removed" json:"Removed"`                      // 是否删除(软删除)
+}
+
+// TableName 显式声明表名,避免命名策略差异导致指错表。
+func (TSession) TableName() string { return "t_session" }
+
+// 轮次落库状态(t_turn.status):回答"这一轮有没有落成助手记录、为什么"
 const (
 	TurnStatusNormal             = 0 // 正常:助手记录已落盘
 	TurnStatusInterruptedEmpty   = 1 // 中断且无产出:按设计不写助手记录(空记录无信息量)
@@ -68,29 +88,6 @@ func (r InterruptReason) String() string {
 		return "not interrupted"
 	}
 }
-
-// TSession 会话:一次完整对话会话的元数据。
-// 业务主键为 SessionId(DDL 中 ID 仅作自增主键);ChatData 保存内容文件名,不含目录。
-type TSession struct {
-	Id                int64  `gorm:"column:id;primaryKey" json:"Id"`                     // 自增主键
-	SessionId         string `gorm:"column:session_id" json:"SessionId"`                 // 会话业务主键(<=32 字符)
-	SessionName       string `gorm:"column:session_name" json:"SessionName"`             // 会话名称(首条消息截断生成)
-	AgentId           string `gorm:"column:agent_id" json:"AgentId"`                     // 会话绑定的 Agent(替代仅内存存在的绑定)
-	BeginTimestamp    int64  `gorm:"column:begin_timestamp" json:"BeginTimestamp"`       // 会话开始时间(Unix 秒)
-	ChatType          int    `gorm:"column:chat_type" json:"ChatType"`                   // 0/1:私聊/群聊
-	ChatChannel       int    `gorm:"column:chat_channel" json:"ChatChannel"`             // 聊天渠道
-	Sender            string `gorm:"column:sender" json:"Sender"`                        // 创建会话的用户名(服务端认证)
-	Archived          bool   `gorm:"column:archived" json:"Archived"`                    // 是否归档
-	ArchivedTimestamp int64  `gorm:"column:archived_timestamp" json:"ArchivedTimestamp"` // 归档时间
-	ChatData          string `gorm:"column:chat_data" json:"ChatData"`                   // 聊天历史文件名(memory_xxx.md)
-	Ended             bool   `gorm:"column:ended" json:"Ended"`                          // 是否已结束
-	EndReason         int    `gorm:"column:end_reason" json:"EndReason"`                 // 见 SessionEndReason*
-	EndTimestamp      int64  `gorm:"column:end_timestamp" json:"EndTimestamp"`           // 结束时间
-	Removed           bool   `gorm:"column:removed" json:"Removed"`                      // 是否删除(软删除)
-}
-
-// TableName 显式声明表名,避免命名策略差异导致指错表。
-func (TSession) TableName() string { return "t_session" }
 
 // TTurn 轮次:一次"用户提问 + 助手回复"。
 // Seq 为会话内轮次序号(从 1 开始);ChatIndex/RespIndex 指向历史文件中的记录序号。

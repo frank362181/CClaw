@@ -69,12 +69,6 @@ func mergeAttemptSizes(summaryCount int) []int {
 // 为什么是结构体而不是一串位置参数:
 //   - TurnSeq(int) 与 Closing(bool) 相邻、Closing 又与摘要器相邻,位置传错编译期不报错;
 //   - 具名字段让调用点自解释 —— 收尾路径(Assembled=nil + Closing=true)一眼可读。
-//
-// 字段**必须导出**:它出现在公开方法 TriggerMemoryMaintenance 的签名里,
-// 包外无法构造的结构体等于把公开 API 变成摆设。
-//
-// 这里不持有 LLM 客户端:摘要器由调用方构造并注入(见 TriggerMemoryMaintenance 的 summarizer 参数),
-// 本包不认识 LLM 客户端,只认识压好形的 hCommon.Summarizer。
 type MaintenanceRequest struct {
 	Session *dataobject.TSession //所属会话(ChatData 即历史文件名);必填
 	Agent   *dataobject.TAgent   //所属 Agent(决定长期记忆文件位置与压缩模式);必填

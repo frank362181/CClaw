@@ -118,6 +118,12 @@ func (r *TurnRecorder) Snapshot() []TurnToolRecord {
 	return out
 }
 
+// TurnOutcome 本轮的结果维度(决定 t_turn.status / t_turn.interrupt_reason)
+type TurnOutcome struct {
+	Interrupted bool                       // 本轮回复残缺(被中断,或流错误导致没写完)
+	Reason      dataobject.InterruptReason // 残缺来源;Interrupted=false 时应为 InterruptNone
+}
+
 // ------------------------------- end of TurnRecorder ----------------------------
 
 // MemoryService 记忆管理服务。
@@ -237,15 +243,6 @@ func (s *MemoryService) Begin(sender string, agent dataobject.TAgent, req *reque
 	}
 
 	return session, true, nil
-}
-
-// TurnOutcome 本轮的结果维度(决定 t_turn.status / t_turn.interrupt_reason)。
-//
-// 为什么合成一个结构:两者必须一起算、一起写 —— 拆成两个独立参数,调用方漏传其一时
-// 会写出"status 说残缺、reason 说未中断"这种自相矛盾的行。
-type TurnOutcome struct {
-	Interrupted bool                       // 本轮回复残缺(被中断,或流错误导致没写完)
-	Reason      dataobject.InterruptReason // 残缺来源;Interrupted=false 时应为 InterruptNone
 }
 
 // AppendTurn 记录一轮:写入 t_turn + t_turn_tool,并把内容追加到历史文件。
@@ -411,7 +408,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 	}
 
 	// 压缩模式来源:t_agent.compaction_mode —— 0=default(整体摘要) / 1=safeguard(分块+保全),
-	// 常量与名称见 dataobject.CompactionMode*,模式差异集中在 mstorage/compaction.go。
+	// 常量与名称见 dataobject.CompactionMode*,模式差异集中在 mstorage/compressor.go。
 	from, to, mode := maintenanceReq.Assembled.DroppedFrom, maintenanceReq.Assembled.DroppedTo, agent.CompactionMode
 
 	// 获得一个维护routine，避免无限次获取打满LLM
@@ -760,7 +757,7 @@ func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRe
 			ToolCalled: true,
 			CallTime:   tool.CallTime,
 			ToolName:   tool.ToolName,
-			ToolResp:   pCommon.TruncateRunes(strings.TrimSpace(result), hCommon.TurnToolRespMaxLen, pCommon.BlankString),
+			ToolResp:   pCommon.TruncateRunes(strings.TrimSpace(result), hCommon.TurnToolRespMaxLen, pCommon.BlankString), //写入数据库时截断，仅仅写前256 runes
 			RespTime:   tool.RespTime,
 		})
 		if fileName != "" {

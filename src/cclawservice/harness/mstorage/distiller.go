@@ -2,8 +2,8 @@
 * 记忆蒸馏(把会话里的"长期有效事实"写入 Agent 工作区的 MEMORY.md)
 *
 * 与压缩的区别:
-*   - 压缩(compaction.go)面向**单个会话**:让本会话历史体积有界,摘要留在会话历史文件内;
-*   - 蒸馏(distillation.go)面向**Agent 的长期记忆**:把跨会话仍然有效的事实沉淀到工作区文件,
+*   - 压缩(compressor.go)面向**单个会话**:让本会话历史体积有界,摘要留在会话历史文件内;
+*   - 蒸馏(distiller.go)面向**Agent 的长期记忆**:把跨会话仍然有效的事实沉淀到工作区文件,
 *     由 prompt 组装层按固定顺序注入 system prompt(AGENTS → SOUL → ... → MEMORY)。
 *
 * **作用域(重要)**:MEMORY.md 位于 `<exeDir>/cclaw/<ownerId>/<agentDir>/`,按
