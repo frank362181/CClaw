@@ -470,16 +470,39 @@ func TestLoopGuard_ReadEditReadNotStopped(t *testing.T) {
 	}
 }
 
-// TestLoopGuard_ThreeToolsCycleNotStopped 记录已知局限:三个及以上工具的周期调用不属于二元交替,不会被判定。
-func TestLoopGuard_ThreeToolsCycleNotStopped(t *testing.T) {
+// TestLoopGuard_ThreeToolsCycleStoppedByNoProgress 验证三个及以上工具的周期调用
+// (A,B,C,A,B,C...)虽然不属于"二元交替"规则,但会被规则 6(无进展)捕获:
+// 前 3 次各自是"新结果",之后连续 8 次结果都已在窗口内 → 第 11 次调用命中 no_progress。
+func TestLoopGuard_ThreeToolsCycleStoppedByNoProgress(t *testing.T) {
 	g := NewLoopGuard()
+
+	const cycleTools = 3
+	wantHitAt := cycleTools + progressMaxNoNewCalls // 3 + 8 = 11
 
 	for i := 1; i <= 60; i++ {
 		name := fmt.Sprintf("tool_%d", i%3)
-		if verdict := g.Check(name, fmt.Sprintf(`{"n":%d}`, i%3), true, fmt.Sprintf("out-%d", i%3)); verdict.Hit() {
-			t.Fatalf("三工具周期调用第 %d 次被判定为停止 (msg=%q)", i, verdict.Msg)
+		verdict := g.Check(name, fmt.Sprintf(`{"n":%d}`, i%3), true, fmt.Sprintf("out-%d", i%3))
+
+		if i < wantHitAt {
+			if verdict.Hit() {
+				t.Fatalf("三工具周期调用第 %d 次即被判定为停止(早于预期第 %d 次), msg=%q", i, wantHitAt, verdict.Msg)
+			}
+			continue
 		}
+
+		if !verdict.Hit() {
+			t.Fatalf("三工具周期调用第 %d 次应被无进展规则判定为停止", i)
+		}
+		if verdict.Rule != LoopRuleNoProgress {
+			t.Fatalf("命中规则 = %s, want %s", verdict.Rule, LoopRuleNoProgress)
+		}
+		if verdict.Level != LoopLevelStop {
+			t.Fatalf("命中级别 = %s, want %s", verdict.Level, LoopLevelStop)
+		}
+		return
 	}
+
+	t.Fatal("三工具周期调用在 60 次内始终未被判定为停止")
 }
 
 // ---------------------------------------------------------------------------

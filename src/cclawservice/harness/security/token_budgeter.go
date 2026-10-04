@@ -63,10 +63,7 @@ func EstimateToolReserveTokens(agentId string, tools []llmproto.Tool) int {
 //   - 必然 BudgetExhausted:系统提示预留 + 输出预留 就已经吃掉窗口(含本轮消息更不够)
 //     —— 此时历史一点都不回放,且压缩被禁用(NeedCompact 对 BudgetExhausted 返回 false);
 //   - 疑似把"系统提示预留"当成历史旋钮用:预留超出实测系统提示 + 摘要上限 时,
-//     真正应该调的是 MaxHistoryTokens。
-//
-// 阈值取"实测 + 摘要上限":预留的正当用途就是给摘要增长留余量,
-// 超过这个量就不是"预留"了。
+//     真正应该调的是 MaxHistoryTokens
 func PolicyWarnings(policy hCommon.ContextPolicy, systemTokens int) []string {
 	var warnings []string
 
@@ -171,9 +168,7 @@ func Budget(policy hCommon.ContextPolicy, msg llmproto.ChatMessage) int {
 // DynamicMaxTokens 计算应发送的 max_tokens。由 context_window 与供应商输出上限共同约束:
 //   - 取值为 min(context_window - 估算输入, llmProvider.MaxTokens);
 //   - 剩余空间 ≤ 0 时取 1(此时请求大概率仍会被供应商拒绝,但保持确定性);
-//   - 未配置 ContextWindow 时返回 0(不发送 max_tokens,由供应商用其默认值)。
-//
-// 修复背景:早期版本仅按 context_window 推导(如 1M 窗口 + 小输入 → max_tokens ≈ 1M),
+//   - 未配置 ContextWindow 时返回 0(不发送 max_tokens,由供应商用其默认值)
 func DynamicMaxTokens(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage) int {
 	if llmProvider.ContextWindow == 0 {
 		return 0 // 未配置返回 0 表示应用供应商的默认值

@@ -31,6 +31,7 @@ const (
 	LoopRuleSameToolCallings                  // 3. 同一工具连续调用
 	LoopRuleIdenticalCallings                 // 4. 完全相同的调用
 	LoopRuleAlternatingCallings               // 5. 二元交替调用
+	LoopRuleNoProgress                        // 无进展
 )
 
 // String 记录/指标用的稳定名称(日志里不用数字,便于检索)。
@@ -46,6 +47,8 @@ func (r LoopGuardRule) String() string {
 		return "identical_callings"
 	case LoopRuleAlternatingCallings:
 		return "alternating_callings"
+	case LoopRuleNoProgress:
+		return "no_progress"
 	default:
 		return "none"
 	}
@@ -58,7 +61,7 @@ func (r LoopGuardRule) level() LoopGuardLevel {
 	switch r {
 	case LoopRuleConsecutiveErrors, LoopRuleSameToolCallings:
 		return LoopLevelWarn
-	case LoopRuleTotalCallings, LoopRuleIdenticalCallings, LoopRuleAlternatingCallings:
+	case LoopRuleTotalCallings, LoopRuleIdenticalCallings, LoopRuleAlternatingCallings, LoopRuleNoProgress:
 		return LoopLevelStop
 	default:
 		return LoopLevelNone
@@ -120,6 +123,10 @@ const (
 
 	maxAlternatingSameToolCallingMsg = "检测到死循环：最近 %d 轮用同一工具 %s 在两组参数之间交替调用。请立即停止重试，换一种完全不同的策略。"
 
+	maxNoProgressCalls = progressMaxNoNewCalls
+	maxNoProgressMsg   = "检测到无进展：最近 %d 次工具调用的结果没有产生任何新信息（反复得到同一结果）。" +
+		"请立即停止重试，换一种完全不同的策略，或直接总结当前已获得的结论。"
+
 	// 调用签名(工具名 + 参数哈希 + 结果前缀)相关
 	maxRecentToolCallings   = 10  //签名窗口:只保留最近几次调用的签名
 	maxSignatureResultRunes = 200 //签名里保留的工具结果前缀长度(按 rune 截断,避免切坏多字节字符)
@@ -139,6 +146,8 @@ type LoopGuard struct {
 	curSameToolCallings int    //当前同一工具调用的次数
 
 	recentTools []string
+
+	progress *progressTracker // 规则6:结果新颖度跟踪(无新进展检测)
 }
 
 // NewLoopGuard 创建一轮对话的守卫。每轮对话必须新建,禁止复用上一轮的实例。
@@ -149,6 +158,7 @@ func NewLoopGuard() *LoopGuard {
 		lastToolName:             "",
 		curSameToolCallings:      0,
 		recentTools:              []string{},
+		progress:                 newProgressTracker(),
 	}
 }
 
@@ -189,6 +199,11 @@ func (g *LoopGuard) Check(toolName, toolArgs string, resultOK bool, result strin
 		g.recentTools = g.recentTools[len(g.recentTools)-maxRecentToolCallings:] //只保留最近的几个
 	}
 
+	var noProgress ProgressVerdict
+	if noProgressEnabled && resultOK {
+		noProgress = g.progress.Observe(result)
+	}
+
 	// 1. 工具调用总数判断
 	if g.curToolTotalCallings >= maxToolTotalCallings {
 		return newLoopGuardVerdict(LoopRuleTotalCallings, maxToolTotalCallingsStr, maxToolTotalCallings)
@@ -224,6 +239,11 @@ func (g *LoopGuard) Check(toolName, toolArgs string, resultOK bool, result strin
 
 			return newLoopGuardVerdict(LoopRuleAlternatingCallings, maxAlternatingToolCallingMsg, maxAlternatingToolCallings, prevToolName, toolName)
 		}
+	}
+
+	// 6. 无新进展检测
+	if noProgress.Stalled {
+		return newLoopGuardVerdict(LoopRuleNoProgress, maxNoProgressMsg, noProgress.ConsecutiveNoNew)
 	}
 
 	return LoopGuardVerdict{}

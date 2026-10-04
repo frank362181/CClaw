@@ -125,8 +125,7 @@ func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.T
 			return content, calls, nil
 		}
 		lastErr = err
-		// 供应商不接受强制调用相关参数(tool_choice / enable_thinking):降级重试一次 ——
-		// 强制调用失败不该让整轮对话失败,退回"由模型自行决定"仍优于把 502 抛给用户。
+		// 供应商不接受强制调用相关参数(tool_choice / enable_thinking):降级重试一次
 		if dropped := ctxmgr.DegradeChatRequest(&req, err); dropped {
 			continue
 		}
@@ -228,7 +227,7 @@ func (c *Client) streamRequest(ctx context.Context, llmProvider dataobject.TLlm,
 }
 
 // ================================== private functions & methods ========================================
-// completeWithToolsOnce 执行一次同步(带工具)chat/completions(不含重试)。
+// completeWithToolsOnce 执行一次同步(带工具)chat/completions(不含重试)
 func (c *Client) completeWithToolsOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (string, []llmproto.ToolCall, error) {
 	httpReq, err := c.prepareRequest(ctx, llmProvider, req)
 	if err != nil {

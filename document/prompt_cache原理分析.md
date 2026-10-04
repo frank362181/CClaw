@@ -61,7 +61,7 @@ Claude Code的缓存有几个容易踩坑失效场景：
 
 OpenClaw通过cacheRetention参数控制缓存保留策略，支持三个值：
 
-- "none"：不是用缓存
+- "none"：不使用缓存
 - "short"：提供商的默认缓存窗口（通常5分钟）
 - "long"：扩展缓存窗口（通常1小时）
 
@@ -117,7 +117,7 @@ OpenClaw提供了两个辅助机制来维持缓存有效性：
 
 ### 2.方案一：统一网关/适配层
 
-LiteLLM：自动注入缓存检查点
+#### 1. LiteLLM：自动注入缓存检查点
 
 LiteLLM是目前多厂商prompt cache适配最成熟的参考实现之一。它对两类厂商采取不同的策略：
 
@@ -134,6 +134,31 @@ LiteLLM是目前多厂商prompt cache适配最成熟的参考实现之一。它�
   开启后，LiteLLM会在system prompt末尾和尾轮消息各放一个检查点，使稳定前缀被缓存，而检查点随对话推进。它还会遵守厂商的4个缓存块上限，且如果客户端已经自带了cache_control,LiteLLM会“让位”不重复注入。
 
 对于DashScop/Qwen,LiteLLM的cache_control注入是原声支持的；对于DeepSeek，则依赖自动缓存，无需标记。关键限制：LiteLLM的自动注入默认只对Claude模型生效。要让Qwen或DeepSeek也走显式缓存路径(例如OpenRouter接入时)，需要扩展其allowlist，将qwen和deepseek加入CacheControlSupportedModels。
+
+#### 2. OpenRouter: Sticky Routing + cache_control透传
+
+OpenRouter作为聚合层，同时处理隐式和显式两种模式：
+
+- 对OpenAI 、DeepSeek、Gemini 2.5等隐式缓存模型，OpenRouter自动处理，无需Agent端标记；
+- 对Anthropic、Qwen家族、DeepSeek v3.2等需要显式标记的模型，OpenRouter会透传Anthropic风格的cache_control断点到上游。
+
+OpenRouter还使用了sticky routing(粘性路由)：一旦某个请求命中了缓存，后续请求都会被路由到同一个上游的provider端点，确保缓存能够持续命中。这对于多厂商场景至关重要---如果缓存请求被随机路由到不同节点，即使prompt完全相同，KV Cache也不在同一个LLM的推理实例上，缓存命中率会归零。
+
+#### 3. CtxGuard：Agent端与厂商之间的透明反向代理
+
+CtxGuard是部署在Agent与大模型服务商之间的透明方向代理网关，支持OpenAI、Anthropic、Google Gemini、DeepSeek等，它的缓存保护策略从物理层入手：
+
+- 二进制切片透传：对未变更的历史消息，跳过JSON反序列化与重构，直接转发原始HTTP请求的底层二进制切片，从根本上杜绝空格、换行、浮点格式漂移格式导致的前缀失效；
+- Schema确定性重构：对tools列表及内部JSON Schema递归遍历，统一按字母序重排，解决字典无序导致的前缀缓存击穿；
+- 生命周期冷热隔离：将上下文且分为静态系统区与动态交互区，会话建立后锁定头部提示词快照，动态注入项仅追加于末尾。
+
+这套机制对多厂商场景尤其重要，因为不同厂商的API对JSON序列化的容忍度不同，客户端库的微小差异就可能导致前缀在字节层面的不一致。
+
+#### 5. TELOS SDK：不改变prompt的缓存感知网
+
+TELOS的设计目标"prompt agent context"---它作为一个缓存感知网关，在代理到上游的段上重构请求，让共享前缀从缓存中读取，而不改变prompt的语义。这意味着Agent应用可以继续使用自己习惯的promt格式，由TELOS负责在请求中适配不同厂商的缓存协议。
+
+
 
 
 

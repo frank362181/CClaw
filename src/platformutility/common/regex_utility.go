@@ -23,3 +23,7 @@ func GetIntFromRegex(regStr string, data []byte) int {
 	}
 	return maxIndex
 }
+
+func ReplaceStringWithRegexp(input string, regExp *regexp.Regexp, replacing string) string {
+	return regExp.ReplaceAllString(input, replacing)
+}

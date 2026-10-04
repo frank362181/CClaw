@@ -69,13 +69,6 @@ func (kind AgentDocumentKind) String() string {
 	}
 }
 
-//// StartupDocSpec 启动文档清单中的一项(文件名/种类/是否必需)
-//type StartupDocSpec struct {
-//	Kind     AgentDocumentKind `json:"kind"`
-//	Name     string
-//	Required bool
-//}
-
 // MissingFileMarker 缺失文件标记(OpenClaw context-file: [MISSING] Expected at: <path>)
 const MissingFileMarker = "[MISSING]"
 
@@ -90,12 +83,8 @@ const (
 	MaxUserDocChars        = 4 * 1024   //USER.md 单独的字符上限;单位 **rune**
 )
 
-// MaxPromptSectionLen 由 prompt_service.assembleSystemPrompt 中的 capSections 施加。
-//
-// 【兑底常量】当前每个 section 都有更紧的来源上限(MaxBootstrapFileChars 20480 rune /
-// MaxUserDocChars 4096 rune / MaxSkillsPromptChars 18000 rune),它们都小于本值 ⇒
-// 本上限在当前常量下**不会截断任何东西**,只防"将来新增一种没有来源上限的 section"。
-// 改这些常量前先看 TestSectionCapIsBackstopOnly。
+// MaxPromptSectionLen 由 prompt_service.assembleSystemPrompt 中的 capSections 施加
+// 表示比如system section,user section等
 const (
 	MaxPromptSectionLen = 32 * 1024 //system prompt 单个 section 的最大 rune 数
 )
@@ -118,12 +107,6 @@ const (
 )
 
 // 命中技能的正文(SOP)注入预算
-//
-// 只有意图门命中(问题命中该技能的 trigger-keywords)的技能才会注入正文,
-// 因此这里不是“所有技能正文之和”的上限,而是**单个技能单次注入**的上限 —— 超限截断
-// 并记入 truncated(会落成 Bootstrap Context Notice)。
-// 取值参考:启动文档单文件上限是 20K rune,而 SOP 只是“怎么做这一步”的操作规程,
-// 8K rune 足够装下完整的三步 SOP;写得更长说明该技能该拆分而不是靠拉大预算。
 const (
 	MaxActiveSkillDocRunes = 8 * 1024 //单个命中技能正文注入上限;单位 **rune**
 	MaxActiveSkillsPerTurn = 4        //单轮最多注入几个技能的正文(防全命中时吃光预算)
@@ -139,16 +122,7 @@ const (
 	DefaultOutputReserveTokens = 4096 // 为模型输出预留的 token 数
 
 	// DefaultMaxHistoryTokens 历史回放上限的默认值(tokens):历史回放预算取
-	// min(窗口预算, 本值)。
-	//
-	// 为什么需要这个旋钮:在此之前唯一能约束历史回放的量是"为系统提示预留的额度"
-	// (t_agent.reverse_token_floor),而它同时被三处消费(系统预留 / 历史回放 / 工具循环),
-	// 且与窗口强耦合在 1M 窗口下形同虚设 —— 实测:真实会话 79 条记录也只回放 1.2 万 token,
-	// 要到几百上千轮才会碰到窗口。
-	//
-	// 64k 的量级参考(实测 100001c80d… 那个 22 轮真实会话):回放约 1.2 万 token
-	// = 每轮约 540 token(工具结果回放被截到 1200 rune,所以远小于文件体积);
-	// 因此 64k 大致对应"百轮量级"的会话开始进入压缩 —— 既不打扰短会话,也不会永不触发。
+	// min(窗口预算, 本值)，64K 差不多100轮的会话所需的历史消息
 	DefaultMaxHistoryTokens = 64 * 1024
 )
 
@@ -156,7 +130,7 @@ const (
 const (
 	AgentRunTimeout  = 600                          //Agent单次聊天运行超时时间(工具循环+LLM生成)
 	ChatRunTimeout   = "CCLAW_CHAT_RUN_TIMEOUT_SEC" //聊天最长的时间环境变量
-	AgentToolLoopMax = 30                           // function-calling 工具循环的最大迭代次数(防止模型反复请求工具导致死循环/超时)。
+	AgentToolLoopMax = 80                           // function-calling 工具循环的最大迭代次数(防止模型反复请求工具导致死循环/超时)。
 
 	NonStreamResponseTimeout = 60 // 单次 LLM 同步请求的默认超时，同步情况下起作用
 	StreamResponseTimeout    = 60 // 流式读取空闲上限(秒):LLM无返回的最大时间
@@ -195,7 +169,7 @@ const (
 	// InterruptedReplyNotice 回放"被中断的助手回复"时加在正文前的标记。
 	// 为什么必须标:中断时写进历史的是**残缺**内容,不标注模型会把它当成完整发言
 	// (接着半句话继续说、或以为已经回答过而不再补充)。
-	// 压缩/蒸馏侧的 recordLabel 已有 "assistant(被中断)" 语义,装配侧必须补齐同一语义。
+	// 压缩/蒸馏侧的 recordLabel 已有 "assistant(被中断)" 语义,装配侧必须补齐同一语义
 	InterruptedReplyNotice = "[该轮回复被用户中断,以下为中断前已产出的不完整内容]"
 
 	// TurnToolUnfinishedResult 工具"已发起但没拿到结果"时写进历史与 t_turn_tool 的占位正文。
@@ -204,9 +178,7 @@ const (
 	TurnToolUnfinishedResult = `{"status":"unfinished","note":"tool call started but was interrupted before returning a result"}`
 )
 
-// 对应 data/ddl_sqlite3.sql 的 t_session / t_turn / t_turn_tool 三张表。
-// 设计:会话内容写入 memory_{yyyyMMddHHmmss}.md,t_session.chat_data 只保存该文件名,
-// 文件目录由 session_id 推导为 <exeDir>/cclaw/chat_history/<session_id>/。
+// 写历史消息的文件metadata,文件目录由 session_id 推导为 <exeDir>/cclaw/chat_history/<session_id>
 const (
 	ChatMemoryDirName    = "chat_history" // 会话历史文件根目录名(与 AgentBootstrapDir 同级)。
 	ChatMemoryFilePrefix = "memory_"      // 历史文件名前缀:memory_{yyyyMMddHHmmss}.md
