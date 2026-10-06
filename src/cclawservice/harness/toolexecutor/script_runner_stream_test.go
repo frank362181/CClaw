@@ -2,7 +2,7 @@
 * ScriptRunner 流式执行单元测试(本地临时脚本,无网络依赖)
 **/
 
-package execbox
+package toolexecutor
 
 import (
 	"context"

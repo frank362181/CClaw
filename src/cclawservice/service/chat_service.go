@@ -30,10 +30,10 @@ import (
 	"my.favorite/cclawservice/harness/api/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
-	"my.favorite/cclawservice/harness/execbox"
 	"my.favorite/cclawservice/harness/knowledge"
 	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/harness/tool"
+	"my.favorite/cclawservice/harness/toolexecutor"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/cclawservice/request"
@@ -684,7 +684,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 			// 工具执行中被中断时,"这次调用发生过"仍会留在历史与 t_turn_tool
 			toolIdx := recorder.Start(call.Function.Name, callTime)
 
-			result, err := execbox.RunScript(ctx, scriptFile, call.Function.Arguments)
+			result, err := toolexecutor.RunScript(ctx, scriptFile, call.Function.Arguments)
 
 			respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 			result = toolResultForRecord(result, err)
@@ -748,7 +748,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 			callID string
 			arg    string
 			script string // 脚本绝对路径(派发前解析好)
-			err    error  // 脚本解析失败的原因:非 nil 时不进 execbox(空串只会 Stat 失败),直接按执行失败收尾
+			err    error  // 脚本解析失败的原因:非 nil 时不进 toolexecutor(空串只会 Stat 失败),直接按执行失败收尾
 		}
 		runs := make([]toolRunItem, len(calls))
 		for k, call := range calls {
@@ -814,7 +814,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 				// 执行具体的工具(run.script 已在派发前解析为绝对路径)
 				res, err := pCommon.BlankString, run.err
 				if run.err == nil {
-					res, err = execbox.RunScriptStream(ctx, run.script, run.arg, func(line string) {
+					res, err = toolexecutor.RunScriptStream(ctx, run.script, run.arg, func(line string) {
 						lastOut.Store(pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().NanoTimestamp)
 						// json串不需要输出到UI界面上
 						if pCommon.LooksLikeJson(line) {

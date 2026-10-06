@@ -72,8 +72,8 @@ func GetPromptRepository() *PromptRepository {
 }
 
 // LoadAgentBootstrap 加载并缓存一个工作区的启动文档。只是加载agent的工作区
-// 当工作区未变化(指纹相同)时直接复用缓存,避免重复读盘。
-// 单个文档缺失/失败不阻断整个工作区的加载。
+// 当工作区未变化(指纹相同)时直接复用缓存,避免重复读盘
+// 单个文档缺失/失败不阻断整个工作区的加载
 func (repo *PromptRepository) LoadAgentBootstrap(agent dataobject.TAgent) error {
 	agentBootstrapRoot, ok := hCommon.BuildAgentBootstrapRoot(agent)
 	if !ok {

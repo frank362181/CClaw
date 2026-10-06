@@ -1,9 +1,9 @@
 /**
-* ScriptRunner 护栏策略单元测试(白盒,package execbox):
+* ScriptRunner 护栏策略单元测试(白盒,package toolexecutor):
 * 默认策略与安全常量一致;自定义策略超时生效。
 **/
 
-package execbox
+package toolexecutor
 
 import (
 	"context"

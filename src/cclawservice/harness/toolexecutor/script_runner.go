@@ -10,7 +10,7 @@
 * 不使用 shell;内置超时与输出上限,防止脚本挂起/洪泛打爆内存。
 **/
 
-package execbox
+package toolexecutor
 
 import (
 	"bufio"
