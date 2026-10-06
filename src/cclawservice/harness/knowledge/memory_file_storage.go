@@ -50,7 +50,7 @@
 *     判定为需要压缩(压缩后文件头部的旧记录即可被摘要取代)。
 **/
 
-package mstorage
+package knowledge
 
 import (
 	"errors"

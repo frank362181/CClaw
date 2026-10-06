@@ -212,7 +212,7 @@ func ActivePlainRecords(records []MemoryRecord) []MemoryRecord {
 // ActiveSummaries 返回**仍然生效**的摘要记录(按序号升序)。
 //
 // 取代判定:某条更晚的摘要的 covers 区间包含了本条摘要自己的记录序号。
-// 正常情况下不会发生 —— 普通压缩的 covers 区间刻意不含任何摘要记录序号(见 mstorage.compactionRun);
+// 正常情况下不会发生 —— 普通压缩的 covers 区间刻意不含任何摘要记录序号(见 knowledge.compactionRun);
 // 只有"合并摘要"刻意把被合并的摘要记录序号纳入区间时,才会发生取代。
 func ActiveSummaries(records []MemoryRecord) []MemoryRecord {
 	summaries := SummariesOf(records)

@@ -12,7 +12,7 @@
 * 必须串行,统一由 ctxmgr.GetSessionLocks() 按 sessionId 加锁保护。
 **/
 
-package mstorage
+package knowledge
 
 import (
 	"context"
@@ -408,7 +408,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 	}
 
 	// 压缩模式来源:t_agent.compaction_mode —— 0=default(整体摘要) / 1=safeguard(分块+保全),
-	// 常量与名称见 dataobject.CompactionMode*,模式差异集中在 mstorage/compressor.go。
+	// 常量与名称见 dataobject.CompactionMode*,模式差异集中在 knowledge/compressor.go。
 	from, to, mode := maintenanceReq.Assembled.DroppedFrom, maintenanceReq.Assembled.DroppedTo, agent.CompactionMode
 
 	// 获得一个维护routine，避免无限次获取打满LLM

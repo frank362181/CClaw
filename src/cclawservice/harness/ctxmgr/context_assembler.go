@@ -2,7 +2,7 @@
 * 上下文读回装配
 *
 * 职责:把"系统提示 + 历史记忆(文件记录) + 本轮用户消息"装配成一次 LLM 调用所需的完整消息序列,
-* 并在模型上下文窗口内做预算裁剪。它是"读回"的唯一入口,与 mstorage 的写入端一一对应。
+* 并在模型上下文窗口内做预算裁剪。它是"读回"的唯一入口,与 knowledge 的写入端一一对应。
 *
 * 装配形态(与写入端记录类型的映射):
 *
@@ -23,7 +23,7 @@
 *     它是独立旋钮,不影响工具循环(FitMessages 不会被它限制);
 *   - 历史预算是硬上限:算不下就不带历史(请求仍然合法:system + 本轮用户消息),
 *     不会为了多带历史把请求顶出模型窗口;
-*   - 被裁掉的记录区间会回传给调用方,作为"需要压缩"的判据(压缩由 mstorage 落盘为新摘要记录)。
+*   - 被裁掉的记录区间会回传给调用方,作为"需要压缩"的判据(压缩由 knowledge 落盘为新摘要记录)。
 **/
 
 package ctxmgr
@@ -953,7 +953,7 @@ func buildHistoryItems(records []hCommon.MemoryRecord, toolMaxRunes int) []histo
 
 	for _, rec := range records {
 		switch rec.RecordType {
-		case hCommon.HistoryRecordTypeUser: //mstorage.HistoryRecordUser:
+		case hCommon.HistoryRecordTypeUser: //knowledge.HistoryRecordUser:
 			// 上一条用户消息之前残留的工具记录(异常结构)不再挂到新问题上
 			flush(nil, rec.Index)
 			if strings.TrimSpace(rec.Content) == "" {
@@ -961,9 +961,9 @@ func buildHistoryItems(records []hCommon.MemoryRecord, toolMaxRunes int) []histo
 			}
 			items = append(items, historyItem{index: rec.Index, minIndex: rec.Index, records: 1,
 				msg: llmproto.ChatMessage{Role: hCommon.RoleUser, Content: rec.Content}})
-		case hCommon.HistoryRecordTypeTool: //mstorage.HistoryRecordTool:
+		case hCommon.HistoryRecordTypeTool: //knowledge.HistoryRecordTool:
 			pending = append(pending, rec)
-		case hCommon.HistoryRecordTypeAssistant: //mstorage.HistoryRecordAssistant:
+		case hCommon.HistoryRecordTypeAssistant: //knowledge.HistoryRecordAssistant:
 			// 空助手消息(模型只输出思考内容、或内容被安全策略拦下)不回放:
 			content := strings.TrimSpace(rec.Content)
 			if content == "" {

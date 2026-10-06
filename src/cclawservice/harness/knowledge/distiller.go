@@ -12,7 +12,7 @@
 * **不得写入个人隐私与用户个人信息**(提示词里有硬约束)。个人画像属于 USER.md。
 **/
 
-package mstorage
+package knowledge
 
 import (
 	"fmt"

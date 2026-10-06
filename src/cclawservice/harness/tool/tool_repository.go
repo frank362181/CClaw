@@ -61,12 +61,7 @@ type FunctionBundle struct {
 	Slots       []SkillSlot       // 技能级元数据(意图门 + SOP 注入的输入)
 }
 
-// Activate 根据本轮用户问题判定“哪些技能相关”(意图门)。
-//
-// 规则(宽进严出:宁可少强制,不可乱强制):
-//   - 声明了 trigger-keywords 的技能:问题(不区分大小写,子串)命中任一关键词 → hit;
-//     否则 miss —— miss 时**抑制**它的 force-call(不再把整轮首轮变成必须调工具)。
-//   - 未声明的技能:legacy —— 保持旧行为(允许 force),但不注入正文(无法判定相关性)。
+// Activate 根据本轮用户问题判定“哪些技能相关”(意图门)
 func (b FunctionBundle) Activate(question string) Activation {
 	act := Activation{}
 	q := strings.ToLower(strings.TrimSpace(question))

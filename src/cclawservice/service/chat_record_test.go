@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	cCommon "my.favorite/cclawservice/common"
-	"my.favorite/cclawservice/harness/mstorage"
+	"my.favorite/cclawservice/harness/knowledge"
 	"my.favorite/cclawservice/request"
 )
 
@@ -29,18 +29,18 @@ func TestNoteRecordNotAvailable(t *testing.T) {
 
 	// 2. 归属冲突:必须下发 not_recorded 提示
 	code, msg = "", ""
-	svc.noteRecordNotAvailable(chatReq, capture, mstorage.ErrSessionOwnershipConflict)
+	svc.noteRecordNotAvailable(chatReq, capture, knowledge.ErrSessionOwnershipConflict)
 	if code != cCommon.ChatNoticeNotRecorded || msg != cCommon.ConstChatNoticeNotRecordedMsg {
 		t.Fatalf("归属冲突必须下发 not_recorded 提示, got code=%q msg=%q", code, msg)
 	}
 
 	// 3. 包装后的错误同样要被识别(errors.Is 语义)
 	code = ""
-	svc.noteRecordNotAvailable(chatReq, capture, fmt.Errorf("begin: %w", mstorage.ErrSessionOwnershipConflict))
+	svc.noteRecordNotAvailable(chatReq, capture, fmt.Errorf("begin: %w", knowledge.ErrSessionOwnershipConflict))
 	if code != cCommon.ChatNoticeNotRecorded {
 		t.Fatalf("包装错误应被识别为归属冲突, got code=%q", code)
 	}
 
 	// 4. 同步接口没有 notice 通道:不得 panic(此时只落错误日志)
-	svc.noteRecordNotAvailable(chatReq, nil, mstorage.ErrSessionOwnershipConflict)
+	svc.noteRecordNotAvailable(chatReq, nil, knowledge.ErrSessionOwnershipConflict)
 }

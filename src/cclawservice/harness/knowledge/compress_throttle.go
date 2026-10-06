@@ -14,7 +14,7 @@
 *   - 只跳过"压缩尝试"本身,不影响裁剪与对话:这仍是一条旁路增强。
 **/
 
-package mstorage
+package knowledge
 
 import (
 	"sort"

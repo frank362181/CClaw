@@ -5,7 +5,7 @@
 * 顺序错了不会报错,只会静默地让蒸馏看不到已被压缩的原文(见 steps 的注释)。
 **/
 
-package mstorage
+package knowledge
 
 import (
 	hCommon "my.favorite/cclawservice/harness/common"

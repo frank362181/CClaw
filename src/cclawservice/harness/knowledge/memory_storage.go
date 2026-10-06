@@ -4,7 +4,7 @@
 *	md 文件
 **/
 
-package mstorage
+package knowledge
 
 import (
 	"my.favorite/cclawservice/harness/common"

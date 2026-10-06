@@ -10,7 +10,7 @@
 *  2. **幂等**。压缩前先确认目标区间尚未被已有摘要覆盖;同一会话的压缩串行化(专用锁键)。
 **/
 
-package mstorage
+package knowledge
 
 import (
 	"context"

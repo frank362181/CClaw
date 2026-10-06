@@ -1,4 +1,4 @@
-package mstorage
+package knowledge
 
 import (
 	"testing"
