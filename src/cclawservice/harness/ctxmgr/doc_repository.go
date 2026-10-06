@@ -55,6 +55,7 @@ type PromptRepository struct {
 	// skillCache 已解析的 SKILL.md 文档缓存:key = SKILL.md 绝对路径。
 	skillCache map[string]hCommon.SkillDocument
 
+	//agent 的启动文件prompt,即system prompt
 	promptMap map[string]*agentPrompt
 }
 
