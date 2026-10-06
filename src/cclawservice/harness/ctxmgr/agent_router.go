@@ -207,11 +207,10 @@ func (r *AgentRouter) classifyByLLM(ctx context.Context, comCode string, agents 
 		candidates = append(candidates, hCommon.ClassificationAgent{
 			AgentId:   agent.AgentId,
 			AgentName: agent.AgentName,
-			Label:     r.classifyLabel(*agent),
+			Label:     r.getAgentSummary(*agent),
 		})
 	}
 
-	//content, _, err := r.llmClient.Complete(classifyCtx, provider, harness.BuildClassifySystemPrompt(candidates), reqMsg, r.llmMaxTokens)
 	content, _, err := classifyAgent(classifyCtx, provider, BuildClassifySystemPrompt(candidates), reqMsg, r.llmMaxTokens)
 	if err != nil {
 		logging.LogDebugF("agent router: runtime classify skipped, err:%s", err.Error())
@@ -260,32 +259,33 @@ func (r *AgentRouter) resolveRoutingProvider(comCode string) (dataobject.TLlm, b
 	return firstAvailableProvider(providers)
 }
 
-// classifyLabel 解析某 Agent 在路由意图判断中使用的"简介"。
-// 优先级:工作区 AGENTS.md 的 front matter summary > 数据库 description > Agent 名称。
-// AGENTS.md 缺失/无摘要/读取失败时静默降级,不影响路由可用性。
-func (r *AgentRouter) classifyLabel(agent dataobject.TAgent) string {
-	if label := r.agentDocSummary(agent); label != "" {
-		return label
+// 获取agent的summary,优先级:AGENTS.md中front matter中的summary > 数据库中的description > 名称
+func (r *AgentRouter) getAgentSummary(agent dataobject.TAgent) string {
+	agentDocRepo := GetAgentDocRepository()
+	if err := agentDocRepo.LoadAgentBootstrap(agent); err != nil {
+		return common.BlankString
 	}
-	if desc := strings.TrimSpace(agent.Description); desc != "" {
-		return desc
-	}
-	return strings.TrimSpace(agent.AgentName)
-}
 
-// agentDocSummary 读取 agent 工作区 AGENTS.md 的 front matter summary。
-// 复用 PromptRepository 的指纹缓存(文件未变零读盘);读取失败或缺少摘要返回空串。
-func (r *AgentRouter) agentDocSummary(agent dataobject.TAgent) string {
-	promptRepo := GetPromptRepository()
-	if err := promptRepo.LoadAgentBootstrap(agent); err != nil {
-		return ""
-	}
-	for _, doc := range promptRepo.GetAgentDocuments(agent.AgentId) {
+	summary := common.BlankString
+	for _, doc := range agentDocRepo.GetAgentDocuments(agent.AgentId) {
 		if doc.Kind == hCommon.AgentDocAgent {
-			return strings.TrimSpace(doc.FrontMatter.Summary)
+			summary = strings.TrimSpace(doc.FrontMatter.Summary)
+			break
 		}
 	}
-	return ""
+
+	if summary != common.BlankString {
+		return summary
+	}
+
+	// 数据库中定义的description
+	summary = strings.TrimSpace(agent.Description)
+	if summary != common.BlankString {
+		return summary
+	}
+
+	//兜底:名称
+	return strings.TrimSpace(agent.AgentName)
 }
 
 // findAvailableProvider 按 providerId 查找可用(未删除、未禁用)的 Provider。

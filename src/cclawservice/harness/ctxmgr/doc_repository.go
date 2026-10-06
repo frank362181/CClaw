@@ -1,15 +1,15 @@
 /**
-* Agent 启动文档与 Skill 元数据的文件仓库，对应每个agent
+* Agent对应的所有的启动文件,SKILLS.md,系统工具对应的.json等文件的仓库
 * 本系统支持多个agent在线
 *
 * 职责:
 *   1. 从 agent 的工作区根目录读取 AGENTS.md(agent.md)/SOUL.md(soul.md)/TOOLS.md(tools.md)
 *   2. 读取 SKILL.md 并解析其 YAML Front Matter(元数据与正文)——
 *      **SKILL.md 的唯一读盘 + 唯一 YAML 解析入口**(工具层只消费 LoadSkills 的产物)
-*   3. 内存缓存 + 指纹(文件大小/修改时间)判定,避免重复读盘
+*	3. 读取系统工具对应的.json文件
+*   4. 内存缓存 + 指纹(文件大小/修改时间)判定,避免重复读盘
 *      (启动文档按工作区指纹、技能文档按单文件指纹;技能文档与 agent 无关,全仓库只缓存一份)
 *
-* 与 AgentRepository 保持一致:common.GetSingleton 单例 + common.SafeList 线程安全缓存。
 **/
 
 package ctxmgr
@@ -28,8 +28,8 @@ import (
 	"my.favorite/platformutility/logging"
 )
 
-// 表示一个agent的prompt DOCUMENT缓存
-type agentPrompt struct {
+// 表示一个agent对应的所有 系统DOCUMENT 缓存,一般表示启动文件
+type agentSystemDocument struct {
 	agentId            string
 	agentBootstrapRoot string
 
@@ -42,11 +42,11 @@ type agentPrompt struct {
 // maxSkillDocCacheEntries 技能文档缓存条目上限,超过则整体清空(防陈旧条目无限累积)
 const maxSkillDocCacheEntries = 256
 
-// PromptRepository 负责从文件系统加载并缓存 prompt 相关的文档
+// AgentDocumentRepository 负责从文件系统加载并缓存 prompt 相关的文档
 //
 // 并发约定:mu 只保护 map/列表的读改;磁盘 IO(路径解析/stat/读文件/YAML 解析)**一律在锁外**,
 // 只把“取快照”与“回写新条目”两段极短操作放进锁内 —— 否则一个慢盘或大文件会阻塞所有 agent。
-type PromptRepository struct {
+type AgentDocumentRepository struct {
 	mu sync.RWMutex
 
 	// 系统工具schema缓存文档
@@ -56,26 +56,26 @@ type PromptRepository struct {
 	skillCache map[string]hCommon.SkillDocument
 
 	//agent 的启动文件prompt,即system prompt
-	promptMap map[string]*agentPrompt
+	agentBootstrapDocuments map[string]*agentSystemDocument
 }
 
-var promptRepository = pCommon.GetSingleton(func() *PromptRepository {
-	return &PromptRepository{
-		promptMap:             make(map[string]*agentPrompt),
-		skillCache:            make(map[string]hCommon.SkillDocument),
-		systemToolSchemaCache: make(map[string]hCommon.SystemToolSchemaDocument),
+var agentDocRepository = pCommon.GetSingleton(func() *AgentDocumentRepository {
+	return &AgentDocumentRepository{
+		agentBootstrapDocuments: make(map[string]*agentSystemDocument),
+		skillCache:              make(map[string]hCommon.SkillDocument),
+		systemToolSchemaCache:   make(map[string]hCommon.SystemToolSchemaDocument),
 	}
 }).Instance()
 
-// GetPromptRepository 返回全局唯一的 prompt 仓库实例
-func GetPromptRepository() *PromptRepository {
-	return promptRepository
+// GetAgentDocRepository 返回全局唯一的 prompt 仓库实例
+func GetAgentDocRepository() *AgentDocumentRepository {
+	return agentDocRepository
 }
 
 // LoadAgentBootstrap 加载并缓存一个工作区的启动文档。只是加载agent的工作区
 // 当工作区未变化(指纹相同)时直接复用缓存,避免重复读盘
 // 单个文档缺失/失败不阻断整个工作区的加载
-func (repo *PromptRepository) LoadAgentBootstrap(agent dataobject.TAgent) error {
+func (repo *AgentDocumentRepository) LoadAgentBootstrap(agent dataobject.TAgent) error {
 	agentBootstrapRoot, ok := hCommon.BuildAgentBootstrapRoot(agent)
 	if !ok {
 		return exception.ParameterEmptyErrorEx("prompt repo: workspace root is unavailable")
@@ -89,20 +89,20 @@ func (repo *PromptRepository) LoadAgentBootstrap(agent dataobject.TAgent) error 
 		fileNames = append(fileNames, item.Name)
 	}
 
-	prompt := repo.promptMap[agent.AgentId]
-	if prompt != nil {
+	bootstrapDocument := repo.agentBootstrapDocuments[agent.AgentId]
+	if bootstrapDocument != nil {
 		// 判断是否修改过 *.md 文件
-		if prompt.agentBootstrapRoot == agentBootstrapRoot &&
-			prompt.loadedFingerprint == pCommon.ComputeFilesFingerprint(agentBootstrapRoot, fileNames) {
+		if bootstrapDocument.agentBootstrapRoot == agentBootstrapRoot &&
+			bootstrapDocument.loadedFingerprint == pCommon.ComputeFilesFingerprint(agentBootstrapRoot, fileNames) {
 			return nil // 未变化,直接复用缓存
 		}
 
 		// *.md文件已经被修改过
-		prompt.documents.Clear()
-		prompt.agentBootstrapRoot = agentBootstrapRoot
+		bootstrapDocument.documents.Clear()
+		bootstrapDocument.agentBootstrapRoot = agentBootstrapRoot
 	} else {
 		//初次加载
-		prompt = &agentPrompt{
+		bootstrapDocument = &agentSystemDocument{
 			agentId:            agent.AgentId,
 			agentBootstrapRoot: agentBootstrapRoot,
 			documents:          pCommon.NewSafeList[hCommon.AgentDocument](),
@@ -117,17 +117,17 @@ func (repo *PromptRepository) LoadAgentBootstrap(agent dataobject.TAgent) error 
 			continue
 		}
 		if ok {
-			prompt.documents.Append(*doc)
+			bootstrapDocument.documents.Append(*doc)
 		}
 	}
 
-	prompt.loadedFingerprint = pCommon.ComputeFilesFingerprint(agentBootstrapRoot, fileNames)
-	repo.promptMap[agent.AgentId] = prompt
+	bootstrapDocument.loadedFingerprint = pCommon.ComputeFilesFingerprint(agentBootstrapRoot, fileNames)
+	repo.agentBootstrapDocuments[agent.AgentId] = bootstrapDocument
 	return nil
 }
 
 // LoadSystemTools 将系统工具的schema 加载进来,从数据库中的配置加载而来
-func (repo *PromptRepository) LoadSystemTools(tools []dataobject.TTool) observatory.SkillLoadReport {
+func (repo *AgentDocumentRepository) LoadSystemTools(tools []dataobject.TTool) observatory.SkillLoadReport {
 	observer := observatory.NewObserver(len(tools))
 	if len(tools) == 0 {
 		return observer
@@ -230,7 +230,7 @@ func (repo *PromptRepository) LoadSystemTools(tools []dataobject.TTool) observat
 //
 // 这是 SKILL.md 的**唯一读盘 + 唯一 YAML 解析入口**:工具层只消费返回文档的 FrontMatter,
 // prompt 层只消费目录与正文 —— 都不再自己读文件。
-func (repo *PromptRepository) LoadSkills(skillFiles []string) ([]hCommon.SkillDocument, observatory.SkillLoadReport) {
+func (repo *AgentDocumentRepository) LoadSkills(skillFiles []string) ([]hCommon.SkillDocument, observatory.SkillLoadReport) {
 	report := observatory.NewObserver(len(skillFiles))
 	if len(skillFiles) == 0 {
 		return nil, report
@@ -312,7 +312,7 @@ func (repo *PromptRepository) LoadSkills(skillFiles []string) ([]hCommon.SkillDo
 }
 
 // GetAgentDocuments 返回全部启动文档的副本
-func (repo *PromptRepository) GetAgentDocuments(agentId string) []hCommon.AgentDocument {
+func (repo *AgentDocumentRepository) GetAgentDocuments(agentId string) []hCommon.AgentDocument {
 	agentId = strings.TrimSpace(agentId)
 	if len(agentId) == 0 {
 		return nil
@@ -322,7 +322,7 @@ func (repo *PromptRepository) GetAgentDocuments(agentId string) []hCommon.AgentD
 	repo.mu.RLock()
 	defer repo.mu.RUnlock()
 
-	prompt := repo.promptMap[agentId]
+	prompt := repo.agentBootstrapDocuments[agentId]
 	if prompt == nil {
 		return nil
 	}
@@ -337,7 +337,7 @@ func (repo *PromptRepository) GetAgentDocuments(agentId string) []hCommon.AgentD
 	return out
 }
 
-func (repo *PromptRepository) GetSystemToolSchemaDocument(allowedList, disallowedList []string) ([]hCommon.SystemToolSchemaDocument, error) {
+func (repo *AgentDocumentRepository) GetSystemToolSchemaDocument(allowedList, disallowedList []string) ([]hCommon.SystemToolSchemaDocument, error) {
 	var visibleList []string
 
 	repo.mu.RLock()
@@ -374,11 +374,11 @@ func (repo *PromptRepository) GetSystemToolSchemaDocument(allowedList, disallowe
 }
 
 // Destroy 释放仓库持有的全部缓存
-func (repo *PromptRepository) Destroy() {
+func (repo *AgentDocumentRepository) Destroy() {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 
-	for _, item := range repo.promptMap {
+	for _, item := range repo.agentBootstrapDocuments {
 		if item == nil {
 			continue
 		}
@@ -392,7 +392,7 @@ func (repo *PromptRepository) Destroy() {
 
 	repo.skillCache = nil
 	repo.systemToolSchemaCache = nil
-	repo.promptMap = nil
+	repo.agentBootstrapDocuments = nil
 }
 
 // ======================================= private methods =====================================
@@ -401,7 +401,7 @@ func (repo *PromptRepository) Destroy() {
 //   - ok=true 且 doc.Missing=false:文档存在
 //   - ok=true 且 doc.Missing=true:必需文件缺失,content 为空,由组装层注入 [MISSING] 标记
 //   - ok=false:可选文件缺失,直接省略
-func (repo *PromptRepository) readAgentDocumentLocked(kind hCommon.AgentDocumentKind, workspaceRoot, fileName string, required bool) (*hCommon.AgentDocument, bool, error) {
+func (repo *AgentDocumentRepository) readAgentDocumentLocked(kind hCommon.AgentDocumentKind, workspaceRoot, fileName string, required bool) (*hCommon.AgentDocument, bool, error) {
 	filePath, err := hCommon.ResolveStartupPath(workspaceRoot, fileName)
 	if err != nil {
 		return nil, false, err
@@ -441,7 +441,7 @@ func (repo *PromptRepository) readAgentDocumentLocked(kind hCommon.AgentDocument
 }
 
 // cacheSkillLocked 写入技能解析缓存(调用方需持有 repo.mu)
-func (repo *PromptRepository) cacheSkillLocked(doc hCommon.SkillDocument) {
+func (repo *AgentDocumentRepository) cacheSkillLocked(doc hCommon.SkillDocument) {
 	if len(repo.skillCache) >= maxSkillDocCacheEntries {
 		repo.skillCache = make(map[string]hCommon.SkillDocument) // 满则整体重置,防陈旧条目无限累积
 	}

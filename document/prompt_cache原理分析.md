@@ -158,6 +158,32 @@ CtxGuard是部署在Agent与大模型服务商之间的透明方向代理网关�
 
 TELOS的设计目标"prompt agent context"---它作为一个缓存感知网关，在代理到上游的段上重构请求，让共享前缀从缓存中读取，而不改变prompt的语义。这意味着Agent应用可以继续使用自己习惯的promt格式，由TELOS负责在请求中适配不同厂商的缓存协议。
 
+## 3. prompt的布局
+
+​	每次对LLM的API的调用实际上是无副作用的API调用，Agent端到LLM的请求所带的消息，即为prompt，每次请求都由[system (启动文档 + 目录 + SOP + 固定尾巴 + 历史摘要)] + [历史（append-only）] + [本轮 user]等三部分构成。每次向LLM请求的提示词，是要消耗大量的token，这将直接决定了成本的大小。为了尽可能降低token的消耗，对prompt的核心设计是对prompt的缓存的机制利用。将prompt分为"static section"和"dynamic section"两部分，中间以SYSTEM_PROMPT_DYNAMIC_BOUNDARY标记加以分隔。
+
+​	静态段一般将系统启动文件中的内容，如基础规则、工具基础指南、用户身份等内容放在static section中，而将当前用户任务、当前时间、当前工作目录等动态内容放入到dynamic section中，且dynamic section则按需计算。
+
+​	这么设计的目的是充分利用LLM的prompt cache机制，LLM厂家对于prompt cache不管是前缀匹配还是全局匹配。如果将随时变化的当前时间放入到static section中，则当前时间后面的内容将会全部失效，不会命中prompt cache。当前系统prompt的布局如下描述所示：
+
+┌─ system（字节稳定，跨轮/跨会话可复用）────────────────────────────┐
+│ AGENTS → SOUL → IDENTITY → USER → TOOLS → BOOTSTRAP              │
+│ MEMORY.md【人工区】        ← 人维护，几乎不变                      │
+│ Available Skills → Available Tools                                										 │
+│ 输出语言 → 工具调用纪律     ← 常量，必须进稳定前缀                  								│
+└────────────────────────────────────────────────
+[ 历史（append-only，越大越要保住） ]
+┌─ 本轮尾部（随轮/低频变化─────────────────────────────┐
+│ 历史摘要（压缩时变）                                              │
+│ MEMORY.md【自动区】（蒸馏时变）                                   │
+│ 本轮命中的 Skill SOP（gate 变）                                   │
+│ Bootstrap Context Notice                                          │
+│ 当前时间                                                          │
+│ 本轮用户消息                                                      │
+└───────────────────────────────────────────┘
+
+
+
 
 
 

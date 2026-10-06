@@ -54,7 +54,7 @@ type ServiceMain struct {
 	// agents related
 	defaultAgentConfigHelper *config.ConfigurationHelper
 	agentRepo                *repo.AgentRepository
-	promptRepo               *ctxmgr.PromptRepository
+	agentDocRepo             *ctxmgr.AgentDocumentRepository
 	startupFileRepo          *repo.AgentFileRepository
 
 	// 并发闸:流式(SSE)在飞连接数、全局聊天在飞请求数(各自上限在 Init 按 ini 配置)
@@ -296,8 +296,8 @@ func (m *ServiceMain) Destroy() {
 		m.agentRepo.Destroy()
 	}
 
-	if m.promptRepo != nil {
-		m.promptRepo.Destroy()
+	if m.agentDocRepo != nil {
+		m.agentDocRepo.Destroy()
 	}
 
 	if m.startupFileRepo != nil {
@@ -347,21 +347,21 @@ func (m *ServiceMain) loadAgentConfigurations() error {
 	agents := m.agentRepo.LoadAllAgents(int64(ttlSec))
 
 	// 4. warm up the prompt repository with the default workspace (best-effort)
-	if m.promptRepo == nil {
-		m.promptRepo = ctxmgr.GetPromptRepository()
+	if m.agentDocRepo == nil {
+		m.agentDocRepo = ctxmgr.GetAgentDocRepository()
 	}
 	if m.startupFileRepo == nil {
 		m.startupFileRepo = repo.GetAgentFileRepository()
 	}
 	for _, agent := range agents {
-		if err := m.promptRepo.LoadAgentBootstrap(agent); err != nil {
+		if err := m.agentDocRepo.LoadAgentBootstrap(agent); err != nil {
 			logging.LogWarnF("warm up default workspace error:%s", err.Error())
 		}
 	}
 
 	// 5.warm up the system tools when startup
 	systemTools := m.agentRepo.GetSystemTools()
-	_ = m.promptRepo.LoadSystemTools(systemTools)
+	_ = m.agentDocRepo.LoadSystemTools(systemTools)
 
 	return nil
 }

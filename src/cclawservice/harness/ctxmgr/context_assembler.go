@@ -49,6 +49,9 @@ const (
 	historyToolBlockClose = "</工具结果>"
 	historySummaryTitle   = "## 历史摘要"
 
+	currentTimeBlockOpen  = "<当前时间>"
+	currentTimeBlockClose = "</当前时间>"
+
 	// 渲染分隔符:最终拼接与预算记账**共用同一组常量**,否则"记账"与"实际"会再次漂移。
 	// (都是 ASCII,所以 len() 即 rune 数)
 	sectionTitlePrefix = "## "
@@ -63,7 +66,38 @@ type historyItem struct {
 	msg      llmproto.ChatMessage
 }
 
-// ============================= block for building chat message ================================
+// =========================== block for building prompt =================================
+
+// BuildClassifySystemPrompt 构建用来通过用户问题的意图询问LLM返回合适Agent的 prompt
+// 简介优先使用各 Agent 工作区 AGENTS.md 的摘要(已由调用方解析进 ClassifyAgent.Label)
+func BuildClassifySystemPrompt(agents []hCommon.ClassificationAgent) string {
+	var sb strings.Builder
+	sb.WriteString("你是一个智能体路由器。请根据用户的问题,从下面的智能体列表中选择最合适的一个。\n")
+	sb.WriteString("智能体列表(格式: 编号|名称|简介):\n")
+	for _, a := range agents {
+		label := strings.TrimSpace(a.Label)
+		if label == "" {
+			label = strings.TrimSpace(a.AgentName)
+		}
+		_, _ = fmt.Fprintf(&sb, "- %s|%s|%s\n", a.AgentId, a.AgentName, label)
+	}
+	sb.WriteString("只回答最合适的智能体编号(如 agent_001),不要输出任何其他内容;如果不确定,回答 default。")
+	return sb.String()
+}
+
+// BuildSystemPromptWithSkills 用**已解析**的技能文档组装 system prompt(技能侧不再读盘)
+func BuildSystemPromptWithSkills(agent dataobject.TAgent, skills []hCommon.SkillDocument, scope hCommon.BootstrapScope,
+	activeSkillFiles []string, tools []hCommon.ToolPromptItem) (*hCommon.SystemPrompt, error) {
+
+	// 加载并缓存 agent 启动文件(文件fingerprint未变化则直接命中缓存)
+	if err := GetAgentDocRepository().LoadAgentBootstrap(agent); err != nil {
+		return nil, err
+	}
+
+	return assembleSystemPrompt(agent, scope, activeSkillFiles, skills, tools)
+}
+
+// ============================= block for building chat message & request ================================
 
 // BuildSimpleChatMessage 以system/user 文本构建简单的prompt
 func BuildSimpleChatMessage(sysMsg, userMsg string) []llmproto.ChatMessage {
@@ -91,8 +125,6 @@ func BuildToolCallWithContentMessage(content string, calls []llmproto.ToolCall) 
 func BuildToolResultMessage(toolCallID, content string) llmproto.ChatMessage {
 	return llmproto.ChatMessage{Role: hCommon.RoleTool, ToolCallID: toolCallID, Content: content}
 }
-
-// =========================== block for building for request ===========================
 
 func BuildChatCompletionRequestWithString(llmProvider dataobject.TLlm, sysMsg string, userMsg string, maxTokens int, stream bool) llmproto.ChatCompletionRequest {
 	messages := BuildSimpleChatMessage(sysMsg, userMsg)
@@ -199,40 +231,6 @@ func DegradeChatRequest(req *llmproto.ChatCompletionRequest, err error) bool {
 	return true
 }
 
-// =========================== block for building prompt =================================
-
-// BuildSystemPromptWithSkills 用**已解析**的技能文档组装 system prompt(技能侧不再读盘)。
-//
-// tools 必须是**本轮实际下发的工具**派生的清单项(tool.FunctionBundle.PromptItems):
-// system prompt 里的工具清单与请求体 tools 必须同源,否则会重新出现"模型宣称某工具本轮
-// 未注册/可见"那类事故(详见 hCommon.ToolPromptItem 的注释)。
-func BuildSystemPromptWithSkills(agent dataobject.TAgent, skills []hCommon.SkillDocument, scope hCommon.BootstrapScope,
-	activeSkillFiles []string, tools []hCommon.ToolPromptItem) (*hCommon.SystemPrompt, error) {
-	// 加载并缓存 agent 启动文件(文件fingerprint未变化则直接命中缓存)
-	if err := GetPromptRepository().LoadAgentBootstrap(agent); err != nil {
-		return nil, err
-	}
-
-	return assembleSystemPrompt(agent, scope, activeSkillFiles, skills, tools)
-}
-
-// BuildClassifySystemPrompt 构建用来通过用户问题的意图询问LLM返回合适Agent的 prompt。
-// 简介优先使用各 Agent 工作区 AGENTS.md 的摘要(已由调用方解析进 ClassifyAgent.Label)。
-func BuildClassifySystemPrompt(agents []hCommon.ClassificationAgent) string {
-	var sb strings.Builder
-	sb.WriteString("你是一个智能体路由器。请根据用户的问题,从下面的智能体列表中选择最合适的一个。\n")
-	sb.WriteString("智能体列表(格式: 编号|名称|简介):\n")
-	for _, a := range agents {
-		label := strings.TrimSpace(a.Label)
-		if label == "" {
-			label = strings.TrimSpace(a.AgentName)
-		}
-		_, _ = fmt.Fprintf(&sb, "- %s|%s|%s\n", a.AgentId, a.AgentName, label)
-	}
-	sb.WriteString("只回答最合适的智能体编号(如 agent_001),不要输出任何其他内容;如果不确定,回答 default。")
-	return sb.String()
-}
-
 // AssembleContext 装配完整上下文。
 //   - systemPrompt:   已构建好的系统提示(含 AGENTS/SOUL/... 各段)
 //   - records:        历史文件读回的记录(按序号升序)
@@ -246,8 +244,8 @@ func AssembleContext(systemPrompt string, records []hCommon.MemoryRecord, curren
 	summaryText, active := splitSummaryAndActive(records)
 	items := buildHistoryItems(active, policy.ToolReplayMaxRunes)
 
-	system := buildSystemMessage(systemPrompt, summaryText, historySummaryTitle) //composeSystemMessage(systemPrompt, summaryText)
-	current := llmproto.ChatMessage{Role: hCommon.RoleUser, Content: currentUserMsg}
+	systemAndHisSummary := appendHistorySummary(systemPrompt, summaryText, historySummaryTitle)
+	current := llmproto.ChatMessage{Role: hCommon.RoleUser, Content: decorateCurrentUserMessage(currentUserMsg)}
 
 	result := hCommon.AssembleResult{Summary: summaryText}
 
@@ -258,11 +256,11 @@ func AssembleContext(systemPrompt string, records []hCommon.MemoryRecord, curren
 	if policy.ContextWindow <= 0 {
 		kept = items
 	} else {
-		result.SystemReserveTokens = security.CalcSystemReservedTokens(policy, system)
+		result.SystemReserveTokens = security.CalcSystemReservedTokens(policy, systemAndHisSummary)
 		result.ToolsReserveTokens = policy.ToolsReserveTokens
 		result.HistoryCapTokens = policy.MaxHistoryTokens
 
-		budget := security.Budget(policy, system) - security.EstimateInputTokens([]llmproto.ChatMessage{current})
+		budget := security.Budget(policy, systemAndHisSummary) - security.EstimateInputTokens([]llmproto.ChatMessage{current})
 		if budget < 0 {
 			budget = 0 // 窗口不够:本轮不带历史(而不是强行塞入历史把请求顶出窗口)
 		}
@@ -293,7 +291,7 @@ func AssembleContext(systemPrompt string, records []hCommon.MemoryRecord, curren
 	}
 
 	messages := make([]llmproto.ChatMessage, 0, len(kept)+2)
-	messages = append(messages, system)
+	messages = append(messages, systemAndHisSummary)
 	for _, item := range kept {
 		messages = append(messages, item.msg)
 	}
@@ -360,11 +358,25 @@ func FitMessages(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, p
 
 // ================================ private functions & methods for the module==============================
 
+// 将"当前时间"锚点并入 **本轮用户消息**
+func decorateCurrentUserMessage(userMsg string) string {
+	var sb strings.Builder
+
+	sb.WriteString(currentTimeBlockOpen)
+	sb.WriteString("\n")
+	sb.WriteString(pCommon.FormatCurrentTime())
+	sb.WriteString("\n")
+	sb.WriteString(currentTimeBlockClose)
+	sb.WriteString("\n\n")
+	sb.WriteString(userMsg)
+	return sb.String()
+}
+
 // buildSystemMessage 组装 system 消息:系统提示 + 历史摘要(摘要追加在系统提示之后)。
 //
 // 摘要刻意不单独成一条 system 消息:部分供应商对"非首条 system"支持不一致,
 // 折进同一条 system 消息可以完全规避该类兼容问题。
-func buildSystemMessage(systemPrompt, summaryText, summaryTitle string) llmproto.ChatMessage {
+func appendHistorySummary(systemPrompt, summaryText, summaryTitle string) llmproto.ChatMessage {
 	content := strings.TrimSpace(systemPrompt)
 	if summary := strings.TrimSpace(summaryText); summary != pCommon.BlankString {
 		content = strings.TrimSpace(content + "\n\n" + summaryTitle + "\n" + summary)
@@ -373,23 +385,19 @@ func buildSystemMessage(systemPrompt, summaryText, summaryTitle string) llmproto
 	return llmproto.ChatMessage{Role: hCommon.RoleSystem, Content: content}
 }
 
-// assembleSystemPrompt 组装 system prompt 的全部 section。
-//
-// skills:本轮技能文档(prompt repo 已解析的产物)。不再按 agentId 从仓库取 —— 技能文档与
-// agent 无关,同一份 SKILL.md 对所有 agent 都是同一份数据,调用方传入即可避免"按 agent 存"
-// 带来的每轮重读盘与跨 agent 残留问题。
-//
-// tools:本轮实际下发的工具清单项(由 tool.FunctionBundle.PromptItems 派生)。
-//
 // section 顺序(前面稳定、后面易变,便于上游前缀缓存):
 //
 //	启动文档(AGENTS→…→MEMORY) → Available Skills → Available Tools → Skill: <name> → 截断提示
 //
-// 末尾再追加固定尾巴(当前时间 / 输出语言),它们不受预算截断。
+// 末尾追加**常量**固定尾巴(输出语言 / 工具调用纪律),不受预算截断。
+//
+// 【前缀缓存契约】system 必须字节稳定:上游按最长公共前缀命中,一个字节不同,
+// 其后的整段历史与本轮消息都会失效。故"当前时间"不在 system 内(随本轮 user 注入),
+// 常量段排在所有易变内容之后。
 func assembleSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope, activeSkillFiles []string,
 	skills []hCommon.SkillDocument, tools []hCommon.ToolPromptItem) (*hCommon.SystemPrompt, error) {
 	workspaceRoot, _ := hCommon.BuildAgentBootstrapRoot(agent)
-	documents := GetPromptRepository().GetAgentDocuments(agent.AgentId) // 已按规范顺序加载
+	documents := GetAgentDocRepository().GetAgentDocuments(agent.AgentId) // 已按规范顺序加载
 
 	var missing, truncated []string
 	sections := make([]hCommon.SystemPromptSection, 0, len(documents)+1)
@@ -519,24 +527,10 @@ func assembleSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope,
 		sb.WriteString(sections[i].Content)
 	}
 
-	// ---- 当前时间(固定尾巴:始终生效、不受预算截断) ----
-	// 为什么必须有:此前 system prompt 里没有任何"今天几号"的锚点,而历史回放不带时间语义,
-	// 模型无法判断上下文里的日期是否过期 —— 实测出现过把两天前的天气结果当"今天"复述的问题。
-	// 放在最末(而非开头)是为保住前缀缓存:动态内容越靠后,被它失效化的前缀越短。
-	sb.WriteString("\n\n## 当前时间\n\n")
-	sb.WriteString(pCommon.FormatCurrentTime())
-
 	// ---- 输出语言要求(面向中文用户的统一约定;追加在提示词最末,始终生效、不受预算截断) ----
 	sb.WriteString("\n\n## 输出语言\n\n")
 	sb.WriteString("你面向中文用户。所有呈现给用户的输出一律使用简体中文:包括正式回复、思考/推理过程、" +
 		"进度说明与工具调用说明;除非用户明确要求使用其他语言。")
-
-	// ---- 工具调用纪律(固定尾巴:与 `Available Tools` 段互补) ----
-	//
-	// `Available Tools` 回答"本轮有哪些工具",这里回答"不许怎么做";放固定尾而不并进那一段的
-	// 原因(无工具时仍要生效 + 跨 agent 只写一次)见 toolUsagePolicy 的注释。
-	sb.WriteString("\n\n## 工具调用\n\n")
-	sb.WriteString(toolUsagePolicy)
 
 	return &hCommon.SystemPrompt{
 		AgentId:   agent.AgentId,
