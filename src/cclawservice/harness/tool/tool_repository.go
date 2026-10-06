@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"my.favorite/cclawservice/harness/api/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
-	"my.favorite/cclawservice/llmproto"
 	"my.favorite/platformutility/common"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging"

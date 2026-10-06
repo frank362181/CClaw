@@ -32,7 +32,7 @@ import (
 	"fmt"
 	"strings"
 
-	"my.favorite/cclawservice/llmproto"
+	"my.favorite/cclawservice/harness/api/llmproto"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging"
 )

@@ -34,9 +34,9 @@ import (
 	"sort"
 	"strings"
 
+	"my.favorite/cclawservice/harness/api/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/security"
-	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
 	pCommon "my.favorite/platformutility/common"

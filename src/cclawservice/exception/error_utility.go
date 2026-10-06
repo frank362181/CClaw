@@ -8,7 +8,7 @@ import (
 	"errors"
 
 	"my.favorite/cclawservice/apperr"
-	"my.favorite/cclawservice/llmproto"
+	"my.favorite/cclawservice/harness/api/llmproto"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
 )

@@ -27,11 +27,11 @@ import (
 	"time"
 
 	myException "my.favorite/cclawservice/exception"
+	"my.favorite/cclawservice/harness/api/llmproto"
 	"my.favorite/cclawservice/harness/common"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/harness/tool"
-	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
 	pCommon "my.favorite/platformutility/common"

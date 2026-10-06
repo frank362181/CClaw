@@ -10,8 +10,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"my.favorite/cclawservice/harness/api/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
-	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 )

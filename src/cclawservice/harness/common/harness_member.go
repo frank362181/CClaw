@@ -8,7 +8,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"my.favorite/cclawservice/llmproto"
+	"my.favorite/cclawservice/harness/api/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 )
 

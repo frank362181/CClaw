@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v2"
-	"my.favorite/cclawservice/llmproto"
+	"my.favorite/cclawservice/harness/api/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"

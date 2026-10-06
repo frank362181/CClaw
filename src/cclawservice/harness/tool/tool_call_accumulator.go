@@ -13,7 +13,7 @@ package tool
 import (
 	"strings"
 
-	"my.favorite/cclawservice/llmproto"
+	"my.favorite/cclawservice/harness/api/llmproto"
 )
 
 // FunctionCallAccumulator 流式工具调用累积器:按 index 保存调用,并拼接分片的 function.arguments。
