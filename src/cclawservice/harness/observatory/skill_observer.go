@@ -1,6 +1,16 @@
+/*
+* skill文档加载时的观察者
+ */
+
 package observatory
 
 import "my.favorite/platformutility/logging"
+
+// SkillSkipReason 一个被跳过的技能及其原因
+type SkillSkipReason struct {
+	SkillFile string
+	Reason    string
+}
 
 // SkillLoadReport 一次 LoadSkills 的观测结果(命中/重载/跳过 + 原因)
 type SkillLoadReport struct {
@@ -15,13 +25,7 @@ type SkillLoadReport struct {
 	Skipped []SkillSkipReason
 }
 
-// SkillSkipReason 一个被跳过的技能及其原因
-type SkillSkipReason struct {
-	SkillFile string
-	Reason    string
-}
-
-func NewObserver(reqLen int) SkillLoadReport {
+func NewSkillObserver(reqLen int) SkillLoadReport {
 	return SkillLoadReport{
 		Requested: reqLen,
 	}

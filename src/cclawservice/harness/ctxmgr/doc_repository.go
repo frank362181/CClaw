@@ -142,7 +142,7 @@ func (repo *AgentDocumentRepository) LoadAgentBootstrap(agent dataobject.TAgent)
 
 // LoadSystemTools 将系统工具的schema 加载进来,从数据库中的配置加载而来
 func (repo *AgentDocumentRepository) LoadSystemTools(tools []dataobject.TTool) observatory.SkillLoadReport {
-	observer := observatory.NewObserver(len(tools))
+	observer := observatory.NewSkillObserver(len(tools))
 	if len(tools) == 0 {
 		return observer
 	}
@@ -245,7 +245,7 @@ func (repo *AgentDocumentRepository) LoadSystemTools(tools []dataobject.TTool) o
 // 这是 SKILL.md 的**唯一读盘 + 唯一 YAML 解析入口**:工具层只消费返回文档的 FrontMatter,
 // prompt 层只消费目录与正文 —— 都不再自己读文件。
 func (repo *AgentDocumentRepository) LoadSkills(skillFiles []string) ([]hCommon.SkillDocument, observatory.SkillLoadReport) {
-	report := observatory.NewObserver(len(skillFiles))
+	report := observatory.NewSkillObserver(len(skillFiles))
 	if len(skillFiles) == 0 {
 		return nil, report
 	}
