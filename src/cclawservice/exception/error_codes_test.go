@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	"my.favorite/cclawservice/apperr"
-	"my.favorite/cclawservice/llmproto"
+	"my.favorite/cclawservice/harness/api/llmproto"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 

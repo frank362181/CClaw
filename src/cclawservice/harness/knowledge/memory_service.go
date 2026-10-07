@@ -24,6 +24,7 @@ import (
 
 	cCommon "my.favorite/cclawservice/common"
 	hCommon "my.favorite/cclawservice/harness/common"
+	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
@@ -368,7 +369,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 	// 这里按 (窗口 - 维护输出额度 - 系统提示估量) 收窄,**装不下就不排这个动作**,
 	// 并把问题指向配置(面向运维的告警见 security.PolicyWarnings,每 agent 只记一次)。
 	// 窗口未知(ContextWindow<=0)时退化为硬上限,行为与收口前完全一致。
-	budgets := security.CalcMaintenanceBudgets(maintenanceReq.ContextWindow, distillSystemPrompt, compactionSystemPrompt, compactionMergeSystemPrompt)
+	budgets := security.CalcMaintenanceBudgets(maintenanceReq.ContextWindow, hCommon.DistillSystemPrompt, hCommon.CompactionSystemPrompt, hCommon.CompactionMergeSystemPrompt)
 	if needDistill && budgets.DistillBudget <= 0 {
 		logging.LogDebugF("memory service: session=%s distill skipped, the window (%d) leaves no room for a maintenance call",
 			session.SessionId, maintenanceReq.ContextWindow)
@@ -490,7 +491,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 				}
 
 				// 以**重读后**的判定为准:压缩本身也可能把摘要总量推过阈值。
-				if security.SummaryOverBudget(records) {
+				if security.SummaryRecordsOverBudget(records) {
 					if _, err = s.mergeWithBudget(ctx, *session, records, summarizer, budgets.MergeBudget); err != nil {
 						logging.LogWarnF("memory service: merge summaries of %s error:%s", session.SessionId, err.Error())
 					}
@@ -1052,56 +1053,69 @@ func (s *MemoryService) distillWithBudget(ctx context.Context, session dataobjec
 			session.SessionId, backlog)
 	}
 
-	// 已有的长期记忆(自动区 + 迁移期的旧格式小节)一并送入:模型据此输出**更新后的完整列表**
-	oldFacts, _ := existingMemoryFacts(strings.Split(existing, "\n"))
-	prompt := buildDistillUserPrompt(oldFacts, batch, newLines)
+	existingLines := pCommon.SplitStringEx(existing, "\n")
+	oldFacts, _ := existingMemoryFacts(existingLines)
+	legacyOnly := !hasAutoBlock(existingLines)
 
-	text, err := summarize(ctx, distillSystemPrompt, prompt)
+	mode := DistillModeAppend
+	if legacyOnly || distillWriteMode(oldFacts) == DistillModeMerge {
+		mode = DistillModeMerge
+	}
+
+	prompt := ctxmgr.BuildDistillAppendUserPrompt(batch, newLines)
+	if mode == DistillModeMerge {
+		prompt = ctxmgr.BuildDistillUserPrompt(oldFacts, batch, newLines) // 带已有记忆,要求完整列表
+	}
+
+	text, err := summarize(ctx, hCommon.DistillSystemPrompt, prompt)
 	if err != nil {
 		return result, err
 	}
 
 	facts := parseDistilledFacts(text)
-
 	result.Path = path
 	result.CoversFrom, result.CoversTo, result.Backlog = batch[0].Index, batch[len(batch)-1].Index, backlog
 
-	// 模型判定"没有值得长期记住的内容":**只推进水位、保留已有记忆**(不能把旧记忆清空)。
-	// 例外在写入端:文件还是旧格式遗留内容时,模型明确说 NONE 允许清空条目(见 appendFactsToMemoryDoc)。
-	if len(facts) == 0 {
-		if len(oldFacts) == 0 {
-			// 还没有任何长期记忆:不必为"空"创建一个只有注释的文件(它会成为每次请求的噪声),
-			// 也不要推进水位 —— 下一轮再判断一次即可。
-			return result, nil
-		}
-		if written, skipped, updated, removed, migrated, err := appendFactsToMemoryDoc(memoryDocWrite{
-			path: path, facts: oldFacts, sessionId: session.SessionId,
-			fromIndex: result.CoversFrom, toIndex: result.CoversTo,
-			maxChars: hCommon.DistillMemoryDocMaxChars,
-			snapshot: oldFacts, explicitNone: isExplicitNone(text),
-		}); err == nil {
-			result.Facts, result.Skipped, result.Updated, result.Removed, result.Migrated =
-				written, skipped, updated, removed, migrated
-		}
+	// 还没有任何长期记忆且本次无新增:不创建"只有注释"的文件(会成为每次请求的噪声)
+	// 也不推进水位 --- 下一轮再判定一次即可
+	if len(facts) == 0 && len(oldFacts) == 0 {
 		return result, nil
 	}
 
-	written, skipped, updated, removed, migrated, err := appendFactsToMemoryDoc(memoryDocWrite{
+	write := memoryDocWrite{
 		path: path, facts: facts, sessionId: session.SessionId,
 		fromIndex: result.CoversFrom, toIndex: result.CoversTo,
-		maxChars: hCommon.DistillMemoryDocMaxChars,
-		snapshot: oldFacts,
-	})
+		maxChars: hCommon.DistillMemoryDocMaxChars, snapshot: oldFacts,
+	}
+
+	var written []string
+	var skipped, updated, removed, migrated int
+	switch mode {
+	case DistillModeMerge:
+		// 合并模式沿用"完整列表"语义:len(facts) == 0 时以oldFacts回写(保留记忆 + 推进水位)
+		// 迁移模型明确NONE时允许清空条目
+		if len(facts) == 0 {
+			write.facts = oldFacts
+			write.explicitNone = isExplicitNone(text)
+		}
+		written, skipped, updated, removed, migrated, err = appendFactsToMemoryDoc(write)
+	default:
+		written, skipped, updated, removed, migrated, err = appendFactsToAutoRegion(write)
+	}
+
 	if err != nil {
 		return result, err
 	}
-	result.Facts, result.Skipped, result.Updated, result.Removed, result.Migrated = written, skipped, updated, removed, migrated
+
+	result.Facts, result.Skipped, result.Updated, result.Removed, result.Migrated =
+		written, skipped, updated, removed, migrated
 
 	if len(written) > 0 || updated > 0 || removed > 0 || migrated > 0 {
-		logging.LogInfoF("chat memory distill: agent=%s session=%s records=%d-%d facts=%d updated=%d removed=%d migrated=%d skipped=%d backlog=%d",
-			agent.AgentId, session.SessionId, result.CoversFrom, result.CoversTo,
+		logging.LogInfoF("chat memory distill: agent=%s session=%s records=%d-%d mode=%d facts=%d updated=%d removed=%d migrated=%d skipped=%d backlog=%d",
+			agent.AgentId, session.SessionId, result.CoversFrom, result.CoversTo, mode,
 			len(written), updated, removed, migrated, skipped, backlog)
 	}
+
 	return result, nil
 }
 
@@ -1134,7 +1148,7 @@ func (s *MemoryService) mergeAttempt(ctx context.Context, session dataobject.TSe
 		return result, mergeTooLarge, nil
 	}
 
-	text, err := summarize(ctx, compactionMergeSystemPrompt, prompt)
+	text, err := summarize(ctx, hCommon.CompactionMergeSystemPrompt, prompt)
 	if err != nil {
 		return result, mergeNoGain, err
 	}

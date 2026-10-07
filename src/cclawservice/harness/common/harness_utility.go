@@ -47,6 +47,32 @@ func ResolveStartupPath(workspaceRoot, fileName string) (string, error) {
 	return pCommon.SafeJoin(workspaceRoot, filepath.Join(workspaceRoot, fileName))
 }
 
+// NormalNameSet 把"名字列表"归一化为集合:大小写不敏感 + 去首尾空白 + 丢弃空项。
+//
+// 为什么返回 map 而不是切片:调用方只做"是否在名单里"的判断(O(1));
+// 用 nil 区分"未声明名单"(不限制)。
+//
+// 注意:**不得原地修改入参**。入参可能是缓存中的 front matter 切片,
+// 原地做小写化就变成"无锁改写缓存",并发读同一份文档时会数据竞争。
+func NormalNameSet(names []string) map[string]struct{} {
+	if len(names) == 0 {
+		return nil
+	}
+
+	set := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		key := strings.ToLower(strings.TrimSpace(name))
+		if key == "" {
+			continue
+		}
+		set[key] = struct{}{}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return set
+}
+
 // BuildSkillRoot 返回技能根目录 <exeDir>/cclaw/skills。
 // 所有技能都位于该目录之下,一个子目录一个技能(目录名即 t_skill.skill_dir)。
 func BuildSkillRoot() (string, bool) {

@@ -3,7 +3,7 @@ package tool
 import (
 	"testing"
 
-	"my.favorite/cclawservice/llmproto"
+	"my.favorite/cclawservice/harness/api/llmproto"
 )
 
 // TestIntentGateAndToolNamespace 把 2026-09-20 的两次事故固化成断言:

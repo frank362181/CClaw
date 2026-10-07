@@ -133,7 +133,7 @@ func ResultSignatureForNoProgress(result string) string {
 
 func NormalizeResultForProgress(result string) string {
 	s := strings.TrimSpace(result)
-	s = pCommon.TruncateRunes(result, progressMaxResultRunes, pCommon.BlankString)
+	s = pCommon.TruncateRunes(s, progressMaxResultRunes, pCommon.BlankString)
 	s = pCommon.ReplaceStringWithRegexp(s, reUUID, "<uuid>")
 	s = pCommon.ReplaceStringWithRegexp(s, reTimestamp, "<ts>")
 	s = pCommon.ReplaceStringWithRegexp(s, reDateTimeCN, "<ts>")

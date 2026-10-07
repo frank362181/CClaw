@@ -32,11 +32,8 @@ import (
 type agentSystemDocument struct {
 	agentId            string
 	agentBootstrapRoot string
-
-	documents *pCommon.SafeList[hCommon.AgentDocument]
-
-	// 加载时记录的文件指纹,用于判断文件是否发生变化
-	loadedFingerprint string
+	documents          *pCommon.SafeList[hCommon.AgentDocument]
+	loadedFingerprint  string // 加载时记录的文件指纹,用于判断文件是否发生变化
 }
 
 // maxSkillDocCacheEntries 技能文档缓存条目上限,超过则整体清空(防陈旧条目无限累积)
@@ -49,8 +46,7 @@ const maxSkillDocCacheEntries = 256
 type AgentDocumentRepository struct {
 	mu sync.RWMutex
 
-	// 系统工具schema缓存文档
-	systemToolSchemaCache map[string]hCommon.SystemToolSchemaDocument
+	systemToolSchemaCache map[string]hCommon.SystemToolSchemaDocument // 系统工具schema缓存文档
 
 	// skillCache 已解析的 SKILL.md 文档缓存:key = SKILL.md 绝对路径。
 	skillCache map[string]hCommon.SkillDocument
@@ -70,6 +66,24 @@ var agentDocRepository = pCommon.GetSingleton(func() *AgentDocumentRepository {
 // GetAgentDocRepository 返回全局唯一的 prompt 仓库实例
 func GetAgentDocRepository() *AgentDocumentRepository {
 	return agentDocRepository
+}
+
+// BootstrapFingerprint 返回该agent对应的启动文档集合的fingerprint
+// 供"稳定前缀缓存"做失效键:人工改文档/蒸馏改MEMORY.md -> 指纹变化 -> 缓存自然失效
+func (repo *AgentDocumentRepository) BootstrapFingerprint(agentId string) string {
+	agentId = strings.TrimSpace(agentId)
+	if len(agentId) == 0 {
+		return pCommon.BlankString
+	}
+
+	repo.mu.RLock()
+	defer repo.mu.RUnlock()
+
+	if d := repo.agentBootstrapDocuments[agentId]; d != nil {
+		return d.loadedFingerprint
+	}
+
+	return pCommon.BlankString
 }
 
 // LoadAgentBootstrap 加载并缓存一个工作区的启动文档。只是加载agent的工作区

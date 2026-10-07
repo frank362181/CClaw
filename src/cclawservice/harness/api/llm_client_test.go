@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"my.favorite/cclawservice/harness/api/llmproto"
 	"my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/harness/security"
-	"my.favorite/cclawservice/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
 	pCommon "my.favorite/platformutility/common"

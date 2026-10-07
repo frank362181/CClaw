@@ -119,7 +119,7 @@ type TAgent struct {
 	CompactionMode      int `json:"CompactionMode"`      //压缩模式
 	BootstrapTotalChars int `json:"BootstrapTotalChars"` //启动文档注入总上限(rune):0/未配置 → MaxBootstrapTotalChars;负数 → 不限制
 
-	ReverseTokenFloor       int `json:"ReverseTokenFloor"` // 为系统提示(7 个启动文档 + 折叠进 system 的摘要)预留的最小 token 额度;只在该值大于实测系统提示估量时才生效
+	ReverseTokenFloor       int `json:"ReverseTokenFloor"` // 为系统提示(7 个启动文档)预留的最小 token 额度;只在该值大于实测系统提示估量时才生效
 	ReverseTokenFloorTokens int `gorm:"-" json:"ReverseTokenFloorTokens"`
 
 	// MaxHistoryTokens 历史回放上限(tokens):0/未配置 → 用 hCommon.DefaultMaxHistoryTokens;负数 → 不限制。

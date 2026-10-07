@@ -15,7 +15,6 @@ package knowledge
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -23,38 +22,6 @@ import (
 	hCommon "my.favorite/cclawservice/harness/common"
 	pCommon "my.favorite/platformutility/common"
 )
-
-// 压缩提示词
-//
-// 长度上限必须**显式写给模型**:模型自己理解"简明"时,输出长度会随输入一起膨胀,
-// 而 MaxSummaryRunes(落盘截断)与上游 max_tokens 都是硬上限 —— 一旦顶到,摘要会被截断/报错,
-// 整轮压缩白跑(且下一轮还会挑中同一段,形成"永远压不掉"的死循环)。
-var compactionSystemPrompt = fmt.Sprintf("你是对话历史压缩器。你的任务是把给定的历史片段压缩为简明摘要,供后续对话继续使用。\n"+
-	"要求:\n"+
-	"1. 保留事实性信息:用户的目标与偏好、已确认的结论、关键数据(数字、编号、日期)、"+
-	"文件路径与命令、尚未完成的待办事项及其状态;\n"+
-	"2. 删除寒暄、重复表述与无关细节;\n"+
-	"3. 只依据给定内容,不得推测或补造任何信息;不确定的内容标注为“未确认”;\n"+
-	"4. 用第三人称陈述,按时间顺序分条列出,不要输出标题之外的多余格式;\n"+
-	"5. 若片段中有工具调用结果,只保留结论性的数据,不要复述原始输出全文;\n"+
-	"6. 摘要长度不超过 %d 个字符(中文字符按 1 个计),宁可更短。", hCommon.MaxSummaryRunes)
-
-const (
-	compactionUserHeader = "请压缩下面这段历史(记录序号 %d-%d):\n\n"
-
-	// compactionMergeUserHeader 合并摘要时的用户提示:输入是"已有摘要正文"而非原始记录。
-	compactionMergeUserHeader = "请把下面这组历史摘要合并为一条更精炼的摘要(记录序号 %d-%d)。\n" +
-		"它们将被你的输出取代,所以必须覆盖它们**全部**的信息,不得丢失要点:\n\n"
-)
-
-// compactionMergeSystemPrompt 合并摘要专用系统提示(输入是摘要而非原始记录)。
-// 规则编号接在 compactionSystemPrompt 之后(它已经用到 6)。
-var compactionMergeSystemPrompt = compactionSystemPrompt + "\n" +
-	"7. 这次输入本身已经是摘要:你要做的是合并同类项,保留全部事实与结论,只删重复表述。"
-
-// keyTokenPattern 关键信息采样:文件路径、长数字(编号/金额/日期)、带扩展名的文件名。
-// 【safeguard 专属】仅用于保全校验(判断摘要是否丢掉了"不能丢"的信息)。
-var keyTokenPattern = regexp.MustCompile(`(?:[A-Za-z]:)?(?:[\w.\-]+/)+[\w.\-]+|\b\d{4,}\b|\b[\w\-]{2,}\.(?:go|json|md|ini|sql|txt|log|yaml|yml|sh|bat)\b`)
 
 // CompactionResult 压缩结果。
 type CompactionResult struct {
@@ -70,7 +37,7 @@ type CompactionResult struct {
 // buildMergeUserPrompt 渲染"合并摘要"的输入(输入是摘要正文,不是原始记录)。
 func buildMergeUserPrompt(set []hCommon.MemoryRecord, from, to int) string {
 	var sb strings.Builder
-	_, _ = fmt.Fprintf(&sb, compactionMergeUserHeader, from, to)
+	_, _ = fmt.Fprintf(&sb, hCommon.CompactionMergeUserHeader, from, to)
 	for i := range set {
 		_, _ = fmt.Fprintf(&sb, "[%d] (covers %d-%d): %s\n", set[i].Index, set[i].CoversFrom, set[i].CoversTo,
 			pCommon.TruncateRunes(strings.TrimSpace(set[i].Content), hCommon.MemoryExcerptRunes, hCommon.TruncatedMarker))
@@ -309,7 +276,7 @@ func mergeCandidateUpTo(records []hCommon.MemoryRecord, maxSize int) ([]hCommon.
 
 // summarizeOnce —— default 模式:整段区间一次摘要。
 func summarizeOnce(ctx context.Context, targets []hCommon.MemoryRecord, from, to int, summarize hCommon.Summarizer) (string, error) {
-	return summarize(ctx, compactionSystemPrompt, buildCompactionUserPrompt(targets, from, to))
+	return summarize(ctx, hCommon.CompactionSystemPrompt, buildCompactionUserPrompt(targets, from, to))
 }
 
 // summarizeInBlocks —— safeguard 模式:分块摘要后拼接。
@@ -317,7 +284,7 @@ func summarizeOnce(ctx context.Context, targets []hCommon.MemoryRecord, from, to
 func summarizeInBlocks(ctx context.Context, targets []hCommon.MemoryRecord, summarize hCommon.Summarizer) (string, error) {
 	if len(targets) <= hCommon.SafeguardBlockRecords {
 		chunk := targets
-		return summarize(ctx, compactionSystemPrompt, buildCompactionUserPrompt(chunk, chunk[0].Index, chunk[len(chunk)-1].Index))
+		return summarize(ctx, hCommon.CompactionSystemPrompt, buildCompactionUserPrompt(chunk, chunk[0].Index, chunk[len(chunk)-1].Index))
 	}
 
 	var blocks []string
@@ -327,7 +294,7 @@ func summarizeInBlocks(ctx context.Context, targets []hCommon.MemoryRecord, summ
 			end = len(targets)
 		}
 		chunk := targets[start:end]
-		text, err := summarize(ctx, compactionSystemPrompt, buildCompactionUserPrompt(chunk, chunk[0].Index, chunk[len(chunk)-1].Index))
+		text, err := summarize(ctx, hCommon.CompactionSystemPrompt, buildCompactionUserPrompt(chunk, chunk[0].Index, chunk[len(chunk)-1].Index))
 		if err != nil {
 			return pCommon.BlankString, err
 		}
@@ -369,7 +336,7 @@ func promptLineRunes(rec hCommon.MemoryRecord) int {
 // 这里**不再丢弃任何记录** —— 丢弃记录会让 covers 变成对"未经摘要的原文"的过度承诺。
 func buildCompactionUserPrompt(records []hCommon.MemoryRecord, from, to int) string {
 	var sb strings.Builder
-	_, _ = fmt.Fprintf(&sb, compactionUserHeader, from, to)
+	_, _ = fmt.Fprintf(&sb, hCommon.CompactionUserHeader, from, to)
 	for i := range records {
 		sb.WriteString(compactionPromptLine(records[i]))
 	}
@@ -410,7 +377,7 @@ func keyRetentionRatio(records []hCommon.MemoryRecord, summary string) (float64,
 	seen := make(map[string]bool)
 	var keys []string
 	for _, rec := range records {
-		for _, key := range keyTokenPattern.FindAllString(rec.Content, -1) {
+		for _, key := range hCommon.KeyTokenPattern.FindAllString(rec.Content, -1) {
 			if seen[key] {
 				continue
 			}

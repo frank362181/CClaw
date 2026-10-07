@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"my.favorite/cclawservice/llmproto"
+	"my.favorite/cclawservice/harness/api/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 )
 

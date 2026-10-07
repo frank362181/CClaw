@@ -207,18 +207,13 @@ func EstimateInputTokens(messages []llmproto.ChatMessage) int {
 	return int(float64(total) * (1 + estimateSafetyFactor))
 }
 
-// SummaryOverBudget 生效摘要的**注入体积**是否已超上限。
-// 体积口径统一在 hCommon.SummariesRunes(== SummaryTextOf(records) 的 rune 数),
-// 与 SummaryTextOverBudget 对同一段文本给出同一结论。
-func SummaryOverBudget(records []hCommon.MemoryRecord) bool {
+// SummaryRecordsOverBudget 生效摘要的**注入体积**是否已超上限
+func SummaryRecordsOverBudget(records []hCommon.MemoryRecord) bool {
 	return hCommon.SummariesRunes(records) > hCommon.MaxSummaryTotalRunes
 }
 
-// SummaryTextOverBudget 将要注入 system 的摘要正文是否已超总量上限。
-//
-// 与 SummaryOverBudget(records) **同源**:后者按记录渲染出同一段文本再比
-// (hCommon.SummaryTextOf),因此"触发判定(注入文本)"与"动作门(文件记录)"得到同一个结论。
-func SummaryTextOverBudget(summary string) bool {
+// SummaryOverBudget 将要注入 system 的摘要正文是否已超总量上限
+func SummaryOverBudget(summary string) bool {
 	return hCommon.TextRunes(summary) > hCommon.MaxSummaryTotalRunes
 }
 
@@ -246,7 +241,7 @@ func NeedCompact(result hCommon.AssembleResult, droppedRunes int) bool {
 		return false
 	}
 
-	return !SummaryTextOverBudget(result.Summary)
+	return !SummaryOverBudget(result.Summary)
 }
 
 func NewDistillPressure(closing bool) DistillPressure {
@@ -296,7 +291,7 @@ func NeedDistill(turns int, p DistillPressure) bool {
 //
 // 预算耗尽时不做合并 —— 摘要再小也装不下历史,问题在配置(与压缩被禁同一个理由)。
 func NeedMerge(result hCommon.AssembleResult) bool {
-	return !result.BudgetExhausted && SummaryTextOverBudget(result.Summary)
+	return !result.BudgetExhausted && SummaryOverBudget(result.Summary)
 }
 
 // CharsToTokens 把 rune 数按估算规则换算为 token(最坏情况按 CJK 计)。
@@ -324,14 +319,7 @@ func TokensToChars(tokens int) int {
 	return int(float64(tokens) * CharsPerCJKToken)
 }
 
-// CalcSystemReservedTokens 计算系统提示应占用的 token 额度。
-//
-// 取 max(系统提示实际估量, policy.SystemPromptReserveTokens):
-//   - 预留额度的语义是"为启动文档 + 折叠进 system 的摘要留出的最小空间",
-//     即它约束的是**历史可以占多少**,而不是"历史至少保留多少";
-//   - 系统提示实际更大时以实际为准(不能因为预留小就超窗);
-//   - 它只在"大于实际估量"时才起作用 —— 启动文档大小已由估量覆盖,
-//     这个额度真正兜的是摘要增长(上限 MaxSummaryTotalRunes)。
+// CalcSystemReservedTokens 计算系统提示应占用的 token 额度
 func CalcSystemReservedTokens(policy hCommon.ContextPolicy, sysMsg llmproto.ChatMessage) int {
 	reversed := EstimateInputTokens([]llmproto.ChatMessage{sysMsg})
 	if policy.SystemPromptReserveTokens > reversed {

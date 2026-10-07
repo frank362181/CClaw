@@ -180,8 +180,8 @@ func (sf *SecurityFilter) antiTampering(r *basic.RequestInfo, c *gin.Context) (b
 	tempStr2 := r.Nonce
 
 	signature := hash.HmacSha256(sf.signKey, bodyString+tempStr1+tempStr2)
-	if strings.EqualFold(signature, r.Signature) {
-		//此时要放行
+	if hash.HmacEqual([]byte(strings.ToLower(signature)), []byte(strings.ToLower(r.Signature))) {
+		// 此时要放行
 		return false, nil
 	}
 

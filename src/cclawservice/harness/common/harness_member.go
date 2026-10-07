@@ -7,9 +7,11 @@ package common
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"my.favorite/cclawservice/harness/api/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
+	pCommon "my.favorite/platformutility/common"
 )
 
 // StartupDocSpec 启动文档清单中的一项(文件名/种类/是否必需)
@@ -155,4 +157,55 @@ func NormalizeContextPolicy(policy ContextPolicy) ContextPolicy {
 	}
 
 	return policy
+}
+
+const (
+	historySummaryBlockOpen  = "<历史摘要>"
+	historySummaryBlockClose = "</历史摘要>"
+
+	memoryBlockOpen  = "<长期记忆>"
+	memoryBlockClose = "</长期记忆>"
+
+	skillBlockOpen  = "<技能规程>"
+	skillBlockClose = "</技能规程>"
+
+	currentTimeBlockOpen  = "<当前时间>"
+	currentTimeBlockClose = "</当前时间>"
+)
+
+// TurnContext 表示每轮注入的 **动态上下文** (放在历史之后、本轮用户消息之前)
+// 后置的原因:前缀缓存按最长公共前缀命中 -- system 里只要有一个字符变化即缓存作废
+// 顺序固化(越后越易变):历史摘要 -> 长期记忆(蒸馏时变) -> 当前时间(每轮变) -> 用户原话(必变)
+type TurnContext struct {
+	Summary string //折叠进本轮的"历史摘要"文本
+	Memory  string // 长期记忆的自动区,MEMORY.md蒸馏产物
+	Skills  string // 本轮命中的技能的正文(规程)
+	Now     string //当前时间锚点文本
+}
+
+// Render 渲染为本轮用户消息的前置块 + 用户原话
+func (tc *TurnContext) Render(userMsg string) string {
+	var sb strings.Builder
+
+	// 定义一个临时函数
+	writeBlock := func(open, close, body string) {
+		if body = strings.TrimSpace(body); body == pCommon.BlankString {
+			return
+		}
+
+		sb.WriteString(open)
+		sb.WriteString("\n")
+		sb.WriteString(body)
+		sb.WriteString("\n")
+		sb.WriteString(close)
+		sb.WriteString("\n\n")
+	}
+
+	writeBlock(historySummaryBlockOpen, historySummaryBlockClose, tc.Summary)
+	writeBlock(memoryBlockOpen, memoryBlockClose, tc.Memory)
+	writeBlock(skillBlockOpen, skillBlockClose, tc.Skills)
+	writeBlock(currentTimeBlockOpen, currentTimeBlockClose, tc.Now)
+
+	sb.WriteString(userMsg)
+	return sb.String()
 }

@@ -20,7 +20,7 @@ func TestAssembleContextMarksInterruptedReply(t *testing.T) {
 		{Index: 4, RecordType: hCommon.HistoryRecordTypeAssistant, Content: "材料已分析完毕"},
 	}
 
-	result := AssembleContext("sys", records, "继续吗", hCommon.ContextPolicy{})
+	result := AssembleContext("sys", records, "继续吗", hCommon.TurnContext{}, hCommon.ContextPolicy{})
 
 	interruptedReplayed, normalReplayed := false, false
 	for _, msg := range result.Messages {

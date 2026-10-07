@@ -609,15 +609,17 @@ func (s *ChatService) collectSkillDirs(agent dataobject.TAgent) []string {
 
 // assembleChatContext 读回会话历史并装配成本轮完整的 LLM 消息序列。
 //
-// 装配形态:[system(系统提示 + 历史摘要)] + [历史消息(预算内)] + [本轮用户消息]。
+// 装配形态:[system(稳定前缀)] + [历史消息(预算内)] + [本轮用户消息]。
 func (s *ChatService) assembleChatContext(session dataobject.TSession, agent dataobject.TAgent, llmProvider dataobject.TLlm,
 	systemPrompt *hCommon.SystemPrompt, req *request.ChatRequest, toolsReserveTokens int) (hCommon.AssembleResult, []hCommon.MemoryRecord) {
 	policy := hCommon.GetContextPolicy(agent, int(llmProvider.ContextWindow))
 	policy.ToolsReserveTokens = toolsReserveTokens
 
-	systemText := pCommon.BlankString
+	systemText, dynamicMemory, dynamicSkills := pCommon.BlankString, pCommon.BlankString, pCommon.BlankString
 	if systemPrompt != nil {
 		systemText = systemPrompt.Prompt
+		dynamicMemory = systemPrompt.DynamicMemory
+		dynamicSkills = systemPrompt.DynamicSkills
 	}
 
 	records, err := s.memoryService.ReadRecords(session) //读取历史记录
@@ -626,7 +628,13 @@ func (s *ChatService) assembleChatContext(session dataobject.TSession, agent dat
 		records = nil
 	}
 
-	return ctxmgr.AssembleContext(systemText, records, req.ReqMsg, policy), records
+	turn := hCommon.TurnContext{
+		Memory: dynamicMemory,
+		Skills: dynamicSkills,
+		Now:    pCommon.FormatCurrentTime(),
+	}
+
+	return ctxmgr.AssembleContext(systemText, records, req.ReqMsg, turn, policy), records
 }
 
 // completeChat 取回完整回复:function-calling 开启且该 Agent 有可用工具时走工具循环,否则走普通同步调用。

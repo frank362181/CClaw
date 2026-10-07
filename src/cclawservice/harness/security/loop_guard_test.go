@@ -481,7 +481,10 @@ func TestLoopGuard_ThreeToolsCycleStoppedByNoProgress(t *testing.T) {
 
 	for i := 1; i <= 60; i++ {
 		name := fmt.Sprintf("tool_%d", i%3)
-		verdict := g.Check(name, fmt.Sprintf(`{"n":%d}`, i%3), true, fmt.Sprintf("out-%d", i%3))
+		// 结果串必须长于 progressMinResultRunes(8 rune):更短的结果被当作 ACK,
+		// 由 ResultSignatureForNoProgress 判为"不参与无进展判定",否则本用例测不到规则 6。
+		result := fmt.Sprintf("tool-result-%d", i%3)
+		verdict := g.Check(name, fmt.Sprintf(`{"n":%d}`, i%3), true, result)
 
 		if i < wantHitAt {
 			if verdict.Hit() {

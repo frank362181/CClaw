@@ -257,6 +257,19 @@ func SplitString(dottedKey string) []string {
 	return segments
 }
 
+func SplitStringEx(input string, splitStr string) []string {
+	var segments []string
+	if strings.TrimSpace(input) == "" {
+		segments = append(segments, input)
+	} else {
+		lines := strings.Split(input, splitStr)
+		segments = make([]string, 0, len(lines))
+		segments = append(segments, lines...)
+	}
+
+	return segments
+}
+
 func SplitKeyWords(keywords string) []string {
 	return strings.FieldsFunc(keywords, func(r rune) bool {
 		return r == ',' || r == '，'

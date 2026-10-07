@@ -54,6 +54,12 @@ type SystemPrompt struct {
 	Prompt    string                `json:"prompt"`
 	Length    int                   `json:"length"` // prompt 的字节长度
 
+	//注入到prompt的动态区
+	DynamicMemory string `json:"dynamicMemory,omitempty"`
+
+	// 本轮命中的技能正文(规程),与DynamicMemory一样后置 注入
+	DynamicSkills string `json:"dynamicSkills,omitempty"`
+
 	Missing   []string `json:"missing,omitempty"`   // 必需启动文档缺失的清单
 	Truncated []string `json:"truncated,omitempty"` // 因预算被截断的文件清单
 }

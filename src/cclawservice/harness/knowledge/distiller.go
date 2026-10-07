@@ -17,7 +17,6 @@ package knowledge
 import (
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -29,48 +28,11 @@ import (
 	"my.favorite/platformutility/logging"
 )
 
-// 蒸馏提示词
-//
-// 作用域约束是本提示词最重要的部分:MEMORY.md 是 (租户, agent) 级共享文件,
-// 会被注入该 agent 的每一次请求。写错范围等于把用户个人信息变成所有人的 system prompt。
+type DistillMode int //蒸馏写回模式
 const (
-	distillSystemPrompt = "你负责从对话中提炼**长期有效**的记忆,写入智能体的长期记忆文件。\n" +
-		"这个文件由同一单位下的**所有人共用**,并会出现在后续每一次对话的开头,所以:\n" +
-		"\n" +
-		"【只提炼单位/智能体级、跨会话仍然成立的信息】例如:\n" +
-		"- 项目与系统的稳定事实(目录结构、服务地址、命名与编码规范、字段口径);\n" +
-		"- 业务规则与已确认的结论(为什么这么做、被否决的方案及原因);\n" +
-		"- 本单位的固定约定(交付物格式、存放位置、术语用法);\n" +
-		"- 尚未完成的长期待办。\n" +
-		"\n" +
-		"【绝对不要提炼】\n" +
-		"- 个人隐私与用户个人信息:姓名、称呼、联系方式、账号、个人喜好(喜欢的花/城市/数字)、" +
-		"个人行程与历史查询记录等 —— 这些不属于共享记忆,即使对话里反复出现也不要写;\n" +
-		"- 一次性的内容:本次问答过程、临时计算结果、即时查询结果(天气/汇率/股价等)、寒暄。\n" +
-		"\n" +
-		"输出要求:\n" +
-		"1. 每条一行,以 \"- \" 开头,一句话说清,不写理由过程;\n" +
-		"2. 不得推测或补造,只依据给定对话;\n" +
-		"3. 没有任何值得长期记住的内容时,只输出 " + hCommon.DistillNoneMark + "。"
-
-	distillUserHeader = "以下是一段对话记录(记录序号 %d-%d),请提炼长期记忆:\n\n"
-
-	// distillExistingHeader 已有长期记忆的表头。
-	distillExistingHeader = "【已有长期记忆】(上次蒸馏得到的当前状态)\n"
-
-	// distillRewriteNotice 收尾指令:要求输出"更新后的完整列表",并**显式给出长度上限**
-	// (模型自己猜"简明"时容易写到上限之外,而超长输出会被 max_tokens 截断 → 整轮作废)。
-	distillRewriteNotice = "请输出**更新后的完整长期记忆列表**(每行一条,以 \"- \" 开头):" +
-		"保留仍然有效的条目;把被取代的改写为新说法;删掉已失效、已完成或一次性的条目;" +
-		"合并重复表述;总计不超过 %d 条,每条不超过 %d 个字符;" +
-		"没有任何需要记住的内容时只输出 %s。\n"
+	DistillModeAppend DistillMode = iota //追加模式,只输出 **本次新增**事实,旧条目原样保留(默认,便宜且不抖动)
+	DistillModeMerge                     // 合并:模型输出 **更新后的完整列表**,可清理失效/重复项(低频)
 )
-
-// distillSectionHeaderPattern 匹配小节标题 "## 2026-09-13 01:02:03 | session xxx"(可带 "| records a-b")
-var distillSectionHeaderPattern = regexp.MustCompile(`(?m)^## \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}.*$`)
-
-// distillRecordsRangePattern 匹配小节标题里的记录区间(旧小节没有这一段)。
-var distillRecordsRangePattern = regexp.MustCompile(`\| records (\d+)-(\d+)\s*$`)
 
 // DistillResult 蒸馏结果。
 type DistillResult struct {
@@ -104,7 +66,7 @@ func memoryDocPath(agent dataobject.TAgent) (string, bool) {
 // 第二种(带区间)才能推进 watermark;旧小节返回 from=to=0。
 func parseDistillHeader(line string) (sessionId string, from, to int, ok bool) {
 	line = strings.TrimSpace(line)
-	if !distillSectionHeaderPattern.MatchString(line) {
+	if !hCommon.MemorySectionHeaderPattern.MatchString(line) {
 		return pCommon.BlankString, 0, 0, false
 	}
 
@@ -126,7 +88,7 @@ func parseDistillHeader(line string) (sessionId string, from, to int, ok bool) {
 		return pCommon.BlankString, 0, 0, false
 	}
 
-	if m := distillRecordsRangePattern.FindStringSubmatch(line); m != nil {
+	if m := hCommon.DistillRecordsRangePattern.FindStringSubmatch(line); m != nil {
 		_, _ = fmt.Sscanf(m[1], "%d", &from)
 		_, _ = fmt.Sscanf(m[2], "%d", &to)
 	}
@@ -145,7 +107,7 @@ func lastDistilledIndex(content, sessionId string) int {
 	lines := strings.Split(content, "\n")
 	last := 0
 	if begin, _, ok := autoBlockBounds(lines); ok {
-		if m := distillAutoBeginPattern.FindStringSubmatch(strings.TrimSpace(lines[begin])); m != nil {
+		if m := hCommon.DistillAutoBeginPattern.FindStringSubmatch(strings.TrimSpace(lines[begin])); m != nil {
 			last = parseAutoWatermarks(m[2])[sessionId]
 		}
 	}
@@ -198,33 +160,6 @@ func windowPrefix(records []hCommon.MemoryRecord, budgetChars int) ([]hCommon.Me
 	return batch, lines, len(records) - fit
 }
 
-// buildDistillUserPrompt 拼装蒸馏输入:「已有长期记忆」(可空) + 本次新增对话。
-//
-// batch 必须是 windowPrefix 给出的**连续一段**,newLines 是它渲染好的行:
-// 表头区间、列出的内容、以及模型据此判断的"新增范围"三者必须完全一致。
-func buildDistillUserPrompt(existingMemory []string, batch []hCommon.MemoryRecord, newLines []string) string {
-	if len(batch) == 0 {
-		return pCommon.BlankString
-	}
-
-	var sb strings.Builder
-	if len(existingMemory) > 0 {
-		sb.WriteString(distillExistingHeader)
-		for _, fact := range existingMemory {
-			sb.WriteString(pCommon.ConcatStringWithLineSpace(fact)) //渲染一条事实行
-			sb.WriteString("\n")
-		}
-		sb.WriteString("\n")
-	}
-
-	_, _ = fmt.Fprintf(&sb, distillUserHeader, batch[0].Index, batch[len(batch)-1].Index)
-	for _, line := range newLines {
-		sb.WriteString(line)
-	}
-	_, _ = fmt.Fprintf(&sb, "\n"+distillRewriteNotice, hCommon.DistillMaxMemoryFacts, hCommon.DistillMaxFactRunes, hCommon.DistillNoneMark)
-	return sb.String()
-}
-
 // isExplicitNone 模型是否**明确**判定"没有值得长期记住的内容"。
 //
 // 与"输出不可解析"区分开:parseDistilledFacts 对两者都返回空,但只有明确 NONE 才允许清空
@@ -246,7 +181,7 @@ func hasDurableSignal(records []hCommon.MemoryRecord) bool {
 		}
 		content := records[i].Content
 		// 结构性信号:路径 / 文件名 / 长数字(与压缩的关键信息采样共用同一套模式)
-		if keyTokenPattern.MatchString(content) {
+		if hCommon.KeyTokenPattern.MatchString(content) {
 			return true
 		}
 		for _, token := range distillSignalTokens {
@@ -336,6 +271,74 @@ type memoryDocWrite struct {
 	explicitNone bool     // 模型明确输出 NONE(仅在"旧格式遗留"文件上允许清空条目)
 }
 
+// 将本轮 **新增事实**并入现有列表
+//   - 完全重复(NormalizeFact 相同) -> 跳过
+//   - 同槽位相似(FactSame命中,如取值更新"100001->100002") -> **原地替换**,位置不变
+//   - 其余 -> 追加
+//
+// 旧条目一律保留原样 -- 这是与"整体重写"的关键区别
+func applyNewFacts(oldFacts, newFacts []string) (next []string, skipped, updated int) {
+	next = append([]string(nil), oldFacts...)
+	added := 0
+
+	for _, fact := range newFacts {
+		key := pCommon.NormalizeFact(fact)
+		if key == pCommon.BlankString {
+			skipped++
+			continue
+		}
+
+		if index := pCommon.FactSame(next, fact, hCommon.DistillSimilarFactRatio, hCommon.DistillSimilarFactMinRunes); index >= 0 {
+			if pCommon.NormalizeFact(next[index]) == key {
+				skipped++
+				continue
+			}
+
+			next[index] = fact // 同槽位新说法/新取值:原地替换
+			updated++
+			continue
+		}
+
+		if added >= hCommon.DistillMaxAddFacts || len(next) >= hCommon.DistillMaxMemoryFacts {
+			skipped++ //追加额度/总量已满:留给下一次"合并"模式清理后再收
+			continue
+		}
+
+		next = append(next, fact)
+		added++
+	}
+
+	return next, skipped, updated
+}
+
+// appendFactsToAutoRegin 追加写:在自动记忆区 **末尾追加**本轮新增事实(不做整体重写)
+// 与 appendFactsToMemoryDoc(合并模式)的分工：
+//   - 追加(高频):模型只给新增 - 去重/更新后并入,旧条目保持原样;输入输出都更小、不抖动
+//   - 合并(低频,由DistillWriteMode触发):模型给完整列表,清理失效/重复项、重新编排
+func appendFactsToAutoRegion(req memoryDocWrite) (written []string, skipped, updated, removed, migrated int, err error) {
+	unlock := GetStorageLocks().Lock(hCommon.BuildMemoryDocLockKey(req.path))
+	defer unlock()
+
+	existing, readErr := pCommon.ReadTextIfExists(req.path)
+	if readErr != nil {
+		return nil, 0, 0, 0, 0, readErr
+	}
+
+	lines := pCommon.SplitStringEx(existing, "\n")
+	oldFacts, migrated := existingMemoryFacts(lines)
+
+	next, skipped, updated := applyNewFacts(oldFacts, req.facts)
+
+	//体积由"合并处罚阈值(0.8) > 单批追加上限(8 * 200)"保证不超
+	//这里不再按尾部裁剪(尾部裁剪会丢掉**最新**条目,与追加语义相反)
+	content := replaceAutoMemory(lines, next, req.sessionId, req.toIndex)
+	if err = pCommon.WriteTextAtomically(req.path, content); err != nil {
+		return nil, skipped, updated, 0, migrated, err
+	}
+
+	return next, skipped, updated, 0, migrated, nil
+}
+
 // appendFactsToMemoryDoc 用一个**整体重写**的自动记忆区替换原有的自动内容。
 //
 // 为什么是"重写"而不是"追加 + 满了删最旧":
@@ -343,13 +346,6 @@ type memoryDocWrite struct {
 // 而且删的是**最早写入、往往最长期有效**的事实(语言偏好、单位口径),留下的却是最新的琐事。
 // 现在的语义是:自动区 = 当前有效的长期记忆列表(由模型在上次列表基础上增量更新),
 // 因此体积天然有界、不再需要按最旧裁剪,人工维护区也永远不会被碰到。
-//
-// 两处与"并发/迁移"相关的判定在持锁后重算(不能沿用提示词构建时的快照):
-//   - snapshot 是提示词里给模型看过的旧条目。"被模型丢弃"只能对快照里的条目计数 ——
-//     本轮开始之后另一个会话写入的条目模型根本没看过,按文件当前内容计数会把它们误删;
-//   - 迁移期(区域里只有旧格式小节、还没有自动区定界注释)信任模型的范围判断,
-//     不套用安全阀:范围从"用户偏好"改成"单位/agent 级事实"后,旧条目的**正确结局就是被大面积删除**,
-//     安全阀会让这批越界内容永远钉在共享文件里。
 func appendFactsToMemoryDoc(req memoryDocWrite) (written []string, skipped, updated, removed, migrated int, err error) {
 	unlock := GetStorageLocks().Lock(hCommon.BuildMemoryDocLockKey(req.path))
 	defer unlock()
@@ -505,30 +501,18 @@ func fitFactsBudget(facts []string, maxChars int) []string {
 
 // ============================== 自动记忆区(定界/读写) ==============================
 
-// 自动记忆区用一个 HTML 注释定界,便于人工审阅时一眼看出"这块由系统维护":
-//
-//	<!-- auto-memory:updated=2026-09-15 10:23:45;watermarks=sess-a:120,sess-b:40 -->
-//	- 事实…
-//	<!-- /auto-memory -->
-var distillAutoBeginPattern = regexp.MustCompile(`^<!--\s*auto-memory:updated=([^;]*);watermarks=(.*?)\s*-->$`)
-
-// distillAutoBeginMarkerPrefix 自动区起始注释的前缀(人工审阅与测试用)。
-const distillAutoBeginMarkerPrefix = "<!-- auto-memory:"
-
-const distillAutoEndMarker = "<!-- /auto-memory -->"
-
 // existingMemoryFacts 汇总**自动记忆区**里的条目(含迁移期的旧格式小节)与旧格式小节数。
 //
 // 只取自动区:人工维护区的事实不参与重写 —— 否则模型会把它们再写一份进自动区(重复),
 // "删了多少条"的统计也会牵连人工内容。
 func existingMemoryFacts(lines []string) (facts []string, legacySections int) {
-	start, end, ok := autoRegionBounds(lines)
+	start, end, ok := hCommon.AutoRegionBounds(lines)
 	if !ok {
 		return nil, 0
 	}
 
 	for i := start; i < end; i++ {
-		if distillSectionHeaderPattern.MatchString(strings.TrimSpace(lines[i])) {
+		if hCommon.MemorySectionHeaderPattern.MatchString(strings.TrimSpace(lines[i])) {
 			legacySections++
 			continue
 		}
@@ -559,11 +543,11 @@ func autoBlockBounds(lines []string) (begin, end int, ok bool) {
 	begin, end = -1, -1
 	for i := range lines {
 		trimmed := strings.TrimSpace(lines[i])
-		if begin < 0 && distillAutoBeginPattern.MatchString(trimmed) {
+		if begin < 0 && hCommon.DistillAutoBeginPattern.MatchString(trimmed) {
 			begin = i
 			continue
 		}
-		if begin >= 0 && trimmed == distillAutoEndMarker {
+		if begin >= 0 && trimmed == hCommon.MemoryAutoEndMarker {
 			return begin, i, true
 		}
 	}
@@ -571,6 +555,23 @@ func autoBlockBounds(lines []string) (begin, end int, ok bool) {
 		return begin, len(lines), true // 缺结束标记:按"到文件末尾"容错
 	}
 	return -1, -1, false
+}
+
+func distillWriteMode(oldFacts []string) DistillMode {
+	if len(oldFacts) >= hCommon.DistillMergeTriggerFacts {
+		return DistillModeMerge
+	}
+
+	p := hCommon.DistillMergeTriggerPercent
+	total := 0
+	for _, fact := range oldFacts {
+		total += utf8.RuneCountInString(pCommon.ConcatStringWithLineSpace(fact)) + 1
+	}
+	if total*100 >= hCommon.DistillMemoryDocMaxChars*p {
+		return DistillModeMerge
+	}
+
+	return DistillModeAppend
 }
 
 // replaceAutoMemory 把自动记忆区整体替换为 facts,并把本会话的水印推进到 toIndex。
@@ -582,7 +583,7 @@ func autoBlockBounds(lines []string) (begin, end int, ok bool) {
 func replaceAutoMemory(lines []string, facts []string, sessionId string, toIndex int) string {
 	marks := map[string]int{}
 	if begin, _, ok := autoBlockBounds(lines); ok {
-		if m := distillAutoBeginPattern.FindStringSubmatch(strings.TrimSpace(lines[begin])); m != nil {
+		if m := hCommon.DistillAutoBeginPattern.FindStringSubmatch(strings.TrimSpace(lines[begin])); m != nil {
 			marks = parseAutoWatermarks(m[2])
 		}
 	}
@@ -591,7 +592,7 @@ func replaceAutoMemory(lines []string, facts []string, sessionId string, toIndex
 	}
 
 	block := renderAutoMemoryBlock(facts, marks, len(lines) > 0)
-	start, end, hasRegion := autoRegionBounds(lines)
+	start, end, hasRegion := hCommon.AutoRegionBounds(lines)
 	if hasRegion {
 		// 区域末尾若原本有非空行,替换后补一个空行,保持"小节之间空一行"的排版
 		merged := make([]string, 0, len(lines))
@@ -608,66 +609,6 @@ func replaceAutoMemory(lines []string, facts []string, sessionId string, toIndex
 	}
 	content += strings.Join(block, "\n")
 	return pCommon.NormalizeBlankLine(content)
-}
-
-// autoRegionBounds 返回"自动内容"在文件里占据的连续区域 [start,end)。
-//
-// 定位方式:先找**锚点**(自动区定界注释或旧格式时间戳小节标题),再从锚点向后吃自动行
-// (空行/时间戳标题/定界注释/条目行),遇到其它内容(手写标题、正文)即停。
-//
-// 两项保证:
-//   - 前导空行**不属于区域**:区域从锚点行开始 —— 这样反复重写不会每次吃掉一个空行
-//     (排版能收敛),人工维护区里紧贴自动区的条目行也绝不会被吞进来;
-//   - 向后只吃自动行:人工维护区(手写标题/正文)永远不会被删。
-//
-// 代价是:紧跟在自动区**之后**的裸条目行会被当成自动内容 —— 人工新增内容请写在
-// 自动区**之前**的独立小节里(文件头注释里有说明)。
-func autoRegionBounds(lines []string) (start, end int, ok bool) {
-	anchor := -1
-	for i := range lines {
-		if isAutoAnchor(lines[i]) {
-			anchor = i
-			break
-		}
-	}
-	if anchor < 0 {
-		return -1, -1, false
-	}
-
-	// start 就是锚点行本身:向后不吞前导空行 —— 否则每次重写都会吃掉一个空行,
-	// 排版永远收不了(实测:两次重写后人工区与自动区之间的空行会消失)。
-	start = anchor
-	end = anchor + 1
-	for end < len(lines) && isAutoRegionLine(lines[end]) {
-		end++
-	}
-	return start, end, true
-}
-
-// isAutoAnchor 区域锚点:自动区定界注释 / 旧格式时间戳小节标题。
-func isAutoAnchor(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	return distillAutoBeginPattern.MatchString(trimmed) || distillSectionHeaderPattern.MatchString(trimmed)
-}
-
-// isAutoRegionLine 该行是否属于自动内容(见 autoRegionBounds)。
-func isAutoRegionLine(line string) bool {
-	trimmed := strings.TrimSpace(line)
-
-	if trimmed == pCommon.BlankString {
-		return true
-	}
-	if distillSectionHeaderPattern.MatchString(trimmed) {
-		return true
-	}
-	if distillAutoBeginPattern.MatchString(trimmed) || trimmed == distillAutoEndMarker {
-		return true
-	}
-	if strings.HasPrefix(trimmed, "<!--") || strings.HasPrefix(trimmed, "-->") {
-		return true
-	}
-	_, isFact := parseFactLine(line)
-	return isFact
 }
 
 // hasAutoBlock 文件里是否已有自动区定界注释(即:已被"整体重写"设计接管)。
@@ -697,7 +638,7 @@ func renderAutoMemoryBlock(facts []string, marks map[string]int, useNow bool) []
 	for _, fact := range facts {
 		block = append(block, pCommon.ConcatStringWithLineSpace(fact)) //渲染一条事实行
 	}
-	block = append(block, distillAutoEndMarker)
+	block = append(block, hCommon.MemoryAutoEndMarker)
 	return block
 }
 

@@ -290,7 +290,9 @@ const (
 	DistillSimilarFactRatio    = 0.6
 	DistillSimilarFactMinRunes = 10
 
-	DistillMaxFacts = 8 // 单次蒸馏最多写入的条目数(避免一次会话灌满长期记忆)
+	DistillMaxFacts    = 8 // 单次蒸馏最多写入的条目数(避免一次会话灌满长期记忆)
+	DistillMaxAddFacts = 8 //追加模式下单次最多追加的条目数
+
 	// DistillMaxMemoryFacts 自动记忆区**总计**允许保留的条目数上限。
 	// 与 DistillMaxFacts 的区别:自动区是**整体重写**的"当前状态列表",
 	// 所以这里限制的是列表总长,而 DistillMaxFacts 限制的是单次解析出的条数。
@@ -301,4 +303,7 @@ const (
 	DistillMaxInputChars     = 20000                 // 送入模型的源文本字符上限
 	DistillSectionTimeLayout = "2006-01-02 15:04:05" // 小节标题的时间格式
 	DistillNoneMark          = "NONE"                // 模型判定"没有值得长期记住的内容"时的输出
+
+	DistillMergeTriggerFacts   = 16 // 自动区条目数达到该值时,该用"合并(整体重写)"模式
+	DistillMergeTriggerPercent = 80 // 自动区体积达到 DistillMemoryDocMaxChars时触发合并
 )

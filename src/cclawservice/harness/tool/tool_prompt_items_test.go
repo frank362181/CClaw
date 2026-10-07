@@ -11,8 +11,8 @@ package tool
 import (
 	"testing"
 
+	"my.favorite/cclawservice/harness/api/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
-	"my.favorite/cclawservice/llmproto"
 )
 
 func llmTool(name, desc string) llmproto.Tool {

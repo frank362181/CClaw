@@ -83,8 +83,9 @@ func TestRenderToolsCatalog(t *testing.T) {
 	}
 }
 
-// TestAssembleSystemPromptToolsSection 验证段位与顺序:
-// 工具清单必须被渲染成 "## Available Tools",且排在 Skill 正文之前。
+// TestAssembleSystemPromptToolsSection 验证段位与分工:
+// 工具清单渲染成 "## Available Tools" 并留在**稳定前缀**;技能正文则**后置**
+// (随意图门变化,不能进 system —— 否则每次技能切换都会让整段历史缓存失效)。
 //
 // 这里刻意不预加载启动文档(未在 prompt repo 里的 agentId → 无启动文档段):
 // 被测的是"工具清单段"本身,启动文档段由 prompt_repo 的测试覆盖。
@@ -106,19 +107,20 @@ func TestAssembleSystemPromptToolsSection(t *testing.T) {
 		t.Fatalf("组装 system prompt 失败: %s", err.Error())
 	}
 
-	toolsAt := strings.Index(sysPrompt.Prompt, "## Available Tools")
-	skillAt := strings.Index(sysPrompt.Prompt, "## Skill: demo")
-	if toolsAt < 0 {
+	// 工具清单在**稳定前缀**里
+	if !strings.Contains(sysPrompt.Prompt, "## Available Tools") {
 		t.Fatalf("缺少 Available Tools 段:\n%s", sysPrompt.Prompt)
-	}
-	if skillAt < 0 {
-		t.Fatalf("缺少 Skill 正文段:\n%s", sysPrompt.Prompt)
-	}
-	if toolsAt > skillAt {
-		t.Fatalf("工具清单应排在 Skill 正文之前(tools=%d skill=%d)", toolsAt, skillAt)
 	}
 	if !strings.Contains(sysPrompt.Prompt, "- **read**(系统工具) — 读取本地文件") {
 		t.Fatalf("清单内容不正确:\n%s", sysPrompt.Prompt)
+	}
+
+	// 技能正文属**后置内容**:不得出现在稳定前缀里,必须在 DynamicSkills 中
+	if strings.Contains(sysPrompt.Prompt, "## Skill: demo") {
+		t.Fatalf("技能正文不应出现在稳定前缀里(技能切换会让历史缓存失效):\n%s", sysPrompt.Prompt)
+	}
+	if !strings.Contains(sysPrompt.DynamicSkills, "## Skill: demo") {
+		t.Fatalf("缺少 Skill 正文段:\n%s", sysPrompt.DynamicSkills)
 	}
 
 	// 无工具时该段整体省略(不产生空段)。
