@@ -387,7 +387,8 @@ func DegradeChatRequest(req *llmproto.ChatCompletionRequest, err error) bool {
 	}
 
 	msg := strings.ToLower(err.Error())
-	if !strings.Contains(msg, "tool_choice") && !strings.Contains(msg, "enable_thinking") {
+	if !strings.Contains(msg, "tool_choice") && !strings.Contains(msg, "enable_thinking") &&
+		!strings.Contains(msg, "stream_options") && !strings.Contains(msg, "include_usage") {
 		return false
 	}
 
@@ -397,6 +398,7 @@ func DegradeChatRequest(req *llmproto.ChatCompletionRequest, err error) bool {
 	//对强制工具调用进行降级
 	req.ToolChoice = pCommon.BlankString
 	req.EnableThinking = nil
+	req.StreamOptions = nil //代价:LLM供应商流式拿不到usage,将退化为"不可观测",而非报错
 
 	return true
 }

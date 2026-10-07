@@ -21,8 +21,8 @@ import (
 
 	"gopkg.in/yaml.v2"
 	hCommon "my.favorite/cclawservice/harness/common"
+	"my.favorite/cclawservice/harness/observatory"
 	"my.favorite/cclawservice/model/dataobject"
-	"my.favorite/cclawservice/observatory"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"

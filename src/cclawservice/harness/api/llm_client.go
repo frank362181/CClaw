@@ -599,6 +599,12 @@ func (c *Client) prepareRequest(ctx context.Context, llmProvider dataobject.TLlm
 	if len(req.Messages) == 0 {
 		return nil, myException.RuntimeClientErrEx("runtime client: messages is empty")
 	}
+
+	// 流式:按provider配置开启usage上报
+	if req.Stream && req.StreamOptions == nil && llmProvider.UsageInStreaming {
+		req.StreamOptions = &llmproto.StreamOptions{IncludeUsage: true}
+	}
+
 	baseURL := strings.TrimSpace(llmProvider.BaseUrl)
 	if baseURL == pCommon.BlankString {
 		return nil, myException.RuntimeClientErrEx("runtime client: base url is empty")

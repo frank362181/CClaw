@@ -78,6 +78,9 @@ type ChatCompletionRequest struct {
 	// EnableThinking 是否开启 thinking(Qwen3 等思考型模型专用;omitempty 为 nil 时不发送)。
 	// 约束:该类模型非流式调用必须显式 enable_thinking=false,否则网关返回 400。
 	EnableThinking *bool `json:"enable_thinking,omitempty"`
+
+	//仅流式有意义
+	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
 }
 
 // 流式/同步应答的 finish_reason 取值(OpenAI 兼容):决定回答结束的原因。
@@ -104,11 +107,53 @@ type ChatCompletionChoice struct {
 	FinishReason *string     `json:"finish_reason,omitempty"`
 }
 
+// PromptTokensDetail OpenAI口径的输入token细分
+type PromptTokensDetail struct {
+	CachedTokens int `json:"cached_tokens"` //命中前缀缓存的输入的token数
+}
+
+// StreamOptions 流式可选参数:开启include_usage后上游在**最后一个 chunk**返回 usage
+type StreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
 // ChatCompletionUsage token 用量(可选,部分供应商流式返回时可能为空)
+//
+//	对于Agent向LLM发起请求时的prompt,遵循"静态在前,动态在后",那么token到底省了多少
+//	唯一权威的数据是来自上游返回的缓存命中的token
 type ChatCompletionUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`     // 本次请求的全部token,=请求的token+历史消息+工具调用结果+prompt token
 	CompletionTokens int `json:"completion_tokens"` // 本次请求的输出token
 	TotalTokens      int `json:"total_tokens"`      //prompt token + completion tokens
+
+	// 前缀缓存命中DeepSeek 口径
+	PromptCacheHitTokens  int `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens int `json:"prompt_cache_miss_tokens"`
+
+	// 前缀缓存命中 OpenAI口径
+	PromptTokensDetails *PromptTokensDetail `json:"prompt_tokens_detail"`
+}
+
+// CachedPromptTokens 归一化命中前缀缓存的输入token
+func (u *ChatCompletionUsage) CachedPromptTokens() int {
+	if u == nil {
+		return 0
+	}
+
+	n := u.PromptCacheHitTokens
+	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens > n {
+		n = u.PromptTokensDetails.CachedTokens
+	}
+
+	return n
+}
+
+func (u *ChatCompletionUsage) HasCacheReport() bool {
+	if u == nil {
+		return false
+	}
+
+	return u.PromptCacheHitTokens > 0 || u.PromptCacheMissTokens >= 0 || u.PromptTokensDetails != nil
 }
 
 // ChatCompletionResponse chat/completions 应答体
@@ -127,6 +172,7 @@ type ChatCompletionChunk struct {
 	ID      string                      `json:"id"`
 	Model   string                      `json:"model"`
 	Choices []ChatCompletionChunkChoice `json:"choices"`
+	Usage   *ChatCompletionUsage        `json:"usage,omitempty"` //仅最后一个包(需设置LLM的include_usage属性)
 	Error   json.RawMessage             `json:"error,omitempty"`
 }
 
