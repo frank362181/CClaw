@@ -30,7 +30,7 @@ func captureUsage(t *testing.T) (func() []observatory.TokenUsageEvent, func()) {
 	var mu sync.Mutex
 	events := make([]observatory.TokenUsageEvent, 0, 4)
 
-	observatory.RegisterTokenObserver(func(e observatory.TokenUsageEvent) {
+	observatory.RegisterTokenUsageObserver(func(e observatory.TokenUsageEvent) {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, e)
@@ -43,7 +43,7 @@ func captureUsage(t *testing.T) (func() []observatory.TokenUsageEvent, func()) {
 		copy(out, events)
 		return out
 	}
-	return snapshot, func() { observatory.RegisterTokenObserver(nil) }
+	return snapshot, func() { observatory.RegisterTokenUsageObserver(nil) }
 }
 
 // sseServer 起一个假 SSE 服务端,按行回放 lines,并记录请求体。

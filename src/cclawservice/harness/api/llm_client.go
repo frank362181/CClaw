@@ -112,7 +112,7 @@ func (c *Client) ChatCompletion(ctx context.Context, llmProvider dataobject.TLlm
 // 不执行工具:由调用方(工具循环)解析并执行返回的工具调用。
 // 429/5xx/断流(传输层)按指数退避重试(同步调用无副作用,可安全重试)。
 //   - toolChoice: llmproto.ToolChoice* 常量;空串表示不发送 tool_choice(默认 auto)
-func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool /*[]llmproto.Tool*/, toolChoice string) (string, []llmproto.ToolCall, error) {
+func (c *Client) CompleteWithTools(ctx context.Context, llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool, toolChoice string) (string, []llmproto.ToolCall, error) {
 	req := ctxmgr.BuildChatCompletionRequestWithToolChoice(llmProvider, messages, tools, toolChoice, false)
 	var lastErr error
 	for attempt := 1; attempt <= c.retryMaxAttempts; attempt++ {
@@ -229,12 +229,27 @@ func (c *Client) streamRequest(ctx context.Context, llmProvider dataobject.TLlm,
 
 // ================================== private functions & methods ========================================
 // completeWithToolsOnce 执行一次同步(带工具)chat/completions(不含重试)
-func (c *Client) completeWithToolsOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (string, []llmproto.ToolCall, error) {
+func (c *Client) completeWithToolsOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (outContent string, outCalls []llmproto.ToolCall, outErr error) {
+	var (
+		callStart      time.Time
+		ttftMs         int64
+		lastTokenUsage *llmproto.ChatCompletionUsage //同步路径也有 usage,之前硬传 nil → prompt/cached 永远为 0
+		err            error
+	)
+
+	// 返回值具名(名字刻不与局部变量冲突,免得连带改一堆 :=):
+	// 只有具名返回值才能让 `return ..., 新构造的错误` 也落到 outErr 上 ——
+	// 否则像 ParseLlmResponseError 这类返回值不会写回任何局部 err,报表里的 err 永远是空的。
+	defer func() {
+		observatory.OnLlmTiming(ctx, llmProvider, false, lastTokenUsage, callStart, ttftMs, outErr)
+	}()
+
 	httpReq, err := c.prepareRequest(ctx, llmProvider, req)
 	if err != nil {
 		return pCommon.BlankString, nil, err
 	}
 
+	callStart = time.Now() //TTFT 调用开始时间
 	httpResp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
@@ -270,6 +285,8 @@ func (c *Client) completeWithToolsOnce(ctx context.Context, llmProvider dataobje
 	}
 
 	//回调统计token用量
+	ttftMs = time.Since(callStart).Milliseconds() //登记结束时检长度
+	lastTokenUsage = resp.Usage                   //同步路径同样要把用量带进 llm timing 行
 	observatory.ReportTokenUsage(llmProvider, false, resp.Usage)
 
 	msg := resp.Choices[0].Message
@@ -278,7 +295,18 @@ func (c *Client) completeWithToolsOnce(ctx context.Context, llmProvider dataobje
 
 // chatCompletionStreamOnce 执行一次流式 chat/completions(不含重试;含空闲超时与 SSE 事件解析)。
 // 返回值 emitted 表示是否已向调用方输出过增量(决定上层能否安全重试)。
-func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest, onChunk func(string), onReasoning func(string)) (string, string, bool, error) {
+func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest, onChunk func(string), onReasoning func(string)) (outContent string, outFinish string, outEmitted bool, outErr error) {
+	var (
+		lastTokenUsage *llmproto.ChatCompletionUsage //流式下的token用量统计变量
+		callStart      time.Time
+		ttftMs         int64
+		err            error
+	)
+	// 返回值具名:让每个 `return ..., 新构造的错误` 都能被 defer 读到(否则报表 err 恒空)。
+	defer func() {
+		observatory.OnLlmTiming(ctx, llmProvider, true, lastTokenUsage, callStart, ttftMs, outErr)
+	}()
+
 	// 空闲超时:上游长时间无任何数据 → 取消本次流(归类为可重试的传输层错误)
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -294,6 +322,7 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 	}
 
 	// 流式使用独立客户端:无整体超时,长流不会被固定上限(如 60s)中断
+	callStart = time.Now() //登记TTFT开始的时间
 	httpResp, err := c.streamClient.Do(httpReq)
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
@@ -319,7 +348,6 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 	finishReason := ""
 	emitted := false
 	eventName := ""
-	var lastTokenUsage *llmproto.ChatCompletionUsage //流式下的token用量统计变量
 
 	scanner := bufio.NewScanner(httpResp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), hCommon.MaxResponseBytes)
@@ -347,6 +375,11 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
 			break // 上游结束标记
+		}
+
+		// TTFT 打点:首个data行 = 上游开始产出,不能是首个字节(避免keep-alive会让首包时间虚低,失去诊断价值)
+		if ttftMs == 0 {
+			ttftMs = time.Since(callStart).Milliseconds()
 		}
 
 		var chunk llmproto.ChatCompletionChunk
@@ -400,7 +433,20 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 }
 
 // streamWithToolsOnce 执行一次带工具的流式 chat/completions(不含重试)。
-func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest, onChunk func(string), onReasoning func(string), onToolIntent func(name string)) (string, []llmproto.ToolCall, string, bool, error) {
+func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest, onChunk func(string), onReasoning func(string), onToolIntent func(name string)) (outContent string, outCalls []llmproto.ToolCall, outFinish string, outEmitted bool, outErr error) {
+	var (
+		callStart      time.Time
+		ttftMs         int64
+		lastTokenUsage *llmproto.ChatCompletionUsage
+		err            error
+	)
+	// 返回值具名:让每个 `return ..., 新构造的错误` 都能被 defer 读到(否则报表 err 恒空)。
+	defer func() {
+		observatory.OnLlmTiming(ctx, llmProvider, true, lastTokenUsage, callStart, ttftMs, outErr)
+	}()
+
+	callStart = time.Now() //TTFT 调用开始的时间
+
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	idle := c.streamIdle
@@ -437,7 +483,6 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 	finishReason := ""
 	emitted := false
 	eventName := ""
-	var lastTokenUsage *llmproto.ChatCompletionUsage //token使用量登记
 
 	acc := tool.NewToolCallAccumulator()
 	reportedIntent := make(map[int]bool) // 已上报过工具意图的 index,避免同 index 分片重复上报
@@ -466,6 +511,10 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
 			break
+		}
+
+		if ttftMs == 0 {
+			ttftMs = time.Since(callStart).Milliseconds()
 		}
 
 		var chunk llmproto.ChatCompletionChunk
@@ -563,12 +612,25 @@ func (c *Client) doCompletion(ctx context.Context, llmProvider dataobject.TLlm, 
 
 // doCompletionOnce 执行一次同步 chat/completions 请求并解析回复文本(同步/轻量调用共用,不含重试)。
 // 同时透出 finish_reason:调用方据此判断内容是否被上游截断(length)。
-func (c *Client) doCompletionOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (string, string, error) {
+func (c *Client) doCompletionOnce(ctx context.Context, llmProvider dataobject.TLlm, req llmproto.ChatCompletionRequest) (outContent string, outFinish string, outErr error) {
+	var (
+		callStart      time.Time
+		ttftMs         int64
+		lastTokenUsage *llmproto.ChatCompletionUsage //同步路径也有 usage,之前硬传 nil → prompt/cached 永远为 0
+		err            error
+	)
+
+	// 返回值具名:让每个 `return ..., 新构造的错误` 都能被 defer 读到(否则报表 err 恒空)。
+	defer func() {
+		observatory.OnLlmTiming(ctx, llmProvider, false, lastTokenUsage, callStart, ttftMs, outErr)
+	}()
+
 	httpReq, err := c.prepareRequest(ctx, llmProvider, req)
 	if err != nil {
 		return pCommon.BlankString, pCommon.BlankString, err
 	}
 
+	callStart = time.Now() // TTFT起点,请求发出时间
 	httpResp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		if pException.IsContextCanceled(ctx, err) {
@@ -614,6 +676,8 @@ func (c *Client) doCompletionOnce(ctx context.Context, llmProvider dataobject.TL
 	}
 
 	// 回调token用量
+	ttftMs = time.Since(callStart).Milliseconds() //记录完成的时间长度
+	lastTokenUsage = resp.Usage                   //同步路径同样要把用量带进 llm timing 行
 	observatory.ReportTokenUsage(llmProvider, false, resp.Usage)
 
 	return content, finishReason, nil

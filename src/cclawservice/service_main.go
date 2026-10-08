@@ -138,15 +138,8 @@ func (m *ServiceMain) Init() error {
 
 	m.setupSwaggerController()
 
-	//注册观测函数
-	observatory.RegisterTokenObserver(func(event observatory.TokenUsageEvent) {
-		observatory.ObservePromptCache(observatory.TokenUsageEvent{
-			ProviderId: event.ProviderId, Model: event.Model, Stream: event.Stream,
-			Prompt: event.Prompt, Cached: event.Cached,
-			HasCacheReport: event.HasCacheReport,
-			InputCost:      event.InputCost, CachedReadCost: event.CachedReadCost,
-		})
-	})
+	observatory.RegisterTokenObserver()  //注册token用量观测函数
+	observatory.RegisterTimingObserver() //注册时间维度的可观测函数
 
 	return nil
 }

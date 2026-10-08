@@ -49,3 +49,45 @@ type PromptCacheSummary struct {
 
 	NoReport int //未上报缓存字段的调用数(其命中率不可知,不应计入分母)
 }
+
+// LlmCallTiming 一次上游LLM调用的时间(与TokenUsageEvent同源,同一次调用)
+// 只在 LLM客户端内部可得: TTFT 依赖 SSE 读循环,上层无法伪造
+type LlmCallTiming struct {
+	TurnScope string // 合并归因标识(turnId);若为空则未归因
+
+	ProviderId string
+	Model      string
+	Stream     bool
+
+	// 本次请求 "发出时刻" 的毫秒数
+	StartOffsetMs int64
+
+	TtftMs  int64 // 请求发出 -> 上游首个data行,非首个字节
+	TotalMs int64 // 请求发出 -> 本轮结束
+
+	PromptTokens int
+	CachedTokens int
+
+	Err string // 非空 = 本次调用失败(慢失败同样要留痕,否则看不到"卡住的那次")
+}
+
+type TurnTiming struct {
+	TurnScope string
+	AgentId   string
+
+	GateMs   int64 // ①.Agent并发闸等待
+	RouteMs  int64 // ②.路由:会话绑定/关键词/LLM分类
+	SkillMs  int64 // ③.技能读盘 + 工具合成
+	PromptMs int64 // ④.意图们 + system prompt 组装 + 首轮计划/预算
+	LlmMs    int64 // ⑤.所有上游调用 TotalMs 之和
+	ToolsMs  int64 // ⑥.所有工具执行之和
+
+	Rounds    int
+	ToolCalls int
+
+	FirstVisibleMs int64 //回合开始 -> 首个"内容类"事件(正文/思考/工具);不包含status
+
+	ReplyRunes int
+	TotalMs    int64
+	Err        string
+}

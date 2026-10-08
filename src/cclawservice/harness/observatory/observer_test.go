@@ -34,12 +34,12 @@ func approx(t *testing.T, name string, got, want float64) {
 func TestObservePromptCacheAggregates(t *testing.T) {
 	resetPromptCache(t)
 
-	ObservePromptCache(TokenUsageEvent{ProviderId: "p", Model: "m1", Prompt: 1000, Cached: 800,
+	observePromptCache(TokenUsageEvent{ProviderId: "p", Model: "m1", Prompt: 1000, Cached: 800,
 		HasCacheReport: true, InputCost: 1, CachedReadCost: 0})
-	ObservePromptCache(TokenUsageEvent{ProviderId: "p", Model: "m1", Prompt: 2000, Cached: 500,
+	observePromptCache(TokenUsageEvent{ProviderId: "p", Model: "m1", Prompt: 2000, Cached: 500,
 		HasCacheReport: true, InputCost: 1, CachedReadCost: 0})
 
-	s := SnapShot()
+	s := TokenSnapShot()
 	if s.Calls != 2 || s.Prompt != 3000 || s.Cached != 1300 {
 		t.Fatalf("聚合结果错误: %+v", s)
 	}
@@ -55,11 +55,11 @@ func TestNoReportExcludedFromHitRate(t *testing.T) {
 	resetPromptCache(t)
 
 	// 支持上报且命中
-	ObservePromptCache(TokenUsageEvent{Model: "deepseek", Prompt: 1000, Cached: 900, HasCacheReport: true})
+	observePromptCache(TokenUsageEvent{Model: "deepseek", Prompt: 1000, Cached: 900, HasCacheReport: true})
 	// 不支持上报(供应商不返回任何缓存字段)
-	ObservePromptCache(TokenUsageEvent{Model: "qwen", Prompt: 1000, Cached: 0, HasCacheReport: false})
+	observePromptCache(TokenUsageEvent{Model: "qwen", Prompt: 1000, Cached: 0, HasCacheReport: false})
 
-	s := SnapShot()
+	s := TokenSnapShot()
 	if s.NoReport != 1 {
 		t.Fatalf("no_report 应为 1,实际 %d", s.NoReport)
 	}
@@ -70,9 +70,9 @@ func TestNoReportExcludedFromHitRate(t *testing.T) {
 func TestZeroPromptIgnored(t *testing.T) {
 	resetPromptCache(t)
 
-	ObservePromptCache(TokenUsageEvent{Model: "m1", Prompt: 0, Cached: 0, HasCacheReport: true})
+	observePromptCache(TokenUsageEvent{Model: "m1", Prompt: 0, Cached: 0, HasCacheReport: true})
 
-	s := SnapShot()
+	s := TokenSnapShot()
 	if s.Calls != 0 || s.Prompt != 0 {
 		t.Fatalf("prompt=0 的样本应被丢弃,实际 %+v", s)
 	}
@@ -84,7 +84,7 @@ func TestThrottleCounterIncrements(t *testing.T) {
 	promptCache.logEvery = 2
 
 	for i := 0; i < 4; i++ {
-		ObservePromptCache(TokenUsageEvent{Model: "m1", Prompt: 100, Cached: 50, HasCacheReport: true})
+		observePromptCache(TokenUsageEvent{Model: "m1", Prompt: 100, Cached: 50, HasCacheReport: true})
 	}
 
 	promptCache.mu.Lock()

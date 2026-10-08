@@ -31,6 +31,7 @@ import (
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/harness/knowledge"
+	"my.favorite/cclawservice/harness/observatory"
 	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/harness/tool"
 	"my.favorite/cclawservice/harness/toolexecutor"
@@ -119,6 +120,8 @@ type chatTurn struct {
 	plan  tool.FirstRoundToolPlan //首轮策略(由tools立刻算出)
 	gate  tool.Activation         //意图门结果(命中技能/强制工具/被抑制的强制)
 	scope string                  // "agent = xxx turn = yyy" ,日志与哨兵共用,只拼接一次
+
+	turnTiming observatory.TurnTiming //本回合耗时
 }
 
 // scriptPathOf 取"工具名 → 脚本绝对路径",取不到时返回可读错误。
@@ -141,13 +144,27 @@ func (t *chatTurn) scriptPathOf(toolName string) (string, error) {
 //   - sender: 服务端认证得到的登录名(由认证 interceptor 写入请求上下文),覆盖请求体 senderId 防伪造
 //   - comCode: 服务端认证得到的单位编码,用于 Agent/Provider 的归属隔离(owner_id)
 func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest, sender, comCode string) (*request.ChatResponse, error) {
+	turnStart := time.Now() //回合原点:与流式路径同口径
+	// 预挂回合归因:路由(prepareChat内部的LLM分类)也是一次上游LLM调用
+	ctx = observatory.WithTurn(ctx, cCommon.NormalizeCompactId(req.TurnId), turnStart)
 	turn, err := s.prepareChat(ctx, req, sender, comCode)
 	if err != nil {
 		return nil, err
 	}
 
+	// 回合归因 + 回合上报:同步路径原先没有任何观测出口,turn.turnTiming 里采到的
+	// 路由/技能/prompt/工具/轮次全被丢弃。归因必须先挂(TTFT、offset 靠它回填)
+	ctx = observatory.WithTurn(ctx, turn.req.TurnId, turnStart)
+	var reply string
+	defer func() {
+		// 同步接口没有增量下发,first_visible 无意义,固定 0
+		observatory.OnTurnTiming(ctx, turn.turnTiming, turnStart, 0, reply, err)
+	}()
+
 	// 每 Agent 并发闸:同一 agent 同时生成数不超过 max_concurrent,覆盖整段生成(含工具循环)
+	gateStart := time.Now()
 	release, err := s.acquireAgentGate(ctx, turn.agent)
+	turn.turnTiming.GateMs = pCommon.MilliDiff(gateStart)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +180,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 
 	// 调用 LLM 引擎取回完整回复(function-calling 开启且该 Agent 有工具时可能经过工具循环)
 	recorder := knowledge.NewTurnRecorder()
-	reply, err := s.completeChat(ctx, turn, assembled.Messages, recorder)
+	reply, err = s.completeChat(ctx, turn, assembled.Messages, recorder) // reply/err 已在上方声明:供回合上报读取最终值
 	if err != nil {
 		reason := cCommon.ClassifyInterrupt(ctx, ctx, nil, err) // 记录停止的原因
 		turnSeq := 0
@@ -215,6 +232,16 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 //   - 与 SendMessage 共用 prepareChat,保证同步/流式两条路径的校验与解析完全一致
 func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, sender, comCode string,
 	onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent), onNotice func(code, msg string)) (string, error) {
+	var (
+		firstVisibleMs      int64
+		reply, finishReason string
+	)
+
+	turnStart := time.Now() //回合原点:所有阶段耗时与下游埋点的共同基准
+
+	//预挂回合归因:路由(prepareChat 内部的LLM分类)也是一次上游调用
+	ctx = observatory.WithTurn(ctx, cCommon.NormalizeCompactId(req.TurnId), turnStart)
+
 	if onStatus != nil {
 		onStatus(cCommon.ChatStatusPreparing, "正在解析任务…")
 	}
@@ -222,9 +249,18 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	if err != nil {
 		return "", err
 	}
+	//用真实的规范化后的turnId覆盖
+	ctx = observatory.WithTurn(ctx, turn.req.TurnId, turnStart)
+
+	//登记本轮对话的用时
+	defer func() {
+		observatory.OnTurnTiming(ctx, turn.turnTiming, turnStart, firstVisibleMs, reply, err)
+	}()
 
 	// 每 Agent 并发闸:同一 agent 同时生成数不超过 max_concurrent,覆盖整段流式生成(含工具循环)
+	gateStart := time.Now()
 	release, err := s.acquireAgentGate(ctx, turn.agent)
+	turn.turnTiming.GateMs = pCommon.MilliDiff(gateStart)
 	if err != nil {
 		return "", err
 	}
@@ -244,6 +280,9 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	runCtx, runCancel := context.WithTimeout(streamCtx, timeout)
 	defer runCancel()
 
+	// 回合归因:LLM 客户端据此回填 scope 与"距回合开始的偏移"(全仓唯一 ctx value,只读)
+	runCtx = observatory.WithTurn(runCtx, turn.req.TurnId, turnStart)
+
 	if onStatus != nil {
 		onStatus(cCommon.ChatStatusThinking, "正在思考…")
 	}
@@ -254,6 +293,12 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 
 	// 将system,user,memory等信息进行装配
 	assembled, records := s.assembleChatContext(session, turn.agent, turn.llm, turn.systemPrompt, req, turn.toolsReserve)
+
+	markVisible := func() {
+		if firstVisibleMs == 0 {
+			firstVisibleMs = pCommon.MilliDiff(turnStart)
+		}
+	}
 
 	// 累计已产出的回复:中断/失败时也要把"用户已经看到的内容"记入历史,
 	// 否则下一轮读回会出现"问题在、回答不在"的断裂。
@@ -267,14 +312,22 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 		}
 	}
 
+	forwardReasoning := onReasoning
+	if onReasoning != nil {
+		forwardReasoning = func(delta string) { markVisible(); onReasoning(delta) }
+	}
+	forwardTool := onTool
+	if onTool != nil {
+		forwardTool = func(evt ToolEvent) { markVisible(); onTool(evt) }
+	}
+
 	// function-calling 开启且该 Agent 有可用工具时,走工具调用循环(工具阶段状态提示,最终内容流式转发);
 	// 否则保持原有的纯流式转发。
 	recorder := knowledge.NewTurnRecorder()
-	var reply, finishReason string
 	if s.functionCalling && len(turn.tools.Tools) > 0 {
-		reply, finishReason, err = s.streamToolLoop(runCtx, turn, assembled.Messages, forwardChunk, onStatus, onReasoning, onTool, onNotice, recorder)
+		reply, finishReason, err = s.streamToolLoop(runCtx, turn, assembled.Messages, forwardChunk, onStatus, forwardReasoning, forwardTool, onNotice, recorder)
 	} else {
-		reply, finishReason, err = s.llmClient.ChatCompletionStreamMessages(runCtx, turn.llm, assembled.Messages, forwardChunk, onReasoning)
+		reply, finishReason, err = s.llmClient.ChatCompletionStreamMessages(runCtx, turn.llm, assembled.Messages, forwardChunk, forwardReasoning)
 	}
 	if err != nil {
 		reason := cCommon.ClassifyInterrupt(ctx, runCtx, streamCtx, err) //获取停止的原因
@@ -453,10 +506,14 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 	s.normalizeRequest(comCode, sender, req)
 
 	// 3. 解析目标 Agent(混合路由:显式 → 会话绑定 → 关键词 → LLM 分类 → 默认)
+	timing := observatory.TurnTiming{TurnScope: cCommon.NormalizeCompactId(req.TurnId)}
+	routerStart := time.Now()
 	agent, err := s.resolveAgent(ctx, comCode, req.SessionId, req.ReqMsg, req.AgentId)
 	if err != nil {
 		return nil, err
 	}
+	timing.RouteMs = pCommon.MilliDiff(routerStart)
+	timing.AgentId = agent.AgentId
 
 	// 4. 解析 LLM Provider(PrimaryModel 优先,Fallbacks 兜底)
 	llmProvider, err := s.resolveProvider(comCode, agent)
@@ -465,6 +522,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 	}
 
 	// 5. 收集本 Agent 绑定的技能目录(原始配置值;路径解析与越界校验统一在 prompt repo 内做一次)
+	skillStart := time.Now()
 	skillDirs := s.collectSkillDirs(agent)
 
 	// 5.1 SKILL.md 的唯一读盘 + 唯一路径解析 + YAML 解析入口(prompt repo,按文件指纹缓存)
@@ -473,9 +531,11 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 
 	// 5.2 由已解析文档派生工具与技能级元数据(触发词/正文/强制工具,零 IO)
 	bundle := tool.GetToolsSearch().GetToolsBundle(skillDocs)
+	timing.SkillMs = pCommon.MilliDiff(skillStart)
 
 	// 5.3 意图门:按**本轮问题**判定哪些技能相关。根据用户的请求命中关键词，或force-call决定哪些skill文件注入system prompt
-	// 命中才允许该技能的 force-call 生效、才注入其正文(SOP)。
+	// 命中才允许该技能的 force-call 生效、才注入其正文(SOP)
+	promptStart := time.Now()
 	gate := bundle.Activate(req.ReqMsg)
 
 	// 5.4 组装 system prompt(命中技能的正文 + 本轮实际下发的工具清单,未命中的技能不注入,避免稀释注意力)
@@ -492,6 +552,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 	// 工具 schema 占窗口但与历史竞争同一份额度:按**本轮实际下发的工具**现算,
 	// 不做按 agentId 的跨轮缓存(可见工具会随门/配置变化,旧实现无失效键 + 空值写死)。
 	toolsReserveTokens := security.EstimateToolReserveTokens(agent.AgentId, visibleTools)
+	timing.PromptMs = pCommon.MilliDiff(promptStart)
 
 	// 上下文预算的配置异味(预留吃光窗口 / 把系统预留当历史旋钮)只报一次
 	s.warnPolicyIssues(agent, llmProvider, systemPrompt, toolsReserveTokens)
@@ -507,6 +568,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 		plan:         plan,
 		gate:         gate,
 		scope:        fmt.Sprintf("agent=%s,turn=%s", agent.AgentId, req.TurnId),
+		turnTiming:   timing,
 	}
 
 	// active=命中的技能,keyword=命中的触发词,visible tools=本轮下发数/总工具数,reserve=占用的窗口额度
@@ -658,7 +720,11 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 
 	for i := 0; i < hCommon.AgentToolLoopMax; i++ {
 		roundTools, toolChoice := turn.plan.RoundTools(turn.visibleTools, i) //根据轮次决定required参数
+
+		turn.turnTiming.Rounds++
+		roundStart := time.Now()
 		content, calls, err := s.llmClient.CompleteWithTools(ctx, turn.llm, ctxmgr.FitMessages(turn.llm, messages, policy), roundTools, toolChoice)
+		turn.turnTiming.LlmMs += pCommon.MilliDiff(roundStart)
 		tool.VerifyForcedCall(turn.plan, calls, toolChoice, turn.scope) //哨兵:按本轮实际发送的 choice 判断
 
 		if err != nil {
@@ -676,6 +742,10 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 		for _, call := range calls {
 			callTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 
+			// 与流式路径同口径:模型**声明**的每次调用都计数(脚本解析失败时耗时记 0) ——
+			// 否则同步路径的 turn timing 会写成 tool=0ms(0次),把工具真实耗时推进"未纳管缺口"。
+			toolStart := time.Now()
+
 			// 取不到脚本(模型回传了未注册的工具名等)不能 continue:assistant 消息里的 tool_calls
 			// 必须逐条拿到 role=tool 应答,缺一条下一轮会被上游判协议错(整轮失败)。
 			scriptFile, err := turn.scriptPathOf(call.Function.Name)
@@ -685,6 +755,9 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 				recorder.Record(call.Function.Name, callTime, respTime, result) // 旁路记录(recorder 为 nil 时静默)
 				result = guard.ApplyLoopGuard(call.Function.Name, call.Function.Arguments, false, result, nil)
 				messages = append(messages, ctxmgr.BuildToolResultMessage(call.ID, result))
+
+				turn.turnTiming.ToolCalls++
+				turn.turnTiming.ToolsMs += pCommon.MilliDiff(toolStart)
 				continue
 			}
 
@@ -693,6 +766,10 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 			toolIdx := recorder.Start(call.Function.Name, callTime)
 
 			result, err := toolexecutor.RunScript(ctx, scriptFile, call.Function.Arguments)
+
+			// 工具耗时/次数:同步路径串行执行,直接累加即可
+			turn.turnTiming.ToolCalls++
+			turn.turnTiming.ToolsMs += pCommon.MilliDiff(toolStart)
 
 			respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 			result = toolResultForRecord(result, err)
@@ -724,7 +801,10 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 
 		roundTools, toolChoice := turn.plan.RoundTools(turn.visibleTools, i)
 
-		var roundIntents []int // 本轮模型声明的工具调用序号(与返回的 calls 一一对应)
+		turn.turnTiming.Rounds++ //调用轮次计数 +1
+
+		roundStart := time.Now() //本轮上游调用端到端耗时(与 llm timing 行互为印证)
+		var roundIntents []int   // 本轮模型声明的工具调用序号(与返回的 calls 一一对应)
 		content, calls, finishReason, err := s.llmClient.StreamWithTools(ctx, turn.llm, ctxmgr.FitMessages(turn.llm, messages, policy), roundTools, toolChoice, onChunk, onReasoning,
 			func(name string) { // onToolIntent:模型流式声明将调用某工具,立即告知前端
 				if onTool != nil {
@@ -733,6 +813,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 					onTool(ToolEvent{Phase: cCommon.ChatToolEventIntent, Seq: seq, Name: name})
 				}
 			})
+		turn.turnTiming.LlmMs += pCommon.MilliDiff(roundStart)          //回合级上游耗时汇总
 		tool.VerifyForcedCall(turn.plan, calls, toolChoice, turn.scope) //哨兵:按本轮实际发送的 choice 判断
 
 		if err != nil {
@@ -774,11 +855,12 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 		}
 
 		type toolResultItem struct {
-			item     toolRunItem
-			result   string
-			err      error
-			callTime int64 // 工具调用时间(Unix 秒,旁路记录用)
-			respTime int64 // 工具返回时间(Unix 秒,旁路记录用)
+			item      toolRunItem
+			result    string
+			err       error
+			callTime  int64 // 工具调用时间(Unix 秒,旁路记录用)
+			respTime  int64 // 工具返回时间(Unix 秒,旁路记录用)
+			elapsedMs int64 // 本次工具执行耗时
 		}
 		results := make([]toolResultItem, len(runs))
 
@@ -819,6 +901,8 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 				// 中断时本轮的串行回填段走不到,只记"结束"会让这次调用彻底消失。
 				toolIdx := recorder.Start(run.name, startTime.Timestamp)
 
+				toolStart := time.Now() //工具调用开始的时间
+
 				// 执行具体的工具(run.script 已在派发前解析为绝对路径)
 				res, err := pCommon.BlankString, run.err
 				if run.err == nil {
@@ -831,13 +915,15 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 						lineCh <- ToolEvent{Phase: cCommon.ChatToolEventProgress, Seq: run.seq, Name: run.name, Detail: line}
 					})
 				}
+				elapsedMs := pCommon.MilliDiff(toolStart) //工具调用耗时
+
 				respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 				// 结果在**本协程内**即时回填,而不是等全部工具收尾后的串行回填段:
 				// 中断时那一段走不到,这一轮的工具有没有跑过就查不到了(见 M3)。
 				recorder.Finish(toolIdx, respTime, toolResultForRecord(res, err))
 				close(stopHeart)
 				<-heartDone
-				results[k] = toolResultItem{item: run, result: res, err: err, callTime: startTime.Timestamp, respTime: respTime}
+				results[k] = toolResultItem{item: run, result: res, err: err, callTime: startTime.Timestamp, respTime: respTime, elapsedMs: elapsedMs}
 			}(k, run)
 		}
 
@@ -862,6 +948,9 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 		// 全部执行完成:按原始顺序回填 tool 消息并派发 done/error 事件。
 		// 工具留痕已在各自执行协程内完成(见上面的 Finish),这里不再重复记录。
 		for _, r := range results {
+			turn.turnTiming.ToolCalls++
+			turn.turnTiming.ToolsMs += r.elapsedMs
+
 			if r.err != nil {
 				if onTool != nil {
 					onTool(ToolEvent{Phase: cCommon.ChatToolEventError, Seq: r.item.seq, Name: r.item.name, Detail: r.err.Error()})

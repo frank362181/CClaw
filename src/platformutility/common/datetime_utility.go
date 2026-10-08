@@ -24,6 +24,11 @@ func TimestampText(timestamp int64) string {
 	return time.Unix(timestamp, 0).Format("2006-01-02 15:04:05")
 }
 
+// MilliDiff 获取与当前时间的毫秒数
+func MilliDiff(t time.Time) int64 {
+	return time.Since(t).Milliseconds()
+}
+
 // weekdayCN 中文星期名(下标与 time.Weekday 对齐,0=周日)
 var weekdayCN = [...]string{"周日", "周一", "周二", "周三", "周四", "周五", "周六"}
 
