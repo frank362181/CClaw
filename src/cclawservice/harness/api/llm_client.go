@@ -31,6 +31,7 @@ import (
 	"my.favorite/cclawservice/harness/common"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
+	"my.favorite/cclawservice/harness/observatory"
 	"my.favorite/cclawservice/harness/tool"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
@@ -268,6 +269,9 @@ func (c *Client) completeWithToolsOnce(ctx context.Context, llmProvider dataobje
 		return pCommon.BlankString, nil, myException.RuntimeClientErrEx("runtime client: empty completion choices")
 	}
 
+	//回调统计token用量
+	observatory.ReportTokenUsage(llmProvider, false, resp.Usage)
+
 	msg := resp.Choices[0].Message
 	return strings.TrimSpace(msg.Content), msg.ToolCalls, nil
 }
@@ -315,6 +319,8 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 	finishReason := ""
 	emitted := false
 	eventName := ""
+	var lastTokenUsage *llmproto.ChatCompletionUsage //流式下的token用量统计变量
+
 	scanner := bufio.NewScanner(httpResp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), hCommon.MaxResponseBytes)
 	for scanner.Scan() {
@@ -348,6 +354,12 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 		if payload, isErr := llmproto.StreamErrorPayload(eventName, chunk, data); isErr {
 			return pCommon.BlankString, finishReason, emitted, llmproto.NewLlmStreamError(payload, requestID)
 		}
+
+		//登记使用量,usage末包chunk.Choice为空,因此必须早于chunk.Choice是否为空的判断
+		if chunkOK && chunk.Usage != nil {
+			lastTokenUsage = chunk.Usage
+		}
+
 		if !chunkOK || len(chunk.Choices) == 0 {
 			continue
 		}
@@ -375,6 +387,9 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 	if err := scanner.Err(); err != nil {
 		return pCommon.BlankString, finishReason, emitted, common.StreamReadError(ctx, streamCtx, err, requestID, idle)
 	}
+
+	// 回掉统计token是用量
+	observatory.ReportTokenUsage(llmProvider, true, lastTokenUsage)
 
 	content := strings.TrimSpace(sb.String())
 	// 内容安全拦截可能无任何正式内容:透出 finish_reason 交由上层提示,不误报为"空流"
@@ -422,6 +437,8 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 	finishReason := ""
 	emitted := false
 	eventName := ""
+	var lastTokenUsage *llmproto.ChatCompletionUsage //token使用量登记
+
 	acc := tool.NewToolCallAccumulator()
 	reportedIntent := make(map[int]bool) // 已上报过工具意图的 index,避免同 index 分片重复上报
 	scanner := bufio.NewScanner(httpResp.Body)
@@ -456,6 +473,12 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 		if payload, isErr := llmproto.StreamErrorPayload(eventName, chunk, data); isErr {
 			return "", nil, finishReason, emitted, llmproto.NewLlmStreamError(payload, requestID)
 		}
+
+		//必须早于Choice是否为空的判断,因为末包Choice为空
+		if chunkOK && chunk.Usage != nil {
+			lastTokenUsage = chunk.Usage
+		}
+
 		if !chunkOK || len(chunk.Choices) == 0 {
 			continue
 		}
@@ -489,6 +512,9 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 	if err := scanner.Err(); err != nil {
 		return "", nil, finishReason, emitted, common.StreamReadError(ctx, streamCtx, err, requestID, idle)
 	}
+
+	//回调登记 token使用量
+	observatory.ReportTokenUsage(llmProvider, true, lastTokenUsage)
 
 	return strings.TrimSpace(sb.String()), acc.Result(), finishReason, emitted, nil
 }
@@ -586,6 +612,9 @@ func (c *Client) doCompletionOnce(ctx context.Context, llmProvider dataobject.TL
 	if content == pCommon.BlankString {
 		return pCommon.BlankString, finishReason, myException.RuntimeClientErrEx("runtime client: empty completion content")
 	}
+
+	// 回调token用量
+	observatory.ReportTokenUsage(llmProvider, false, resp.Usage)
 
 	return content, finishReason, nil
 }

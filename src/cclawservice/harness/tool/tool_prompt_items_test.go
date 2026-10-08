@@ -24,7 +24,7 @@ func llmTool(name, desc string) llmproto.Tool {
 
 // TestFunctionBundlePromptItems 验证清单与 schema 同源、归属技能正确、空名工具被跳过。
 func TestFunctionBundlePromptItems(t *testing.T) {
-	bundle := FunctionBundle{
+	bundle := ToolsBundle{
 		Tools: []llmproto.Tool{
 			llmTool("npa_ingest", "解析材料为按页内容 JSON"),
 			llmTool("get_weather", "查实时天气"),
@@ -74,7 +74,7 @@ func TestFunctionBundlePromptItems(t *testing.T) {
 
 // TestFunctionBundlePromptItemsEmpty 无工具时不产出清单(调用方据此省略该 section)。
 func TestFunctionBundlePromptItemsEmpty(t *testing.T) {
-	if items := (FunctionBundle{}).PromptItems(); len(items) != 0 {
+	if items := (ToolsBundle{}).PromptItems(); len(items) != 0 {
 		t.Fatalf("无工具时不应产出清单: %+v", items)
 	}
 }

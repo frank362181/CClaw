@@ -17,6 +17,7 @@ import (
 	selfController "my.favorite/cclawservice/controller"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
+	"my.favorite/cclawservice/harness/observatory"
 	"my.favorite/cclawservice/harness/tool"
 	selfInterceptor "my.favorite/cclawservice/interceptor"
 	"my.favorite/cclawservice/model/repo"
@@ -136,6 +137,16 @@ func (m *ServiceMain) Init() error {
 	}
 
 	m.setupSwaggerController()
+
+	//注册观测函数
+	observatory.RegisterTokenObserver(func(event observatory.TokenUsageEvent) {
+		observatory.ObservePromptCache(observatory.TokenUsageEvent{
+			ProviderId: event.ProviderId, Model: event.Model, Stream: event.Stream,
+			Prompt: event.Prompt, Cached: event.Cached,
+			HasCacheReport: event.HasCacheReport,
+			InputCost:      event.InputCost, CachedReadCost: event.CachedReadCost,
+		})
+	})
 
 	return nil
 }
@@ -313,7 +324,7 @@ func (m *ServiceMain) Destroy() {
 	}
 
 	serviceCore.GetAgentGateRegistry().Destroy() //释放agent gate
-	tool.GetFunctionRepository().Destroy()       //释放工具仓库
+	tool.GetToolsSearch().Destroy()              //释放工具仓库
 
 	if m.defaultAgentConfigHelper != nil {
 		m.defaultAgentConfigHelper.Destroy()

@@ -112,9 +112,9 @@ type chatTurn struct {
 	systemPrompt *hCommon.SystemPrompt
 	llm          dataobject.TLlm
 
-	tools        tool.FunctionBundle //与skill.md文件绑定的，以及系统工具合成的实际工具列表
-	visibleTools []llmproto.Tool     //本轮实际下发的工具列表
-	toolsReserve int                 //本轮工具schema的token预算(每轮现算,不能缓存)
+	tools        tool.ToolsBundle //与skill.md文件绑定的，以及系统工具合成的实际工具列表
+	visibleTools []llmproto.Tool  //本轮实际下发的工具列表
+	toolsReserve int              //本轮工具schema的token预算(每轮现算,不能缓存)
 
 	plan  tool.FirstRoundToolPlan //首轮策略(由tools立刻算出)
 	gate  tool.Activation         //意图门结果(命中技能/强制工具/被抑制的强制)
@@ -472,7 +472,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 	skillReport.LogSummary(fmt.Sprintf("chat service: agent=%s,turn=%s", agent.AgentId, req.TurnId))
 
 	// 5.2 由已解析文档派生工具与技能级元数据(触发词/正文/强制工具,零 IO)
-	bundle := tool.GetFunctionRepository().GetFunctionBundle(skillDocs)
+	bundle := tool.GetToolsSearch().GetToolsBundle(skillDocs)
 
 	// 5.3 意图门:按**本轮问题**判定哪些技能相关。根据用户的请求命中关键词，或force-call决定哪些skill文件注入system prompt
 	// 命中才允许该技能的 force-call 生效、才注入其正文(SOP)。

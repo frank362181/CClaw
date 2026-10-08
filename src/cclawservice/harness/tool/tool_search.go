@@ -53,8 +53,8 @@ type Activation struct {
 	HitKeywords     []string
 }
 
-// FunctionBundle 用来构建function-calling计划使用
-type FunctionBundle struct {
+// ToolsBundle 用来构建function-calling计划使用
+type ToolsBundle struct {
 	Tools       []llmproto.Tool   // 下发给 LLM 的工具 schema(由 SKILL.md 文档派生)
 	ForcedNames []string          // 声明了force-call的工具名
 	Scripts     map[string]string // 工具名 --> 脚本路径(绝对路径)
@@ -62,7 +62,7 @@ type FunctionBundle struct {
 }
 
 // Activate 根据本轮用户问题判定“哪些技能相关”(意图门)
-func (b FunctionBundle) Activate(question string) Activation {
+func (b ToolsBundle) Activate(question string) Activation {
 	act := Activation{}
 	q := strings.ToLower(strings.TrimSpace(question))
 
@@ -107,14 +107,14 @@ func (b FunctionBundle) Activate(question string) Activation {
 }
 
 // VisibleTools 返回本轮实际下发给LLM的工具列表
-func (b FunctionBundle) VisibleTools(gate Activation) []llmproto.Tool {
+func (b ToolsBundle) VisibleTools(gate Activation) []llmproto.Tool {
 	return b.Tools
 }
 
 // PromptItems 把**本轮实际下发的工具**投影成 system prompt 的清单项(名字 + 一句话用途 + 归属技能)。
 // 【唯一事实源】只读 b.Tools(即 request.tools 的来源)与 b.Slots(同一批过滤后的名字):
 // 两者在生产端就已对齐(见 collectToolsFromSkill 的注释),所以 prompt 清单不可能与 schema 漂移，且顺序与slots一致
-func (b FunctionBundle) PromptItems() []hCommon.ToolPromptItem {
+func (b ToolsBundle) PromptItems() []hCommon.ToolPromptItem {
 	owner := make(map[string]string, len(b.Tools))
 	for i := range b.Slots {
 		for _, name := range b.Slots[i].ToolNames {
@@ -159,23 +159,23 @@ func (a Activation) String() string {
 	return desc
 }
 
-// FunctionRepository 工具仓库。
+// ToolsSearch 工具仓库。
 // 包含skill tool和system tool
-type FunctionRepository struct{}
+type ToolsSearch struct{}
 
-var functionRepository = common.GetSingleton(func() *FunctionRepository {
-	return &FunctionRepository{}
+var toolsSearch = common.GetSingleton(func() *ToolsSearch {
+	return &ToolsSearch{}
 }).Instance()
 
-func GetFunctionRepository() *FunctionRepository {
-	return functionRepository
+func GetToolsSearch() *ToolsSearch {
+	return toolsSearch
 }
 
-// GetFunctionBundle 每轮对话的所有的 function-calling 输入。
+// GetToolsBundle 每轮对话的所有的 function-calling 输入。
 // 根据skill.md文件中定义的allowed,disallowed加载系统工具
-func (repo *FunctionRepository) GetFunctionBundle(skillDocs []hCommon.SkillDocument) FunctionBundle {
+func (repo *ToolsSearch) GetToolsBundle(skillDocs []hCommon.SkillDocument) ToolsBundle {
 	basicTools, slots := repo.collectToolsFromSkill(skillDocs)
-	bundle := FunctionBundle{
+	bundle := ToolsBundle{
 		Tools:       make([]llmproto.Tool, 0, len(basicTools)),
 		ForcedNames: make([]string, 0, len(basicTools)),
 		Scripts:     make(map[string]string),
@@ -201,7 +201,7 @@ func (repo *FunctionRepository) GetFunctionBundle(skillDocs []hCommon.SkillDocum
 }
 
 // Destroy 生命周期钩子(ServiceMain.Destroy 会调用):本仓库当前无自有状态,无需释放。
-func (repo *FunctionRepository) Destroy() {}
+func (repo *ToolsSearch) Destroy() {}
 
 // ===================================== private functions & methods ==================================
 
@@ -210,7 +210,7 @@ func (repo *FunctionRepository) Destroy() {}
 //   - 只有**解析出脚本绝对路径**的工具才进入 tools —— 其余既不下发 schema,也不进
 //     forcedTools(否则意图门会强制模型去调一个必然失败的工具);
 //   - buildSkillSlot 复用同一份 tools,保证 ToolNames 与实际下发的工具严格同源。
-func (repo *FunctionRepository) collectToolsFromSkill(skillDocs []hCommon.SkillDocument) ([]hCommon.BasicTool, []SkillSlot) {
+func (repo *ToolsSearch) collectToolsFromSkill(skillDocs []hCommon.SkillDocument) ([]hCommon.BasicTool, []SkillSlot) {
 	var visibleTools []hCommon.BasicTool
 	var slots []SkillSlot
 

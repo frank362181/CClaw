@@ -382,7 +382,11 @@ func BuildDistillAppendUserPrompt(batch []hCommon.MemoryRecord, newLines []strin
 
 // DegradeChatRequest 错误信息中包含的信息对chat request降级
 func DegradeChatRequest(req *llmproto.ChatCompletionRequest, err error) bool {
-	if req == nil || err == nil || req.ToolChoice == pCommon.BlankString {
+	if req == nil || err == nil {
+		return false
+	}
+
+	if req.ToolChoice == pCommon.BlankString && req.EnableThinking == nil && req.StreamOptions == nil {
 		return false
 	}
 

@@ -13,7 +13,7 @@ import (
 //
 // 同时锁住首轮/后续轮必须“第二轮回到全量 + auto”,以及哨兵只在“本轮真的发了 required”时校验。
 func TestIntentGateAndToolNamespace(t *testing.T) {
-	bundle := FunctionBundle{
+	bundle := ToolsBundle{
 		Tools: []llmproto.Tool{
 			{Type: "function", Function: llmproto.ToolFunction{Name: "get_weather"}},
 			{Type: "function", Function: llmproto.ToolFunction{Name: "npa_ingest"}},
@@ -78,7 +78,7 @@ func TestIntentGateAndToolNamespace(t *testing.T) {
 	}
 
 	// ---- 未声明触发词的技能:保持旧行为(允许强制) ----
-	legacy := FunctionBundle{
+	legacy := ToolsBundle{
 		Tools: bundle.Tools,
 		Slots: []SkillSlot{{SkillId: "legacy", File: "/s/legacy/SKILL.md", ForcedTools: []string{"get_weather"}}},
 	}

@@ -131,7 +131,7 @@ type ChatCompletionUsage struct {
 	PromptCacheMissTokens int `json:"prompt_cache_miss_tokens"`
 
 	// 前缀缓存命中 OpenAI口径
-	PromptTokensDetails *PromptTokensDetail `json:"prompt_tokens_detail"`
+	PromptTokensDetails *PromptTokensDetail `json:"prompt_tokens_details"`
 }
 
 // CachedPromptTokens 归一化命中前缀缓存的输入token
@@ -153,7 +153,7 @@ func (u *ChatCompletionUsage) HasCacheReport() bool {
 		return false
 	}
 
-	return u.PromptCacheHitTokens > 0 || u.PromptCacheMissTokens >= 0 || u.PromptTokensDetails != nil
+	return u.PromptCacheHitTokens > 0 || u.PromptCacheMissTokens > 0 || u.PromptTokensDetails != nil
 }
 
 // ChatCompletionResponse chat/completions 应答体

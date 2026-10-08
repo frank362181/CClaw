@@ -6,25 +6,6 @@ package observatory
 
 import "my.favorite/platformutility/logging"
 
-// SkillSkipReason 一个被跳过的技能及其原因
-type SkillSkipReason struct {
-	SkillFile string
-	Reason    string
-}
-
-// SkillLoadReport 一次 LoadSkills 的观测结果(命中/重载/跳过 + 原因)
-type SkillLoadReport struct {
-	Requested  int // 入参技能数
-	Loaded     int // 返回的可用技能数
-	Cached     int // 命中缓存(零读盘零解析)
-	Reloaded   int // 首次加载或指纹变化:读盘 + YAML 解析
-	Duplicated int // 重复绑定被去掉的条数
-
-	// Skipped 被跳过的技能:分两批记录 —— 先记入参非法(目录为空/越界),
-	// 再记读盘阶段失败(文件缺失/过大/YAML 处理失败)。每条带 SkillFile 可唯一定位。
-	Skipped []SkillSkipReason
-}
-
 func NewSkillObserver(reqLen int) SkillLoadReport {
 	return SkillLoadReport{
 		Requested: reqLen,
