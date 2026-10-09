@@ -336,7 +336,7 @@ func BuildMemoryRoot(sender string) string {
 	sender = strings.TrimSpace(sender)
 
 	memoryRoot := filepath.Join(pCommon.GetExecutableDir(), AgentBootstrapDir, ChatMemoryDirName)
-	memoryDir := pCommon.ResolvePath(sender, memoryRoot)
+	memoryDir, _ := pCommon.SafeJoin(memoryRoot, sender)
 
 	_ = pCommon.CreateDir(memoryDir)
 

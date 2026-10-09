@@ -44,3 +44,13 @@ func RemoveInB[T comparable](a, b []T) []T {
 
 	return result
 }
+
+func Contains[T comparable](a []T, b T) bool {
+	set := make(map[T]struct{}, len(a))
+	for _, v := range a {
+		set[v] = struct{}{}
+	}
+
+	_, ok := set[b]
+	return ok
+}

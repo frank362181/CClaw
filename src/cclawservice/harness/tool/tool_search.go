@@ -238,7 +238,7 @@ func (repo *ToolsSearch) collectToolsFromSkill(skillDocs []hCommon.SkillDocument
 
 			// 脚本是技能工具的唯一执行体:未声明/文件不存在就不下发。
 			// 保留一个空脚本的 schema 只会让模型调用一个必然失败的工具,force-call 更是 100% 失败。
-			resolved, err := pCommon.ResolveFile(baseDir, t.Script)
+			resolved, err := pCommon.SafeJoinWithRoot(baseDir, t.Script)
 			if err != nil {
 				logging.LogWarnF("tool repository: skill %s tool %s script %q unavailable, tool dropped: %s",
 					doc.SkillId, toolName, t.Script, err.Error())

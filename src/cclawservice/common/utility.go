@@ -39,6 +39,10 @@ func ValidateLLMProvider(p dataobject.TLlm) error {
 	if strings.TrimSpace(p.BaseUrl) == "" {
 		return pException.ParameterEmptyErrorEx("provider base url is empty")
 	}
+
+	if ok := pCommon.ValidateUrl(p.BaseUrl, nil); !ok {
+		return pException.ParameterEmptyErrorEx("provider base url is invalid")
+	}
 	return nil
 }
 

@@ -265,34 +265,6 @@ func IsLocalPath(path string) bool {
 	return true
 }
 
-// ResolveFile 将文件名返回绝对路径
-func ResolveFile(baseDir, name string) (string, error) {
-	if !IsDir(baseDir) {
-		return "", errors.New("should be a dir")
-	}
-
-	if IsDir(name) {
-		return "", errors.New("could not be a dir")
-	}
-
-	targetFileName := name
-	if !filepath.IsAbs(name) {
-		targetFileName = filepath.Join(baseDir, targetFileName)
-	}
-
-	info, err := os.Stat(targetFileName)
-	if err != nil {
-		return "", err
-	}
-
-	if info.IsDir() {
-		return "", errors.New("target must be a file")
-	}
-
-	// cleanup . & ..
-	return filepath.Clean(targetFileName), nil
-}
-
 // ResolvePath 将两个目录合并,并规范化后返回绝对路径
 func ResolvePath(input, baseDir string) string {
 	if baseDir == "" {
@@ -384,27 +356,37 @@ func SafeJoin(base, target string) (string, error) {
 	return SafeJoinWithRoot(ResolveRealPath(filepath.Clean(rootAbs)), target)
 }
 
-// SafeJoinWithRoot 使用**已解析的真实根路径**校验目标路径并返回其绝对路径。
-//
-// 前置条件:realRoot 必须是目标所在根的 ResolveRealPath 结果。传未解析的根
-// (如 /var/... 而真实路径是 /private/var/...)会与 realTarget 前缀不匹配,
-// 把合法路径误判为"越界"(fail-closed)。行为与 SafeJoin 完全一致,差别只是
+// SafeJoinWithRoot 使用**已解析的真实根路径**校验目标路径并返回其绝对路径
 // 根解析改由调用方负责 —— 便于"一处解析、多处复用"。
 func SafeJoinWithRoot(realRoot, target string) (string, error) {
-	targetAbs, err := filepath.Abs(target)
+	root := filepath.Clean(strings.TrimSpace(realRoot))
+	if root == BlankString || root == "." {
+		// 空的根目录
+		return BlankString, errors.New("safe join: empty root")
+	}
+	if !filepath.IsAbs(root) {
+		if abs, err := filepath.Abs(root); err == nil {
+			root = abs
+		}
+	}
+
+	tgt := strings.TrimSpace(target)
+	if tgt == BlankString {
+		return BlankString, errors.New("safe join: empty target")
+	}
+	if !filepath.IsAbs(tgt) {
+		tgt = filepath.Join(root, tgt)
+	}
+
+	targetAbs, err := filepath.Abs(tgt)
 	if err != nil {
 		return "", err
 	}
 	targetAbs = filepath.Clean(targetAbs)
-
-	// 防符号链接逃逸:按真实路径比较。注意目标可能还不存在(如缺失的可选文档),
-	// 此时 EvalSymlinks 会失败,ResolveRealPath 会按"最近存在的祖先"解析,
-	// 否则 macOS(/var->/private/var)等带符号链接的目录会对缺失文件误报越界。
+	realRootPath := ResolveRealPath(root)
 	realTarget := ResolveRealPath(targetAbs)
-
-	sep := string(filepath.Separator)
-	if realTarget != realRoot && !strings.HasPrefix(realTarget, realRoot+sep) {
-		return "", errors.New("prompt repo: document escapes workspace root: " + target)
+	if realTarget != realRootPath && !strings.HasPrefix(realTarget, realRootPath+string(filepath.Separator)) {
+		return BlankString, errors.New("path escape root: target=" + target + " root=" + root)
 	}
 
 	return targetAbs, nil
@@ -539,6 +521,10 @@ func Close(file *os.File) {
 	}
 }
 
+func GetOSEnvironments() []string {
+	return os.Environ()
+}
+
 func GetEnvString(key string) string {
 	key = strings.TrimSpace(key)
 	return os.Getenv(key)
@@ -565,6 +551,40 @@ func CreateTimerWithContext(idle time.Duration, cancel context.CancelFunc) *time
 	}
 
 	return time.AfterFunc(idle, cancel)
+}
+
+// ValidateUrl 校验URL,防 SSRF:仅允许 https + 公网地址 + (可选,白名单)
+func ValidateUrl(rawUrl string, whiteList []string) bool {
+	rawUrl = strings.TrimSpace(rawUrl)
+	u, err := url.Parse(rawUrl)
+	if err != nil || u.Host == BlankString {
+		return false
+	}
+
+	if !strings.EqualFold(u.Scheme, "https") {
+		return false
+	}
+
+	host := strings.ToLower(u.Hostname())
+	if len(whiteList) > 0 {
+		if !Contains(whiteList, host) {
+			return false
+		}
+	}
+
+	ips, err := net.LookupIP(host)
+	if err != nil || len(ips) == 0 {
+		return false
+	}
+
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() ||
+			ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return false
+		}
+	}
+
+	return true
 }
 
 // =================================== member of object ======================

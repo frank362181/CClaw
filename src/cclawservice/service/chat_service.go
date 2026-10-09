@@ -730,6 +730,8 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 	// 工具死循环守卫:一轮对话一个实例(局部变量),禁止做成服务字段/单例,原因见 chat_tool_guard.go。
 	guard := security.NewTurnLoopGuard()
 
+	agentWorkspaceRoot, _ := hCommon.BuildAgentBootstrapRoot(turn.agent) //获得agent的工作区目录
+
 	for i := 0; i < hCommon.AgentToolLoopMax; i++ {
 		roundTools, toolChoice := turn.plan.RoundTools(turn.visibleTools, i) //根据轮次决定required参数
 
@@ -777,7 +779,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 			// 工具执行中被中断时,"这次调用发生过"仍会留在历史与 t_turn_tool
 			toolIdx := recorder.Start(call.Function.Name, callTime)
 
-			result, err := toolexecutor.RunScript(ctx, scriptFile, call.Function.Arguments)
+			result, err := toolexecutor.RunScript(ctx, scriptFile, call.Function.Arguments, agentWorkspaceRoot)
 
 			// 工具耗时/次数:同步路径串行执行,直接累加即可
 			turn.turnTiming.ToolCalls++
@@ -803,6 +805,8 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 	onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent), onNotice func(code, msg string), recorder *knowledge.TurnRecorder) (string, string, error) {
 	seq := 0 // 本回合工具调用序号(跨轮自增,前端按 seq 追踪同一工具调用)
 	policy := hCommon.ContextPolicy{ContextWindow: int(turn.llm.ContextWindow)}
+
+	agentWorkspaceRoot, _ := hCommon.BuildAgentBootstrapRoot(turn.agent)
 
 	// 工具死循环守卫:一轮对话一个实例
 	guard := security.NewTurnLoopGuard()
@@ -918,7 +922,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 				// 执行具体的工具(run.script 已在派发前解析为绝对路径)
 				res, err := pCommon.BlankString, run.err
 				if run.err == nil {
-					res, err = toolexecutor.RunScriptStream(ctx, run.script, run.arg, func(line string) {
+					res, err = toolexecutor.RunScriptStream(ctx, run.script, run.arg, agentWorkspaceRoot, func(line string) {
 						lastOut.Store(pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().NanoTimestamp)
 						// json串不需要输出到UI界面上
 						if pCommon.LooksLikeJson(line) {

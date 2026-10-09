@@ -88,15 +88,15 @@ var DefaultScriptPolicy = ScriptPolicy{
 }
 
 // RunScript 以默认策略执行外部脚本工具(向后兼容入口)。
-func RunScript(ctx context.Context, scriptPath, argsJSON string) (string, error) {
-	return runScriptWithPolicy(ctx, DefaultScriptPolicy, scriptPath, argsJSON)
+func RunScript(ctx context.Context, scriptPath, argsJSON string, workspaceRoot string) (string, error) {
+	return runScriptWithPolicy(ctx, DefaultScriptPolicy, scriptPath, argsJSON, workspaceRoot)
 }
 
 // RunScriptStream 流式执行脚本(stdout 逐行回调 onLine,去行尾换行、空行跳过),
 // 返回完整输出(去尾部空白)与错误(退出码非 0/超限/超时)。
 // 适用于需要把工具执行过程实时回传的调用方(如全流式工具进度)。
 // 安全护栏与 runScriptWithPolicy 一致;超限即终止进程并报错;ctx 取消即终止。
-func RunScriptStream(ctx context.Context, scriptPath, argsJSON string, onLine func(string)) (string, error) {
+func RunScriptStream(ctx context.Context, scriptPath, argsJSON string, workspaceRoot string, onLine func(string)) (string, error) {
 	policy := DefaultScriptPolicy
 	if policy.Bin == "" {
 		policy.Bin = scriptBin
@@ -130,6 +130,11 @@ func RunScriptStream(ctx context.Context, scriptPath, argsJSON string, onLine fu
 
 	cmd := exec.CommandContext(ctx, policy.Bin, scriptPath)
 	cmd.Stdin = strings.NewReader(argsJSON)
+
+	if workspaceRoot != "" {
+		cmd.Dir = workspaceRoot
+		cmd.Env = append(common.GetOSEnvironments(), "CCLAW_AGENT_WORKSPACE="+workspaceRoot)
+	}
 
 	stderrBuf := limitedBuffer{limit: policy.MaxOutput}
 	cmd.Stderr = &stderrBuf
@@ -183,7 +188,7 @@ func RunScriptStream(ctx context.Context, scriptPath, argsJSON string, onLine fu
 //
 // 退出码非 0、输出超限或参数超限时返回错误(含 stderr 摘要)。
 // 未设置的策略字段回退到默认值,保证零值可用。
-func runScriptWithPolicy(ctx context.Context, policy ScriptPolicy, scriptPath, argsJSON string) (string, error) {
+func runScriptWithPolicy(ctx context.Context, policy ScriptPolicy, scriptPath, argsJSON string, workspaceRoot string) (string, error) {
 	if policy.Bin == "" {
 		policy.Bin = scriptBin
 	}
@@ -216,6 +221,10 @@ func runScriptWithPolicy(ctx context.Context, policy ScriptPolicy, scriptPath, a
 
 	cmd := exec.CommandContext(ctx, policy.Bin, scriptPath)
 	cmd.Stdin = strings.NewReader(argsJSON)
+	if workspaceRoot != "" {
+		cmd.Dir = workspaceRoot
+		cmd.Env = append(common.GetOSEnvironments(), "CCLAW_AGENT_WORKSPACE="+workspaceRoot)
+	}
 
 	stdoutBuf := limitedBuffer{limit: policy.MaxOutput}
 	stderrBuf := limitedBuffer{limit: policy.MaxOutput}

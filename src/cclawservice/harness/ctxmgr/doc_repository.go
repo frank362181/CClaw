@@ -162,7 +162,7 @@ func (repo *AgentDocumentRepository) LoadSystemTools(tools []dataobject.TTool) o
 		}
 
 		// 目录越界检查
-		schemaFile, err := pCommon.ResolveFile(filepath.Join(systemToolRoot, toolName), tool.SchemaFile)
+		schemaFile, err := pCommon.SafeJoinWithRoot(systemToolRoot, filepath.Join(toolName, tool.SchemaFile))
 		if err != nil {
 			observer.Skip(tool.ToolName, "invalid tool schema file")
 			continue
@@ -212,7 +212,7 @@ func (repo *AgentDocumentRepository) LoadSystemTools(tools []dataobject.TTool) o
 			continue
 		}
 
-		scriptFile, err := pCommon.ResolveFile(filepath.Join(systemToolRoot, tool.ToolName), tool.Script)
+		scriptFile, err := pCommon.SafeJoinWithRoot(systemToolRoot, filepath.Join(tool.ToolName, tool.Script))
 		if err != nil {
 			observer.Skip(tool.ToolName, err.Error())
 			continue

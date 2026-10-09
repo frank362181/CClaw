@@ -177,7 +177,7 @@ func (w *MemoryFileRWriter) Ensure(sender, sessionId string, at *pCommon.Datetim
 // 取最大值同时满足两个目标:DB 更新时立即跟上,DB 陈旧时也不会回退。
 func (w *MemoryFileRWriter) Append(sender, sessionId, fileName, recordType, title, content, timeText string, hintIndex int) (int, error) {
 	memoryDir := hCommon.BuildMemoryRoot(sender)
-	path, err := pCommon.ResolveFile(memoryDir, fileName)
+	path, err := pCommon.SafeJoinWithRoot(memoryDir, fileName)
 	if err != nil {
 		return 0, err
 	}
@@ -215,7 +215,7 @@ func (w *MemoryFileRWriter) Append(sender, sessionId, fileName, recordType, titl
 //   - 半条记录(写入中断)不会被解析进来,下次读回会自动补上。
 func (w *MemoryFileRWriter) Read(sender, sessionId, fileName string) ([]hCommon.MemoryRecord, error) {
 	memoryDir := hCommon.BuildMemoryRoot(sender)
-	path, err := pCommon.ResolveFile(memoryDir, fileName)
+	path, err := pCommon.SafeJoinWithRoot(memoryDir, fileName)
 	if err != nil {
 		return nil, err
 	}
