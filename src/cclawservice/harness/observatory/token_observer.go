@@ -1,6 +1,7 @@
 /*
 * 设计目的:
 *	专门用于面向上游供应商调用时的Token使用量的观察者
+* 	设计 **setupTokenObserver** 函数的目的是为了控制是否支持可观测性
  */
 
 package observatory
@@ -43,7 +44,7 @@ var (
 )
 
 // ReportTokenUsage 尽在 **成功** 返回时调用(失败/重试 的尝试不计数,否则会出现重复统计)
-func ReportTokenUsage(provider dataobject.TLlm, stream bool, u *llmproto.ChatCompletionUsage) {
+func reportTokenUsage(provider dataobject.TLlm, stream bool, u *llmproto.ChatCompletionUsage) {
 	if u == nil {
 		return
 	}
@@ -72,17 +73,6 @@ func setupTokenObserver() {
 	defer tokenObserverLock.Unlock()
 
 	tokenObserver = observePromptCache //观察者函数
-}
-
-// RegisterTokenUsageObserver 注入 token 用量观察者(nil = 关闭)。
-//
-// 为什么要对外可注入:单测需要断言"采集到的用量",生产需要接监控/落库 ——
-// 两者都不该去改 observatory 的默认实现(默认只打日志)。
-func RegisterTokenUsageObserver(fn func(event TokenUsageEvent)) {
-	tokenObserverLock.Lock()
-	defer tokenObserverLock.Unlock()
-
-	tokenObserver = fn
 }
 
 // observePromptCache 记录一次采用,并按节拍输出

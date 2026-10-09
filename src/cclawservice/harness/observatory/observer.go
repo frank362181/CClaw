@@ -14,12 +14,10 @@ import (
 	pCommon "my.favorite/platformutility/common"
 )
 
+// =========================codes block for token usage ====================
+
 func RegisterTokenObserver() {
 	setupTokenObserver()
-}
-
-func RegisterTimingObserver() {
-	setupTimingObserver()
 }
 
 // TokenSnapShot 返回当前统计数据的快照
@@ -30,6 +28,16 @@ func TokenSnapShot() PromptCacheSummary {
 // LogPromptCacheSummary 输出一行info汇总(按模型细分,便于判断 有些模型不支持缓存)
 func LogPromptCacheSummary() {
 	logPromptCacheSummary()
+}
+
+func OnTokenUsage(provider dataobject.TLlm, stream bool, u *llmproto.ChatCompletionUsage) {
+	reportTokenUsage(provider, stream, u)
+}
+
+// ======================== block are for calling timing =================
+
+func RegisterTimingObserver() {
+	setupTimingObserver()
 }
 
 // WithTurn 把回合归因挂到 ctx(返回新 ctx,不修改入参),供底层埋点回填 TurnScope 与 StartOffsetMs
@@ -59,7 +67,7 @@ func OnLlmTiming(ctx context.Context, llm dataobject.TLlm, stream bool, lastToke
 		timing.Err = err.Error()
 	}
 
-	ReportLlmTiming(ctx, timing)
+	reportLlmTiming(ctx, timing)
 }
 
 func OnTurnTiming(ctx context.Context, turnTiming TurnTiming, turnStart time.Time, firstVisibleMs int64, reply string, err error) {
@@ -71,5 +79,5 @@ func OnTurnTiming(ctx context.Context, turnTiming TurnTiming, turnStart time.Tim
 		turnTiming.Err = err.Error()
 	}
 
-	ReportTurnTiming(ctx, turnTiming)
+	reportTurnTiming(ctx, turnTiming)
 }

@@ -1,6 +1,7 @@
 /*
 * 设计目的:
 *	专门用于"时间维度"的可观测性:单次调用上游(TTFT)和整回合分阶段耗时
+*	设计 **setupTimingObserver**函数的目的是为了是否支持可观测性进行设置
  */
 
 package observatory
@@ -59,7 +60,7 @@ var (
 	turnTimingObserver func(turn TurnTiming)
 )
 
-func ReportLlmTiming(ctx context.Context, timing LlmCallTiming) {
+func reportLlmTiming(ctx context.Context, timing LlmCallTiming) {
 	timingObserverLock.Lock()
 	fn := llmTimingObserver
 	timingObserverLock.Unlock()
@@ -77,7 +78,7 @@ func ReportLlmTiming(ctx context.Context, timing LlmCallTiming) {
 	fn(timing)
 }
 
-func ReportTurnTiming(ctx context.Context, turn TurnTiming) {
+func reportTurnTiming(ctx context.Context, turn TurnTiming) {
 	timingObserverLock.Lock()
 	fn := turnTimingObserver
 	timingObserverLock.Unlock()
@@ -89,29 +90,6 @@ func ReportTurnTiming(ctx context.Context, turn TurnTiming) {
 	fn(turn)
 }
 
-// RegisterLlmTimingObserver 注入"单次上游调用"观察者(nil = 关闭)。
-//
-// 保留这个注入点的两个硬需求:
-//  1. 单测得断言 TTFT,而 TTFT 只在 llm_client 的读流循环里可得 —— 没有注入点就测不到;
-//  2. 生产接监控/落库时,不应去改 observatory 的默认实现(默认只打日志)。
-//
-// 与 token 侧的 RegisterTokenUsageObserver 同型,可分别开关。
-func RegisterLlmTimingObserver(fn func(timing LlmCallTiming)) {
-	timingObserverLock.Lock()
-	defer timingObserverLock.Unlock()
-
-	llmTimingObserver = fn
-}
-
-// RegisterTurnTimingObserver 注入"整回合"观察者(nil = 关闭);语义同 RegisterLlmTimingObserver。
-func RegisterTurnTimingObserver(fn func(turn TurnTiming)) {
-	timingObserverLock.Lock()
-	defer timingObserverLock.Unlock()
-
-	turnTimingObserver = fn
-}
-
-// ======================= private function & methods =========================
 func setupTimingObserver() {
 	timingObserverLock.Lock()
 	defer timingObserverLock.Unlock()

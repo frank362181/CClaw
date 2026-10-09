@@ -287,7 +287,7 @@ func (c *Client) completeWithToolsOnce(ctx context.Context, llmProvider dataobje
 	//回调统计token用量
 	ttftMs = time.Since(callStart).Milliseconds() //登记结束时检长度
 	lastTokenUsage = resp.Usage                   //同步路径同样要把用量带进 llm timing 行
-	observatory.ReportTokenUsage(llmProvider, false, resp.Usage)
+	observatory.OnTokenUsage(llmProvider, false, resp.Usage)
 
 	msg := resp.Choices[0].Message
 	return strings.TrimSpace(msg.Content), msg.ToolCalls, nil
@@ -422,7 +422,7 @@ func (c *Client) chatCompletionStreamOnce(ctx context.Context, llmProvider datao
 	}
 
 	// 回掉统计token是用量
-	observatory.ReportTokenUsage(llmProvider, true, lastTokenUsage)
+	observatory.OnTokenUsage(llmProvider, true, lastTokenUsage)
 
 	content := strings.TrimSpace(sb.String())
 	// 内容安全拦截可能无任何正式内容:透出 finish_reason 交由上层提示,不误报为"空流"
@@ -563,7 +563,7 @@ func (c *Client) streamWithToolsOnce(ctx context.Context, llmProvider dataobject
 	}
 
 	//回调登记 token使用量
-	observatory.ReportTokenUsage(llmProvider, true, lastTokenUsage)
+	observatory.OnTokenUsage(llmProvider, true, lastTokenUsage)
 
 	return strings.TrimSpace(sb.String()), acc.Result(), finishReason, emitted, nil
 }
@@ -678,7 +678,7 @@ func (c *Client) doCompletionOnce(ctx context.Context, llmProvider dataobject.TL
 	// 回调token用量
 	ttftMs = time.Since(callStart).Milliseconds() //记录完成的时间长度
 	lastTokenUsage = resp.Usage                   //同步路径同样要把用量带进 llm timing 行
-	observatory.ReportTokenUsage(llmProvider, false, resp.Usage)
+	observatory.OnTokenUsage(llmProvider, false, resp.Usage)
 
 	return content, finishReason, nil
 }
