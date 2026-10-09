@@ -188,12 +188,8 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 	defer cancel()
 
 	reply, err = s.completeChat(runCtx, turn, assembled.Messages, recorder) // reply/err 已在上方声明:供回合上报读取最终值
-	if errors.Is(err, context.DeadlineExceeded) {
-		//若超时,设置err为超时的error
-		err = myException.ChatRunTimeoutKind.Newf("chat service: run timeout after %d seconds", timeoutInterval)
-	}
 	if err != nil {
-		reason := cCommon.ClassifyInterrupt(runCtx, runCtx, nil, err) // 记录停止的原因
+		reason := cCommon.ClassifyInterrupt(ctx, runCtx, nil, err) // 记录停止的原因
 		turnSeq := 0
 		if recorded && cCommon.IsInterrupted(runCtx, err) {
 			turnSeq = s.memoryService.AppendInterruptedTurn(session, req, pCommon.BlankString, recorder.Snapshot(), reason)
@@ -209,7 +205,12 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 		if strings.TrimSpace(reply) != pCommon.BlankString {
 			logging.LogWarnF("chat service: tool loop stopped with partial reply: %s", pCommon.TruncateRunes(reply, 200, "…"))
 		}
-		return nil, myException.LlmError(err, "chat service: runtime call chat")
+
+		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			//若超时,设置err为超时的error
+			return nil, myException.ChatRunTimeoutKind.Newf("chat service: run timeout after %d seconds", timeoutInterval)
+		}
+		return nil, myException.LlmError(err, "chat service: runtime call chat error")
 	}
 
 	// 轮次落库:问题/工具/回复写入历史文件并登记 t_turn / t_turn_tool
