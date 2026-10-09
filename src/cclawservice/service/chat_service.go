@@ -152,7 +152,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 		return nil, err
 	}
 
-	// 回合归因 + 回合上报:同步路径原先没有任何观测出口,turn.turnTiming 里采到的
+	// 可观测性:回合归因 + 回合上报:同步路径原先没有任何观测出口,turn.turnTiming 里采到的
 	// 路由/技能/prompt/工具/轮次全被丢弃。归因必须先挂(TTFT、offset 靠它回填)
 	ctx = observatory.WithTurn(ctx, turn.req.TurnId, turnStart)
 	var reply string
@@ -180,15 +180,26 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 
 	// 调用 LLM 引擎取回完整回复(function-calling 开启且该 Agent 有工具时可能经过工具循环)
 	recorder := knowledge.NewTurnRecorder()
-	reply, err = s.completeChat(ctx, turn, assembled.Messages, recorder) // reply/err 已在上方声明:供回合上报读取最终值
+
+	// 设置整体超时
+	timeoutInterval := pCommon.GetEnvIntDefault(hCommon.ChatRunTimeout, hCommon.AgentRunTimeout)
+	timeout := time.Duration(timeoutInterval) * time.Second
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	reply, err = s.completeChat(runCtx, turn, assembled.Messages, recorder) // reply/err 已在上方声明:供回合上报读取最终值
+	if errors.Is(err, context.DeadlineExceeded) {
+		//若超时,设置err为超时的error
+		err = myException.ChatRunTimeoutKind.Newf("chat service: run timeout after %d seconds", timeoutInterval)
+	}
 	if err != nil {
-		reason := cCommon.ClassifyInterrupt(ctx, ctx, nil, err) // 记录停止的原因
+		reason := cCommon.ClassifyInterrupt(runCtx, runCtx, nil, err) // 记录停止的原因
 		turnSeq := 0
-		if recorded && cCommon.IsInterrupted(ctx, err) {
+		if recorded && cCommon.IsInterrupted(runCtx, err) {
 			turnSeq = s.memoryService.AppendInterruptedTurn(session, req, pCommon.BlankString, recorder.Snapshot(), reason)
 			// 被中断的轮次同样要推进记忆维护:否则"节拍点那一轮被中断"会永久吞掉一次蒸馏
 			s.triggerMemoryMaintenance(session, turn, assembled, records, turnSeq)
-		} else if cCommon.IsInterrupted(ctx, err) {
+		} else if cCommon.IsInterrupted(runCtx, err) {
 			// 中断但记录不可用:历史与 t_turn 都没有 —— 必须显式留痕,不能只剩"什么都没有"
 			logging.LogErrorF("chat service: interrupted turn of session %s was not recorded (recorded=%v reason=%s)",
 				req.SessionId, recorded, reason)
