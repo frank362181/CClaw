@@ -30,7 +30,6 @@ import (
 	"my.favorite/cclawservice/harness/api/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
-	"my.favorite/cclawservice/harness/knowledge"
 	"my.favorite/cclawservice/harness/observatory"
 	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/harness/tool"
@@ -59,7 +58,7 @@ type ChatService struct {
 
 	// memoryService 会话管理(阶段1双写:只写不读的旁路)。
 	// 为 nil 或未启用时全部记录动作静默跳过,不影响聊天主流程。
-	memoryService *knowledge.MemoryService
+	memoryService *ctxmgr.MemoryService
 
 	functionCalling bool // 是否启用 function-calling(由 ini [sandBox] functionCalling 控制)
 
@@ -88,7 +87,7 @@ func GetChatService(db core.IBaseDatabase, functionCalling bool, sessionRecord b
 	chatService.agentRepo = repo.GetAgentRepository(db)
 	chatService.agentRouter = ctxmgr.GetAgentRouter(chatService.agentRepo)
 	chatService.functionCalling = functionCalling
-	chatService.memoryService = knowledge.GetMemoryService(db, sessionRecord)
+	chatService.memoryService = ctxmgr.GetMemoryService(db, sessionRecord)
 
 	return chatService
 }
@@ -179,7 +178,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *request.ChatRequest,
 	assembled, records := s.assembleChatContext(session, turn.agent, turn.llm, turn.systemPrompt, req, turn.toolsReserve)
 
 	// 调用 LLM 引擎取回完整回复(function-calling 开启且该 Agent 有工具时可能经过工具循环)
-	recorder := knowledge.NewTurnRecorder()
+	recorder := ctxmgr.NewTurnRecorder()
 
 	// 设置整体超时
 	timeoutInterval := pCommon.GetEnvIntDefault(hCommon.ChatRunTimeout, hCommon.AgentRunTimeout)
@@ -283,7 +282,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 	// 注册键必须是 <sender>:<turnId>:中断 API 只收到 turnId,用同一规则构造才能命中;
 	// 以发送者为前缀则避免跨用户冒用 turnId 中断他人流。
 	streamCtx, cancel := context.WithCancel(ctx)
-	key := hCommon.BuildTurnStreamKey(sender, req.TurnId)
+	key := ctxmgr.BuildTurnStreamKey(sender, req.TurnId)
 	ctxmgr.GetTurnStreamMgr().Register(key, cancel)
 	defer ctxmgr.GetTurnStreamMgr().Unregister(key)
 
@@ -335,7 +334,7 @@ func (s *ChatService) ChatStream(ctx context.Context, req *request.ChatRequest, 
 
 	// function-calling 开启且该 Agent 有可用工具时,走工具调用循环(工具阶段状态提示,最终内容流式转发);
 	// 否则保持原有的纯流式转发。
-	recorder := knowledge.NewTurnRecorder()
+	recorder := ctxmgr.NewTurnRecorder()
 	if s.functionCalling && len(turn.tools.Tools) > 0 {
 		reply, finishReason, err = s.streamToolLoop(runCtx, turn, assembled.Messages, forwardChunk, onStatus, forwardReasoning, forwardTool, onNotice, recorder)
 	} else {
@@ -405,7 +404,7 @@ func (s *ChatService) EndChatSession(session dataobject.TSession, agent dataobje
 	// closing=true:不受节拍约束,直接把水位之后的尾巴蒸掉(NeedDistill 的收尾维度)。
 	// 没有可蒸内容时 Distill 内部自己会跳过,不会白烧调用。
 	// Assembled=nil:收尾路径没有"本轮装配结果",由 TriggerMemoryMaintenance 归一(zero 值)。
-	s.memoryService.TriggerMemoryMaintenance(knowledge.MaintenanceRequest{
+	s.memoryService.TriggerMemoryMaintenance(ctxmgr.MaintenanceRequest{
 		Session:       &session,
 		Agent:         &agent,
 		Assembled:     nil,
@@ -420,7 +419,7 @@ func (s *ChatService) EndChatSession(session dataobject.TSession, agent dataobje
 // 仅在聊天已开始(流式进行中)时支持;该轮次不在聊天中则返回"未在聊天"错误。
 // 键与 ChatStream 注册时一致(<sender>:<turnId>),并以发送者隔离不同用户。
 func (s *ChatService) InterruptChat(sender, turnId string) error {
-	key := hCommon.BuildTurnStreamKey(sender, cCommon.NormalizeCompactId(turnId))
+	key := ctxmgr.BuildTurnStreamKey(sender, cCommon.NormalizeCompactId(turnId))
 	if !ctxmgr.GetTurnStreamMgr().Cancel(key) {
 		return myException.ChatNotActiveKind.Newf("chat stream not active: %s", turnId)
 	}
@@ -603,7 +602,7 @@ func (s *ChatService) warnPolicyIssues(agent dataobject.TAgent, llmProvider data
 		return
 	}
 
-	policy := hCommon.GetContextPolicy(agent, window)
+	policy := ctxmgr.GetContextPolicy(agent, window)
 	policy.ToolsReserveTokens = toolsReserve
 
 	systemText := pCommon.BlankString
@@ -685,8 +684,8 @@ func (s *ChatService) collectSkillDirs(agent dataobject.TAgent) []string {
 //
 // 装配形态:[system(稳定前缀)] + [历史消息(预算内)] + [本轮用户消息]。
 func (s *ChatService) assembleChatContext(session dataobject.TSession, agent dataobject.TAgent, llmProvider dataobject.TLlm,
-	systemPrompt *hCommon.SystemPrompt, req *request.ChatRequest, toolsReserveTokens int) (hCommon.AssembleResult, []hCommon.MemoryRecord) {
-	policy := hCommon.GetContextPolicy(agent, int(llmProvider.ContextWindow))
+	systemPrompt *hCommon.SystemPrompt, req *request.ChatRequest, toolsReserveTokens int) (hCommon.AssembleResult, []ctxmgr.MemoryRecord) {
+	policy := ctxmgr.GetContextPolicy(agent, int(llmProvider.ContextWindow))
 	policy.ToolsReserveTokens = toolsReserveTokens
 
 	systemText, dynamicMemory, dynamicSkills := pCommon.BlankString, pCommon.BlankString, pCommon.BlankString
@@ -702,7 +701,7 @@ func (s *ChatService) assembleChatContext(session dataobject.TSession, agent dat
 		records = nil
 	}
 
-	turn := hCommon.TurnContext{
+	turn := ctxmgr.TurnContext{
 		Memory: dynamicMemory,
 		Skills: dynamicSkills,
 		Now:    pCommon.FormatCurrentTime(),
@@ -714,7 +713,7 @@ func (s *ChatService) assembleChatContext(session dataobject.TSession, agent dat
 // completeChat 取回完整回复:function-calling 开启且该 Agent 有可用工具时走工具循环,否则走普通同步调用。
 //   - messages: 已装配好的完整消息序列(system + 历史 + 本轮用户消息)
 //   - recorder: 旁路记录本轮调用过的工具(可为 nil)
-func (s *ChatService) completeChat(ctx context.Context, turn *chatTurn, messages []llmproto.ChatMessage, recorder *knowledge.TurnRecorder) (string, error) {
+func (s *ChatService) completeChat(ctx context.Context, turn *chatTurn, messages []llmproto.ChatMessage, recorder *ctxmgr.TurnRecorder) (string, error) {
 	if s.functionCalling && len(turn.visibleTools) > 0 {
 		return s.runToolLoop(ctx, turn, messages, recorder)
 	}
@@ -725,7 +724,7 @@ func (s *ChatService) completeChat(ctx context.Context, turn *chatTurn, messages
 //
 // 每轮请求前都做一次预算贴合(FitMessages):工具结果不断回填会持续挤压上下文窗口,
 // 长工具链必须随时把最老的历史裁掉,否则会遇到上游"超窗口"报错。
-func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages []llmproto.ChatMessage, recorder *knowledge.TurnRecorder) (string, error) {
+func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages []llmproto.ChatMessage, recorder *ctxmgr.TurnRecorder) (string, error) {
 	policy := hCommon.ContextPolicy{ContextWindow: int(turn.llm.ContextWindow)}
 	// 工具死循环守卫:一轮对话一个实例(局部变量),禁止做成服务字段/单例,原因见 chat_tool_guard.go。
 	guard := security.NewTurnLoopGuard()
@@ -802,7 +801,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 // 最终内容增量通过 onChunk 流式转发。底层仍为多次上游请求(OpenAI 兼容协议不支持服务端工具循环),
 // 此处把多轮编排为一条面向客户端的事件流。
 func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messages []llmproto.ChatMessage,
-	onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent), onNotice func(code, msg string), recorder *knowledge.TurnRecorder) (string, string, error) {
+	onChunk func(string), onStatus func(status, text string), onReasoning func(delta string), onTool func(evt ToolEvent), onNotice func(code, msg string), recorder *ctxmgr.TurnRecorder) (string, string, error) {
 	seq := 0 // 本回合工具调用序号(跨轮自增,前端按 seq 追踪同一工具调用)
 	policy := hCommon.ContextPolicy{ContextWindow: int(turn.llm.ContextWindow)}
 
@@ -996,7 +995,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 //   - 有 notice 通道(流式路径)时下发一条提示,用户据此知道该新建会话;
 //   - 没有通道(同步接口)时至少落到错误日志,运维可查。
 func (s *ChatService) noteRecordNotAvailable(req *request.ChatRequest, onNotice func(code, msg string), err error) {
-	if !errors.Is(err, knowledge.ErrSessionOwnershipConflict) {
+	if !errors.Is(err, ctxmgr.ErrSessionOwnershipConflict) {
 		return
 	}
 
@@ -1011,8 +1010,8 @@ func (s *ChatService) noteRecordNotAvailable(req *request.ChatRequest, onNotice 
 // turnSeq 必须是本轮**实际落库**的轮次序号:传 0 时维护会退回一次 SELECT MAX(seq),
 // 而中断轮同样推进了 seq —— 用 0 会让节拍判定基于过时的轮次数(见 interrupt-memory-chain.md M1)。
 func (s *ChatService) triggerMemoryMaintenance(session dataobject.TSession, turn *chatTurn,
-	assembled hCommon.AssembleResult, records []hCommon.MemoryRecord, turnSeq int) {
-	s.memoryService.TriggerMemoryMaintenance(knowledge.MaintenanceRequest{
+	assembled hCommon.AssembleResult, records []ctxmgr.MemoryRecord, turnSeq int) {
+	s.memoryService.TriggerMemoryMaintenance(ctxmgr.MaintenanceRequest{
 		Session:       &session,
 		Agent:         &turn.agent,
 		Assembled:     &assembled,
@@ -1033,7 +1032,7 @@ func toolResultForRecord(result string, err error) string {
 }
 
 // summarizer 把 LLM 客户端包装为"摘要生成器"注入 knowledge。
-func (s *ChatService) summarizer(llmProvider dataobject.TLlm) hCommon.Summarizer {
+func (s *ChatService) summarizer(llmProvider dataobject.TLlm) ctxmgr.Summarizer {
 	return func(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 		// 输出额度按**窗口**收口(见 security.CalcMaintenanceOutputTokens):维护调用的输入同样占窗口,
 		// 若无脑发 SummaryMaxTokens,小窗模型上会变成"输入 + 输出 > 窗口"的必然失败 ——

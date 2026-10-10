@@ -206,7 +206,7 @@ func (repo *AgentDocumentRepository) LoadSystemTools(tools []dataobject.TTool) o
 			continue
 		}
 
-		doc, err := hCommon.ReadSystemToolSchemaDocument(key, fingerprint)
+		doc, err := ReadSystemToolSchemaDocument(key, fingerprint)
 		if err != nil {
 			observer.Skip(tool.ToolName, err.Error())
 			continue
@@ -261,7 +261,7 @@ func (repo *AgentDocumentRepository) LoadSkills(skillFiles []string) ([]hCommon.
 		}
 
 		// 越界校验(相对 skills 根解析 + 真实路径包含性)在 common 里单点收敛
-		filePath, err := hCommon.ResolveSkillDocPath(skillFile)
+		filePath, err := ResolveSkillDocPath(skillFile)
 		if err != nil {
 			report.Skip(skillFile, err.Error())
 			continue
@@ -301,7 +301,7 @@ func (repo *AgentDocumentRepository) LoadSkills(skillFiles []string) ([]hCommon.
 			continue
 		}
 
-		doc, err := hCommon.ReadSkillDocument(filePath, fingerprint)
+		doc, err := ReadSkillDocument(filePath, fingerprint)
 		if err != nil {
 			report.Skip(filePath, err.Error()) // 超大/不可读:整份跳过(不截断)
 			continue
@@ -440,7 +440,7 @@ func (repo *AgentDocumentRepository) readAgentDocumentLocked(kind hCommon.AgentD
 		return nil, false, err
 	}
 
-	frontMatter, content := hCommon.SplitFrontMatter(data)
+	frontMatter, content := SplitFrontMatter(data)
 
 	base.Content = content
 	base.ByteSize = size

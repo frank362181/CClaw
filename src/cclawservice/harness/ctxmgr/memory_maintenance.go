@@ -5,7 +5,7 @@
 * 顺序错了不会报错,只会静默地让蒸馏看不到已被压缩的原文(见 steps 的注释)。
 **/
 
-package knowledge
+package ctxmgr
 
 import (
 	hCommon "my.favorite/cclawservice/harness/common"
@@ -78,7 +78,7 @@ type MaintenanceRequest struct {
 	Assembled *hCommon.AssembleResult
 	// Records 装配时刚读回的记录快照,**只用于请求路径上的判定**(维护压力/压缩收益),0 额外 IO。
 	// 后台动作读的是协程内的重读结果 —— 排队等锁期间可能已有其它轮次追加了记录或摘要。
-	Records []hCommon.MemoryRecord
+	Records []MemoryRecord
 
 	// ContextWindow 模型上下文窗口(tokens),**只用于收窄维护调用的源文本预算**
 	// (蒸馏/压缩/合并都要调模型,窗口装不下时会被整批跳过)。

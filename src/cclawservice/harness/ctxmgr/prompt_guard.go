@@ -31,7 +31,7 @@ var volatileSystemMarkers = []struct{ Marker, Reason string }{
 	{"## 当前时间", "每轮变化:应随 TurnContext.Now 后置"},
 	{"## 历史摘要", "压缩/合并时变化:应随 TurnContext.Summary 后置"},
 	{sectionTitlePrefix + "Skill:", "随意图门变化:应随 TurnContext.Skills后置"},
-	{hCommon.MemoryAutoBeginPrefix, "蒸馏时变化:MEMORY.md 自动区后置"},
+	{MemoryAutoBeginPrefix, "蒸馏时变化:MEMORY.md 自动区后置"},
 }
 
 func ValidateStablePrompt(prompt string) []string {

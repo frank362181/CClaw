@@ -12,7 +12,7 @@
 * **不得写入个人隐私与用户个人信息**(提示词里有硬约束)。个人画像属于 USER.md。
 **/
 
-package knowledge
+package ctxmgr
 
 import (
 	"fmt"
@@ -66,7 +66,7 @@ func memoryDocPath(agent dataobject.TAgent) (string, bool) {
 // 第二种(带区间)才能推进 watermark;旧小节返回 from=to=0。
 func parseDistillHeader(line string) (sessionId string, from, to int, ok bool) {
 	line = strings.TrimSpace(line)
-	if !hCommon.MemorySectionHeaderPattern.MatchString(line) {
+	if !MemorySectionHeaderPattern.MatchString(line) {
 		return pCommon.BlankString, 0, 0, false
 	}
 
@@ -88,7 +88,7 @@ func parseDistillHeader(line string) (sessionId string, from, to int, ok bool) {
 		return pCommon.BlankString, 0, 0, false
 	}
 
-	if m := hCommon.DistillRecordsRangePattern.FindStringSubmatch(line); m != nil {
+	if m := DistillRecordsRangePattern.FindStringSubmatch(line); m != nil {
 		_, _ = fmt.Sscanf(m[1], "%d", &from)
 		_, _ = fmt.Sscanf(m[2], "%d", &to)
 	}
@@ -107,7 +107,7 @@ func lastDistilledIndex(content, sessionId string) int {
 	lines := strings.Split(content, "\n")
 	last := 0
 	if begin, _, ok := autoBlockBounds(lines); ok {
-		if m := hCommon.DistillAutoBeginPattern.FindStringSubmatch(strings.TrimSpace(lines[begin])); m != nil {
+		if m := DistillAutoBeginPattern.FindStringSubmatch(strings.TrimSpace(lines[begin])); m != nil {
 			last = parseAutoWatermarks(m[2])[sessionId]
 		}
 	}
@@ -121,8 +121,8 @@ func lastDistilledIndex(content, sessionId string) int {
 }
 
 // pendingRecords 取出 watermark 之后、仍需蒸馏的记录(保持升序)。
-func pendingRecords(records []hCommon.MemoryRecord, watermark int) []hCommon.MemoryRecord {
-	pending := make([]hCommon.MemoryRecord, 0, len(records))
+func pendingRecords(records []MemoryRecord, watermark int) []MemoryRecord {
+	pending := make([]MemoryRecord, 0, len(records))
 	for i := range records {
 		if records[i].Index > watermark {
 			pending = append(pending, records[i])
@@ -137,7 +137,7 @@ func pendingRecords(records []hCommon.MemoryRecord, watermark int) []hCommon.Mem
 // 取前缀保证已蒸馏区间始终**连续**、不留下永久空洞;取最新一段会把中间那段永久跳过。
 // 溢出的部分留在队列里(下一轮继续),条数通过返回值交给调用方告警。
 // 至少返回 1 条(哪怕它自己就超预算),否则队列永远推不动。
-func windowPrefix(records []hCommon.MemoryRecord, budgetChars int) ([]hCommon.MemoryRecord, []string, int) {
+func windowPrefix(records []MemoryRecord, budgetChars int) ([]MemoryRecord, []string, int) {
 	if len(records) == 0 {
 		return nil, nil, 0
 	}
@@ -174,14 +174,14 @@ func isExplicitNone(text string) bool {
 // 只看**用户发言**:长期有效的约定/口径/偏好都是用户提出的;助手与工具输出里
 // 路径、编号遍地都是,拿它们当信号等于不过滤。
 // 这是**粗筛**:宁可多调用一次,也不要漏掉真正该记住的内容。
-func hasDurableSignal(records []hCommon.MemoryRecord) bool {
+func hasDurableSignal(records []MemoryRecord) bool {
 	for i := range records {
-		if records[i].RecordType != hCommon.HistoryRecordTypeUser {
+		if records[i].RecordType != HistoryRecordTypeUser {
 			continue
 		}
 		content := records[i].Content
 		// 结构性信号:路径 / 文件名 / 长数字(与压缩的关键信息采样共用同一套模式)
-		if hCommon.KeyTokenPattern.MatchString(content) {
+		if KeyTokenPattern.MatchString(content) {
 			return true
 		}
 		for _, token := range distillSignalTokens {
@@ -248,7 +248,7 @@ func parseDistilledFacts(text string) []string {
 
 	facts := make([]string, 0, len(items))
 	for _, item := range items {
-		facts = append(facts, pCommon.TruncateRunes(item, hCommon.DistillMaxFactRunes, hCommon.TruncatedMarker))
+		facts = append(facts, pCommon.TruncateRunes(item, hCommon.DistillMaxFactRunes, TruncatedMarker))
 		if len(facts) >= hCommon.DistillMaxMemoryFacts {
 			break
 		}
@@ -316,7 +316,7 @@ func applyNewFacts(oldFacts, newFacts []string) (next []string, skipped, updated
 //   - 追加(高频):模型只给新增 - 去重/更新后并入,旧条目保持原样;输入输出都更小、不抖动
 //   - 合并(低频,由DistillWriteMode触发):模型给完整列表,清理失效/重复项、重新编排
 func appendFactsToAutoRegion(req memoryDocWrite) (written []string, skipped, updated, removed, migrated int, err error) {
-	unlock := GetStorageLocks().Lock(hCommon.BuildMemoryDocLockKey(req.path))
+	unlock := GetStorageLocks().Lock(BuildMemoryDocLockKey(req.path))
 	defer unlock()
 
 	existing, readErr := pCommon.ReadTextIfExists(req.path)
@@ -347,7 +347,7 @@ func appendFactsToAutoRegion(req memoryDocWrite) (written []string, skipped, upd
 // 现在的语义是:自动区 = 当前有效的长期记忆列表(由模型在上次列表基础上增量更新),
 // 因此体积天然有界、不再需要按最旧裁剪,人工维护区也永远不会被碰到。
 func appendFactsToMemoryDoc(req memoryDocWrite) (written []string, skipped, updated, removed, migrated int, err error) {
-	unlock := GetStorageLocks().Lock(hCommon.BuildMemoryDocLockKey(req.path))
+	unlock := GetStorageLocks().Lock(BuildMemoryDocLockKey(req.path))
 	defer unlock()
 
 	existing, readErr := pCommon.ReadTextIfExists(req.path)
@@ -506,13 +506,13 @@ func fitFactsBudget(facts []string, maxChars int) []string {
 // 只取自动区:人工维护区的事实不参与重写 —— 否则模型会把它们再写一份进自动区(重复),
 // "删了多少条"的统计也会牵连人工内容。
 func existingMemoryFacts(lines []string) (facts []string, legacySections int) {
-	start, end, ok := hCommon.AutoRegionBounds(lines)
+	start, end, ok := AutoRegionBounds(lines)
 	if !ok {
 		return nil, 0
 	}
 
 	for i := start; i < end; i++ {
-		if hCommon.MemorySectionHeaderPattern.MatchString(strings.TrimSpace(lines[i])) {
+		if MemorySectionHeaderPattern.MatchString(strings.TrimSpace(lines[i])) {
 			legacySections++
 			continue
 		}
@@ -543,11 +543,11 @@ func autoBlockBounds(lines []string) (begin, end int, ok bool) {
 	begin, end = -1, -1
 	for i := range lines {
 		trimmed := strings.TrimSpace(lines[i])
-		if begin < 0 && hCommon.DistillAutoBeginPattern.MatchString(trimmed) {
+		if begin < 0 && DistillAutoBeginPattern.MatchString(trimmed) {
 			begin = i
 			continue
 		}
-		if begin >= 0 && trimmed == hCommon.MemoryAutoEndMarker {
+		if begin >= 0 && trimmed == MemoryAutoEndMarker {
 			return begin, i, true
 		}
 	}
@@ -583,7 +583,7 @@ func distillWriteMode(oldFacts []string) DistillMode {
 func replaceAutoMemory(lines []string, facts []string, sessionId string, toIndex int) string {
 	marks := map[string]int{}
 	if begin, _, ok := autoBlockBounds(lines); ok {
-		if m := hCommon.DistillAutoBeginPattern.FindStringSubmatch(strings.TrimSpace(lines[begin])); m != nil {
+		if m := DistillAutoBeginPattern.FindStringSubmatch(strings.TrimSpace(lines[begin])); m != nil {
 			marks = parseAutoWatermarks(m[2])
 		}
 	}
@@ -592,7 +592,7 @@ func replaceAutoMemory(lines []string, facts []string, sessionId string, toIndex
 	}
 
 	block := renderAutoMemoryBlock(facts, marks, len(lines) > 0)
-	start, end, hasRegion := hCommon.AutoRegionBounds(lines)
+	start, end, hasRegion := AutoRegionBounds(lines)
 	if hasRegion {
 		// 区域末尾若原本有非空行,替换后补一个空行,保持"小节之间空一行"的排版
 		merged := make([]string, 0, len(lines))
@@ -638,7 +638,7 @@ func renderAutoMemoryBlock(facts []string, marks map[string]int, useNow bool) []
 	for _, fact := range facts {
 		block = append(block, pCommon.ConcatStringWithLineSpace(fact)) //渲染一条事实行
 	}
-	block = append(block, hCommon.MemoryAutoEndMarker)
+	block = append(block, MemoryAutoEndMarker)
 	return block
 }
 

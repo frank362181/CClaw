@@ -50,7 +50,7 @@
 *     判定为需要压缩(压缩后文件头部的旧记录即可被摘要取代)。
 **/
 
-package knowledge
+package ctxmgr
 
 import (
 	"errors"
@@ -61,7 +61,6 @@ import (
 	"strings"
 	"sync"
 
-	hCommon "my.favorite/cclawservice/harness/common"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
 )
@@ -105,7 +104,7 @@ type memoryFileSnapshot struct {
 	parsedOffset    int64  // 已解析到的字节偏移
 	size            int64  // 解析时的文件大小
 	truncated       bool   // 是否为"只读尾部"的降级结果
-	records         []hCommon.MemoryRecord
+	records         []MemoryRecord
 }
 
 var memoryFileRWriter = pCommon.GetSingleton(func() *MemoryFileRWriter {
@@ -129,10 +128,10 @@ func GetMemoryFileWriter() IMemoryStorage { //*MemoryFileRWriter {
 //   - 文件不存在时写入头部(会话标识 + 元数据行);
 //   - 文件已存在时直接返回文件名,不覆盖既有内容。
 func (w *MemoryFileRWriter) Ensure(sender, sessionId string, at *pCommon.DatetimeItem, headerLines []string) (string, error) {
-	memoryDir, memoryFileName := hCommon.BuildMemoryFileName(sender, sessionId, at)
+	memoryDir, memoryFileName := BuildMemoryFileName(sender, sessionId, at)
 
 	// 与 Append 共用同一把会话锁:避免"判不存在"与"追加写"交错写出重复头部
-	unlock := GetStorageLocks().Lock(hCommon.BuildHistoryLockKey(sessionId))
+	unlock := GetStorageLocks().Lock(BuildHistoryLockKey(sessionId))
 	defer unlock()
 
 	path := filepath.Join(memoryDir, memoryFileName)
@@ -142,7 +141,7 @@ func (w *MemoryFileRWriter) Ensure(sender, sessionId string, at *pCommon.Datetim
 	}
 
 	var sb strings.Builder
-	_, _ = fmt.Fprintf(&sb, "# %s %s\n\n", hCommon.SessionDefaultName, sessionId)
+	_, _ = fmt.Fprintf(&sb, "# %s %s\n\n", SessionDefaultName, sessionId)
 	for _, line := range headerLines {
 		line = strings.TrimSpace(line)
 		if line == pCommon.BlankString {
@@ -176,7 +175,7 @@ func (w *MemoryFileRWriter) Ensure(sender, sessionId string, at *pCommon.Datetim
 //
 // 取最大值同时满足两个目标:DB 更新时立即跟上,DB 陈旧时也不会回退。
 func (w *MemoryFileRWriter) Append(sender, sessionId, fileName, recordType, title, content, timeText string, hintIndex int) (int, error) {
-	memoryDir := hCommon.BuildMemoryRoot(sender)
+	memoryDir := BuildMemoryRoot(sender)
 	path, err := pCommon.SafeJoinWithRoot(memoryDir, fileName)
 	if err != nil {
 		return 0, err
@@ -193,7 +192,7 @@ func (w *MemoryFileRWriter) Append(sender, sessionId, fileName, recordType, titl
 
 	// 会话级串行:同一会话内"分配序号 + 追加写"必须原子;不同会话互不阻塞。
 	// 锁在磁盘 IO 与尾部扫描期间保持——但只阻塞同一会话。
-	unlock := GetStorageLocks().Lock(hCommon.BuildHistoryLockKey(sessionId))
+	unlock := GetStorageLocks().Lock(BuildHistoryLockKey(sessionId))
 	defer unlock()
 
 	index := w.nextIndexFor(path, hintIndex)
@@ -213,8 +212,8 @@ func (w *MemoryFileRWriter) Append(sender, sessionId, fileName, recordType, titl
 //   - 文件不存在时返回 (nil, nil):会话尚未写入历史属正常状态,不是错误;
 //   - 返回的切片是缓存内部数据,**调用方只读、不得修改**;
 //   - 半条记录(写入中断)不会被解析进来,下次读回会自动补上。
-func (w *MemoryFileRWriter) Read(sender, sessionId, fileName string) ([]hCommon.MemoryRecord, error) {
-	memoryDir := hCommon.BuildMemoryRoot(sender)
+func (w *MemoryFileRWriter) Read(sender, sessionId, fileName string) ([]MemoryRecord, error) {
+	memoryDir := BuildMemoryRoot(sender)
 	path, err := pCommon.SafeJoinWithRoot(memoryDir, fileName)
 	if err != nil {
 		return nil, err
@@ -257,7 +256,7 @@ func (w *MemoryFileRWriter) Read(sender, sessionId, fileName string) ([]hCommon.
 // 继续分配(序号看起来"跳号"),测试之间也会互相污染。
 func (w *MemoryFileRWriter) ForgetSession(sender, sessionId string) {
 	//dir, err := w.MemoryDir(sessionId)
-	dir := hCommon.BuildMemoryRoot(sender)
+	dir := BuildMemoryRoot(sender)
 
 	prefix := dir + string(filepath.Separator)
 
@@ -350,7 +349,7 @@ func (w *MemoryFileRWriter) readFull(path string, size int64) (*memoryFileSnapsh
 		}
 	}
 
-	records, consumed := hCommon.ParseMemoryRecords(text)
+	records, consumed := ParseMemoryRecords(text)
 	return &memoryFileSnapshot{
 		headFingerprint: pCommon.ComputeStringFingerprint(text, historyHeadFingerprintBytes), //headFingerprint(text),
 		parsedOffset:    start + int64(consumed),
@@ -367,10 +366,10 @@ func (w *MemoryFileRWriter) readIncremental(path string, cached *memoryFileSnaps
 		return nil, err
 	}
 
-	records, consumed := hCommon.ParseMemoryRecords(delta)
+	records, consumed := ParseMemoryRecords(delta)
 	merged := cached.records
 	if len(records) > 0 {
-		merged = make([]hCommon.MemoryRecord, 0, len(cached.records)+len(records))
+		merged = make([]MemoryRecord, 0, len(cached.records)+len(records))
 		merged = append(merged, cached.records...)
 		merged = append(merged, records...)
 	}

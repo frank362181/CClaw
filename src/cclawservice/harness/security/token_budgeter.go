@@ -9,6 +9,8 @@ package security
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"my.favorite/cclawservice/harness/api/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
@@ -207,14 +209,9 @@ func EstimateInputTokens(messages []llmproto.ChatMessage) int {
 	return int(float64(total) * (1 + estimateSafetyFactor))
 }
 
-// SummaryRecordsOverBudget 生效摘要的**注入体积**是否已超上限
-func SummaryRecordsOverBudget(records []hCommon.MemoryRecord) bool {
-	return hCommon.SummariesRunes(records) > hCommon.MaxSummaryTotalRunes
-}
-
 // SummaryOverBudget 将要注入 system 的摘要正文是否已超总量上限
 func SummaryOverBudget(summary string) bool {
-	return hCommon.TextRunes(summary) > hCommon.MaxSummaryTotalRunes
+	return utf8.RuneCountInString(strings.TrimSpace(summary)) > hCommon.MaxSummaryTotalRunes
 }
 
 // NeedCompact 判断是否压缩(与 compaction_mode 无关)。

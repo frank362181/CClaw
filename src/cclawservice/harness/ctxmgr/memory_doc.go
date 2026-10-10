@@ -12,13 +12,14 @@
 *	写入侧(knowledge)需要按同一套标记定位自动区 -- 两处必须用同一套标记与同一套边界规则
  */
 
-package common
+package ctxmgr
 
 import (
 	"fmt"
 	"regexp"
 	"strings"
 
+	hCommon "my.favorite/cclawservice/harness/common"
 	pCommon "my.favorite/platformutility/common"
 )
 
@@ -49,7 +50,7 @@ var CompactionSystemPrompt = fmt.Sprintf("你是对话历史压缩器。你的�
 	"3. 只依据给定内容,不得推测或补造任何信息;不确定的内容标注为“未确认”;\n"+
 	"4. 用第三人称陈述,按时间顺序分条列出,不要输出标题之外的多余格式;\n"+
 	"5. 若片段中有工具调用结果,只保留结论性的数据,不要复述原始输出全文;\n"+
-	"6. 摘要长度不超过 %d 个字符(中文字符按 1 个计),宁可更短。", MaxSummaryRunes)
+	"6. 摘要长度不超过 %d 个字符(中文字符按 1 个计),宁可更短。", hCommon.MaxSummaryRunes)
 
 // CompactionMergeSystemPrompt 合并摘要专用系统提示(输入是摘要而非原始记录)。
 // 规则编号接在 compactionSystemPrompt 之后(它已经用到 6)
@@ -82,7 +83,7 @@ const (
 		"输出要求:\n" +
 		"1. 每条一行,以 \"- \" 开头,一句话说清,不写理由过程;\n" +
 		"2. 不得推测或补造,只依据给定对话;\n" +
-		"3. 没有任何值得长期记住的内容时,只输出 " + DistillNoneMark + "。"
+		"3. 没有任何值得长期记住的内容时,只输出 " + hCommon.DistillNoneMark + "。"
 
 	DistillUserHeader = "以下是一段对话记录(记录序号 %d-%d),请提炼长期记忆:\n\n"
 

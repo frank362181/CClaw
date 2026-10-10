@@ -12,7 +12,7 @@
 *   - 全局锁只用于保护 entries 表本身,不在持锁期间做 IO。
 **/
 
-package knowledge
+package ctxmgr
 
 import (
 	"sync"

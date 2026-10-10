@@ -17,7 +17,6 @@ import (
 	"strings"
 
 	"my.favorite/cclawservice/harness/api/llmproto"
-	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
@@ -75,12 +74,11 @@ func ValidateSkill(sk dataobject.TSkill) error {
 	if strings.TrimSpace(sk.SkillName) == "" {
 		return pException.ParameterEmptyErrorEx("skill name is empty")
 	}
-	if _, err := hCommon.NormalizeSkillDir(sk.SkillDir); err != nil {
-		return err
-	}
+
 	if !dataobject.SkillScope(sk.SkillScope).Valid() {
 		return pException.ParameterEmptyErrorEx("skill scope is invalid")
 	}
+
 	return nil
 }
 

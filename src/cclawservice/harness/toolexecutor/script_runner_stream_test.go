@@ -22,7 +22,7 @@ func TestRunScriptStream_OnLine(t *testing.T) {
 	}
 
 	var lines []string
-	out, err := RunScriptStream(context.Background(), scriptPath, "{}", func(line string) {
+	out, err := RunScriptStream(context.Background(), scriptPath, "{}", "", func(line string) {
 		lines = append(lines, line)
 	})
 	if err != nil {
@@ -43,7 +43,7 @@ func TestRunScriptStream_OnLineNil(t *testing.T) {
 	if err := os.WriteFile(scriptPath, []byte("print('hello')\n"), 0o755); err != nil {
 		t.Fatalf("write script: %v", err)
 	}
-	out, err := RunScriptStream(context.Background(), scriptPath, "{}", nil)
+	out, err := RunScriptStream(context.Background(), scriptPath, "{}", "", nil)
 	if err != nil {
 		t.Fatalf("run stream: %v", err)
 	}

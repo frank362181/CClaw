@@ -4,7 +4,9 @@
 * 职责:执行 系统工具以及SKILL.md 声明的脚本工具(scripts/*.py 等)。
 *   1. 参数 JSON 通过 stdin 传入(避免 argv 长度/转义/注入问题);
 *   2. stdout 为执行结果(约定 JSON 或文本),stderr 为错误信息;
-*   3. 退出码非 0 或输出超限视为失败,由上层以 tool 消息回填给 LLM。
+*   3. 退出码非 0 或输出超限视为失败,由上层以 tool 消息回填给 LLM;
+*      失败原因优先取 stderr,为空时回退解析 stdout 的 {"error":"..."},最后才退回 exit status
+*      (部分脚本只把错误 JSON 写到 stdout,只看 stderr 会退化成 "exit status 1"、真实原因丢失)。
 *
 * 安全:仅执行 ToolSet 解析并校验过的脚本绝对路径(位于 agent extension 根内);
 * 不使用 shell;内置超时与输出上限,防止脚本挂起/洪泛打爆内存。
@@ -16,6 +18,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -173,10 +176,7 @@ func RunScriptStream(ctx context.Context, scriptPath, argsJSON string, workspace
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return "", fmt.Errorf("script tool: %s timed out after %s", filepath.Base(scriptPath), policy.Timeout)
 		}
-		detail := strings.TrimSpace(stderrBuf.String())
-		if detail == "" {
-			detail = waitErr.Error()
-		}
+		detail := scriptFailureDetail(stderrBuf.String(), sb.String(), waitErr)
 		return "", fmt.Errorf("script tool: %s failed: %s", filepath.Base(scriptPath), detail)
 	}
 	return strings.TrimSpace(sb.String()), nil
@@ -239,11 +239,47 @@ func runScriptWithPolicy(ctx context.Context, policy ScriptPolicy, scriptPath, a
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return "", fmt.Errorf("script tool: %s timed out after %s", filepath.Base(scriptPath), policy.Timeout)
 		}
-		detail := strings.TrimSpace(stderrBuf.String())
-		if detail == "" {
-			detail = runErr.Error()
-		}
+		detail := scriptFailureDetail(stderrBuf.String(), stdoutBuf.String(), runErr)
 		return "", fmt.Errorf("script tool: %s failed: %s", filepath.Base(scriptPath), detail)
 	}
 	return strings.TrimSpace(stdoutBuf.String()), nil
+}
+
+// ============================== private helpers ==========================================
+
+// scriptFailureDetail 提取脚本失败的可读原因。
+// 优先级:stderr 详情 → stdout 的 {"error":"..."} → 执行错误(如 "exit status 1")。
+// 为什么要回退解析 stdout:部分脚本(如 weather.py)把错误 JSON 只写到 stdout,
+// 若仅看 stderr 会退化成 "exit status 1",真实原因(网络/解析/参数)全部丢失、无法诊断。
+func scriptFailureDetail(stderr, stdout string, runErr error) string {
+	if detail := strings.TrimSpace(stderr); detail != "" {
+		return detail
+	}
+	if detail := extractStdoutError(stdout); detail != "" {
+		return detail
+	}
+	return runErr.Error()
+}
+
+// extractStdoutError 从脚本 stdout 中提取 {"error":"..."} 文本。
+// stdout 可能多行(最后一行通常是脚本的最终 JSON 结果),故自后向前找首个可解析且含 error 的 JSON 对象。
+func extractStdoutError(stdout string) string {
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if len(line) < 2 || line[0] != '{' {
+			continue
+		}
+
+		var payload struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(line), &payload); err != nil {
+			continue
+		}
+		if msg := strings.TrimSpace(payload.Error); msg != "" {
+			return msg
+		}
+	}
+	return ""
 }

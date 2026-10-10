@@ -12,7 +12,7 @@
   - 城市名兼容行政后缀（杭州市→杭州），原始名匹配不到自动剥离再试
   - 日期寻址：不给日期 = 今天起 3 天；date=YYYY-MM-DD 或 day_offset=0/1/2（今天/明天/后天）
   - 输出顶层 today = 地点本地日期（权威"今天"，避免用机器时钟猜日期）
-  - 免费 Open-Meteo API，无需 Key
+  - 免费 Open-Meteo API，无需 Key；瞬时网络故障(TLS 握手/连接超时、5xx/429)自动重试
   - 离线自检：python3 scripts/weather.py --selftest
 """
 
@@ -21,12 +21,20 @@ import json
 import os
 import ssl
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
-HTTP_TIMEOUT = 8  # 秒
+HTTP_TIMEOUT = 8          # 秒:单次请求超时
+# 瞬时故障重试次数(总尝试 = 1 + HTTP_RETRY)。取 1:实测失败后立即重试 100% 成功,
+# 再叠加 geocode 的多候选尝试也不至于逼近脚本执行器 120s 上限。
+HTTP_RETRY = 1
+HTTP_RETRY_BACKOFF = 0.6  # 秒:第 n 次重试前等待 n * 该值
+# 可重试的 HTTP 状态码:超时/限流/服务端临时不可用。
+TRANSIENT_HTTP_CODES = frozenset({408, 425, 429, 500, 502, 503, 504})
 
 FORECAST_WINDOW_DAYS = 7  # 向 API 拉取的窗口（决定 date/day_offset 的可选范围）
 FORECAST_RETURN_DAYS = 3  # 默认返回的天数（锚点起 3 天）
@@ -57,10 +65,39 @@ def _get_opener():
     return _opener
 
 
+def _is_transient(exc):
+    """判断异常是否为“瞬时故障”（值得重试）。
+
+    - HTTPError：仅超时/限流/5xx 可重试；其它 4xx（参数、权限）视为永久故障。
+    - 其余：网络类异常（OSError 家族，含 URLError/SSLError 握手超时、socket 读写超时、
+      连接重置/拒绝）可重试；JSON 解析等非网络错误不重试。
+    注意 HTTPError 也是 OSError 子类，必须先判 HTTPError。
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in TRANSIENT_HTTP_CODES
+    return isinstance(exc, OSError)
+
+
 def http_get_json(url):
+    """GET 并解析 JSON；对瞬时网络故障做有限重试 + 短退避。
+
+    为什么要重试：Open-Meteo 免费接口偶发 TLS 握手超时（实测约占 7%~10%），
+    脚本内重试即可挽回（实测失败后立即重试 100% 成功），避免整次工具调用失败、
+    再让模型多跑一轮工具往返（还会多出一条 tool 记录）。
+    永久故障（城市不存在、4xx）不重试 —— 重试只浪费额度与时延，应尽快把真实原因返回。
+    """
     req = urllib.request.Request(url, headers={"User-Agent": "cclaw-weather/1.0"})
-    with _get_opener().open(req, timeout=HTTP_TIMEOUT) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    last_exc = None
+    for attempt in range(HTTP_RETRY + 1):
+        try:
+            with _get_opener().open(req, timeout=HTTP_TIMEOUT) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:  # 先分类再决定是否重试：非瞬时故障立即抛出
+            last_exc = exc
+            if not _is_transient(exc) or attempt >= HTTP_RETRY:
+                raise
+            time.sleep(HTTP_RETRY_BACKOFF * (attempt + 1))
+    raise last_exc  # 不可达（循环内必定 return 或 raise）
 
 
 # 常见行政区划后缀（长→短，优先剥离更长后缀）
@@ -247,18 +284,24 @@ def fetch_forecast(city, lat, lon, anchor=0):
     return build_forecast(city, cur, daily, days, anchor)
 
 
+def fail(message, code=1):
+    """失败：stdout 给 JSON（便于直接手跑脚本核对），stderr 给可读错误（执行器取它做错误详情）。
+    必须双写：只写 stdout 时执行器只能拿到 "exit status N"，真实原因（网络/解析/参数）会丢失。"""
+    sys.stdout.write(json.dumps({"error": message}, ensure_ascii=False) + "\n")
+    sys.stderr.write(message + "\n")
+    return code
+
+
 def main():
     raw = sys.stdin.read() or "{}"
     try:
         args = json.loads(raw)
-    except json.JSONDecodeError:
-        print(json.dumps({"error": "invalid args json"}, ensure_ascii=False))
-        sys.exit(2)
+    except json.JSONDecodeError as exc:
+        return fail("invalid args json: %s" % exc, 2)
 
     city = str(args.get("city") or "").strip()
     if not city:
-        print(json.dumps({"error": "city is empty"}, ensure_ascii=False))
-        sys.exit(2)
+        return fail("city is empty", 2)
 
     try:
         lat, lon = geocode(city)
@@ -266,9 +309,9 @@ def main():
         anchor = resolve_anchor(days, args.get("date"), args.get("day_offset"))
         result = build_forecast(city, cur, daily, days, anchor)
         print(json.dumps(result, ensure_ascii=False))
-    except Exception as exc:  # 网络/解析/参数失败：stdout 输出错误 JSON，退出码非 0
-        print(json.dumps({"error": str(exc)}, ensure_ascii=False))
-        sys.exit(1)
+    except Exception as exc:  # 网络/解析/参数失败：stdout+stderr 双写，退出码非 0
+        return fail(str(exc), 1)
+    return 0
 
 
 def selftest():
@@ -317,6 +360,60 @@ def selftest():
     assert out["forecast"][0]["weather"] == "小雨"
     assert len(build_forecast("杭州", fake_cur, fake_daily, days, 3)["forecast"]) == 1
     assert build_forecast("杭州", fake_cur, fake_daily, days, 0)["forecast"][0]["date"] == "2026-09-17"
+
+    # 瞬时/永久故障分类：网络抖动重试，参数/业务错误不重试
+    assert _is_transient(urllib.error.URLError("handshake timed out"))
+    assert _is_transient(ssl.SSLError("The handshake operation timed out"))
+    assert _is_transient(TimeoutError("timed out"))
+    assert _is_transient(ConnectionResetError("connection reset"))
+    assert not _is_transient(ValueError("city not found: 不存在市"))
+    assert not _is_transient(json.JSONDecodeError("bad json", "", 0))
+    for code in sorted(TRANSIENT_HTTP_CODES):
+        assert _is_transient(urllib.error.HTTPError("u", code, "err", None, None)), code
+    for code in (400, 401, 403, 404, 422):
+        assert not _is_transient(urllib.error.HTTPError("u", code, "err", None, None)), code
+
+    # 重试循环行为（打桩 opener，不触网）：瞬时故障重试后成功；永久故障立即抛出、不重试
+    class _FakeResp:
+        def read(self):
+            return b'{"ok": 1}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    class _FakeOpener:
+        def __init__(self, errors):
+            self._errors = list(errors)
+            self.calls = 0
+
+        def open(self, _req, timeout=None):  # noqa: ARG002 - 与 urllib opener 签名对齐
+            self.calls += 1
+            if self._errors:
+                raise self._errors.pop(0)
+            return _FakeResp()
+
+    global _opener
+    saved = _opener
+    try:
+        transient = _FakeOpener([ssl.SSLError("handshake timed out")])
+        _opener = transient
+        assert http_get_json("https://example.invalid") == {"ok": 1}
+        assert transient.calls == 2, transient.calls  # 第一次失败 + 第二次成功
+
+        permanent = _FakeOpener([ValueError("city not found: X")])
+        _opener = permanent
+        try:
+            http_get_json("https://example.invalid")
+            raise AssertionError("永久故障应当直接抛出")
+        except ValueError:
+            pass
+        assert permanent.calls == 1, permanent.calls  # 不应重试
+    finally:
+        _opener = saved
+
     print("selftest ok")
 
 
@@ -324,4 +421,4 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--selftest":
         selftest()
     else:
-        main()
+        sys.exit(main())

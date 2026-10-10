@@ -12,7 +12,7 @@
 * 必须串行,统一由 ctxmgr.GetSessionLocks() 按 sessionId 加锁保护。
 **/
 
-package knowledge
+package ctxmgr
 
 import (
 	"context"
@@ -24,7 +24,6 @@ import (
 
 	cCommon "my.favorite/cclawservice/common"
 	hCommon "my.favorite/cclawservice/harness/common"
-	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
@@ -217,7 +216,7 @@ func (s *MemoryService) Begin(sender string, agent dataobject.TAgent, req *reque
 	// 2. 首条消息 → 建档
 	session := dataobject.TSession{
 		SessionId:      sessionId,
-		SessionName:    hCommon.BuildSessionName(req.ReqMsg),
+		SessionName:    BuildSessionName(req.ReqMsg),
 		AgentId:        strings.TrimSpace(agent.AgentId),
 		BeginTimestamp: now.Timestamp,
 		ChatType:       req.ChatType,
@@ -268,7 +267,7 @@ func (s *MemoryService) AppendInterruptedTurn(sess dataobject.TSession, req *req
 // 语义:
 //   - 旁路读:任何失败都按"无历史"处理,由调用方决定是否降级,绝不阻断本轮对话;
 //   - 会话尚未建档(chat_data 为空)时返回空,不是错误。
-func (s *MemoryService) ReadRecords(session dataobject.TSession) ([]hCommon.MemoryRecord, error) {
+func (s *MemoryService) ReadRecords(session dataobject.TSession) ([]MemoryRecord, error) {
 	if !s.fileStorageUsable() {
 		return nil, nil
 	}
@@ -290,7 +289,7 @@ func (s *MemoryService) ReadRecords(session dataobject.TSession) ([]hCommon.Memo
 // **执行顺序是契约** —— 蒸馏必须在压缩之前(否则被压缩的原文对蒸馏永久不可见),
 // 顺序由 maintenancePlan.steps 给出并单测锁住(memory_maintenance_test.go 锁声明,
 // memory_maintenance_trigger_test.go 锁"真跑起来之后的调用序列与输入")。
-func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceRequest, summarizer hCommon.Summarizer) {
+func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceRequest, summarizer Summarizer) {
 
 	if s == nil || !s.Enabled() {
 		return
@@ -323,7 +322,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 
 	// 压缩的**收益**维度:被裁区间至少要有 MinCompactionSrcRunes 的体积才值得一次 LLM 调用。
 	// 早退扫描(够门槛就停),records 是装配刚读回的,请求路径上不额外读文件。
-	droppedRunes := hCommon.RecordsRunesInRange(maintenanceReq.Records, maintenanceReq.Assembled.DroppedFrom, maintenanceReq.Assembled.DroppedTo,
+	droppedRunes := RecordsRunesInRange(maintenanceReq.Records, maintenanceReq.Assembled.DroppedFrom, maintenanceReq.Assembled.DroppedTo,
 		hCommon.MinCompactionSrcRunes)
 	needCompact := security.NeedCompact(*maintenanceReq.Assembled, droppedRunes)
 	// 请求路径上只取一次"当前时刻",压缩与合并两处节流共用
@@ -369,7 +368,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 	// 这里按 (窗口 - 维护输出额度 - 系统提示估量) 收窄,**装不下就不排这个动作**,
 	// 并把问题指向配置(面向运维的告警见 security.PolicyWarnings,每 agent 只记一次)。
 	// 窗口未知(ContextWindow<=0)时退化为硬上限,行为与收口前完全一致。
-	budgets := security.CalcMaintenanceBudgets(maintenanceReq.ContextWindow, hCommon.DistillSystemPrompt, hCommon.CompactionSystemPrompt, hCommon.CompactionMergeSystemPrompt)
+	budgets := security.CalcMaintenanceBudgets(maintenanceReq.ContextWindow, DistillSystemPrompt, CompactionSystemPrompt, CompactionMergeSystemPrompt)
 	if needDistill && budgets.DistillBudget <= 0 {
 		logging.LogDebugF("memory service: session=%s distill skipped, the window (%d) leaves no room for a maintenance call",
 			session.SessionId, maintenanceReq.ContextWindow)
@@ -413,7 +412,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 	from, to, mode := maintenanceReq.Assembled.DroppedFrom, maintenanceReq.Assembled.DroppedTo, agent.CompactionMode
 
 	// 获得一个维护routine，避免无限次获取打满LLM
-	if !hCommon.AcquireMaintenanceSlot() {
+	if !AcquireMaintenanceSlot() {
 		logging.LogDebugF("memory service: memory maintenance slot unavailable, skip session=%s", session.SessionId)
 		return
 	}
@@ -424,7 +423,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 	plan := maintenancePlan{distill: needDistill, compact: needCompact, merge: needMerge}
 
 	go func() {
-		defer hCommon.ReleaseMaintenanceSlot()
+		defer ReleaseMaintenanceSlot()
 		defer func() { // 后台协程必须自兜 panic:否则单个会话的异常会带崩整个进程
 			if r := recover(); r != nil {
 				logging.LogErrorF("memory service: panic in memory maintenance of %s: %v", session.SessionId, r)
@@ -491,7 +490,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 				}
 
 				// 以**重读后**的判定为准:压缩本身也可能把摘要总量推过阈值。
-				if security.SummaryRecordsOverBudget(records) {
+				if SummariesRunes(records) > hCommon.MaxSummaryTotalRunes {
 					if _, err = s.mergeWithBudget(ctx, *session, records, summarizer, budgets.MergeBudget); err != nil {
 						logging.LogWarnF("memory service: merge summaries of %s error:%s", session.SessionId, err.Error())
 					}
@@ -523,8 +522,8 @@ func (s *MemoryService) TurnCount(sessionId string) int {
 //
 // 导出入口用**硬上限**作为源文本预算(等价于窗口未知);编排侧走 compactWithBudget,
 // 把按窗口算出的预算传进来。
-func (s *MemoryService) Compact(ctx context.Context, session dataobject.TSession, records []hCommon.MemoryRecord,
-	from, to, mode int, summarize hCommon.Summarizer) (CompactionResult, error) {
+func (s *MemoryService) Compact(ctx context.Context, session dataobject.TSession, records []MemoryRecord,
+	from, to, mode int, summarize Summarizer) (CompactionResult, error) {
 	return s.compactWithBudget(ctx, session, records, from, to, mode, summarize, hCommon.MaxCompactionInputChars)
 }
 
@@ -544,7 +543,7 @@ func (s *MemoryService) Compact(ctx context.Context, session dataobject.TSession
 //
 // 返回 SummaryIndex=0 表示没有可安全合并的集合(宁可超预算,也不写过度承诺的 covers)。
 func (s *MemoryService) CompactSummaries(ctx context.Context, session dataobject.TSession,
-	records []hCommon.MemoryRecord, summarize hCommon.Summarizer) (CompactionResult, error) {
+	records []MemoryRecord, summarize Summarizer) (CompactionResult, error) {
 	return s.mergeWithBudget(ctx, session, records, summarize, hCommon.MaxCompactionInputChars)
 }
 
@@ -561,7 +560,7 @@ func (s *MemoryService) CompactSummaries(ctx context.Context, session dataobject
 // 编排侧在压缩判定也需要水位时会改用 distillWatermark + distillPressureAt,
 // 让两者共用同一次读取。
 func (s *MemoryService) DistillPressure(session dataobject.TSession, agent dataobject.TAgent,
-	records []hCommon.MemoryRecord) (pendingRecords, pendingChars int) {
+	records []MemoryRecord) (pendingRecords, pendingChars int) {
 	if !s.fileStorageUsable() || len(records) == 0 {
 		return 0, 0
 	}
@@ -576,8 +575,8 @@ func (s *MemoryService) DistillPressure(session dataobject.TSession, agent datao
 // Distill 把会话记录蒸馏为长期记忆并写入 Agent 工作区的 MEMORY.md。
 //
 // 导出入口用**硬上限**作为源文本预算;编排侧走 distillWithBudget(按窗口收口)。
-func (s *MemoryService) Distill(ctx context.Context, session dataobject.TSession, records []hCommon.MemoryRecord,
-	agent dataobject.TAgent, summarize hCommon.Summarizer) (DistillResult, error) {
+func (s *MemoryService) Distill(ctx context.Context, session dataobject.TSession, records []MemoryRecord,
+	agent dataobject.TAgent, summarize Summarizer) (DistillResult, error) {
 	return s.distillWithBudget(ctx, session, records, agent, summarize, hCommon.DistillMaxInputChars)
 }
 
@@ -604,8 +603,7 @@ func (s *MemoryService) EndSession(sessionId string, reason int) error {
 // 为什么要重读:调用方的快照是"读锁之前"的,看不到等锁期间别的协程已经追加的摘要,
 // 用它做"区间是否已被压缩"的判定会对同一区间写出重复摘要(两条摘要互相不构成取代,内容会重复注入)。
 // Read 有增量缓存(头指纹 + parsedOffset),文件只追加时只解析新增字节,代价很低。
-func (s *MemoryService) reloadForCompaction(session dataobject.TSession, fileName string,
-	fallback []hCommon.MemoryRecord) []hCommon.MemoryRecord {
+func (s *MemoryService) reloadForCompaction(session dataobject.TSession, fileName string, fallback []MemoryRecord) []MemoryRecord {
 	latest, err := GetMemoryFileWriter().Read(session.Sender, session.SessionId, fileName)
 	if err != nil {
 		logging.LogDebugF("chat memory compact: reload records of %s error:%s (fallback to caller snapshot)",
@@ -737,7 +735,7 @@ func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRe
 	//    写入器会取"DB 序号与本进程缓存"的最大值,保证序号只增不减(见写入器的序号契约)。
 	chatIndex := 0
 	if fileName != "" {
-		if idx, err := writer.Append(sess.Sender, sessionId, fileName, hCommon.HistoryRecordTypeUser, "", req.ReqMsg, pCommon.TimestampText(chatTime), nextIndex); err == nil {
+		if idx, err := writer.Append(sess.Sender, sessionId, fileName, HistoryRecordTypeUser, "", req.ReqMsg, pCommon.TimestampText(chatTime), nextIndex); err == nil {
 			chatIndex = idx
 		} else {
 			logging.LogWarnF("memory service: append user record error:%s", err.Error())
@@ -750,7 +748,7 @@ func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRe
 		if tool.Unfinished() {
 			// 已发起但没拿到结果(执行中被中断/取消/超时):不能留空 ——
 			// 调用已经发生且可能已有副作用,"这次调用发生过"本身就是审计信息(见 M3)。
-			result = hCommon.TurnToolUnfinishedResult
+			result = TurnToolUnfinishedResult
 			logging.LogWarnF("memory service: tool %s of turn %s started but never returned a result, recorded as unfinished", tool.ToolName, turnId)
 		}
 		toolRows = append(toolRows, dataobject.TTurnTool{
@@ -758,11 +756,11 @@ func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRe
 			ToolCalled: true,
 			CallTime:   tool.CallTime,
 			ToolName:   tool.ToolName,
-			ToolResp:   pCommon.TruncateRunes(strings.TrimSpace(result), hCommon.TurnToolRespMaxLen, pCommon.BlankString), //写入数据库时截断，仅仅写前256 runes
+			ToolResp:   pCommon.TruncateRunes(strings.TrimSpace(result), TurnToolRespMaxLen, pCommon.BlankString), //写入数据库时截断，仅仅写前256 runes
 			RespTime:   tool.RespTime,
 		})
 		if fileName != "" {
-			if _, err := writer.Append(sess.Sender, sessionId, fileName, hCommon.HistoryRecordTypeTool, tool.ToolName, result, pCommon.TimestampText(tool.CallTime), nextIndex+1+i); err != nil {
+			if _, err := writer.Append(sess.Sender, sessionId, fileName, HistoryRecordTypeTool, tool.ToolName, result, pCommon.TimestampText(tool.CallTime), nextIndex+1+i); err != nil {
 				logging.LogWarnF("memory service: append tool record error:%s", err.Error())
 			}
 		}
@@ -772,11 +770,11 @@ func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRe
 	appendFailed := false
 	assistantTitle := pCommon.BlankString
 	if outcome.Interrupted {
-		assistantTitle = hCommon.HistoryRecordTypeInterrupted
+		assistantTitle = HistoryRecordTypeInterrupted
 	}
 	// 中断且没有任何产出时不写助手记录:空记录无信息量,徒增噪声(resp_index 保持 0)
 	if fileName != "" && (!outcome.Interrupted || strings.TrimSpace(reply) != pCommon.BlankString) {
-		if idx, err := writer.Append(sess.Sender, sessionId, fileName, hCommon.HistoryRecordTypeAssistant, assistantTitle, reply, pCommon.TimestampText(now.Timestamp), nextIndex+1+len(tools)); err == nil {
+		if idx, err := writer.Append(sess.Sender, sessionId, fileName, HistoryRecordTypeAssistant, assistantTitle, reply, pCommon.TimestampText(now.Timestamp), nextIndex+1+len(tools)); err == nil {
 			respIndex = idx
 		} else {
 			appendFailed = true
@@ -840,8 +838,8 @@ func (s *MemoryService) memoryFileHeaderLines(session dataobject.TSession, now *
 //   - budget:    送入模型的源文本预算(rune)
 //
 // 返回值:压缩结果;未执行压缩时 SummaryIndex 为 0 且 err 为 nil(属正常情况,非错误)。
-func (s *MemoryService) compactWithBudget(ctx context.Context, session dataobject.TSession, records []hCommon.MemoryRecord,
-	from, to, mode int, summarize hCommon.Summarizer, budget int) (CompactionResult, error) {
+func (s *MemoryService) compactWithBudget(ctx context.Context, session dataobject.TSession, records []MemoryRecord,
+	from, to, mode int, summarize Summarizer, budget int) (CompactionResult, error) {
 	result := CompactionResult{Mode: mode}
 	if !s.fileStorageUsable() || summarize == nil {
 		return result, nil
@@ -854,7 +852,7 @@ func (s *MemoryService) compactWithBudget(ctx context.Context, session dataobjec
 
 	// 同会话压缩串行:压缩会读全量记录再追加摘要,并发执行会写出重复摘要。
 	// 用专用锁键(与历史写入锁不同名,避免与 Append 的内部加锁自锁)。
-	unlock := GetStorageLocks().Lock(hCommon.BuildCompactionLockKey(session.SessionId))
+	unlock := GetStorageLocks().Lock(BuildCompactionLockKey(session.SessionId))
 	defer unlock()
 
 	records = s.reloadForCompaction(session, fileName, records)
@@ -880,7 +878,7 @@ func (s *MemoryService) compactWithBudget(ctx context.Context, session dataobjec
 
 	// 收益门槛:压缩的价值来自"变小"。源体积不大于摘要上限时压缩只有坏处
 	// (摘要会折进 system 消息,而 system 越长历史预算越小 —— 会形成正反馈)。
-	srcRunes := hCommon.RecordsRunes(run)
+	srcRunes := RecordsRunes(run)
 	summaryCap := effectiveSummaryCap(srcRunes)
 	if srcRunes <= summaryCap {
 		logging.LogDebugF("chat memory compact: session=%s skipped, no gain (src_runes=%d <= summary_cap=%d)",
@@ -907,7 +905,7 @@ func (s *MemoryService) compactWithBudget(ctx context.Context, session dataobjec
 	// 先按**落盘上限**截断,再做保全校验。
 	// 必须这个顺序:校验的应当是真正写进去的那段文本 —— 否则会出现
 	// "校验通过、截断后关键信息丢了"的假通过(保全校验就失去意义)。
-	summaryText = pCommon.TruncateRunes(strings.TrimSpace(summaryText), summaryCap, hCommon.TruncatedMarker)
+	summaryText = pCommon.TruncateRunes(strings.TrimSpace(summaryText), summaryCap, TruncatedMarker)
 	if summaryText == pCommon.BlankString {
 		GetCompactionThrottle().RecordFailure(session.SessionId, now) // 调用已发生,同样计入冷却
 		return result, nil
@@ -919,8 +917,8 @@ func (s *MemoryService) compactWithBudget(ctx context.Context, session dataobjec
 
 	// 【模式差异 2/3 + 3/3】保全校验与覆盖区间调整 —— **safeguard 专属**(default 恒为 [from,to])
 	// 校验不过时不扩大覆盖区间:收窄到区间前半,较新的原文继续以原文回放(宁可多留,不可丢失)。
-	if mode == hCommon.CompactionModeSafeguard { //safeguard
-		if ratio < hCommon.SafeguardMinKeyRetention {
+	if mode == CompactionModeSafeguard { //safeguard
+		if ratio < SafeguardMinKeyRetention {
 			result.Degraded = true
 			coverTo = degradeCoverTo(run, coverFrom, coverTo)
 			logging.LogWarnF("chat memory compact: mode=safeguard key retention %.2f below floor, degrade covers to %d-%02d (missed %v)",
@@ -928,13 +926,13 @@ func (s *MemoryService) compactWithBudget(ctx context.Context, session dataobjec
 
 			// 降级后按**新的覆盖区间**重算:降级到底保住了没有,必须可观测
 			if degraded := recordsInRange(run, coverFrom, coverTo); len(degraded) > 0 {
-				if degradedRatio, degradedMissed := keyRetentionRatio(degraded, summaryText); degradedRatio < hCommon.SafeguardMinKeyRetention {
+				if degradedRatio, degradedMissed := keyRetentionRatio(degraded, summaryText); degradedRatio < SafeguardMinKeyRetention {
 					logging.LogWarnF("chat memory compact: session=%s degraded range still below floor (retention=%.2f missed=%v)",
 						session.SessionId, degradedRatio, degradedMissed)
 				}
 			}
 		}
-	} else if ratio < hCommon.SafeguardMinKeyRetention {
+	} else if ratio < SafeguardMinKeyRetention {
 		// default 模式不降级(它承诺整段替换),但必须留下痕迹:否则"摘要丢了关键信息"无从发现
 		logging.LogWarnF("memory compact: session=%s mode=default low key retention %.2f (missed %v)",
 			session.SessionId, ratio, missed)
@@ -945,7 +943,7 @@ func (s *MemoryService) compactWithBudget(ctx context.Context, session dataobjec
 	for i := range run {
 		consumed[run[i].Index] = true
 	}
-	covered := hCommon.CoveredIndexes(hCommon.SummariesOf(records))
+	covered := CoveredIndexes(SummariesOf(records))
 	if err := verifyCovers(records, coverFrom, coverTo, consumed, covered); err != nil {
 		logging.LogErrorF("memory compact: session=%s refuse to write summary: %s", session.SessionId, err.Error())
 		GetCompactionThrottle().RecordFailure(session.SessionId, now)
@@ -953,7 +951,7 @@ func (s *MemoryService) compactWithBudget(ctx context.Context, session dataobjec
 	}
 
 	content := buildSummaryRecordContent(coverFrom, coverTo, summaryText)
-	index, err := GetMemoryFileWriter().Append(session.Sender, session.SessionId, fileName, hCommon.HistoryRecordTypeSummary, pCommon.BlankString,
+	index, err := GetMemoryFileWriter().Append(session.Sender, session.SessionId, fileName, HistoryRecordTypeSummary, pCommon.BlankString,
 		content, pCommon.BlankString, 0)
 	if err != nil {
 		GetCompactionThrottle().RecordFailure(session.SessionId, now)
@@ -963,8 +961,8 @@ func (s *MemoryService) compactWithBudget(ctx context.Context, session dataobjec
 	GetCompactionThrottle().RecordSuccess(session.SessionId, now, result.Degraded)
 	result.SummaryIndex, result.CoversFrom, result.CoversTo, result.Summary = index, coverFrom, coverTo, summaryText
 	logging.LogInfoF("chat memory compact: session=%s summary_index=%d covers=%d-%d mode=%d(%s) degraded=%v retention=%.2f src_runes=%d summary_runes=%d %s",
-		session.SessionId, index, coverFrom, coverTo, mode, hCommon.CompactionModeName(mode), result.Degraded,
-		ratio, srcRunes, utf8.RuneCountInString(summaryText), hCommon.CompactionStat(run))
+		session.SessionId, index, coverFrom, coverTo, mode, CompactionModeName(mode), result.Degraded,
+		ratio, srcRunes, utf8.RuneCountInString(summaryText), CompactionStat(run))
 	return result, nil
 }
 
@@ -996,8 +994,8 @@ func (s *MemoryService) distillWatermark(agent dataobject.TAgent, sessionId stri
 // 于是自动记忆区体积天然有界(整体重写),不需要按"最旧优先"删旧事实。
 //
 // 返回:蒸馏结果;未执行(记录太少/无工作区/无新事实信号)时返回零值且 err 为 nil。
-func (s *MemoryService) distillWithBudget(ctx context.Context, session dataobject.TSession, records []hCommon.MemoryRecord,
-	agent dataobject.TAgent, summarize hCommon.Summarizer, budget int) (DistillResult, error) {
+func (s *MemoryService) distillWithBudget(ctx context.Context, session dataobject.TSession, records []MemoryRecord,
+	agent dataobject.TAgent, summarize Summarizer, budget int) (DistillResult, error) {
 	var result DistillResult
 	if summarize == nil || agent.AgentId == pCommon.BlankString {
 		return result, nil
@@ -1013,7 +1011,7 @@ func (s *MemoryService) distillWithBudget(ctx context.Context, session dataobjec
 	}
 
 	// 待蒸馏集合:未被摘要代表的普通记录(被摘要覆盖的记录既不回放、也不该再蒸馏)
-	active := hCommon.ActivePlainRecords(records)
+	active := ActivePlainRecords(records)
 
 	existing, readErr := pCommon.ReadTextIfExists(path)
 	if readErr != nil {
@@ -1062,12 +1060,12 @@ func (s *MemoryService) distillWithBudget(ctx context.Context, session dataobjec
 		mode = DistillModeMerge
 	}
 
-	prompt := ctxmgr.BuildDistillAppendUserPrompt(batch, newLines)
+	prompt := BuildDistillAppendUserPrompt(batch, newLines)
 	if mode == DistillModeMerge {
-		prompt = ctxmgr.BuildDistillUserPrompt(oldFacts, batch, newLines) // 带已有记忆,要求完整列表
+		prompt = BuildDistillUserPrompt(oldFacts, batch, newLines) // 带已有记忆,要求完整列表
 	}
 
-	text, err := summarize(ctx, hCommon.DistillSystemPrompt, prompt)
+	text, err := summarize(ctx, DistillSystemPrompt, prompt)
 	if err != nil {
 		return result, err
 	}
@@ -1122,9 +1120,9 @@ func (s *MemoryService) distillWithBudget(ctx context.Context, session dataobjec
 // mergeAttempt 用至多 maxSize 条最旧摘要做**一次**合并尝试(maxSize<=0 表示不限制)。
 // 调用方必须已持压缩锁并通过节流闸;本函数只负责这一次尝试本身(err != nil 时 state 无意义)。
 func (s *MemoryService) mergeAttempt(ctx context.Context, session dataobject.TSession,
-	records []hCommon.MemoryRecord, fileName string, maxSize, budget int,
-	summarize hCommon.Summarizer) (CompactionResult, mergeAttemptState, error) {
-	result := CompactionResult{Mode: hCommon.CompactionModeDefault}
+	records []MemoryRecord, fileName string, maxSize, budget int,
+	summarize Summarizer) (CompactionResult, mergeAttemptState, error) {
+	result := CompactionResult{Mode: CompactionModeDefault}
 
 	set, from, to := mergeCandidateUpTo(records, maxSize)
 	if len(set) == 0 {
@@ -1133,7 +1131,7 @@ func (s *MemoryService) mergeAttempt(ctx context.Context, session dataobject.TSe
 
 	// 收益门槛(与 Compact 同一门槛):合并后不会变小就毫无意义 ——
 	// 摘要下限 SummaryMinRunes 可能大于被合并摘要的总量,此时"合并"反而会把 system 撑大。
-	srcRunes := hCommon.RecordsRunes(set)
+	srcRunes := RecordsRunes(set)
 	summaryCap := effectiveSummaryCap(srcRunes)
 	if srcRunes <= summaryCap {
 		logging.LogDebugF("chat memory merge: session=%s skipped, no gain (src_runes=%d <= summary_cap=%d)",
@@ -1148,12 +1146,12 @@ func (s *MemoryService) mergeAttempt(ctx context.Context, session dataobject.TSe
 		return result, mergeTooLarge, nil
 	}
 
-	text, err := summarize(ctx, hCommon.CompactionMergeSystemPrompt, prompt)
+	text, err := summarize(ctx, CompactionMergeSystemPrompt, prompt)
 	if err != nil {
 		return result, mergeNoGain, err
 	}
 
-	text = pCommon.TruncateRunes(strings.TrimSpace(text), summaryCap, hCommon.TruncatedMarker)
+	text = pCommon.TruncateRunes(strings.TrimSpace(text), summaryCap, TruncatedMarker)
 	if text == pCommon.BlankString {
 		logging.LogWarnF("chat memory merge: session=%s summarizer returned empty text (merged=%d)", session.SessionId, len(set))
 		return result, mergeEmptyOutput, nil
@@ -1163,7 +1161,7 @@ func (s *MemoryService) mergeAttempt(ctx context.Context, session dataobject.TSe
 	// 因此与 Compact 一样必须检查关键信息保有率。不达标宁可不写 ——
 	// 摘要超预算只是多花 token,丢信息不可逆(而 covers 已经承诺取代那些摘要)。
 	ratio, missed := keyRetentionRatio(set, text)
-	if ratio < hCommon.SafeguardMinKeyRetention {
+	if ratio < SafeguardMinKeyRetention {
 		logging.LogWarnF("chat memory merge: session=%s key retention %.2f below floor, refuse to write (merged=%d missed %v)",
 			session.SessionId, ratio, len(set), missed)
 		return result, mergeLossy, nil
@@ -1173,14 +1171,14 @@ func (s *MemoryService) mergeAttempt(ctx context.Context, session dataobject.TSe
 	for i := range set {
 		consumed[set[i].Index] = true
 	}
-	covered := hCommon.CoveredIndexes(hCommon.SummariesOf(records))
+	covered := CoveredIndexes(SummariesOf(records))
 	if err := verifyCovers(records, from, to, consumed, covered); err != nil {
 		logging.LogErrorF("chat memory merge: session=%s refuse to write merged summary: %s", session.SessionId, err.Error())
 		return result, mergeNoCandidate, err
 	}
 
 	content := buildSummaryRecordContent(from, to, text)
-	index, err := GetMemoryFileWriter().Append(session.Sender, session.SessionId, fileName, hCommon.HistoryRecordTypeSummary, pCommon.BlankString,
+	index, err := GetMemoryFileWriter().Append(session.Sender, session.SessionId, fileName, HistoryRecordTypeSummary, pCommon.BlankString,
 		content, pCommon.BlankString, 0)
 	if err != nil {
 		return result, mergeNoCandidate, err
@@ -1195,8 +1193,8 @@ func (s *MemoryService) mergeAttempt(ctx context.Context, session dataobject.TSe
 
 // mergeWithBudget 与 CompactSummaries 相同,但源文本预算由调用方给定(见 ctxmgr.MaintenanceBudgets)。
 func (s *MemoryService) mergeWithBudget(ctx context.Context, session dataobject.TSession,
-	records []hCommon.MemoryRecord, summarize hCommon.Summarizer, budget int) (CompactionResult, error) {
-	result := CompactionResult{Mode: hCommon.CompactionModeDefault}
+	records []MemoryRecord, summarize Summarizer, budget int) (CompactionResult, error) {
+	result := CompactionResult{Mode: CompactionModeDefault}
 	if !s.fileStorageUsable() || summarize == nil {
 		return result, nil
 	}
@@ -1206,7 +1204,7 @@ func (s *MemoryService) mergeWithBudget(ctx context.Context, session dataobject.
 		return result, nil
 	}
 
-	unlock := GetStorageLocks().Lock(hCommon.BuildCompactionLockKey(session.SessionId))
+	unlock := GetStorageLocks().Lock(BuildCompactionLockKey(session.SessionId))
 	defer unlock()
 
 	// 节流(与压缩同一张表、不同键):
@@ -1223,7 +1221,7 @@ func (s *MemoryService) mergeWithBudget(ctx context.Context, session dataobject.
 	records = s.reloadForCompaction(session, fileName, records)
 
 	// 尝试顺序见 mergeAttemptSizes:先"一次尽量多合并",保留率不达标再退回最小集合。
-	sizes := mergeAttemptSizes(len(hCommon.SummariesOf(records)))
+	sizes := mergeAttemptSizes(len(SummariesOf(records)))
 
 	var last CompactionResult
 	lastState := mergeNoCandidate
@@ -1255,12 +1253,12 @@ func (s *MemoryService) mergeWithBudget(ctx context.Context, session dataobject.
 		// 没有可安全合并的集合 = 摘要将持续超预算(注入体积只增不减,历史预算随之变小),
 		// 这是唯一信号,不能用 debug 级别埋掉。
 		logging.LogWarnF("chat memory merge: session=%s summaries over budget but no safely mergeable set (summaries=%d runes=%d)",
-			session.SessionId, len(hCommon.SummariesOf(records)), hCommon.SummariesRunes(records))
+			session.SessionId, len(SummariesOf(records)), SummariesRunes(records))
 	case mergeLossy:
 		// 连最小集合都保不住关键标记:摘要会长期超预算、压缩被禁用,
 		// 此后掉出窗口的记录将没有任何摘要代表 —— 必须人工介入(整理摘要/调大窗口)。
 		logging.LogWarnF("chat memory merge: session=%s no lossless merge at any candidate size (summaries=%d runes=%d): summaries stay over budget and compaction stays disabled, check the summary content",
-			session.SessionId, len(hCommon.SummariesOf(records)), hCommon.SummariesRunes(records))
+			session.SessionId, len(SummariesOf(records)), SummariesRunes(records))
 	}
 	return last, nil
 }
@@ -1270,9 +1268,9 @@ func (s *MemoryService) mergeWithBudget(ctx context.Context, session dataobject.
 //
 //	default   (CompactionModeDefault  , 0):整段区间一次调用;
 //	safeguard (CompactionModeSafeguard, 1):区间超过 safeguardBlockRecords 时分块多次调用后拼接。
-func buildSummaryByMode(ctx context.Context, targets []hCommon.MemoryRecord, from, to, mode int, summarize hCommon.Summarizer) (string, error) {
+func buildSummaryByMode(ctx context.Context, targets []MemoryRecord, from, to, mode int, summarize Summarizer) (string, error) {
 	switch mode {
-	case hCommon.CompactionModeSafeguard: //safeguard
+	case CompactionModeSafeguard: //safeguard
 		return summarizeInBlocks(ctx, targets, summarize)
 	default: // default compaction mode
 		return summarizeOnce(ctx, targets, from, to, summarize)
@@ -1284,7 +1282,7 @@ func buildSummaryByMode(ctx context.Context, targets []hCommon.MemoryRecord, fro
 // 体积口径与**送批**完全一致(逐条按 promptLineRunes 计):一个是"数出来的",一个是"渲染出来的",
 // 但两者必须同值,否则会出现"压力说攒够一轮了"而实际批次只装了零头(长工具记录),
 // 或反过来(多条短记录)在批次早已满时还不触发。一致性由 TestPromptLineRunesMatchesRendered 锁住。
-func distillPressureAt(watermark int, records []hCommon.MemoryRecord) (pendingRecords, pendingChars int) {
+func distillPressureAt(watermark int, records []MemoryRecord) (pendingRecords, pendingChars int) {
 	for i := range records {
 		if records[i].Index <= watermark || records[i].IsSummary() {
 			continue

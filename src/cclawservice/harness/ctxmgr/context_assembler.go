@@ -184,7 +184,7 @@ func getSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope,
 
 // BuildClassifySystemPrompt 构建用来通过用户问题的意图询问LLM返回合适Agent的 prompt
 // 简介优先使用各 Agent 工作区 AGENTS.md 的摘要(已由调用方解析进 ClassifyAgent.Label)
-func BuildClassifySystemPrompt(agents []hCommon.ClassificationAgent) string {
+func BuildClassifySystemPrompt(agents []ClassificationAgent) string {
 	var sb strings.Builder
 	sb.WriteString("你是一个智能体路由器。请根据用户的问题,从下面的智能体列表中选择最合适的一个。\n")
 	sb.WriteString("智能体列表(格式: 编号|名称|简介):\n")
@@ -304,7 +304,7 @@ func BuildChatCompletionRequest(llmProvider dataobject.TLlm, systemPrompt *hComm
 
 // BuildChatCompletionRequestWithTool 构造带工具的 chat/completions 请求体(tool_choice 不发送)。
 // max_tokens 沿用与普通请求一致的动态推导(dynamicMaxTokens)。
-func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool /*[]llmproto.Tool*/, stream bool) llmproto.ChatCompletionRequest {
+func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool, stream bool) llmproto.ChatCompletionRequest {
 	return BuildChatCompletionRequestWithToolChoice(llmProvider, messages, tools, pCommon.BlankString, stream)
 }
 
@@ -313,7 +313,7 @@ func BuildChatCompletionRequestWithTool(llmProvider dataobject.TLlm, messages []
 //
 // 为什么需要:技能正文不注入 system prompt,模型看不到"必须调用工具"的流程要求,
 // 可能直接用上下文里的历史工具结果作答 —— 对实时类工具(force-call)首轮必须强制调用。
-func BuildChatCompletionRequestWithToolChoice(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool /*[]llmproto.Tool*/, toolChoice string, stream bool) llmproto.ChatCompletionRequest {
+func BuildChatCompletionRequestWithToolChoice(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, tools []llmproto.Tool, toolChoice string, stream bool) llmproto.ChatCompletionRequest {
 	req := llmproto.ChatCompletionRequest{
 		Model:      llmProvider.GetModelName(),
 		Messages:   messages,
@@ -340,14 +340,14 @@ func BuildChatCompletionRequestWithToolChoice(llmProvider dataobject.TLlm, messa
 }
 
 // BuildDistillUserPrompt 拼装蒸馏输入:「已有长期记忆」(可空) + 本次新增对话。
-func BuildDistillUserPrompt(existingMemory []string, batch []hCommon.MemoryRecord, newLines []string) string {
+func BuildDistillUserPrompt(existingMemory []string, batch []MemoryRecord, newLines []string) string {
 	if len(batch) == 0 {
 		return pCommon.BlankString
 	}
 
 	var sb strings.Builder
 	if len(existingMemory) > 0 {
-		sb.WriteString(hCommon.DistillExistingHeader)
+		sb.WriteString(DistillExistingHeader)
 		for _, fact := range existingMemory {
 			sb.WriteString(pCommon.ConcatStringWithLineSpace(fact)) //渲染一条事实行
 			sb.WriteString("\n")
@@ -355,28 +355,28 @@ func BuildDistillUserPrompt(existingMemory []string, batch []hCommon.MemoryRecor
 		sb.WriteString("\n")
 	}
 
-	_, _ = fmt.Fprintf(&sb, hCommon.DistillUserHeader, batch[0].Index, batch[len(batch)-1].Index)
+	_, _ = fmt.Fprintf(&sb, DistillUserHeader, batch[0].Index, batch[len(batch)-1].Index)
 	for _, line := range newLines {
 		sb.WriteString(line)
 	}
-	_, _ = fmt.Fprintf(&sb, "\n"+hCommon.DistillRewriteNotice, hCommon.DistillMaxMemoryFacts, hCommon.DistillMaxFactRunes, hCommon.DistillNoneMark)
+	_, _ = fmt.Fprintf(&sb, "\n"+DistillRewriteNotice, hCommon.DistillMaxMemoryFacts, hCommon.DistillMaxFactRunes, hCommon.DistillNoneMark)
 	return sb.String()
 }
 
 // BuildDistillAppendUserPrompt 追加模式的输入:给本次新增对话(不带记忆--本地去重兜底)
-func BuildDistillAppendUserPrompt(batch []hCommon.MemoryRecord, newLines []string) string {
+func BuildDistillAppendUserPrompt(batch []MemoryRecord, newLines []string) string {
 	if len(batch) == 0 {
 		return pCommon.BlankString
 	}
 
 	var sb strings.Builder
 	batchLen := len(batch)
-	_, _ = fmt.Fprintf(&sb, hCommon.DistillUserHeader, batch[0].Index, batch[batchLen-1].Index)
+	_, _ = fmt.Fprintf(&sb, DistillUserHeader, batch[0].Index, batch[batchLen-1].Index)
 	for _, line := range newLines {
 		sb.WriteString(line)
 	}
 
-	_, _ = fmt.Fprintf(&sb, "\n"+hCommon.DistillAppendNotice, hCommon.DistillNoneMark)
+	_, _ = fmt.Fprintf(&sb, "\n"+DistillAppendNotice, hCommon.DistillNoneMark)
 	return sb.String()
 }
 
@@ -414,14 +414,14 @@ func DegradeChatRequest(req *llmproto.ChatCompletionRequest, err error) bool {
 //   - policy:         装配策略
 //
 // 返回的消息序列永远以 system 开头、以本轮用户消息结尾。
-func AssembleContext(systemPrompt string, records []hCommon.MemoryRecord, currentUserMsg string, turn hCommon.TurnContext, policy hCommon.ContextPolicy) hCommon.AssembleResult {
-	policy = hCommon.NormalizeContextPolicy(policy)
+func AssembleContext(systemPrompt string, records []MemoryRecord, currentUserMsg string, turn TurnContext, policy hCommon.ContextPolicy) hCommon.AssembleResult {
+	policy = NormalizeContextPolicy(policy)
 
 	summaryText, active := splitSummaryAndActive(records)
 	items := buildHistoryItems(active, policy.ToolReplayMaxRunes)
 
 	turn.Summary = summaryText
-	system := llmproto.ChatMessage{Role: hCommon.RoleSystem, Content: systemPrompt} //appendHistorySummary(systemPrompt, summaryText, historySummaryTitle)
+	system := llmproto.ChatMessage{Role: hCommon.RoleSystem, Content: systemPrompt}
 	current := llmproto.ChatMessage{Role: hCommon.RoleUser, Content: turn.Render(currentUserMsg)}
 
 	result := hCommon.AssembleResult{Summary: summaryText}
@@ -493,7 +493,7 @@ func FitMessages(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, p
 		return messages
 	}
 
-	policy = hCommon.NormalizeContextPolicy(policy)
+	policy = NormalizeContextPolicy(policy)
 	if policy.ContextWindow <= 0 { // 未配置窗口:不做裁剪,保持阶段1行为
 		return messages
 	}
@@ -503,7 +503,6 @@ func FitMessages(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, p
 		return messages
 	}
 
-	//budget := policy.ContextWindow - policy.OutputReserve - CalcSystemReservedTokens(policy, messages[0])
 	budget := security.Budget(policy, messages[0])
 	if budget < 0 {
 		budget = 0
@@ -557,7 +556,7 @@ func assembleSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope,
 	// ---- 启动文档(顺序:AGENTS -> SOUL -> IDENTITY -> USER -> TOOLS -> BOOTSTRAP -> MEMORY) ----
 	for i := range documents {
 		doc := &documents[i]
-		if !hCommon.IsKindAllowedInScope(doc.Kind, scope) {
+		if !IsKindAllowedInScope(doc.Kind, scope) {
 			continue
 		}
 
@@ -579,7 +578,7 @@ func assembleSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope,
 		//MEMORY.md 拆分:人工区进稳定前缀,自动区 **后置**(不在此注入)
 		//蒸馏会改写自动区,留在 system 里 -> 每次蒸馏都让 "system 之后的整段历史"缓存失效
 		if doc.Kind == hCommon.AgentDocMemory {
-			human, auto := hCommon.SplitMemoryDoc(content)
+			human, auto := SplitMemoryDoc(content)
 			dynamicMemory = auto
 			content = strings.TrimSpace(human)
 			if len(content) == 0 {
@@ -637,7 +636,7 @@ func assembleSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope,
 	dynamicSkills = renderSectionsText(renderActiveSkillDocs(skills, activeSkillFiles, &skillTruncated), skillTruncated)
 
 	// ---- 单 section 硬上限:任何 section 都不得超过 MaxPromptSectionLen ----
-	sections, truncated = capSections(sections, hCommon.MaxPromptSectionLen, truncated)
+	sections, truncated = capSections(sections, MaxPromptSectionLen, truncated)
 
 	// ---- 总预算控制:优先保留高优先级文件,超限从尾部压缩 ----
 	totalCap := security.CalcBoostrapBudget(agent.BootstrapTotalChars)
@@ -648,9 +647,9 @@ func assembleSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope,
 	if totalCap > 0 {
 		logging.LogDebugF("prompt service: agent=%s scope=%s bootstrap budget: section_cap=%d runes(≈%d tokens) total_cap=%d runes(≈%d tokens) skill_cap=%d runes(≈%d tokens) truncated=%v",
 			agent.AgentId, scope.String(),
-			hCommon.MaxPromptSectionLen, security.CharsToTokens(hCommon.MaxPromptSectionLen),
+			MaxPromptSectionLen, security.CharsToTokens(MaxPromptSectionLen),
 			totalCap, security.CharsToTokens(totalCap),
-			hCommon.MaxSkillsPromptChars, security.CharsToTokens(hCommon.MaxSkillsPromptChars), truncated)
+			MaxSkillsPromptChars, security.CharsToTokens(MaxSkillsPromptChars), truncated)
 	}
 
 	// MEMORY.md 在注入顺序里是**最后**一段,总预算吃紧时它是第一个被截断/丢弃的。
@@ -839,8 +838,8 @@ func renderToolsCatalog(tools []hCommon.ToolPromptItem) (string, bool) {
 	// 1) 单条描述上限:加省略号让"这里是节选"可见 —— 但不计入 truncated:
 	// 完整描述仍在 schema 里,不该因此触发 Bootstrap Context Notice(那不是内容丢失)。
 	for i := range items {
-		if len([]rune(items[i].Description)) > hCommon.MaxToolDescPromptRunes {
-			items[i].Description = pCommon.TruncateRunes(items[i].Description, hCommon.MaxToolDescPromptRunes, "…")
+		if len([]rune(items[i].Description)) > MaxToolDescPromptRunes {
+			items[i].Description = pCommon.TruncateRunes(items[i].Description, MaxToolDescPromptRunes, "…")
 		}
 	}
 
@@ -866,7 +865,7 @@ func renderToolsCatalog(tools []hCommon.ToolPromptItem) (string, bool) {
 		return sb.String()
 	}
 
-	if full := render(items); runes(full) <= hCommon.MaxToolsPromptChars {
+	if full := render(items); runes(full) <= MaxToolsPromptChars {
 		return full, false
 	}
 
@@ -875,7 +874,7 @@ func renderToolsCatalog(tools []hCommon.ToolPromptItem) (string, bool) {
 	keep := make([]hCommon.ToolPromptItem, 0, len(items))
 	for i := range items {
 		candidate := append(keep[:len(keep):len(keep)], items[i])
-		if runes(render(candidate)) > hCommon.MaxToolsPromptChars {
+		if runes(render(candidate)) > MaxToolsPromptChars {
 			break
 		}
 		keep = candidate
@@ -927,8 +926,8 @@ func renderActiveSkillDocs(skills []hCommon.SkillDocument, activeSkillFiles []st
 		}
 
 		// 单技能正文预算:超限截断并可见(而不是默默把一个技能的 SOP 截断一半还继续塞下一个)
-		if runeLen := len([]rune(content)); runeLen > hCommon.MaxActiveSkillDocRunes {
-			content = pCommon.TruncateRunes(content, hCommon.MaxActiveSkillDocRunes, pCommon.BlankString)
+		if runeLen := len([]rune(content)); runeLen > MaxActiveSkillDocRunes {
+			content = pCommon.TruncateRunes(content, MaxActiveSkillDocRunes, pCommon.BlankString)
 			*truncated = append(*truncated, "Skill: "+name)
 		}
 
@@ -936,7 +935,7 @@ func renderActiveSkillDocs(skills []hCommon.SkillDocument, activeSkillFiles []st
 			Title:   "Skill: " + name,
 			Content: content,
 		})
-		if len(out) >= hCommon.MaxActiveSkillsPerTurn {
+		if len(out) >= MaxActiveSkillsPerTurn {
 			break
 		}
 	}
@@ -999,8 +998,8 @@ func renderSkillsCatalog(skills []hCommon.SkillDocument) (string, bool) {
 	})
 
 	// 数量上限
-	if len(catalog) > hCommon.MaxSkillsInPrompt {
-		catalog = catalog[:hCommon.MaxSkillsInPrompt]
+	if len(catalog) > MaxSkillsInPrompt {
+		catalog = catalog[:MaxSkillsInPrompt]
 	}
 
 	render := func(list []hCommon.SkillDocument, descMax int) string {
@@ -1036,13 +1035,13 @@ func renderSkillsCatalog(skills []hCommon.SkillDocument) (string, bool) {
 	runes := func(s string) int { return len([]rune(s)) }
 
 	// 完整描述若可容纳,直接使用
-	if full := render(catalog, 0); runes(full) <= hCommon.MaxSkillsPromptChars {
+	if full := render(catalog, 0); runes(full) <= MaxSkillsPromptChars {
 		return full, false
 	}
 
 	// 二分查找能容纳全部 skill 的最大描述长度
 	fits := func(descMax int) bool {
-		return runes(render(catalog, descMax)) <= hCommon.MaxSkillsPromptChars
+		return runes(render(catalog, descMax)) <= MaxSkillsPromptChars
 	}
 
 	lo, hi := minDesc, maxDesc
@@ -1063,7 +1062,7 @@ func renderSkillsCatalog(skills []hCommon.SkillDocument) (string, bool) {
 	keep := make([]hCommon.SkillDocument, 0, len(catalog))
 	for i := range catalog {
 		candidate := append(keep, catalog[i])
-		if runes(render(candidate, lo)) > hCommon.MaxSkillsPromptChars {
+		if runes(render(candidate, lo)) > MaxSkillsPromptChars {
 			break
 		}
 		keep = candidate
@@ -1082,21 +1081,21 @@ func renderSkillsCatalog(skills []hCommon.SkillDocument) (string, bool) {
 // "哪些摘要仍生效""哪些记录已被取代""注入文本长什么样"这三个判定**必须**用 hCommon 里的
 // 共享实现(与写端 compactionRun / 合并判定 SummaryOverBudget 同一规则),
 // 否则会出现"按 A 规则判断要不要压缩、按 B 规则决定注入什么"的漂移。
-func splitSummaryAndActive(records []hCommon.MemoryRecord) (summaryText string, active []hCommon.MemoryRecord) {
-	if len(hCommon.SummariesOf(records)) == 0 {
+func splitSummaryAndActive(records []MemoryRecord) (summaryText string, active []MemoryRecord) {
+	if len(SummariesOf(records)) == 0 {
 		return "", records
 	}
 
-	return hCommon.SummaryTextOf(records), hCommon.ActivePlainRecords(records)
+	return SummaryTextOf(records), ActivePlainRecords(records)
 }
 
 // buildHistoryItems 把记录映射为历史消息(工具记录折叠进同轮助手消息)。
 //
 // 每条 item 同时记录其**来源记录**的最小序号与条数:压缩门槛要按"记录条数"判断
 // (折叠后的消息条数会被工具记录放大),而 covers 区间要用**记录**序号表达。
-func buildHistoryItems(records []hCommon.MemoryRecord, toolMaxRunes int) []historyItem {
+func buildHistoryItems(records []MemoryRecord, toolMaxRunes int) []historyItem {
 	items := make([]historyItem, 0, len(records))
-	var pending []hCommon.MemoryRecord
+	var pending []MemoryRecord
 
 	flush := func(target *historyItem, anchor int) {
 		if len(pending) == 0 {
@@ -1123,7 +1122,7 @@ func buildHistoryItems(records []hCommon.MemoryRecord, toolMaxRunes int) []histo
 
 	for _, rec := range records {
 		switch rec.RecordType {
-		case hCommon.HistoryRecordTypeUser: //knowledge.HistoryRecordUser:
+		case HistoryRecordTypeUser: //knowledge.HistoryRecordUser:
 			// 上一条用户消息之前残留的工具记录(异常结构)不再挂到新问题上
 			flush(nil, rec.Index)
 			if strings.TrimSpace(rec.Content) == "" {
@@ -1131,9 +1130,9 @@ func buildHistoryItems(records []hCommon.MemoryRecord, toolMaxRunes int) []histo
 			}
 			items = append(items, historyItem{index: rec.Index, minIndex: rec.Index, records: 1,
 				msg: llmproto.ChatMessage{Role: hCommon.RoleUser, Content: rec.Content}})
-		case hCommon.HistoryRecordTypeTool: //knowledge.HistoryRecordTool:
+		case HistoryRecordTypeTool: //knowledge.HistoryRecordTool:
 			pending = append(pending, rec)
-		case hCommon.HistoryRecordTypeAssistant: //knowledge.HistoryRecordAssistant:
+		case HistoryRecordTypeAssistant: //knowledge.HistoryRecordAssistant:
 			// 空助手消息(模型只输出思考内容、或内容被安全策略拦下)不回放:
 			content := strings.TrimSpace(rec.Content)
 			if content == "" {
@@ -1143,7 +1142,7 @@ func buildHistoryItems(records []hCommon.MemoryRecord, toolMaxRunes int) []histo
 			// (接着半句话继续说、或以为已回答过而不再补充)。
 			// 压缩/蒸馏侧已有 "assistant(被中断)" 标签(compaction.recordLabel),此处补齐同一语义。
 			if rec.IsInterrupted() {
-				content = hCommon.InterruptedReplyNotice + "\n" + content
+				content = InterruptedReplyNotice + "\n" + content
 			}
 			item := historyItem{index: rec.Index, minIndex: rec.Index, records: 1,
 				msg: llmproto.ChatMessage{Role: hCommon.RoleAssistant, Content: content}}
@@ -1162,7 +1161,7 @@ func buildHistoryItems(records []hCommon.MemoryRecord, toolMaxRunes int) []histo
 // 每条都带**记录时间**前缀:历史工具结果原本与"刚查到的"长得一模一样,
 // 模型会把旧数据当当下复述(实测:两天前的天气被当成今天)。时间由记录头解析而来
 // (MemoryRecord.TimeText),缺失时降级为不带时间的旧格式。
-func renderToolBlock(tools []hCommon.MemoryRecord, maxRunes int) string {
+func renderToolBlock(tools []MemoryRecord, maxRunes int) string {
 	var sb strings.Builder
 	sb.WriteString(historyToolBlockOpen)
 	for _, t := range tools {
@@ -1170,7 +1169,7 @@ func renderToolBlock(tools []hCommon.MemoryRecord, maxRunes int) string {
 		if name == "" {
 			name = "tool"
 		}
-		body := pCommon.TruncateRunes(strings.TrimSpace(t.Content), maxRunes, hCommon.TruncatedMarker)
+		body := pCommon.TruncateRunes(strings.TrimSpace(t.Content), maxRunes, TruncatedMarker)
 		if timeText := strings.TrimSpace(t.TimeText); timeText != "" {
 			_, _ = fmt.Fprintf(&sb, "\n- [%s] %s: %s", timeText, name, body)
 		} else {

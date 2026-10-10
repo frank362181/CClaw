@@ -10,7 +10,7 @@
 *  2. **幂等**。压缩前先确认目标区间尚未被已有摘要覆盖;同一会话的压缩串行化(专用锁键)。
 **/
 
-package knowledge
+package ctxmgr
 
 import (
 	"context"
@@ -35,19 +35,19 @@ type CompactionResult struct {
 }
 
 // buildMergeUserPrompt 渲染"合并摘要"的输入(输入是摘要正文,不是原始记录)。
-func buildMergeUserPrompt(set []hCommon.MemoryRecord, from, to int) string {
+func buildMergeUserPrompt(set []MemoryRecord, from, to int) string {
 	var sb strings.Builder
-	_, _ = fmt.Fprintf(&sb, hCommon.CompactionMergeUserHeader, from, to)
+	_, _ = fmt.Fprintf(&sb, CompactionMergeUserHeader, from, to)
 	for i := range set {
 		_, _ = fmt.Fprintf(&sb, "[%d] (covers %d-%d): %s\n", set[i].Index, set[i].CoversFrom, set[i].CoversTo,
-			pCommon.TruncateRunes(strings.TrimSpace(set[i].Content), hCommon.MemoryExcerptRunes, hCommon.TruncatedMarker))
+			pCommon.TruncateRunes(strings.TrimSpace(set[i].Content), MemoryExcerptRunes, TruncatedMarker))
 	}
 	return sb.String()
 }
 
 // recordsInRange 取出 [from,to] 内的记录(升序)。
-func recordsInRange(records []hCommon.MemoryRecord, from, to int) []hCommon.MemoryRecord {
-	var in []hCommon.MemoryRecord
+func recordsInRange(records []MemoryRecord, from, to int) []MemoryRecord {
+	var in []MemoryRecord
 	for i := range records {
 		if records[i].Index >= from && records[i].Index <= to {
 			in = append(in, records[i])
@@ -71,10 +71,10 @@ func recordsInRange(records []hCommon.MemoryRecord, from, to int) []hCommon.Memo
 // 从头取会让屏障后面的记录**永远够不到**,压缩就此停摆。
 // 因此这里在所有候选段里挑一段:优先"条数达标且体积最大"的(体积最大 = 最可能通过收益门槛),
 // 没有达标的段时返回体积最大的那段(交由调用方按门槛拒绝)。
-func compactionRun(records []hCommon.MemoryRecord, from, to int) []hCommon.MemoryRecord {
-	covered := hCommon.CoveredIndexes(hCommon.SummariesOf(records))
+func compactionRun(records []MemoryRecord, from, to int) []MemoryRecord {
+	covered := CoveredIndexes(SummariesOf(records))
 
-	var best, bestUsable, current []hCommon.MemoryRecord
+	var best, bestUsable, current []MemoryRecord
 	flush := func() {
 		if len(current) == 0 {
 			return
@@ -110,8 +110,8 @@ func compactionRun(records []hCommon.MemoryRecord, from, to int) []hCommon.Memor
 }
 
 // volume 一段记录的正文总长(rune),用于挑选"最值得压缩"的段。
-func volume(records []hCommon.MemoryRecord) int {
-	return hCommon.RecordsRunes(records)
+func volume(records []MemoryRecord) int {
+	return RecordsRunes(records)
 }
 
 // fitCompactionRange 按"送入摘要模型的字符预算"收缩区间**尾部**。
@@ -123,7 +123,7 @@ func volume(records []hCommon.MemoryRecord) int {
 // covers 是承诺,区间内的每条记录都必须真的送进模型,否则那部分原文会永久退出回放。
 // 因此放不下时收缩 coverTo(剩下的部分下次再压),而不是把记录丢在区间里。
 // 返回收缩后的记录集与其长度;记录集至少保留 1 条。
-func fitCompactionRange(run []hCommon.MemoryRecord, budgetRunes int) ([]hCommon.MemoryRecord, int) {
+func fitCompactionRange(run []MemoryRecord, budgetRunes int) ([]MemoryRecord, int) {
 	if len(run) == 0 {
 		return nil, 0
 	}
@@ -145,10 +145,10 @@ func fitCompactionRange(run []hCommon.MemoryRecord, budgetRunes int) ([]hCommon.
 // verifyCovers 只需遍历 covers 区间,而不是全量记录:
 // mergeCandidate 会对每个候选前缀各校验一次,用索引可把复杂度从 O(记录数 × 摘要数)
 // 降到 O(区间长度 × 摘要数)。
-type coverChecker map[int]hCommon.MemoryRecord
+type coverChecker map[int]MemoryRecord
 
 // newCoverChecker 为一批记录建索引(建一次可反复校验)。
-func newCoverChecker(records []hCommon.MemoryRecord) coverChecker {
+func newCoverChecker(records []MemoryRecord) coverChecker {
 	checker := make(coverChecker, len(records))
 	for i := range records {
 		checker[records[i].Index] = records[i]
@@ -184,7 +184,7 @@ func (c coverChecker) verify(from, to int, consumed, covered map[int]bool) error
 //  2. 已被**既有摘要**覆盖(它本来就已退出回放,不因本条摘要而改变)。
 //
 // 不满足时必须放弃落盘:过度承诺会让未经摘要的原文永久退出回放(信息静默丢失)。
-func verifyCovers(records []hCommon.MemoryRecord, from, to int, consumed, covered map[int]bool) error {
+func verifyCovers(records []MemoryRecord, from, to int, consumed, covered map[int]bool) error {
 	return newCoverChecker(records).verify(from, to, consumed, covered)
 }
 
@@ -213,7 +213,7 @@ func effectiveSummaryCap(srcRunes int) int {
 // 每条摘要记录必须属于本集合(否则它不会被取代,内容会重复注入)。
 // 从最大前缀向下尝试;找不到(或不足 2 条)返回 nil ——
 // 宁可摘要略超预算,也不写一条"过度承诺"的摘要(那会永久丢历史)。
-func mergeCandidate(records []hCommon.MemoryRecord) ([]hCommon.MemoryRecord, int, int) {
+func mergeCandidate(records []MemoryRecord) ([]MemoryRecord, int, int) {
 	return mergeCandidateUpTo(records, 0)
 }
 
@@ -222,8 +222,8 @@ func mergeCandidate(records []hCommon.MemoryRecord) ([]hCommon.MemoryRecord, int
 //
 // 为什么要能限制:合并是"一次处理越多越好"与"一次处理越少越不容易丢关键标记"之间的取舍。
 // 保留率不达标时退回到最小集合再试一次,而不是直接卡死(见 mergeWithBudget 的重试)。
-func mergeCandidateUpTo(records []hCommon.MemoryRecord, maxSize int) ([]hCommon.MemoryRecord, int, int) {
-	summaries := hCommon.SummariesOf(records)
+func mergeCandidateUpTo(records []MemoryRecord, maxSize int) ([]MemoryRecord, int, int) {
+	summaries := SummariesOf(records)
 	if len(summaries) < hCommon.CompactionMergeMinSummaries {
 		return nil, 0, 0
 	}
@@ -233,7 +233,7 @@ func mergeCandidateUpTo(records []hCommon.MemoryRecord, maxSize int) ([]hCommon.
 		limit = maxSize
 	}
 
-	covered := hCommon.CoveredIndexes(summaries)
+	covered := CoveredIndexes(summaries)
 	checker := newCoverChecker(records)
 	for size := limit; size >= hCommon.CompactionMergeMinSummaries; size-- {
 		set := summaries[:size]
@@ -275,26 +275,26 @@ func mergeCandidateUpTo(records []hCommon.MemoryRecord, maxSize int) ([]hCommon.
 }
 
 // summarizeOnce —— default 模式:整段区间一次摘要。
-func summarizeOnce(ctx context.Context, targets []hCommon.MemoryRecord, from, to int, summarize hCommon.Summarizer) (string, error) {
-	return summarize(ctx, hCommon.CompactionSystemPrompt, buildCompactionUserPrompt(targets, from, to))
+func summarizeOnce(ctx context.Context, targets []MemoryRecord, from, to int, summarize Summarizer) (string, error) {
+	return summarize(ctx, CompactionSystemPrompt, buildCompactionUserPrompt(targets, from, to))
 }
 
 // summarizeInBlocks —— safeguard 模式:分块摘要后拼接。
 // 块内条目少,模型更不容易在长输入里丢要点(代价:调用次数多、摘要更长)。
-func summarizeInBlocks(ctx context.Context, targets []hCommon.MemoryRecord, summarize hCommon.Summarizer) (string, error) {
-	if len(targets) <= hCommon.SafeguardBlockRecords {
+func summarizeInBlocks(ctx context.Context, targets []MemoryRecord, summarize Summarizer) (string, error) {
+	if len(targets) <= SafeguardBlockRecords {
 		chunk := targets
-		return summarize(ctx, hCommon.CompactionSystemPrompt, buildCompactionUserPrompt(chunk, chunk[0].Index, chunk[len(chunk)-1].Index))
+		return summarize(ctx, CompactionSystemPrompt, buildCompactionUserPrompt(chunk, chunk[0].Index, chunk[len(chunk)-1].Index))
 	}
 
 	var blocks []string
-	for start := 0; start < len(targets); start += hCommon.SafeguardBlockRecords {
-		end := start + hCommon.SafeguardBlockRecords
+	for start := 0; start < len(targets); start += SafeguardBlockRecords {
+		end := start + SafeguardBlockRecords
 		if end > len(targets) {
 			end = len(targets)
 		}
 		chunk := targets[start:end]
-		text, err := summarize(ctx, hCommon.CompactionSystemPrompt, buildCompactionUserPrompt(chunk, chunk[0].Index, chunk[len(chunk)-1].Index))
+		text, err := summarize(ctx, CompactionSystemPrompt, buildCompactionUserPrompt(chunk, chunk[0].Index, chunk[len(chunk)-1].Index))
 		if err != nil {
 			return pCommon.BlankString, err
 		}
@@ -306,8 +306,8 @@ func summarizeInBlocks(ctx context.Context, targets []hCommon.MemoryRecord, summ
 }
 
 // compactionPromptLine 渲染一条记录送入摘要模型的文本(逐条限长)。
-func compactionPromptLine(rec hCommon.MemoryRecord) string {
-	body := pCommon.TruncateRunes(strings.TrimSpace(rec.Content), hCommon.MemoryExcerptRunes, hCommon.TruncatedMarker)
+func compactionPromptLine(rec MemoryRecord) string {
+	body := pCommon.TruncateRunes(strings.TrimSpace(rec.Content), MemoryExcerptRunes, TruncatedMarker)
 	return fmt.Sprintf("[%d] %s: %s\n", rec.Index, recordLabel(rec), body)
 }
 
@@ -319,11 +319,11 @@ func compactionPromptLine(rec hCommon.MemoryRecord) string {
 // 压力扫描在请求路径上,而单条工具记录可能上百 KB(构造会白花内存与 GC)。
 // 公式与渲染是同一个来源,一致性由 TestPromptLineRunesMatchesRendered 锁住 ——
 // 改渲染格式必须同步改这里。
-func promptLineRunes(rec hCommon.MemoryRecord) int {
-	body := hCommon.TextRunes(rec.Content)
-	if body > hCommon.MemoryExcerptRunes {
+func promptLineRunes(rec MemoryRecord) int {
+	body := TextRunes(rec.Content)
+	if body > MemoryExcerptRunes {
 		// 截断后的正文 = 上限 + 截断标记(与 pCommon.TruncateRunes 的行为一致)
-		body = hCommon.MemoryExcerptRunes + utf8.RuneCountInString(hCommon.TruncatedMarker)
+		body = MemoryExcerptRunes + utf8.RuneCountInString(TruncatedMarker)
 	}
 
 	return len("[") + len(strconv.Itoa(rec.Index)) + len("] ") +
@@ -334,9 +334,9 @@ func promptLineRunes(rec hCommon.MemoryRecord) int {
 //
 // records 必须已经是 compactionRun + fitCompactionRange 之后的**连续**区间:
 // 这里**不再丢弃任何记录** —— 丢弃记录会让 covers 变成对"未经摘要的原文"的过度承诺。
-func buildCompactionUserPrompt(records []hCommon.MemoryRecord, from, to int) string {
+func buildCompactionUserPrompt(records []MemoryRecord, from, to int) string {
 	var sb strings.Builder
-	_, _ = fmt.Fprintf(&sb, hCommon.CompactionUserHeader, from, to)
+	_, _ = fmt.Fprintf(&sb, CompactionUserHeader, from, to)
 	for i := range records {
 		sb.WriteString(compactionPromptLine(records[i]))
 	}
@@ -344,14 +344,14 @@ func buildCompactionUserPrompt(records []hCommon.MemoryRecord, from, to int) str
 }
 
 // recordLabel 记录的角色标签。
-func recordLabel(rec hCommon.MemoryRecord) string {
+func recordLabel(rec MemoryRecord) string {
 	switch rec.RecordType {
-	case hCommon.HistoryRecordTypeTool: //HistoryRecordTool:
+	case HistoryRecordTypeTool:
 		if name := strings.TrimSpace(rec.Title); name != "" {
 			return "tool:" + name
 		}
 		return "tool"
-	case hCommon.HistoryRecordTypeAssistant: //HistoryRecordAssistant:
+	case HistoryRecordTypeAssistant:
 		if rec.IsInterrupted() {
 			return "assistant(被中断)"
 		}
@@ -368,16 +368,16 @@ func recordLabel(rec hCommon.MemoryRecord) string {
 // 再截断一次只是幂等兜底(保证"校验过的文本"与"落盘的文本"永远一致);
 // 调大 MaxSummaryRunes 不会放大实际摘要 —— 实际上限看 effectiveSummaryCap。
 func buildSummaryRecordContent(from, to int, summary string) string {
-	return fmt.Sprintf("covers: %d-%d\n\n%s", from, to, pCommon.TruncateRunes(summary, hCommon.MaxSummaryRunes, hCommon.TruncatedMarker))
+	return fmt.Sprintf("covers: %d-%d\n\n%s", from, to, pCommon.TruncateRunes(summary, hCommon.MaxSummaryRunes, TruncatedMarker))
 }
 
 // 【safeguard 专属】keyRetentionRatio 计算"关键信息保有率":源记录中出现的关键标记(path/编号/文件名)
 // 有多少同样出现在摘要里。返回保有率与未命中的样例(供日志排查)。
-func keyRetentionRatio(records []hCommon.MemoryRecord, summary string) (float64, []string) {
+func keyRetentionRatio(records []MemoryRecord, summary string) (float64, []string) {
 	seen := make(map[string]bool)
 	var keys []string
 	for _, rec := range records {
-		for _, key := range hCommon.KeyTokenPattern.FindAllString(rec.Content, -1) {
+		for _, key := range KeyTokenPattern.FindAllString(rec.Content, -1) {
 			if seen[key] {
 				continue
 			}
@@ -408,7 +408,7 @@ func keyRetentionRatio(records []hCommon.MemoryRecord, summary string) (float64,
 // 已知且可接受的副作用:摘要正文是按**整段** run 生成的,降级后只声明覆盖前半,
 // 于是后半的内容会"摘要里有、原文也回放"一次(重复占预算,方向安全 —— 不会丢信息)。
 // 要消除它需要按降级后的区间重新摘要(多一次 LLM 调用),当前不做。
-func degradeCoverTo(targets []hCommon.MemoryRecord, from, to int) int {
+func degradeCoverTo(targets []MemoryRecord, from, to int) int {
 	if len(targets) < 2 {
 		return to
 	}

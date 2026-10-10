@@ -38,7 +38,7 @@ func TestRunScriptWithPolicy_CustomTimeout(t *testing.T) {
 	policy := DefaultScriptPolicy
 	policy.Timeout = 100 * time.Millisecond
 	start := time.Now()
-	_, err := runScriptWithPolicy(context.Background(), policy, scriptPath, "{}")
+	_, err := runScriptWithPolicy(context.Background(), policy, scriptPath, "{}", "")
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("expected timeout error")

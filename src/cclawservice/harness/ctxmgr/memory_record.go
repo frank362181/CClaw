@@ -16,7 +16,7 @@
 * 解析是纯函数(只读、无副作用、不触发 IO),便于单测与复用。
 **/
 
-package common
+package ctxmgr
 
 import (
 	"fmt"

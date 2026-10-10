@@ -17,7 +17,10 @@ import (
 )
 
 // codeRuntimeClientError harness 调用侧内部错误(域内单独占 1 个码位 → 4501)。
-const codeRuntimeClientError = codeErrorRuntimeClientBase + 1 + iota
+const (
+	codeRuntimeClientError = codeErrorRuntimeClientBase + 1 + iota
+	codePermissionDeniedError
+)
 
 // RuntimeClientKind harness 调用上游失败(构造请求/解析响应/空响应等)。
 // Code=0:内部成因错误不对外暴露业务码;聊天链路会归一化为 ChatLLMKind。
@@ -37,4 +40,21 @@ func RuntimeClientErrEx(errTxt string) *apperr.Error {
 
 func RuntimeClientErrEx2(errTxt string, a ...interface{}) *apperr.Error {
 	return RuntimeClientKind.Newf(errTxt, a...)
+}
+
+var PermissionDeniedKind = apperr.Register(apperr.Kind{
+	Name:       "harness.permission_denied",
+	Code:       codePermissionDeniedError,
+	HTTPStatus: http.StatusOK,
+	Msg:        "无权限",
+})
+
+var PermissionDeniedErr = PermissionDeniedKind.Sentinel()
+
+func PermissionDeniedErrEx(errTxt string) *apperr.Error {
+	return PermissionDeniedKind.New(errTxt)
+}
+
+func PermissionDeniedErrEx2(errTxt string, a ...interface{}) *apperr.Error {
+	return PermissionDeniedKind.Newf(errTxt, a...)
 }
