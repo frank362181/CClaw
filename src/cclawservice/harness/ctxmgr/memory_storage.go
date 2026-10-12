@@ -14,12 +14,23 @@ type MemoryStorageType int
 
 // 记忆存储枚举类型
 const (
-	MemoryStorageMDFile = 1 + iota
+	MemoryStorageMDFile MemoryStorageType = 1 + iota
 	MemoryStorageDB
 )
 
+func (m MemoryStorageType) String() string {
+	switch m {
+	case MemoryStorageMDFile:
+		return "local file system"
+	case MemoryStorageDB:
+		return "database system"
+	default:
+		return "unknown"
+	}
+}
+
 type IMemoryStorage interface {
-	StorageType() MemoryStorageType
+	StorageType() string
 
 	Ensure(sender, sessionId string, at *pCommon.DatetimeItem, headerLines []string) (string, error)
 	Append(sender, sessionId, fileName, recordType, title, content, timeText string, hintIndex int) (int, error)
@@ -37,6 +48,6 @@ type MemoryStorage struct {
 	storageType MemoryStorageType
 }
 
-func (ms *MemoryStorage) StorageType() MemoryStorageType {
-	return ms.storageType
+func (ms *MemoryStorage) StorageType() string {
+	return ms.storageType.String()
 }

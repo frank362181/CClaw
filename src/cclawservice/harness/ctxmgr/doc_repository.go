@@ -68,31 +68,13 @@ func GetAgentDocRepository() *AgentDocumentRepository {
 	return agentDocRepository
 }
 
-// BootstrapFingerprint 返回该agent对应的启动文档集合的fingerprint
-// 供"稳定前缀缓存"做失效键:人工改文档/蒸馏改MEMORY.md -> 指纹变化 -> 缓存自然失效
-func (repo *AgentDocumentRepository) BootstrapFingerprint(agentId string) string {
-	agentId = strings.TrimSpace(agentId)
-	if len(agentId) == 0 {
-		return pCommon.BlankString
-	}
-
-	repo.mu.RLock()
-	defer repo.mu.RUnlock()
-
-	if d := repo.agentBootstrapDocuments[agentId]; d != nil {
-		return d.loadedFingerprint
-	}
-
-	return pCommon.BlankString
-}
-
 // LoadAgentBootstrap 加载并缓存一个工作区的启动文档。只是加载agent的工作区
 // 当工作区未变化(指纹相同)时直接复用缓存,避免重复读盘
 // 单个文档缺失/失败不阻断整个工作区的加载
-func (repo *AgentDocumentRepository) LoadAgentBootstrap(agent dataobject.TAgent) error {
+func (repo *AgentDocumentRepository) LoadAgentBootstrap(agent dataobject.TAgent) (string, error) {
 	agentBootstrapRoot, ok := hCommon.BuildAgentBootstrapRoot(agent)
 	if !ok {
-		return exception.ParameterEmptyErrorEx("prompt repo: workspace root is unavailable")
+		return "", exception.ParameterEmptyErrorEx("prompt repo: workspace root is unavailable")
 	}
 
 	repo.mu.Lock()
@@ -108,7 +90,7 @@ func (repo *AgentDocumentRepository) LoadAgentBootstrap(agent dataobject.TAgent)
 		// 判断是否修改过 *.md 文件
 		if bootstrapDocument.agentBootstrapRoot == agentBootstrapRoot &&
 			bootstrapDocument.loadedFingerprint == pCommon.ComputeFilesFingerprint(agentBootstrapRoot, fileNames) {
-			return nil // 未变化,直接复用缓存
+			return bootstrapDocument.loadedFingerprint, nil // 未变化,直接复用缓存
 		}
 
 		// *.md文件已经被修改过
@@ -137,7 +119,7 @@ func (repo *AgentDocumentRepository) LoadAgentBootstrap(agent dataobject.TAgent)
 
 	bootstrapDocument.loadedFingerprint = pCommon.ComputeFilesFingerprint(agentBootstrapRoot, fileNames)
 	repo.agentBootstrapDocuments[agent.AgentId] = bootstrapDocument
-	return nil
+	return bootstrapDocument.loadedFingerprint, nil
 }
 
 // LoadSystemTools 将系统工具的schema 加载进来,从数据库中的配置加载而来
@@ -154,17 +136,17 @@ func (repo *AgentDocumentRepository) LoadSystemTools(tools []dataobject.TTool) o
 	sysTools := make(map[string]dataobject.TTool, len(tools))
 	seenTools := make(map[string]struct{}, len(tools))
 
-	for _, tool := range tools {
-		toolName := strings.ToLower(strings.TrimSpace(tool.ToolName))
+	for _, tmpTool := range tools {
+		toolName := strings.ToLower(strings.TrimSpace(tmpTool.ToolName))
 		if len(toolName) == 0 {
-			observer.Skip(tool.ToolName, "empty tool name")
+			observer.Skip(tmpTool.ToolName, "empty tool name")
 			continue
 		}
 
 		// 目录越界检查
-		schemaFile, err := pCommon.SafeJoinWithRoot(systemToolRoot, filepath.Join(toolName, tool.SchemaFile))
+		schemaFile, err := pCommon.SafeJoinWithRoot(systemToolRoot, filepath.Join(toolName, tmpTool.SchemaFile))
 		if err != nil {
-			observer.Skip(tool.ToolName, "invalid tool schema file")
+			observer.Skip(tmpTool.ToolName, "invalid tool schema file")
 			continue
 		}
 
@@ -174,9 +156,9 @@ func (repo *AgentDocumentRepository) LoadSystemTools(tools []dataobject.TTool) o
 			continue
 		}
 
-		tool.ToolName = toolName //回填归一化后的toolName
+		tmpTool.ToolName = toolName //回填归一化后的toolName
 		seenTools[toolName] = struct{}{}
-		sysTools[schemaFile] = tool //此时key是input schema的路径名,绝对路径
+		sysTools[schemaFile] = tmpTool //此时key是input schema的路径名,绝对路径
 	}
 
 	// ---2.从缓存中取出内容

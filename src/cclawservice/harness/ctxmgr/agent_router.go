@@ -262,7 +262,7 @@ func (r *AgentRouter) resolveRoutingProvider(comCode string) (dataobject.TLlm, b
 // 获取agent的summary,优先级:AGENTS.md中front matter中的summary > 数据库中的description > 名称
 func (r *AgentRouter) getAgentSummary(agent dataobject.TAgent) string {
 	agentDocRepo := GetAgentDocRepository()
-	if err := agentDocRepo.LoadAgentBootstrap(agent); err != nil {
+	if _, err := agentDocRepo.LoadAgentBootstrap(agent); err != nil {
 		return common.BlankString
 	}
 

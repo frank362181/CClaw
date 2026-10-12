@@ -1,4 +1,8 @@
-package toolexecutor
+/*
+* define all the const for tool module
+**/
+
+package tool
 
 // SystemToolName 系统工具的名称,共 6个
 type SystemToolName string
@@ -11,3 +15,7 @@ const (
 	SystemToolEdit  SystemToolName = "Edit"  //replace
 	SystemToolBash  SystemToolName = "Bash"  //执行
 )
+
+func (s SystemToolName) String() string {
+	return string(s)
+}

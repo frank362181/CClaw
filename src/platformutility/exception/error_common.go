@@ -65,3 +65,15 @@ func UnknownErrorEx(errTxt string) *ErrorDescription {
 		LineNo:   line,
 	}
 }
+
+func UnknownErrorEx2(errTxt string, a ...interface{}) *ErrorDescription {
+	_, file, line, _ := runtime.Caller(1)
+	argText := fmt.Sprintf(errTxt, a...)
+	return &ErrorDescription{
+		ErrTxt:   argText,
+		ErrId:    ErrorIdUnknown,
+		ErrDesc:  errTxt,
+		FileName: file,
+		LineNo:   line,
+	}
+}

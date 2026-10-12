@@ -36,13 +36,15 @@ const (
 // 返回Next表示放行到下一个Handler
 // 返回Allow/Deny/Ask 表示段路整条链
 type IPermissionHandler interface {
-	Handle(ctx context.Context, req *ToolCallRequest, tool ITool) (*Decision, error)
+	Handle(ctx context.Context, req *ToolCallRequest, tool IBaseTool) (*Decision, error)
 	SetNext(next IPermissionHandler) IPermissionHandler
 	Next() IPermissionHandler
 }
 
-// ITool 为所有的工具必须实现的接口契约
-type ITool interface {
+// IBaseTool 为所有的工具必须实现的接口契约
+// 这里的方法尽量不要设计为Handler,Handler是管线的方法,实现调度
+// ITool的方法为不同工具不同的方法
+type IBaseTool interface {
 	Name() string
 
 	// ValidateInput 在权限检查前执行语义检查
@@ -65,6 +67,16 @@ type Decision struct {
 	Approved bool // 仅当 Behavior== Ask 且用户确认后,此字段指示是否允许
 }
 
+// SandboxConfig 会话级的沙箱显式配置,定义的是每个工具函数的沙箱配置
+type SandboxConfig struct {
+	Enabled         *bool    // 启动/禁用沙箱,nil表示未指定由模式推导
+	AllowedNetwork  *bool    // 启用/禁用网络,nil表示未指定
+	AllowedDomains  []string // 允许访问的域名白名单(仅在AllowedNetwork为true时生效)
+	AllowedDirWrite []string //允许写入的额外路径
+	DeniedDirRead   []string //禁止读取的路径(追加到系统默认之上)
+	Backend         string   // 强制指定沙箱环境,空则自动选择
+}
+
 // CallContext 封装工具调用所需的会话级信息
 type CallContext struct {
 	SessionId  string
@@ -78,6 +90,9 @@ type CallContext struct {
 	Hooks []IToolHook // hook 列表
 
 	UserConfirmFunc ConfirmFunc //交互确认回调
+
+	// 根据会话启动时根据配置信息设置的,nil表示未设置,由模式推导
+	SandboxConfig *SandboxConfig
 }
 
 // IToolHook Hook函数的接口

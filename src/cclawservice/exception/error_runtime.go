@@ -20,6 +20,7 @@ import (
 const (
 	codeRuntimeClientError = codeErrorRuntimeClientBase + 1 + iota
 	codePermissionDeniedError
+	codeSandboxExecutorError
 )
 
 // RuntimeClientKind harness 调用上游失败(构造请求/解析响应/空响应等)。
@@ -57,4 +58,21 @@ func PermissionDeniedErrEx(errTxt string) *apperr.Error {
 
 func PermissionDeniedErrEx2(errTxt string, a ...interface{}) *apperr.Error {
 	return PermissionDeniedKind.Newf(errTxt, a...)
+}
+
+var SandboxExecutorKind = apperr.Register(apperr.Kind{
+	Name:       "harness.sandbox_executor",
+	Code:       codeSandboxExecutorError,
+	HTTPStatus: http.StatusOK,
+	Msg:        "沙箱执行环境",
+})
+
+var SandboxExecutorErr = PermissionDeniedKind.Sentinel()
+
+func SandboxExecutorErrEx(errTxt string) *apperr.Error {
+	return SandboxExecutorKind.New(errTxt)
+}
+
+func SandboxExecutorErrEx2(errTxt string, a ...interface{}) *apperr.Error {
+	return SandboxExecutorKind.Newf(errTxt, a...)
 }

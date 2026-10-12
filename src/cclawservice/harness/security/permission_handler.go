@@ -1,6 +1,15 @@
 /*
 * 系统默认的工具调用过程中的执行前,中,后等流程中的处理函数
 * 包括执行前的参数修改、权限修改等
+*
+* 设计原则:
+*	1. PreUserHookHandler 如果返回Allow不能跳过后续的deny,因此在该类方法中,Decision::Allowed返回时continue
+*	   因为静态的如Deny,Ask等安全策略优先级更高
+*	2.SafetyGuardrailHandler 位于 PermissionModeHandler之前,意味着即使PermissionByPass模式下也要触发
+*	  SafetyGuardrailHandler的安全判断
+*	3. 尾链为fail-closed:当所有的Handler都返回Next且已经到尾部时,BaseHandler.propatate()返回Deny,非Allow
+*	   直接体现fail-closed原则,因为任何阶段失败都deny。权限系统中deny by default更加安全
+*
 **/
 
 package security
@@ -24,7 +33,7 @@ func (b *BaseHandler) Next() IPermissionHandler {
 
 // 将决策沿着链路传递:Next 则调用下一个 Handle
 // 否则短路返回
-func (b *BaseHandler) propagate(ctx context.Context, req *ToolCallRequest, tool ITool, d *Decision, err error) (*Decision, error) {
+func (b *BaseHandler) propagate(ctx context.Context, req *ToolCallRequest, tool IBaseTool, d *Decision, err error) (*Decision, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +57,7 @@ type ValidateInputHandler struct {
 	BaseHandler
 }
 
-func (h *ValidateInputHandler) Handle(ctx context.Context, req *ToolCallRequest, tool ITool) (*Decision, error) {
+func (h *ValidateInputHandler) Handle(ctx context.Context, req *ToolCallRequest, tool IBaseTool) (*Decision, error) {
 	if err := tool.ValidateInput(ctx, req.Input, req.Context); err != nil {
 		return &Decision{
 			Behavior: Deny,
@@ -64,7 +73,7 @@ type PreToolUseHook struct {
 	BaseHandler
 }
 
-func (h *PreToolUseHook) Handle(ctx context.Context, req *ToolCallRequest, tool ITool) (*Decision, error) {
+func (h *PreToolUseHook) Handle(ctx context.Context, req *ToolCallRequest, tool IBaseTool) (*Decision, error) {
 	for _, hook := range req.Context.Hooks {
 		decision, err := hook.Run(ctx, req)
 		if err != nil {
@@ -92,12 +101,12 @@ func (h *PreToolUseHook) Handle(ctx context.Context, req *ToolCallRequest, tool 
 	return h.propagate(ctx, req, tool, &Decision{Behavior: Next}, nil)
 }
 
-// DenyRuleHandler 拒绝规则处理器,step 3
+// DenyRuleHandler 静态deny handler拒绝规则处理器,step 3
 type DenyRuleHandler struct {
 	BaseHandler
 }
 
-func (h *DenyRuleHandler) Handle(ctx context.Context, req *ToolCallRequest, tool ITool) (*Decision, error) {
+func (h *DenyRuleHandler) Handle(ctx context.Context, req *ToolCallRequest, tool IBaseTool) (*Decision, error) {
 	for _, denied := range req.Context.DeniedTools {
 		if MatchesTool(denied, req.ToolName) {
 			return &Decision{
@@ -110,12 +119,12 @@ func (h *DenyRuleHandler) Handle(ctx context.Context, req *ToolCallRequest, tool
 	return h.propagate(ctx, req, tool, &Decision{Behavior: Next}, nil)
 }
 
-// AskRuleHandler 询问规则处理器,step 4
+// AskRuleHandler 静态ask rule handler 询问规则处理器,step 4
 type AskRuleHandler struct {
 	BaseHandler
 }
 
-func (h *AskRuleHandler) Handle(ctx context.Context, req *ToolCallRequest, tool ITool) (*Decision, error) {
+func (h *AskRuleHandler) Handle(ctx context.Context, req *ToolCallRequest, tool IBaseTool) (*Decision, error) {
 	for _, ask := range req.Context.AskTools {
 		if MatchesTool(ask, req.ToolName) {
 			return &Decision{
@@ -133,7 +142,7 @@ type ToolSelfCheckHandler struct {
 	BaseHandler
 }
 
-func (h *ToolSelfCheckHandler) Handle(ctx context.Context, req *ToolCallRequest, tool ITool) (*Decision, error) {
+func (h *ToolSelfCheckHandler) Handle(ctx context.Context, req *ToolCallRequest, tool IBaseTool) (*Decision, error) {
 	d := tool.CheckPermission(ctx, req.Input, req.Context)
 	return h.propagate(ctx, req, tool, d, nil)
 }
@@ -146,7 +155,7 @@ type SafetyGuardrailHandler struct {
 // 敏感路径前缀
 var sensitivePathPrefixes = []string{".git/", ".vscode/", ".ssh/"}
 
-func (h *SafetyGuardrailHandler) Handle(ctx context.Context, req *ToolCallRequest, tool ITool) (*Decision, error) {
+func (h *SafetyGuardrailHandler) Handle(ctx context.Context, req *ToolCallRequest, tool IBaseTool) (*Decision, error) {
 	// 检查文件路径是否命中敏感前缀
 	if path, ok := req.Input["path"].(string); ok {
 		for _, prefix := range sensitivePathPrefixes {
@@ -167,7 +176,7 @@ type PermissionModeHandler struct {
 	BaseHandler
 }
 
-func (h *PermissionModeHandler) Handle(ctx context.Context, req *ToolCallRequest, tool ITool) (*Decision, error) {
+func (h *PermissionModeHandler) Handle(ctx context.Context, req *ToolCallRequest, tool IBaseTool) (*Decision, error) {
 	mode := req.Context.Permission
 
 	switch mode {
@@ -214,7 +223,7 @@ type AllowRuleHandler struct {
 	BaseHandler
 }
 
-func (h *AllowRuleHandler) Handle(ctx context.Context, req *ToolCallRequest, tool ITool) (*Decision, error) {
+func (h *AllowRuleHandler) Handle(ctx context.Context, req *ToolCallRequest, tool IBaseTool) (*Decision, error) {
 	for _, allowed := range req.Context.AllowedTools {
 		if MatchesTool(allowed, req.ToolName) {
 			return &Decision{
@@ -240,7 +249,7 @@ type InteractiveConfirmHandler struct {
 	BaseHandler
 }
 
-func (h *InteractiveConfirmHandler) Handle(ctx context.Context, req *ToolCallRequest, tool ITool) (*Decision, error) {
+func (h *InteractiveConfirmHandler) Handle(ctx context.Context, req *ToolCallRequest, tool IBaseTool) (*Decision, error) {
 	if req.Context.UserConfirmFunc == nil {
 		// 非交互式会话 -> fail-closed
 		return &Decision{

@@ -320,7 +320,7 @@ func compactionPromptLine(rec MemoryRecord) string {
 // 公式与渲染是同一个来源,一致性由 TestPromptLineRunesMatchesRendered 锁住 ——
 // 改渲染格式必须同步改这里。
 func promptLineRunes(rec MemoryRecord) int {
-	body := TextRunes(rec.Content)
+	body := utf8.RuneCountInString(strings.TrimSpace(rec.Content))
 	if body > MemoryExcerptRunes {
 		// 截断后的正文 = 上限 + 截断标记(与 pCommon.TruncateRunes 的行为一致)
 		body = MemoryExcerptRunes + utf8.RuneCountInString(TruncatedMarker)

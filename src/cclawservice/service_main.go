@@ -358,7 +358,7 @@ func (m *ServiceMain) loadAgentConfigurations() error {
 		m.startupFileRepo = repo.GetAgentFileRepository()
 	}
 	for _, agent := range agents {
-		if err := m.agentDocRepo.LoadAgentBootstrap(agent); err != nil {
+		if _, err := m.agentDocRepo.LoadAgentBootstrap(agent); err != nil {
 			logging.LogWarnF("warm up default workspace error:%s", err.Error())
 		}
 	}

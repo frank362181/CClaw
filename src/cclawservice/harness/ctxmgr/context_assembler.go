@@ -134,7 +134,8 @@ func promptKey(agent dataobject.TAgent, scope hCommon.BootstrapScope,
 	sb.WriteString("|")
 	sb.WriteString(scope.String())
 	sb.WriteString("|")
-	sb.WriteString(GetAgentDocRepository().BootstrapFingerprint(agent.AgentId))
+	fp, _ := GetAgentDocRepository().LoadAgentBootstrap(agent)
+	sb.WriteString(fp)
 
 	skillParts := make([]string, 0, len(skills))
 	for i := range skills {
@@ -200,12 +201,11 @@ func BuildClassifySystemPrompt(agents []ClassificationAgent) string {
 }
 
 // BuildSystemPromptWithSkills 用**已解析**的技能文档组装 system prompt(技能侧不再读盘)
-// 直接调用assembleSystemPrompt仍然是有效的
 func BuildSystemPromptWithSkills(agent dataobject.TAgent, skills []hCommon.SkillDocument, scope hCommon.BootstrapScope,
 	activeSkillFiles []string, tools []hCommon.ToolPromptItem) (*hCommon.SystemPrompt, error) {
 
 	// 加载并缓存 agent 启动文件(文件fingerprint未变化则直接命中缓存)
-	if err := GetAgentDocRepository().LoadAgentBootstrap(agent); err != nil {
+	if _, err := GetAgentDocRepository().LoadAgentBootstrap(agent); err != nil {
 		return nil, err
 	}
 
@@ -222,8 +222,6 @@ func BuildSystemPromptWithSkills(agent dataobject.TAgent, skills []hCommon.Skill
 	out.DynamicSkills = renderSectionsText(renderActiveSkillDocs(skills, activeSkillFiles, &skillTruncated), skillTruncated)
 
 	return &out, nil
-
-	//return assembleSystemPrompt(agent, scope, activeSkillFiles, skills, tools)
 }
 
 // ============================= block for building chat message & request ================================

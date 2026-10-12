@@ -109,20 +109,11 @@ func ParseMemoryRecords(text string) (records []MemoryRecord, consumed int) {
 	return records, consumed
 }
 
-// TextRunes 体积记账的**唯一口径**:去掉首尾空白后的 rune 数。
-//
-// 为什么统一:摘要/事实/源文本的体积都会拿去和同一个阈值(如 MaxSummaryTotalRunes)比较,
-// 而注入时的文本本来就是 TrimSpace 过的 —— 两边用不同口径会在阈值附近做出不一致的决定
-// (触发判定说"超了"、动作门说"没超")。
-func TextRunes(s string) int {
-	return utf8.RuneCountInString(strings.TrimSpace(s))
-}
-
 // CompactionStat 供日志使用:把记录数/字符数汇总为一行。
 func CompactionStat(targets []MemoryRecord) string {
 	chars := 0
 	for i := range targets {
-		chars += TextRunes(targets[i].Content)
+		chars += utf8.RuneCountInString(strings.TrimSpace(targets[i].Content))
 	}
 	return fmt.Sprintf("records=%d chars=%d", len(targets), chars)
 }
@@ -131,7 +122,7 @@ func CompactionStat(targets []MemoryRecord) string {
 func RecordsRunes(records []MemoryRecord) int {
 	chars := 0
 	for i := range records {
-		chars += TextRunes(records[i].Content)
+		chars += utf8.RuneCountInString(strings.TrimSpace(records[i].Content))
 	}
 	return chars
 }
@@ -146,7 +137,7 @@ func RecordsRunesInRange(records []MemoryRecord, from, to, limit int) int {
 		if records[i].Index < from || records[i].Index > to {
 			continue
 		}
-		chars += TextRunes(records[i].Content)
+		chars += utf8.RuneCountInString(strings.TrimSpace(records[i].Content))
 		if limit > 0 && chars >= limit {
 			return chars
 		}
@@ -252,7 +243,7 @@ func SummaryTextOf(records []MemoryRecord) string {
 
 // SummariesRunes 生效摘要的**注入体积**(rune)—— 与 SummaryTextOf 严格同源。
 func SummariesRunes(records []MemoryRecord) int {
-	return TextRunes(SummaryTextOf(records))
+	return utf8.RuneCountInString(strings.TrimSpace(SummaryTextOf(records)))
 }
 
 // ============================== private functions & methods ==============================

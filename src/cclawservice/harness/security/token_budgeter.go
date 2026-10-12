@@ -209,11 +209,6 @@ func EstimateInputTokens(messages []llmproto.ChatMessage) int {
 	return int(float64(total) * (1 + estimateSafetyFactor))
 }
 
-// SummaryOverBudget 将要注入 system 的摘要正文是否已超总量上限
-func SummaryOverBudget(summary string) bool {
-	return utf8.RuneCountInString(strings.TrimSpace(summary)) > hCommon.MaxSummaryTotalRunes
-}
-
 // NeedCompact 判断是否压缩(与 compaction_mode 无关)。
 //
 // 三个维度:
@@ -238,7 +233,8 @@ func NeedCompact(result hCommon.AssembleResult, droppedRunes int) bool {
 		return false
 	}
 
-	return !SummaryOverBudget(result.Summary)
+	overBudget := utf8.RuneCountInString(strings.TrimSpace(result.Summary)) > hCommon.MaxSummaryTotalRunes
+	return !overBudget
 }
 
 func NewDistillPressure(closing bool) DistillPressure {
@@ -288,7 +284,8 @@ func NeedDistill(turns int, p DistillPressure) bool {
 //
 // 预算耗尽时不做合并 —— 摘要再小也装不下历史,问题在配置(与压缩被禁同一个理由)。
 func NeedMerge(result hCommon.AssembleResult) bool {
-	return !result.BudgetExhausted && SummaryOverBudget(result.Summary)
+	overBudget := utf8.RuneCountInString(strings.TrimSpace(result.Summary)) > hCommon.MaxSummaryTotalRunes
+	return !result.BudgetExhausted && overBudget
 }
 
 // CharsToTokens 把 rune 数按估算规则换算为 token(最坏情况按 CJK 计)。
