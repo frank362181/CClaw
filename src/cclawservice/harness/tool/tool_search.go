@@ -173,8 +173,8 @@ func GetToolsSearch() *ToolsSearch {
 
 // GetToolsBundle 每轮对话的所有的 function-calling 输入。
 // 根据skill.md文件中定义的allowed,disallowed加载系统工具
-func (repo *ToolsSearch) GetToolsBundle(skillDocs []hCommon.SkillDocument) ToolsBundle {
-	basicTools, slots := repo.collectToolsFromSkill(skillDocs)
+func (search *ToolsSearch) GetToolsBundle(skillDocs []hCommon.SkillDocument) ToolsBundle {
+	basicTools, slots := search.collectToolsFromSkill(skillDocs)
 	bundle := ToolsBundle{
 		Tools:       make([]llmproto.Tool, 0, len(basicTools)),
 		ForcedNames: make([]string, 0, len(basicTools)),
@@ -201,7 +201,7 @@ func (repo *ToolsSearch) GetToolsBundle(skillDocs []hCommon.SkillDocument) Tools
 }
 
 // Destroy 生命周期钩子(ServiceMain.Destroy 会调用):本仓库当前无自有状态,无需释放。
-func (repo *ToolsSearch) Destroy() {}
+func (search *ToolsSearch) Destroy() {}
 
 // ===================================== private functions & methods ==================================
 
@@ -210,7 +210,7 @@ func (repo *ToolsSearch) Destroy() {}
 //   - 只有**解析出脚本绝对路径**的工具才进入 tools —— 其余既不下发 schema,也不进
 //     forcedTools(否则意图门会强制模型去调一个必然失败的工具);
 //   - buildSkillSlot 复用同一份 tools,保证 ToolNames 与实际下发的工具严格同源。
-func (repo *ToolsSearch) collectToolsFromSkill(skillDocs []hCommon.SkillDocument) ([]hCommon.BasicTool, []SkillSlot) {
+func (search *ToolsSearch) collectToolsFromSkill(skillDocs []hCommon.SkillDocument) ([]hCommon.BasicTool, []SkillSlot) {
 	var visibleTools []hCommon.BasicTool
 	var slots []SkillSlot
 
