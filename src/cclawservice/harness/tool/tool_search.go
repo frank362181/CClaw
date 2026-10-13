@@ -267,7 +267,8 @@ func (search *ToolsSearch) collectToolsFromSkill(skillDocs []hCommon.SkillDocume
 		allowedTools = append(allowedTools, slot.AllowedTools...)
 		disabledTools = append(disabledTools, slot.DisallowedTools...)
 	}
-	documents, err := ctxmgr.GetAgentDocRepository().GetSystemToolSchemaDocument(allowedTools, disabledTools)
+
+	documents, err := ctxmgr.GetAgentDocCache().GetSystemToolSchemaDocument(allowedTools, disabledTools)
 	if err != nil {
 		logging.LogWarnF("failed to load system tool for skills: %s", err.Error())
 	}

@@ -537,7 +537,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 	skillDirs := s.collectSkillDirs(agent)
 
 	// 5.1 SKILL.md 的唯一读盘 + 唯一路径解析 + YAML 解析入口(prompt repo,按文件指纹缓存)
-	skillDocs, skillReport := ctxmgr.GetAgentDocRepository().LoadSkills(skillDirs)
+	skillDocs, skillReport := ctxmgr.GetAgentDocCache().LoadSkills(skillDirs)
 	skillReport.LogSummary(fmt.Sprintf("chat service: agent=%s,turn=%s", agent.AgentId, req.TurnId))
 
 	// 5.2 由已解析文档派生工具与技能级元数据(触发词/正文/强制工具,零 IO)

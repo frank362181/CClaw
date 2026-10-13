@@ -10,6 +10,37 @@ import (
 	pCommon "my.favorite/platformutility/common"
 )
 
+// StartupFileState 启动文件在磁盘上的状态,决定上层如何注入 prompt。
+type StartupFileState int
+
+const (
+	// StartupFileMissing 文件不存在。目录与符号链接同样按缺失处理(与 O_NOFOLLOW 语义一致)
+	StartupFileMissing StartupFileState = iota
+	// StartupFileReady 文件存在且原始正文已读入。
+	StartupFileReady
+	// StartupFileUnavailable 文件存在但正文不可用(超过 MaxAgentDocSize 或读取失败)。
+	// 必须与"缺失"区分:缺失的必需文件注入 [MISSING] 占位(提示待创建),
+	// 本状态只告警并省略 —— 文件明明存在,不能向模型谎报它不存在。
+	StartupFileUnavailable
+)
+
+// StartupFileSnapshotItem 单个启动文件的原始快照项(未做任何 prompt 派生)。
+type StartupFileSnapshotItem struct {
+	Spec     hCommon.StartupDocSpec // 白名单条目(种类/文件名/是否必需)
+	State    StartupFileState
+	ByteSize int64
+	Content  string // 原始正文(含 front matter);仅 State==StartupFileReady 时有效
+	Reason   string // State==StartupFileUnavailable 时的原因(供上层记日志)
+}
+
+// StartupSnapshot 一个工作区的启动文件整组快照(供prompt 组装层消费)
+//   - Fingerprint 与正文同出一批 stat,不会出现"指纹说没变、正文其实已旧";
+//   - Files 携带**原始正文**(未剥离 front matter),派生由 prompt 层负责。
+type StartupSnapshot struct {
+	Fingerprint string
+	Files       []StartupFileSnapshotItem
+}
+
 // MaxPromptSectionLen 由 prompt_service.assembleSystemPrompt 中的 capSections 施加
 // 表示比如system section,user section等
 const (
@@ -145,51 +176,6 @@ type ClassificationAgent struct {
 }
 
 type ClassifyAgent func(ctx context.Context, llm dataobject.TLlm, system, user string, maxTokens int) (string, string, error)
-
-// defaultContextPolicy 返回默认策略(未配置任何压缩参数时的安全值)。
-func defaultContextPolicy() hCommon.ContextPolicy {
-	return hCommon.ContextPolicy{
-		OutputReserve:      DefaultOutputReserveTokens,
-		ToolReplayMaxRunes: DefaultToolReplayMaxRunes,
-	}
-}
-
-// GetContextPolicy 按 Agent 与模型配置推导装配策略。
-//   - context_window 来自 t_llm;
-//   - reverse_token_floor 是 t_agent 上**为系统提示预留的最小额度**(保护启动文档不被历史挤掉);
-//   - max_history_tokens 是 t_agent 上**历史回放上限**(压缩节奏旋钮):
-//     0/未配置 → 用 DefaultMaxHistoryTokens;值为负 → 不限制。
-func GetContextPolicy(agent dataobject.TAgent, contextWindow int) hCommon.ContextPolicy {
-	policy := defaultContextPolicy()
-
-	policy.ContextWindow = contextWindow
-	policy.SystemPromptReserveTokens = agent.ReverseTokenFloor
-	policy.MaxHistoryTokens = agent.MaxHistoryTokens
-
-	return policy
-}
-
-func NormalizeContextPolicy(policy hCommon.ContextPolicy) hCommon.ContextPolicy {
-	if policy.OutputReserve <= 0 {
-		policy.OutputReserve = DefaultOutputReserveTokens
-	}
-	if policy.ToolReplayMaxRunes <= 0 {
-		policy.ToolReplayMaxRunes = DefaultToolReplayMaxRunes
-	}
-	if policy.SystemPromptReserveTokens < 0 {
-		policy.SystemPromptReserveTokens = 0
-	}
-	if policy.ToolsReserveTokens < 0 {
-		policy.ToolsReserveTokens = 0
-	}
-	// 历史回放上限:0 = 用默认;负数 = 显式不限制。默认值统一在这里兜 ——
-	// 手写的 ContextPolicy(测试、特殊调用方)不会因为漏填而变成"不限制"。
-	if policy.MaxHistoryTokens == 0 {
-		policy.MaxHistoryTokens = DefaultMaxHistoryTokens
-	}
-
-	return policy
-}
 
 // TurnContext 表示每轮注入的 **动态上下文** (放在历史之后、本轮用户消息之前)
 // 后置的原因:前缀缓存按最长公共前缀命中 -- system 里只要有一个字符变化即缓存作废

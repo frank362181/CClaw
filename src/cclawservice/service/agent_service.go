@@ -17,6 +17,7 @@ import (
 	myUtility "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	common2 "my.favorite/cclawservice/harness/common"
+	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/platformutility/common"
@@ -29,8 +30,8 @@ import (
 type AgentService struct {
 	baseService.BaseService
 
-	agentRepo       *repo.AgentRepository
-	startupFileRepo *repo.AgentFileRepository
+	agentRepo     *repo.AgentRepository
+	agentFileRepo *ctxmgr.AgentFileRepository
 }
 
 var agentService = common.GetSingleton(func() *AgentService {
@@ -39,8 +40,8 @@ var agentService = common.GetSingleton(func() *AgentService {
 			Name:        "agentService",
 			Description: "manage runtime providers, agents and skills",
 		},
-		agentRepo:       nil,
-		startupFileRepo: nil,
+		agentRepo:     nil,
+		agentFileRepo: nil,
 	}
 }).Instance()
 
@@ -50,7 +51,7 @@ func GetAgentService(db core.IBaseDatabase) (*AgentService, error) {
 		return nil, exception.ParameterEmptyErrorEx("agent service: database is nil")
 	}
 	agentService.agentRepo = repo.GetAgentRepository(db)
-	agentService.startupFileRepo = repo.GetAgentFileRepository()
+	agentService.agentFileRepo = ctxmgr.GetAgentFileRepository()
 	return agentService, nil
 }
 
@@ -135,7 +136,7 @@ func (s *AgentService) GetAgentStartupFiles(ownerId, agentId string) ([]common2.
 		return nil, err
 	}
 
-	return s.startupFileRepo.GetStartupFiles(workspaceRoot), nil
+	return s.agentFileRepo.GetStartupFiles(workspaceRoot), nil
 }
 
 // GetAgentStartupFile 获取某 agent 指定启动文件的原始内容。
@@ -159,7 +160,7 @@ func (s *AgentService) GetAgentStartupFile(ownerId, agentId, fileName string) (*
 		return nil, err
 	}
 
-	file, err := s.startupFileRepo.GetStartupFile(workspaceRoot, fileName)
+	file, err := s.agentFileRepo.GetStartupFile(workspaceRoot, fileName)
 	if err != nil {
 		return nil, myException.MapStartupFileError(err)
 	}
@@ -230,7 +231,7 @@ func (s *AgentService) getAgentByOwner(ownerId, agentId string) (*dataobject.TAg
 
 // requireRepos 校验服务依赖已注入,避免未调用 GetAgentService 时空指针 panic。
 func (s *AgentService) requireRepos() error {
-	if s.agentRepo == nil || s.startupFileRepo == nil {
+	if s.agentRepo == nil || s.agentFileRepo == nil {
 		return myException.AgentInternalErrEx("agent service: repositories not initialized")
 	}
 	return nil

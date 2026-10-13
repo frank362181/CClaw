@@ -134,7 +134,7 @@ func promptKey(agent dataobject.TAgent, scope hCommon.BootstrapScope,
 	sb.WriteString("|")
 	sb.WriteString(scope.String())
 	sb.WriteString("|")
-	fp, _ := GetAgentDocRepository().LoadAgentBootstrap(agent)
+	fp, _ := GetAgentDocCache().LoadAgentBootstrap(agent)
 	sb.WriteString(fp)
 
 	skillParts := make([]string, 0, len(skills))
@@ -205,7 +205,7 @@ func BuildSystemPromptWithSkills(agent dataobject.TAgent, skills []hCommon.Skill
 	activeSkillFiles []string, tools []hCommon.ToolPromptItem) (*hCommon.SystemPrompt, error) {
 
 	// 加载并缓存 agent 启动文件(文件fingerprint未变化则直接命中缓存)
-	if _, err := GetAgentDocRepository().LoadAgentBootstrap(agent); err != nil {
+	if _, err := GetAgentDocCache().LoadAgentBootstrap(agent); err != nil {
 		return nil, err
 	}
 
@@ -544,7 +544,7 @@ func FitMessages(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, p
 func assembleSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope, activeSkillFiles []string,
 	skills []hCommon.SkillDocument, tools []hCommon.ToolPromptItem) (*hCommon.SystemPrompt, error) {
 	workspaceRoot, _ := hCommon.BuildAgentBootstrapRoot(agent)
-	documents := GetAgentDocRepository().GetAgentDocuments(agent.AgentId) // 已按规范顺序加载
+	documents := GetAgentDocCache().GetAgentDocuments(agent.AgentId) // 已按规范顺序加载
 
 	var missing, truncated []string
 	dynamicMemory := pCommon.BlankString

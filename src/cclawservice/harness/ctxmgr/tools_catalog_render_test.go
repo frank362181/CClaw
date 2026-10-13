@@ -51,12 +51,12 @@ func TestRenderToolsCatalog(t *testing.T) {
 	// 单条描述超限 → 截断到上限并加省略号。
 	// 这是**节选**而不是内容丢失(完整描述仍在 schema 里) ⇒ **不得**标记 truncated:
 	// 否则每个 agent 每轮都会看到一条误导性的 Bootstrap Context Notice(实测踩过)。
-	long := strings.Repeat("甲", hCommon.MaxToolDescPromptRunes+50)
+	long := strings.Repeat("甲", MaxToolDescPromptRunes+50)
 	got, truncated = renderToolsCatalog([]hCommon.ToolPromptItem{{Name: "x", Description: long}})
 	if truncated {
 		t.Fatalf("仅描述被节选不应标记截断(权威定义仍在 schema 里)")
 	}
-	if !strings.Contains(got, strings.Repeat("甲", hCommon.MaxToolDescPromptRunes)+"…") {
+	if !strings.Contains(got, strings.Repeat("甲", MaxToolDescPromptRunes)+"…") {
 		t.Fatalf("描述应按上限截断且可见: %q", got)
 	}
 
@@ -65,15 +65,15 @@ func TestRenderToolsCatalog(t *testing.T) {
 	for i := 0; i < 200; i++ {
 		many = append(many, hCommon.ToolPromptItem{
 			Name:        fmt.Sprintf("tool_%03d", i),
-			Description: strings.Repeat("甲", hCommon.MaxToolDescPromptRunes),
+			Description: strings.Repeat("甲", MaxToolDescPromptRunes),
 		})
 	}
 	got, truncated = renderToolsCatalog(many)
 	if !truncated {
 		t.Fatalf("总量超限应标记截断")
 	}
-	if runes := len([]rune(got)); runes > hCommon.MaxToolsPromptChars {
-		t.Fatalf("清单超过上限: %d > %d", runes, hCommon.MaxToolsPromptChars)
+	if runes := len([]rune(got)); runes > MaxToolsPromptChars {
+		t.Fatalf("清单超过上限: %d > %d", runes, MaxToolsPromptChars)
 	}
 	if !strings.Contains(got, "tool_000") {
 		t.Fatalf("应从前往后保留(前面的工具优先): %q", got)

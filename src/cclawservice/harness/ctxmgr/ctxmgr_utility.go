@@ -8,6 +8,7 @@ import (
 
 	"gopkg.in/yaml.v2"
 	hCommon "my.favorite/cclawservice/harness/common"
+	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
@@ -44,6 +45,51 @@ func NormalizeSkillDir(skillDir string) (string, error) {
 	}
 
 	return dir, nil
+}
+
+// defaultContextPolicy 返回默认策略(未配置任何压缩参数时的安全值)。
+func defaultContextPolicy() hCommon.ContextPolicy {
+	return hCommon.ContextPolicy{
+		OutputReserve:      DefaultOutputReserveTokens,
+		ToolReplayMaxRunes: DefaultToolReplayMaxRunes,
+	}
+}
+
+// GetContextPolicy 按 Agent 与模型配置推导装配策略。
+//   - context_window 来自 t_llm;
+//   - reverse_token_floor 是 t_agent 上**为系统提示预留的最小额度**(保护启动文档不被历史挤掉);
+//   - max_history_tokens 是 t_agent 上**历史回放上限**(压缩节奏旋钮):
+//     0/未配置 → 用 DefaultMaxHistoryTokens;值为负 → 不限制。
+func GetContextPolicy(agent dataobject.TAgent, contextWindow int) hCommon.ContextPolicy {
+	policy := defaultContextPolicy()
+
+	policy.ContextWindow = contextWindow
+	policy.SystemPromptReserveTokens = agent.ReverseTokenFloor
+	policy.MaxHistoryTokens = agent.MaxHistoryTokens
+
+	return policy
+}
+
+func NormalizeContextPolicy(policy hCommon.ContextPolicy) hCommon.ContextPolicy {
+	if policy.OutputReserve <= 0 {
+		policy.OutputReserve = DefaultOutputReserveTokens
+	}
+	if policy.ToolReplayMaxRunes <= 0 {
+		policy.ToolReplayMaxRunes = DefaultToolReplayMaxRunes
+	}
+	if policy.SystemPromptReserveTokens < 0 {
+		policy.SystemPromptReserveTokens = 0
+	}
+	if policy.ToolsReserveTokens < 0 {
+		policy.ToolsReserveTokens = 0
+	}
+	// 历史回放上限:0 = 用默认;负数 = 显式不限制。默认值统一在这里兜 ——
+	// 手写的 ContextPolicy(测试、特殊调用方)不会因为漏填而变成"不限制"。
+	if policy.MaxHistoryTokens == 0 {
+		policy.MaxHistoryTokens = DefaultMaxHistoryTokens
+	}
+
+	return policy
 }
 
 // ResolveSkillDocPath 解析 skill 的 SKILL.md 绝对路径(技能文档的唯一解析入口)。

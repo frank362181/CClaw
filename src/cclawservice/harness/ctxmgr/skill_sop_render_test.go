@@ -39,11 +39,11 @@ func TestRenderActiveSkillDocs(t *testing.T) {
 	big := []hCommon.SkillDocument{{
 		SkillId:   "big",
 		SkillFile: "/s/big/SKILL.md",
-		Content:   strings.Repeat("甲", hCommon.MaxActiveSkillDocRunes+100),
+		Content:   strings.Repeat("甲", MaxActiveSkillDocRunes+100),
 	}}
 	var truncated []string
 	got = renderActiveSkillDocs(big, []string{"/s/big/SKILL.md"}, &truncated)
-	if len(got) != 1 || len([]rune(got[0].Content)) > hCommon.MaxActiveSkillDocRunes {
+	if len(got) != 1 || len([]rune(got[0].Content)) > MaxActiveSkillDocRunes {
 		t.Fatalf("超限必须截断: runes=%d", len([]rune(got[0].Content)))
 	}
 	if len(truncated) != 1 {

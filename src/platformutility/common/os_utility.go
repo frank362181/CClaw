@@ -290,6 +290,11 @@ func ResolvePath(input, baseDir string) string {
 // ResolveRealPath 解析路径的真实路径;文件不存在时沿父目录链向上找最近存在的祖先,
 // 解析其真实路径后拼接剩余部分,保证符号链接前缀(如 macOS /var -> /private/var)也被正确解析。
 func ResolveRealPath(path string) string {
+	_, err := filepath.Abs(path)
+	if err != nil {
+		return ""
+	}
+
 	if r, err := filepath.EvalSymlinks(path); err == nil {
 		return r
 	}
@@ -407,25 +412,6 @@ func ComputeFileFingerprint(path string) string {
 		return ""
 	}
 	return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
-}
-
-// ComputeFilesFingerprint 计算启动文档的指纹（文件名+大小+修改时间），用于是否从磁盘重新读取文件的判断
-func ComputeFilesFingerprint(path string, fileNames []string) string {
-	var sb strings.Builder
-
-	for _, fileName := range fileNames {
-		file := filepath.Join(path, fileName)
-		info, err := os.Stat(file)
-		if err != nil {
-			sb.WriteString(fileName)
-			sb.WriteString(":missing;")
-			continue
-		}
-
-		_, _ = fmt.Fprintf(&sb, "%s:%d:%d", fileName, info.Size(), info.ModTime().UnixNano())
-	}
-
-	return sb.String()
 }
 
 func ReadFileAll(fileName string) ([]byte, error) {

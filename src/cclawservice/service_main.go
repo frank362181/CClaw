@@ -55,8 +55,8 @@ type ServiceMain struct {
 	// agents related
 	defaultAgentConfigHelper *config.ConfigurationHelper
 	agentRepo                *repo.AgentRepository
-	agentDocRepo             *ctxmgr.AgentDocumentRepository
-	startupFileRepo          *repo.AgentFileRepository
+	agentFileRepo            *ctxmgr.AgentFileRepository
+	agentDocCache            *ctxmgr.AgentDocumentCache
 
 	// 并发闸:流式(SSE)在飞连接数、全局聊天在飞请求数(各自上限在 Init 按 ini 配置)
 	streamGate *serviceCore.ConcurrencyGate
@@ -300,12 +300,12 @@ func (m *ServiceMain) Destroy() {
 		m.agentRepo.Destroy()
 	}
 
-	if m.agentDocRepo != nil {
-		m.agentDocRepo.Destroy()
+	if m.agentDocCache != nil {
+		m.agentDocCache.Destroy()
 	}
 
-	if m.startupFileRepo != nil {
-		m.startupFileRepo.Destroy()
+	if m.agentFileRepo != nil {
+		m.agentFileRepo.Destroy()
 	}
 
 	if m.database != nil {
@@ -351,21 +351,21 @@ func (m *ServiceMain) loadAgentConfigurations() error {
 	agents := m.agentRepo.LoadAllAgents(int64(ttlSec))
 
 	// 4. warm up the prompt repository with the default workspace (best-effort)
-	if m.agentDocRepo == nil {
-		m.agentDocRepo = ctxmgr.GetAgentDocRepository()
-	}
-	if m.startupFileRepo == nil {
-		m.startupFileRepo = repo.GetAgentFileRepository()
+	if m.agentFileRepo == nil {
+		m.agentFileRepo = ctxmgr.GetAgentFileRepository()
 	}
 	for _, agent := range agents {
-		if _, err := m.agentDocRepo.LoadAgentBootstrap(agent); err != nil {
-			logging.LogWarnF("warm up default workspace error:%s", err.Error())
-		}
+		agentWorkspaceRoot, _ := hCommon.BuildAgentBootstrapRoot(agent)
+		m.agentFileRepo.GetStartupFiles(agentWorkspaceRoot)
+	}
+
+	if m.agentDocCache == nil {
+		m.agentDocCache = ctxmgr.GetAgentDocCache()
 	}
 
 	// 5.warm up the system tools when startup
 	systemTools := m.agentRepo.GetSystemTools()
-	_ = m.agentDocRepo.LoadSystemTools(systemTools)
+	_ = m.agentDocCache.LoadSystemTools(systemTools)
 
 	return nil
 }

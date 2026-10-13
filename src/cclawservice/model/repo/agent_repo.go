@@ -1,6 +1,7 @@
 /**
 * 从数据库中获取所有的llm providers,agent,skill等信息
-* 这里并不会加载agent的启动文件以及SKILL.md等文件内容
+*    这里的仓库表示从数据库中加载对应的对象,类似于OpenClaw,Claude Code中的claude.json,
+*    或openclaw.json等配置文件;而且本仓库并不加载对应的AGENTS.md等系统启动文件等
 **/
 
 package repo
@@ -83,8 +84,13 @@ func (repo *AgentRepository) LoadAllAgents(ttl int64) []dataobject.TAgent {
 func (repo *AgentRepository) GetLLMProviders(comCode string) []dataobject.TLlm {
 	repo.refreshIfExpired()
 
-	out := make([]dataobject.TLlm, 0, repo.llmProviders.Len())
-	repo.llmProviders.Range(func(_ int, item dataobject.TLlm) bool {
+	// 持锁取快照:重载会整体替换字段引用,不持锁读该字段即数据竞争(SafeList 只保护内容,不保护字段)
+	repo.mu.RLock()
+	list := repo.llmProviders
+	repo.mu.RUnlock()
+
+	out := make([]dataobject.TLlm, 0, list.Len())
+	list.Range(func(_ int, item dataobject.TLlm) bool {
 		if strings.EqualFold(comCode, item.OwnerId) {
 			out = append(out, item)
 		}
@@ -155,8 +161,12 @@ func (repo *AgentRepository) RemoveLLMProvider(ownerId, providerId string) error
 func (repo *AgentRepository) GetAgents(comCode string) []dataobject.TAgent {
 	repo.refreshIfExpired()
 
-	out := make([]dataobject.TAgent, 0, repo.agents.Len())
-	repo.agents.Range(func(_ int, item dataobject.TAgent) bool {
+	repo.mu.RLock()
+	list := repo.agents
+	repo.mu.RUnlock()
+
+	out := make([]dataobject.TAgent, 0, list.Len())
+	list.Range(func(_ int, item dataobject.TAgent) bool {
 		if strings.EqualFold(comCode, item.OwnerId) {
 			out = append(out, item)
 		}
@@ -171,9 +181,13 @@ func (repo *AgentRepository) GetAgents(comCode string) []dataobject.TAgent {
 func (repo *AgentRepository) GetAgent(ownerId, agentId string) (dataobject.TAgent, bool) {
 	repo.refreshIfExpired()
 
+	repo.mu.RLock()
+	list := repo.agents
+	repo.mu.RUnlock()
+
 	var found dataobject.TAgent
 	ok := false
-	repo.agents.Range(func(_ int, item dataobject.TAgent) bool {
+	list.Range(func(_ int, item dataobject.TAgent) bool {
 		if strings.EqualFold(ownerId, item.OwnerId) && item.AgentId == agentId {
 			found = item
 			ok = true
@@ -246,8 +260,12 @@ func (repo *AgentRepository) RemoveAgent(ownerId, agentId string) error {
 func (repo *AgentRepository) GetSystemTools() []dataobject.TTool {
 	repo.refreshIfExpired()
 
-	out := make([]dataobject.TTool, 0, repo.systemTools.Len())
-	repo.systemTools.Range(func(_ int, item dataobject.TTool) bool {
+	repo.mu.RLock()
+	list := repo.systemTools
+	repo.mu.RUnlock()
+
+	out := make([]dataobject.TTool, 0, list.Len())
+	list.Range(func(_ int, item dataobject.TTool) bool {
 		out = append(out, item)
 		return true
 	})
@@ -258,9 +276,13 @@ func (repo *AgentRepository) GetSystemTools() []dataobject.TTool {
 func (repo *AgentRepository) GetSystemTool(toolId string) (dataobject.TTool, bool) {
 	repo.refreshIfExpired()
 
+	repo.mu.RLock()
+	list := repo.systemTools
+	repo.mu.RUnlock()
+
 	var found dataobject.TTool
 	ok := false
-	repo.systemTools.Range(func(_ int, item dataobject.TTool) bool {
+	list.Range(func(_ int, item dataobject.TTool) bool {
 		if strings.EqualFold(toolId, item.ToolId) {
 			found = item
 			ok = true
@@ -337,8 +359,12 @@ func (repo *AgentRepository) RemoveBaseTool(toolId string) error {
 func (repo *AgentRepository) GetSkills(comCode string) []dataobject.TSkill {
 	repo.refreshIfExpired()
 
-	out := make([]dataobject.TSkill, 0, repo.skills.Len())
-	repo.skills.Range(func(_ int, item dataobject.TSkill) bool {
+	repo.mu.RLock()
+	list := repo.skills
+	repo.mu.RUnlock()
+
+	out := make([]dataobject.TSkill, 0, list.Len())
+	list.Range(func(_ int, item dataobject.TSkill) bool {
 		// 可见性 = skill_scope + owner_id(系统/插件技能全局可见,个人/项目技能仅归属自身可见)
 		if item.IsSkillVisibleTo(comCode) {
 			out = append(out, item)
@@ -356,9 +382,13 @@ func (repo *AgentRepository) GetSkillsByAgent(agent dataobject.TAgent) []dataobj
 		return nil
 	}
 
+	repo.mu.RLock()
+	list := repo.skills
+	repo.mu.RUnlock()
+
 	out := make([]dataobject.TSkill, 0, len(agent.SkillIds))
 
-	repo.skills.Range(func(_ int, item dataobject.TSkill) bool {
+	list.Range(func(_ int, item dataobject.TSkill) bool {
 		// 两道门槛:t_agent_skill 关联(是否启用)+ skill_scope 可见性(该归属能否使用)
 		if slices.Contains(agent.SkillIds, item.SkillId) && item.IsSkillVisibleTo(agent.OwnerId) {
 			out = append(out, item)
@@ -373,8 +403,12 @@ func (repo *AgentRepository) GetSkillsByAgent(agent dataobject.TAgent) []dataobj
 func (repo *AgentRepository) GetAgentRouteRules(comCode string) []dataobject.TAgentRouteRule {
 	repo.refreshIfExpired()
 
-	out := make([]dataobject.TAgentRouteRule, 0, repo.routeRules.Len())
-	repo.routeRules.Range(func(_ int, item dataobject.TAgentRouteRule) bool {
+	repo.mu.RLock()
+	list := repo.routeRules
+	repo.mu.RUnlock()
+
+	out := make([]dataobject.TAgentRouteRule, 0, list.Len())
+	list.Range(func(_ int, item dataobject.TAgentRouteRule) bool {
 		if strings.EqualFold(comCode, item.OwnerId) {
 			out = append(out, item)
 		}
@@ -443,6 +477,10 @@ func (repo *AgentRepository) RemoveSkill(ownerId, skillId string) error {
 }
 
 func (repo *AgentRepository) Destroy() {
+	// 清空期间禁止重载替换字段引用(否则与这里的无锁读构成数据竞争)
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+
 	if repo.llmProviders != nil {
 		repo.llmProviders.Clear()
 	}
