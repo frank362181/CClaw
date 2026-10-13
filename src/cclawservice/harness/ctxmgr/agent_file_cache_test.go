@@ -213,11 +213,11 @@ func TestBuildBootstrapDocumentsStates(t *testing.T) {
 	}
 
 	items := []StartupFileSnapshotItem{
-		{Spec: spec(hCommon.AgentDocAgent, hCommon.AgentDocFileName, true), State: StartupFileMissing},
-		{Spec: spec(hCommon.AgentDocTools, hCommon.ToolsDocFileName, false), State: StartupFileMissing},
-		{Spec: spec(hCommon.AgentDocSoul, hCommon.SoulDocFileName, true), State: StartupFileUnavailable,
+		{Spec: spec(hCommon.AgentDocAgent, hCommon.AgentDocFileName, true), State: FileMissing},
+		{Spec: spec(hCommon.AgentDocTools, hCommon.ToolsDocFileName, false), State: FileMissing},
+		{Spec: spec(hCommon.AgentDocSoul, hCommon.SoulDocFileName, true), State: FileUnavailable,
 			Reason: "startup file too large (limit=262144 bytes)", ByteSize: 300000},
-		{Spec: spec(hCommon.AgentDocIdentity, hCommon.IdentityDocFileName, false), State: StartupFileReady,
+		{Spec: spec(hCommon.AgentDocIdentity, hCommon.IdentityDocFileName, false), State: FileReady,
 			Content: "---\nsummary: 身份摘要\n---\nIDENTITY-BODY\n"},
 	}
 
@@ -267,14 +267,14 @@ func TestSnapshotOversizeIsUnavailable(t *testing.T) {
 		t.Fatalf("Snapshot error:%s", err.Error())
 	}
 
-	state := StartupFileMissing
+	state := FileMissing
 	reason := ""
 	for i := range snap.Files {
 		if snap.Files[i].Spec.Name == hCommon.AgentDocFileName {
 			state, reason = snap.Files[i].State, snap.Files[i].Reason
 		}
 	}
-	if state != StartupFileUnavailable {
+	if state != FileUnavailable {
 		t.Fatalf("超限文件状态应为 Unavailable, got=%v", state)
 	}
 	if reason == "" {

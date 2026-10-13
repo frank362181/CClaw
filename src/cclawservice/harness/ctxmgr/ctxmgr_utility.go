@@ -3,6 +3,8 @@ package ctxmgr
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -183,62 +185,106 @@ func IsKindAllowedInScope(kind hCommon.AgentDocumentKind, scope hCommon.Bootstra
 	}
 }
 
-func ReadSystemToolSchemaDocument(schemaFile string, fingerprint string) (*hCommon.SystemToolSchemaDocument, error) {
-	data, size, err := pCommon.ReadFile(schemaFile, MaxSkillDocSize)
+func ReadDocFile(filePath string, maxSize int64) DocFileSnapshot {
+	snapshot := DocFileSnapshot{FilePath: filePath, State: FileMissing}
+
+	// 类型守卫必须在**打开之前**:syscall.Open(O_RDONLY) 遇到 FIFO 会阻塞到有写端
+	linfo, err := os.Lstat(filePath)
 	if err != nil {
-		return nil, err
+		snapshot.Reason = err.Error()
+		return snapshot
+	}
+	if !linfo.Mode().IsRegular() {
+		snapshot.Reason = "not a regular file"
+		return snapshot
 	}
 
-	var schemaMeta hCommon.SystemToolSchemaMeta
-	err = json.Unmarshal([]byte(data), &schemaMeta)
+	f, stat, err := pCommon.OpenFileNoFollow(filePath)
 	if err != nil {
-		logging.LogErrorF("Failed to unmarshal system tool %s schema meta: %s", schemaFile, err.Error())
-		return nil, err
+		snapshot.Reason = err.Error()
+		return snapshot
+	}
+	defer func() { _ = f.Close() }()
+
+	// 二次类型校验:上一步 Lstat 与本次 Open 之间仍可能被换成 FIFO/设备节点。
+	// OpenFileNoFollow 已带 O_NONBLOCK,此处只负责给出准确的拒绝原因
+	// (不再依赖"读时 EAGAIN"这种含混信号)。
+	if !stat.Mode().IsRegular() {
+		snapshot.Reason = "not a regular file"
+		return snapshot
+	}
+
+	if stat.Size() > maxSize {
+		snapshot.State = FileUnavailable
+		snapshot.ByteSize = stat.Size()
+		snapshot.ModTime = stat.ModTime().UnixNano()
+		snapshot.Reason = fmt.Sprintf("file too large (size = %d > limit = %d)", stat.Size(), maxSize)
+		return snapshot
+	}
+
+	data, err := io.ReadAll(io.LimitReader(f, maxSize+1))
+	if err != nil {
+		snapshot.State = FileUnavailable
+		snapshot.ModTime = stat.ModTime().UnixNano()
+		snapshot.Reason = err.Error()
+		return snapshot
+	}
+
+	if int64(len(data)) > maxSize {
+		snapshot.State = FileUnavailable
+		snapshot.ModTime = stat.ModTime().UnixNano()
+		snapshot.Reason = fmt.Sprintf("file too large (size = %d > limit = %d)", int64(len(data)), maxSize)
+		return snapshot
+	}
+
+	snapshot.State = FileReady
+	snapshot.ByteSize = int64(len(data))
+	snapshot.ModTime = stat.ModTime().UnixNano()
+	snapshot.Content = string(data)
+	snapshot.Fingerprint = pCommon.ComputeFileFingerprint2(stat) // 同句柄、同格式
+	return snapshot
+}
+
+func ParseSystemToolSchema(snapshot DocFileSnapshot, scriptFile string, visible bool) (*hCommon.SystemToolSchemaDocument, error) {
+	var schemaMeta hCommon.SystemToolSchemaMeta
+
+	if err := json.Unmarshal([]byte(snapshot.Content), &schemaMeta); err != nil {
+		return nil, fmt.Errorf("invalid schema json: %w", err)
 	}
 
 	name := strings.TrimSpace(schemaMeta.Name)
 	if len(name) == 0 || len(schemaMeta.InputSchema) == 0 {
-		logging.LogErrorF("invalid schema file: %s", schemaFile)
-		return nil, pException.FilePathErrorEx("invalid schema file: " + schemaFile)
+		return nil, fmt.Errorf("invalid schema name: %s", schemaMeta.Name)
 	}
 
-	schemaDoc := &hCommon.SystemToolSchemaDocument{
-		ToolName:          schemaMeta.Name,
-		SchemaFileName:    schemaFile,
-		SchemaFingerprint: fingerprint,
-		ByteSize:          size,
-
+	return &hCommon.SystemToolSchemaDocument{
+		ToolName:          name,
+		Visible:           visible,
+		Script:            scriptFile,
+		SchemaFileName:    snapshot.FilePath,
+		SchemaFingerprint: snapshot.Fingerprint,
+		ByteSize:          snapshot.ByteSize,
 		SysToolSchemaMeta: schemaMeta,
-	}
-
-	return schemaDoc, nil
+	}, nil
 }
 
-// ReadSkillDocument 读取并解析一个 SKILL.md(唯一的读盘 + 唯一的 YAML 解析点)。
-// YAML 失败只告警不丢弃文档:正文是 SOP 注入的唯一来源,一个 front matter 笔误不该让
-// 技能连正文都进不了 prompt(元数据为空时目录/关键词自然也就为空)。
-func ReadSkillDocument(filePath string, fingerprint string) (*hCommon.SkillDocument, error) {
-	data, size, err := pCommon.ReadFile(filePath, MaxSkillDocSize)
-	if err != nil {
-		return nil, err
-	}
-
-	frontMatter, content := SplitFrontMatter(data)
+func ParseSkillDocument(snapshot DocFileSnapshot) *hCommon.SkillDocument {
 	doc := &hCommon.SkillDocument{
-		SkillId:     filepath.Base(filepath.Dir(filePath)), //技能名称
-		SkillFile:   filePath,
-		Fingerprint: fingerprint,
-		Content:     content,
-		ByteSize:    size,
+		SkillId:     filepath.Base(filepath.Dir(snapshot.FilePath)), //技能目录名
+		SkillFile:   snapshot.FilePath,
+		Fingerprint: snapshot.Fingerprint,
+		ByteSize:    snapshot.ByteSize,
 	}
 
+	frontMatter, content := SplitFrontMatter([]byte(snapshot.Content))
+	doc.Content = content
 	if len(frontMatter) > 0 {
 		if err := yaml.Unmarshal([]byte(frontMatter), &doc.FrontMatter); err != nil {
-			logging.LogWarnF("prompt repo: parse skill %s front matter error:%s", filePath, err.Error())
+			logging.LogWarnF("prompt repo: parse skill %s front matter error:%s", snapshot.FilePath, err.Error())
 		}
 	}
 
-	return doc, nil
+	return doc
 }
 
 // FrontMatterDelimiter front matter 的定界符

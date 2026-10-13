@@ -10,24 +10,34 @@ import (
 	pCommon "my.favorite/platformutility/common"
 )
 
-// StartupFileState 启动文件在磁盘上的状态,决定上层如何注入 prompt。
-type StartupFileState int
+// AgentFileState 启动文件在磁盘上的状态,决定上层如何注入 prompt。
+type AgentFileState int
 
 const (
-	// StartupFileMissing 文件不存在。目录与符号链接同样按缺失处理(与 O_NOFOLLOW 语义一致)
-	StartupFileMissing StartupFileState = iota
-	// StartupFileReady 文件存在且原始正文已读入。
-	StartupFileReady
-	// StartupFileUnavailable 文件存在但正文不可用(超过 MaxAgentDocSize 或读取失败)。
+	FileMissing AgentFileState = iota // FileMissing 文件不存在。目录与符号链接同样按缺失处理(与 O_NOFOLLOW 语义一致)
+	FileReady                         // FileReady 文件存在且原始正文已读入。
+
+	// FileUnavailable 文件存在但正文不可用(超过 MaxAgentDocSize 或读取失败)。
 	// 必须与"缺失"区分:缺失的必需文件注入 [MISSING] 占位(提示待创建),
 	// 本状态只告警并省略 —— 文件明明存在,不能向模型谎报它不存在。
-	StartupFileUnavailable
+	FileUnavailable
 )
 
-// StartupFileSnapshotItem 单个启动文件的原始快照项(未做任何 prompt 派生)。
+func (st AgentFileState) String() string {
+	switch st {
+	case FileMissing:
+		return "file not found"
+	case FileUnavailable:
+		return "file is unavailable"
+	default:
+		return "normal"
+	}
+}
+
+// StartupFileSnapshotItem 单个启动文件的原始快照项(未做任何 prompt 派生)
 type StartupFileSnapshotItem struct {
 	Spec     hCommon.StartupDocSpec // 白名单条目(种类/文件名/是否必需)
-	State    StartupFileState
+	State    AgentFileState
 	ByteSize int64
 	Content  string // 原始正文(含 front matter);仅 State==StartupFileReady 时有效
 	Reason   string // State==StartupFileUnavailable 时的原因(供上层记日志)
@@ -39,6 +49,25 @@ type StartupFileSnapshotItem struct {
 type StartupSnapshot struct {
 	Fingerprint string
 	Files       []StartupFileSnapshotItem
+}
+
+type DocFileSnapshot struct {
+	FilePath    string         // 文件的路径
+	State       AgentFileState // 文件状态
+	Fingerprint string         // 仅FileReady时有效
+
+	ByteSize int64
+	ModTime  int64  //文件修改的时间(nano Second)
+	Content  string //原始正文(未做任何派生);仅FileReady时有效
+	Reason   string //非FileReady时有效(包含拒绝链接符号、超限、读失败)
+}
+
+func (d DocFileSnapshot) SkipReason() string {
+	if d.Reason != pCommon.BlankString {
+		return d.Reason
+	}
+
+	return "file not found"
 }
 
 // MaxPromptSectionLen 由 prompt_service.assembleSystemPrompt 中的 capSections 施加

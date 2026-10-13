@@ -411,7 +411,16 @@ func ComputeFileFingerprint(path string) string {
 	if err != nil {
 		return ""
 	}
-	return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
+	return ComputeFileFingerprint2(info)
+}
+
+// ComputeFileFingerprint2 根据os.FileInfo计算文件指纹,避免两次os.Stat
+func ComputeFileFingerprint2(info os.FileInfo) string {
+	if info == nil {
+		return BlankString
+	}
+
+	return fmt.Sprintf("%s:%d:%d", info.Name(), info.Size(), info.ModTime().UnixNano())
 }
 
 func ReadFileAll(fileName string) ([]byte, error) {

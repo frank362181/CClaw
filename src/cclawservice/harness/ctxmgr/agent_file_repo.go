@@ -12,14 +12,13 @@
 package ctxmgr
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
+	myException "my.favorite/cclawservice/exception"
 	hCommon "my.favorite/cclawservice/harness/common"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/exception"
@@ -32,16 +31,16 @@ type startupFileContent struct {
 	size    int64
 	modTime int64 // 文件修改时间(纳秒)
 
-	hasContent bool   // content是否已经实际读盘(清单路径只做stat,不读取正文)
-	content    string //原始正文(包含front matter)
-	reason     string //存在但正文不可用时的原因(仅诊断,不参与指纹)
+	hasContent  bool // content是否已经实际读盘(清单路径只做stat,不读取正文)
+	fingerprint string
+	content     string //原始正文(包含front matter)
+	reason      string //存在但正文不可用时的原因
 }
 
 // 表示一个Agent的启动文件缓存
 type startupFileBucket struct {
 	resolvedRoot string // 已经解析真实路径的工作区根(避免每次重复调用EvalSymlinks)
 	loadedAt     int64  // 最近一次清单stat的时间(秒级时间戳)
-	fingerprint  string //整组指纹
 
 	startupFiles map[string]startupFileContent // 一个agent下面的7个启动文件
 }
@@ -73,10 +72,8 @@ func GetAgentFileRepository() *AgentFileRepository {
 	return agentFileRepository
 }
 
-// GetStartupFiles 返回某工作区全部启动文件的清单(仅元数据,不读正文)。
-// 按 StartupDocFiles 固定顺序返回;不存在的文件以 missing=true 标记;
-// 列表项复用 AgentDocument,不携带正文(Content/FrontMatter 为空)。
-// 性能:结果按工作区做 TTL 轻量缓存,TTL 内零磁盘访问。
+// GetStartupFiles 返回某工作区全部启动文件的清单(仅元数据,不读正文)
+// 性能:结果按工作区做 TTL 轻量缓存,TTL 内零磁盘访问
 // 安全:只统计白名单内的启动文件;符号链接视为缺失(与正文读取的 O_NOFOLLOW 语义一致)
 func (repo *AgentFileRepository) GetStartupFiles(agentBootStartupRoot string) []hCommon.AgentDocument {
 	agentBootstrapRoot := strings.TrimSpace(agentBootStartupRoot)
@@ -121,7 +118,6 @@ func (repo *AgentFileRepository) GetStartupFiles(agentBootStartupRoot string) []
 	bucket = cache.bucket(agentBootstrapRoot)
 	bucket.resolvedRoot = resolvedRoot
 	bucket.startupFiles = startupFiles
-	bucket.fingerprint = computeStartupFileFingerprint(startupFiles)
 	bucket.loadedAt = now
 
 	return startupFilesMetadata(startupFiles)
@@ -168,51 +164,43 @@ func (repo *AgentFileRepository) GetStartupFile(agentBootstrapRoot, fileName str
 		Missing:  true,
 	}
 
-	// O_NOFOLLOW 打开(Unix):符号链接/目录/缺失统一按缺失返回,不泄漏具体原因
-	f, stat, err := pCommon.OpenFileNoFollow(filePath)
-	if err != nil {
+	fingerprint := pCommon.ComputeFileFingerprint(filePath)
+	if prev, hit := previous[item.Name]; hit && prev.hasContent &&
+		len(fingerprint) > 0 && prev.fingerprint == fingerprint {
+		doc.Content = prev.content
+		doc.ByteSize = prev.size
+		doc.Missing = false
 		return doc, nil
 	}
-	defer func() { _ = f.Close() }()
 
-	if stat.IsDir() {
-		return doc, nil // 目录按缺失
-	}
-	if stat.Size() > hCommon.MaxAgentDocSize {
-		return nil, errors.New("startup file too large: " + fileName)
+	// 同一读盘
+	snapshot := ReadDocFile(filePath, hCommon.MaxAgentDocSize)
+	if snapshot.State == FileUnavailable {
+		return nil, myException.AgentFileUnavailableErrEx2("startup file too large,file=%s,reason=%s", filePath, snapshot.SkipReason())
 	}
 
-	modTime := stat.ModTime().UnixNano()
-	entry := startupFileContent{exists: true, size: stat.Size(), modTime: modTime}
-
-	// 指纹命中,复用
-	if prev, hit := previous[item.Name]; hit && prev.hasContent && prev.size == stat.Size() && prev.modTime == modTime {
-		entry.content = prev.content
-		entry.hasContent = true
-	} else {
-		// 从已经打开的文件句柄上限读取(即使文件在fstat后增长也不会超限)
-		data, err := io.ReadAll(io.LimitReader(f, hCommon.MaxAgentDocSize+1))
-		if err != nil {
-			return nil, err
-		}
-		if int64(len(data)) > hCommon.MaxAgentDocSize {
-			return nil, errors.New("startup file too large: " + fileName)
-		}
-
-		entry.hasContent = true
-		entry.content = string(data)
+	if snapshot.State != FileReady {
+		return doc, nil // 缺失/目录/符号链接:一律按缺失返回
 	}
 
-	// 只更新一个文件并重新计算指纹
+	entry := startupFileContent{
+		exists:      true,
+		size:        snapshot.ByteSize,
+		modTime:     snapshot.ModTime,
+		hasContent:  true,
+		content:     snapshot.Content,
+		fingerprint: snapshot.Fingerprint,
+	}
+
+	// 更新一个文件
 	repo.startupCache.mu.Lock()
 	defer repo.startupCache.mu.Unlock()
 
 	bucket := repo.startupCache.bucket(agentBootstrapRoot)
 	bucket.resolvedRoot = resolvedRoot
 	bucket.startupFiles[item.Name] = entry
-	bucket.fingerprint = computeStartupFileFingerprint(bucket.startupFiles)
 
-	doc.Content = entry.content // 原始正文(含 front matter),供前端展示/编辑
+	doc.Content = entry.content //原始正文,含front matter
 	doc.ByteSize = entry.size
 	doc.Missing = false
 	return doc, nil
@@ -246,7 +234,6 @@ func (repo *AgentFileRepository) Snapshot(agentBootstrapRoot string) (*StartupSn
 	bucket := cache.bucket(agentBootstrapRoot)
 	bucket.resolvedRoot = resolvedRoot
 	bucket.startupFiles = startupFiles
-	bucket.fingerprint = fingerprint
 	bucket.loadedAt = pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 
 	files := startupFileSnapshotItems(bucket.startupFiles)
@@ -327,25 +314,38 @@ func readStartupFiles(resolvedRoot string, startDocSpec []hCommon.StartupDocSpec
 
 		startupFileName, err := pCommon.SafeJoinWithRoot(resolvedRoot, filepath.Join(resolvedRoot, spec.Name))
 		if err != nil {
+			continue //指定的路径越:按缺失处理
+		}
+
+		// 存在性与大小:一次LStat(列路径只需元数据,不必读正文);符号链接/目录按缺失处理
+		info, statErr := os.Lstat(startupFileName)
+		if statErr != nil || !info.Mode().IsRegular() {
 			continue
 		}
 
-		if info, statErr := os.Lstat(startupFileName); statErr == nil && !info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
-			entry.exists = true
-			entry.size = info.Size()
-			entry.modTime = info.ModTime().UnixNano()
+		entry.exists = true
+		entry.size = info.Size()
+		entry.modTime = info.ModTime().UnixNano()
 
-			if prev, hit := previous[spec.Name]; hit && prev.exists && prev.size == entry.size && prev.modTime == entry.modTime &&
-				(!withContent || prev.hasContent) {
-				entry.hasContent = prev.hasContent
-				entry.content = prev.content
-				entry.reason = prev.reason
-			} else if withContent {
-				// 读取整个启动文件;取不到时记录原因(超限/读失败),由上层决定"省略"而非"占位"
-				content, ok, reason := readStartupFileContent(startupFileName)
-				entry.hasContent = ok
-				entry.content = content
-				entry.reason = reason
+		prev, hit := previous[spec.Name]
+		reusable := hit && prev.exists && prev.size == entry.size && prev.modTime == entry.modTime &&
+			(!withContent || prev.hasContent)
+
+		if reusable {
+			entry.hasContent = prev.hasContent
+			entry.content = prev.content
+			entry.reason = prev.reason
+			entry.fingerprint = prev.fingerprint
+		} else if withContent {
+			// AGENTS.md,SKILLS.md等文件共用同一读盘实现
+			snapshot := ReadDocFile(startupFileName, hCommon.MaxAgentDocSize)
+
+			entry.hasContent = snapshot.State == FileReady
+			if entry.hasContent {
+				entry.content = snapshot.Content
+				entry.fingerprint = snapshot.Fingerprint
+			} else {
+				entry.reason = snapshot.SkipReason() //读取失败时有意义
 			}
 		}
 
@@ -384,12 +384,13 @@ func startupFileSnapshotItems(startupFiles map[string]startupFileContent) []Star
 
 		switch {
 		case !entry.exists:
-			item.State = StartupFileMissing
+			item.State = FileMissing
+			item.Reason = "file not found"
 		case entry.hasContent:
-			item.State = StartupFileReady
+			item.State = FileReady
 			item.Content = entry.content
 		default:
-			item.State = StartupFileUnavailable
+			item.State = FileUnavailable
 			item.Reason = entry.reason
 		}
 
@@ -397,34 +398,4 @@ func startupFileSnapshotItems(startupFiles map[string]startupFileContent) []Star
 	}
 
 	return items
-}
-
-// readStartupFileContent 以 O_NOFOLLOW 打开并读取正文。
-// 关键:大小判断与读取都发生在**同一个已打开句柄**上 —— 既防 TOCTOU 符号链接替换,
-// 也防"fstat 之后文件被替换/增长"绕过 MaxAgentDocSize 上限。
-// 返回 (内容, 是否成功, 失败原因);原因仅供上层记日志,不向外部暴露具体路径。
-func readStartupFileContent(startupFileName string) (string, bool, string) {
-	f, stat, err := pCommon.OpenFileNoFollow(startupFileName)
-	if err != nil {
-		// 符号链接/缺失/权限不足统一折算为"不可用",不泄漏具体原因
-		return "", false, err.Error()
-	}
-	defer func() { _ = f.Close() }()
-
-	if stat.IsDir() {
-		return "", false, "not a regular file"
-	}
-	if stat.Size() > hCommon.MaxAgentDocSize {
-		return "", false, fmt.Sprintf("startup file too large (limit=%d bytes)", hCommon.MaxAgentDocSize)
-	}
-
-	data, err := io.ReadAll(io.LimitReader(f, hCommon.MaxAgentDocSize+1))
-	if err != nil {
-		return "", false, err.Error()
-	}
-	if int64(len(data)) > hCommon.MaxAgentDocSize {
-		return "", false, fmt.Sprintf("startup file too large (limit=%d bytes)", hCommon.MaxAgentDocSize)
-	}
-
-	return string(data), true, ""
 }

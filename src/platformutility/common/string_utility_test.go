@@ -89,3 +89,27 @@ func TestTruncateRunesEmpty(t *testing.T) {
 		t.Errorf("max=0 表示不限制, 实际 %q", got)
 	}
 }
+
+// TestNormalizeStringsSet 名单归一化:去空白/去空项/去重 + key 统一小写,
+// 空名单或纯空白名单返回 nil(调用方据此判断"未声明名单")。
+//
+// 该覆盖原先落在 harness/common 的 NormalNameSet 上;该函数已被 NormalizeStringsSet 取代,
+// 测试一并迁到函数所在包,避免重构静默丢失覆盖。
+func TestNormalizeStringsSet(t *testing.T) {
+	set := NormalizeStringsSet([]string{" Read ", "READ", "read", "", "   ", "Edit"})
+	if len(set) != 2 {
+		t.Fatalf("set size mismatch: got=%d want=2 (%v)", len(set), set)
+	}
+	for _, key := range []string{"read", "edit"} {
+		if _, ok := set[key]; !ok {
+			t.Errorf("normalized key %q should be present: %v", key, set)
+		}
+	}
+
+	if got := NormalizeStringsSet(nil); got != nil {
+		t.Errorf("nil input should return nil set, got=%v", got)
+	}
+	if got := NormalizeStringsSet([]string{"", "  "}); got != nil {
+		t.Errorf("blank-only input should return nil set, got=%v", got)
+	}
+}

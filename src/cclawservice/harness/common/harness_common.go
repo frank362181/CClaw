@@ -76,7 +76,7 @@ func (kind AgentDocumentKind) String() string {
 const (
 	AgentRunTimeout  = 600                          //Agent单次聊天运行超时时间(工具循环+LLM生成)
 	ChatRunTimeout   = "CCLAW_CHAT_RUN_TIMEOUT_SEC" //聊天最长的时间环境变量
-	AgentToolLoopMax = 80                           // function-calling 工具循环的最大迭代次数(防止模型反复请求工具导致死循环/超时)。
+	AgentToolLoopMax = 100                          // function-calling 工具循环的最大迭代次数(防止模型反复请求工具导致死循环/超时)。
 
 	NonStreamResponseTimeout = 60 // 单次 LLM 同步请求的默认超时，同步情况下起作用
 	StreamResponseTimeout    = 60 // 流式读取空闲上限(秒):LLM无返回的最大时间

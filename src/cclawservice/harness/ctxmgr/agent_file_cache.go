@@ -127,20 +127,19 @@ func (dc *AgentDocumentCache) LoadSystemTools(tools []dataobject.TTool) observat
 	systemToolRoot := filepath.Join(pCommon.GetExecutableDir(), hCommon.AgentBootstrapDir, hCommon.SystemToolDirRoot)
 
 	// ---1) 归一化检查
-	sysTools := make(map[string]dataobject.TTool, len(tools))
+	type toolFile struct {
+		name       string //归一化工具名
+		visible    bool   //来自DB配置
+		schemaFile string // schema JSON 绝对路径
+		scriptFile string //脚本绝对路径(仅解析路径,不读内容)
+	}
+	systemFiles := make([]toolFile, 0, len(tools))
 	seenTools := make(map[string]struct{}, len(tools))
 
 	for _, tmpTool := range tools {
 		toolName := strings.ToLower(strings.TrimSpace(tmpTool.ToolName))
 		if len(toolName) == 0 {
-			observer.Skip(tmpTool.ToolName, "empty tool name")
-			continue
-		}
-
-		// 目录越界检查
-		schemaFile, err := pCommon.SafeJoinWithRoot(systemToolRoot, filepath.Join(toolName, tmpTool.SchemaFile))
-		if err != nil {
-			observer.Skip(tmpTool.ToolName, "invalid tool schema file")
+			observer.Skip(toolName, "empty tool name")
 			continue
 		}
 
@@ -150,69 +149,81 @@ func (dc *AgentDocumentCache) LoadSystemTools(tools []dataobject.TTool) observat
 			continue
 		}
 
-		tmpTool.ToolName = toolName //回填归一化后的toolName
 		seenTools[toolName] = struct{}{}
-		sysTools[schemaFile] = tmpTool //此时key是input schema的路径名,绝对路径
+
+		schemaFile, err := pCommon.SafeJoinWithRoot(systemToolRoot, filepath.Join(toolName, tmpTool.SchemaFile))
+		if err != nil {
+			observer.Skip(toolName, "invalid tool schema file")
+			continue
+		}
+
+		scriptFile, err := pCommon.SafeJoinWithRoot(systemToolRoot, filepath.Join(toolName, tmpTool.Script))
+		if err != nil {
+			observer.Skip(toolName, "invalid tool script file")
+			continue
+		}
+
+		systemFiles = append(systemFiles, toolFile{
+			name:       toolName,
+			visible:    tmpTool.Visible,
+			schemaFile: schemaFile,
+			scriptFile: scriptFile,
+		})
 	}
 
 	// ---2.从缓存中取出内容
-	cached := make(map[string]hCommon.SystemToolSchemaDocument, len(sysTools))
+	cached := make(map[string]hCommon.SystemToolSchemaDocument, len(systemFiles))
 	dc.mu.Lock()
-	for _, tool := range sysTools {
-		if doc, hit := dc.systemToolSchemaCache[tool.ToolName]; hit {
-			cached[tool.ToolName] = doc
+	for _, f := range systemFiles {
+		if doc, hit := dc.systemToolSchemaCache[f.name]; hit {
+			cached[f.name] = doc
 		}
 	}
 	dc.mu.Unlock()
 
-	// -- 3. 命中取缓存;未命中读盘
-	out := make(map[string]hCommon.SystemToolSchemaDocument, len(sysTools))
-	fresh := make(map[string]hCommon.SystemToolSchemaDocument, len(sysTools))
-	for key, tool := range sysTools {
-		fingerprint := pCommon.ComputeFileFingerprint(key) //此时key就是schema的路径
-		if len(fingerprint) == 0 {
-			observer.Skip(tool.ToolName, "file not found")
-			continue
-		}
-
-		//指纹是否命中
-		if doc, hit := cached[tool.ToolName]; hit && fingerprint == doc.SchemaFingerprint {
-			out[key] = doc
+	// -- 3. 命中取缓存;未命中读盘+解析(锁外,最慢的一段)
+	type parsedTool struct {
+		key string // 归一化的 DB 工具名:回写键必须与查找键 f.name同源
+		doc hCommon.SystemToolSchemaDocument
+	}
+	updates := make([]parsedTool, 0, len(systemFiles))
+	for _, f := range systemFiles {
+		fingerprint := pCommon.ComputeFileFingerprint(f.schemaFile)
+		if doc, hit := cached[f.name]; hit && len(fingerprint) > 0 && doc.SchemaFingerprint == fingerprint {
+			//文件未变:复用已经解析出来的内容,visible必须来自数据库最新的配置
+			doc.Visible = f.visible
+			updates = append(updates, parsedTool{key: f.name, doc: doc})
 			observer.Cached++
 			continue
 		}
 
-		doc, err := ReadSystemToolSchemaDocument(key, fingerprint)
-		if err != nil {
-			observer.Skip(tool.ToolName, err.Error())
+		// 未命中缓存,读盘
+		snapshot := ReadDocFile(f.schemaFile, MaxSkillDocSize)
+		if snapshot.State != FileReady {
+			observer.Skip(f.name, snapshot.SkipReason())
 			continue
 		}
 
-		scriptFile, err := pCommon.SafeJoinWithRoot(systemToolRoot, filepath.Join(tool.ToolName, tool.Script))
+		doc, err := ParseSystemToolSchema(snapshot, f.scriptFile, f.visible)
 		if err != nil {
-			observer.Skip(tool.ToolName, err.Error())
+			observer.Skip(f.name, err.Error())
 			continue
 		}
 
-		doc.Visible = tool.Visible //设置对LLM是否可见的属性
-		doc.Script = scriptFile
-
-		fresh[key] = *doc
-		out[key] = *doc
+		updates = append(updates, parsedTool{key: f.name, doc: *doc})
 		observer.Reloaded++
 	}
 
-	// ---4 回写新的条目
-	if len(fresh) > 0 {
+	// ---4 一次回写(极短)
+	if len(updates) > 0 {
 		dc.mu.Lock()
-		for key := range fresh {
-			toolName := strings.ToLower(strings.TrimSpace(fresh[key].ToolName))
-			dc.systemToolSchemaCache[toolName] = fresh[key]
+		for i := range updates {
+			dc.systemToolSchemaCache[updates[i].key] = updates[i].doc
 		}
 		dc.mu.Unlock()
 	}
 
-	observer.Loaded = len(out)
+	observer.Loaded = len(updates)
 	return observer
 }
 
@@ -265,24 +276,22 @@ func (dc *AgentDocumentCache) LoadSkills(skillFiles []string) ([]hCommon.SkillDo
 	fresh := make([]hCommon.SkillDocument, 0, len(paths))
 	for _, filePath := range paths {
 		fingerprint := pCommon.ComputeFileFingerprint(filePath)
-		if len(fingerprint) == 0 {
-			report.Skip(filePath, "file not found")
-			continue
-		}
 
 		// 指纹命中:直接复用已解析文档(正文 + front matter),零读盘零解析
-		if doc, hit := cached[filePath]; hit && doc.Fingerprint == fingerprint {
+		if doc, hit := cached[filePath]; hit && len(fingerprint) > 0 && doc.Fingerprint == fingerprint {
 			out = append(out, doc)
 			report.Cached++
 			continue
 		}
 
-		doc, err := ReadSkillDocument(filePath, fingerprint)
-		if err != nil {
-			report.Skip(filePath, err.Error()) // 超大/不可读:整份跳过(不截断)
+		// 未命中
+		snapshot := ReadDocFile(filePath, MaxSkillDocSize)
+		if snapshot.State != FileReady {
+			report.Skip(filePath, snapshot.SkipReason()) // 超大/不可读:整份跳过(不截断)
 			continue
 		}
 
+		doc := ParseSkillDocument(snapshot)
 		fresh = append(fresh, *doc)
 		out = append(out, *doc)
 		report.Reloaded++
@@ -415,14 +424,14 @@ func buildBootstrapDocuments(items []StartupFileSnapshotItem) []hCommon.AgentDoc
 			FileName: item.Spec.Name,
 			Required: item.Spec.Required,
 			ByteSize: item.ByteSize,
-			Missing:  item.State != StartupFileReady,
+			Missing:  item.State != FileReady,
 		}
 
 		switch item.State {
-		case StartupFileUnavailable:
+		case FileUnavailable:
 			logging.LogWarnF("prompt repo: load %s skipped: %s", item.Spec.Name, item.Reason)
 			continue
-		case StartupFileMissing:
+		case FileMissing:
 			if item.Spec.Required {
 				out = append(out, doc) // 必须文件:保留占位
 			}
