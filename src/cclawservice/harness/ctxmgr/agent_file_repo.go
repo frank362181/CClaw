@@ -96,7 +96,7 @@ func (repo *AgentFileRepository) GetStartupFiles(agentBootStartupRoot string) []
 		return list
 	}
 
-	// 未命中缓存
+	// 未命中缓存,previous为空
 	resolvedRoot := ""
 	previous := map[string]startupFileContent{}
 	if bucket != nil {
