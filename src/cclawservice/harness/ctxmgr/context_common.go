@@ -151,8 +151,8 @@ const (
 type Summarizer func(ctx context.Context, systemPrompt, userPrompt string) (string, error)
 
 const (
-	CompactionModeDefault   = 0 // 默认模式:把需要压缩的区间整体摘要为一条摘要记录。
-	CompactionModeSafeguard = 1 // 保全模式:分块摘要 + 摘要后校验关键信息(路径/结论/待办)是否保留,
+	CompactionModeDefault   int = 0 // 默认模式:把需要压缩的区间整体摘要为一条摘要记录。
+	CompactionModeSafeguard     = 1 // 保全模式:分块摘要 + 摘要后校验关键信息(路径/结论/待办)是否保留,
 )
 
 // CompactionModeName 返回压缩模式的稳定名称(供日志/可观测性使用,不得用于业务判断)。

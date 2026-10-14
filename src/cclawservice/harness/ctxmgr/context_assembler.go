@@ -663,8 +663,7 @@ func assembleSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope,
 
 	// ---- 截断提示(OpenClaw: "## Bootstrap Context Notice") ----
 	if len(truncated) > 0 {
-		notice := "⚠️ Some bootstrap files were truncated to stay within the prompt budget: " +
-			strings.Join(pCommon.UniqueStrings(truncated), ", ") + "."
+		notice := "⚠️ Some bootstrap files were truncated to stay within the prompt budget: " + strings.Join(pCommon.UniqueStrings(truncated), ", ") + "."
 		sections = append(sections, hCommon.SystemPromptSection{
 			Title:   "Bootstrap Context Notice",
 			Content: notice,

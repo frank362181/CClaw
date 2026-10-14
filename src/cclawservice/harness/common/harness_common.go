@@ -132,10 +132,10 @@ const (
 	//   - 蒸馏要求模型回"完整列表" —— DistillMaxMemoryFacts(20) × DistillMaxFactRunes(200) = 4000 rune。
 	SummaryMaxTokens = 4096
 
-	// MaintenanceMinOutputTokens 维护调用(蒸馏/压缩/合并)的**最小**输出额度。
+	// TurnMinOutputTokens 维护每轮调用(蒸馏/压缩/合并)的**最小**输出额度。
 	// 窗口扣掉输入后剩余不到这个数时,调用方直接跳过 —— 输出这么短必然是一段被截断的残文,
 	// 写进历史摘要或长期记忆只会造成信息缺口,不如不写(问题指向窗口/输出额度配置)。
-	MaintenanceMinOutputTokens = 512
+	TurnMinOutputTokens = 512
 
 	// CompactionMaxConcurrent 后台记忆维护(压缩/蒸馏)的全局并发上限:
 	// 记忆是旁路增强,不应把上游 RPM/TPM 配额吃光、挤掉用户真正的对话请求。

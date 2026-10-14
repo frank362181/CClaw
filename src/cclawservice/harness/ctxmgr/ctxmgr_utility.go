@@ -141,23 +141,23 @@ func ResolveSkillDocPath(skillDir string) (string, error) {
 	return absPath, nil
 }
 
-// maintenanceSlots 后台记忆维护的全局并发闸(压缩/蒸馏都要调用 LLM)。
-var maintenanceSlots = make(chan struct{}, hCommon.CompactionMaxConcurrent)
+// maintenanceSlots 后台记忆维护的全局并发闸(压缩/蒸馏都要调用 LLM),即最大的goroutine个数
+var goroutineBarriers = make(chan struct{}, hCommon.CompactionMaxConcurrent)
 
-// AcquireMaintenanceSlot 非阻塞获取一个维护名额(拿不到就放弃本次)。
-func AcquireMaintenanceSlot() bool {
+// AcquireGoroutineBarrier 非阻塞获取一个维护名额(拿不到就放弃本次)。
+func AcquireGoroutineBarrier() bool {
 	select {
-	case maintenanceSlots <- struct{}{}:
+	case goroutineBarriers <- struct{}{}:
 		return true
 	default:
 		return false
 	}
 }
 
-// ReleaseMaintenanceSlot 释放维护名额。
-func ReleaseMaintenanceSlot() {
+// ReleaseGoroutineBarrier 释放维护名额。
+func ReleaseGoroutineBarrier() {
 	select {
-	case <-maintenanceSlots:
+	case <-goroutineBarriers:
 	default:
 	}
 }
@@ -189,12 +189,12 @@ func ReadDocFile(filePath string, maxSize int64) DocFileSnapshot {
 	snapshot := DocFileSnapshot{FilePath: filePath, State: FileMissing}
 
 	// 类型守卫必须在**打开之前**:syscall.Open(O_RDONLY) 遇到 FIFO 会阻塞到有写端
-	linfo, err := os.Lstat(filePath)
+	info, err := os.Lstat(filePath)
 	if err != nil {
 		snapshot.Reason = err.Error()
 		return snapshot
 	}
-	if !linfo.Mode().IsRegular() {
+	if !info.Mode().IsRegular() {
 		snapshot.Reason = "not a regular file"
 		return snapshot
 	}

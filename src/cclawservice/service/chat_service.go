@@ -562,7 +562,7 @@ func (s *ChatService) prepareChat(ctx context.Context, req *request.ChatRequest,
 
 	// 工具 schema 占窗口但与历史竞争同一份额度:按**本轮实际下发的工具**现算,
 	// 不做按 agentId 的跨轮缓存(可见工具会随门/配置变化,旧实现无失效键 + 空值写死)。
-	toolsReserveTokens := security.EstimateToolReserveTokens(agent.AgentId, visibleTools)
+	toolsReserveTokens := security.EstimateToolReserveTokens(visibleTools)
 	timing.PromptMs = pCommon.MilliDiff(promptStart)
 
 	// 上下文预算的配置异味(预留吃光窗口 / 把系统预留当历史旋钮)只报一次
@@ -1037,7 +1037,7 @@ func (s *ChatService) summarizer(llmProvider dataobject.TLlm) ctxmgr.Summarizer 
 		// 输出额度按**窗口**收口(见 security.CalcMaintenanceOutputTokens):维护调用的输入同样占窗口,
 		// 若无脑发 SummaryMaxTokens,小窗模型上会变成"输入 + 输出 > 窗口"的必然失败 ——
 		// 而且失败只发生在后台日志里。装不下时直接报错,不发起注定失败的调用。
-		maxTokens := security.CalcMaintenanceOutputTokens(int(llmProvider.ContextWindow), hCommon.SummaryMaxTokens, systemPrompt, userPrompt)
+		maxTokens := security.CalcTurnOutputTokens(int(llmProvider.ContextWindow), hCommon.SummaryMaxTokens, systemPrompt, userPrompt)
 		if maxTokens <= 0 {
 			return pCommon.BlankString, myException.RuntimeClientErrEx(fmt.Sprintf(
 				"maintenance call does not fit the context window: window=%d", llmProvider.ContextWindow))

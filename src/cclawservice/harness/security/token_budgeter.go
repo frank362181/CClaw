@@ -20,16 +20,14 @@ import (
 
 // token 估算的假设(公开为包内常量:它同时被“输出上限是否覆盖字符上限”的契约测试引用)。
 const (
-	// CharsPerCJKToken CJK 字符每 token 的字符数(即 1 token ≈ 1.5 个汉字)。
-	CharsPerCJKToken = 1.5
-	// CharsPerAsciiToken 非 CJK 字符每 token 的字符数。
-	CharsPerAsciiToken   = 4.0
+	CharsPerCJKToken     = 1.5 // CharsPerCJKToken CJK 字符每 token 的字符数(即 1 token ≈ 1.5 个汉字)。
+	CharsPerAsciiToken   = 4.0 // CharsPerAsciiToken 非 CJK 字符每 token 的字符数。
 	perMessageOverhead   = 4
 	estimateSafetyFactor = 0.2
 )
 
-// MaintenanceBudgets 各维护动作本轮可发送的源文本预算
-type MaintenanceBudgets struct {
+// TurnBudgets 每轮可发送的源文本预算
+type TurnBudgets struct {
 	DistillBudget int
 	CompactBudget int
 	MergeBudget   int
@@ -45,7 +43,32 @@ type DistillPressure struct {
 	Closing        bool // 会话收尾(空闲超时/主动结束):必须把尾巴带走
 }
 
-func EstimateToolReserveTokens(agentId string, tools []llmproto.Tool) int {
+// CalcBoostrapBudget 返回计算启动文档注入的总预算(**rune**)。
+func CalcBoostrapBudget(configured int) int {
+	switch {
+	case configured > 0:
+		// 配置了启动文件的总预算上限
+		return configured
+	case configured < 0:
+		return 0
+	default:
+		// 返回默认值
+		return hCommon.MaxBootstrapTotalChars
+	}
+}
+
+// CalcSystemReservedTokens 计算系统提示应占用的 token 额度
+func CalcSystemReservedTokens(policy hCommon.ContextPolicy, sysMsg llmproto.ChatMessage) int {
+	reversed := EstimateInputTokens([]llmproto.ChatMessage{sysMsg})
+	if policy.SystemPromptReserveTokens > reversed {
+		return policy.SystemPromptReserveTokens
+	}
+
+	return reversed
+}
+
+// EstimateToolReserveTokens 预估每轮工具调用所需的tokens数量
+func EstimateToolReserveTokens(tools []llmproto.Tool) int {
 	if len(tools) == 0 {
 		return 0
 	}
@@ -59,73 +82,21 @@ func EstimateToolReserveTokens(agentId string, tools []llmproto.Tool) int {
 	return toolsReservedTokens
 }
 
-// PolicyWarnings 报告策略里"一看就会出问题"的配置(供调用方记日志;无问题时返回 nil)。
-//
-// 两类:
-//   - 必然 BudgetExhausted:系统提示预留 + 输出预留 就已经吃掉窗口(含本轮消息更不够)
-//     —— 此时历史一点都不回放,且压缩被禁用(NeedCompact 对 BudgetExhausted 返回 false);
-//   - 疑似把"系统提示预留"当成历史旋钮用:预留超出实测系统提示 + 摘要上限 时,
-//     真正应该调的是 MaxHistoryTokens
-func PolicyWarnings(policy hCommon.ContextPolicy, systemTokens int) []string {
-	var warnings []string
-
-	if policy.ContextWindow <= 0 {
-		return nil // 未配置窗口:不做任何预算推断,也就无可警告
-	}
-
-	summarySlack := CharsToTokens(hCommon.MaxSummaryTotalRunes) // 摘要总量上限的 token 当量
-	if policy.SystemPromptReserveTokens > systemTokens+summarySlack {
-		warnings = append(warnings, fmt.Sprintf(
-			"SystemPromptReserveTokens=%d exceeds the measured system prompt (%d tokens) + summary cap (%d tokens); "+
-				"if the intent is \"replay less history\", use MaxHistoryTokens instead",
-			policy.SystemPromptReserveTokens, systemTokens, summarySlack))
-	}
-
-	if headroom := policy.SystemPromptReserveTokens + policy.OutputReserve + policy.ToolsReserveTokens; headroom >= policy.ContextWindow {
-		warnings = append(warnings, fmt.Sprintf(
-			"system reserve (%d) + output reserve (%d) + tools reserve (%d) >= context window (%d): "+
-				"history will never be replayed and compaction is disabled",
-			policy.SystemPromptReserveTokens, policy.OutputReserve, policy.ToolsReserveTokens, policy.ContextWindow))
-	}
-
-	// 维护调用(蒸馏/压缩/合并)同样要装进窗口:装不下时它们会被**整批跳过**,
-	if avail := CalcMaintenanceAvailableTokens(policy.ContextWindow, hCommon.SummaryMaxTokens, ""); avail <= 0 {
-		warnings = append(warnings, fmt.Sprintf(
-			"context window (%d) minus the maintenance output budget (%d tokens) leaves no room for a maintenance call: "+
-				"distillation/compaction/merge will be skipped (use a larger window or lower SummaryMaxTokens)",
-			policy.ContextWindow, hCommon.SummaryMaxTokens))
-	}
-
-	return warnings
-}
-
-// CalcBoostrapBudget 计算启动文档注入的总预算(**rune**)。
-func CalcBoostrapBudget(configured int) int {
-	switch {
-	case configured > 0:
-		return configured
-	case configured < 0:
-		return 0
-	default:
-		return hCommon.MaxBootstrapTotalChars
-	}
-}
-
-// CalcMaintenanceBudgets 按模型窗口推导各动作的源文本预算
-func CalcMaintenanceBudgets(windowTokens int,
+// CalcTurnBudgets 按模型窗口推导各动作的源文本预算
+func CalcTurnBudgets(windowTokens int,
 	distillSystemPrompt string,
 	compactionSystemPrompt string,
-	compactionMergeSystemPrompt string) MaintenanceBudgets {
-	return MaintenanceBudgets{
-		DistillBudget: calcMaintenanceInputBudgetRunes(windowTokens, hCommon.SummaryMaxTokens, distillSystemPrompt, hCommon.DistillMaxInputChars),
-		CompactBudget: calcMaintenanceInputBudgetRunes(windowTokens, hCommon.SummaryMaxTokens, compactionSystemPrompt, hCommon.MaxCompactionInputChars),
-		MergeBudget:   calcMaintenanceInputBudgetRunes(windowTokens, hCommon.SummaryMaxTokens, compactionMergeSystemPrompt, hCommon.MaxCompactionInputChars),
+	compactionMergeSystemPrompt string) TurnBudgets {
+	return TurnBudgets{
+		DistillBudget: calcTurnInputBudgetRunes(windowTokens, hCommon.SummaryMaxTokens, distillSystemPrompt, hCommon.DistillMaxInputChars),
+		CompactBudget: calcTurnInputBudgetRunes(windowTokens, hCommon.SummaryMaxTokens, compactionSystemPrompt, hCommon.MaxCompactionInputChars),
+		MergeBudget:   calcTurnInputBudgetRunes(windowTokens, hCommon.SummaryMaxTokens, compactionMergeSystemPrompt, hCommon.MaxCompactionInputChars),
 	}
 }
 
-// CalcMaintenanceAvailableTokens 报告维护调用的"可用 token 额度"(窗口 - 输出 - 系统提示估量)。
+// CalcTurnAvailableTokens 报告维护调用的"可用 token 额度"(窗口 - 输出 - 系统提示估量)。
 // <=0 表示这个模型窗口装不下任何维护调用。供 PolicyWarnings 输出一条可操作的配置告警。
-func CalcMaintenanceAvailableTokens(windowTokens, outputTokens int, systemPrompt string) int {
+func CalcTurnAvailableTokens(windowTokens, outputTokens int, systemPrompt string) int {
 	if windowTokens <= 0 {
 		return 0
 	}
@@ -133,14 +104,14 @@ func CalcMaintenanceAvailableTokens(windowTokens, outputTokens int, systemPrompt
 	return windowTokens - outputTokens - systemTokens
 }
 
-// CalcMaintenanceOutputTokens 计算一次维护调用应发送的 max_tokens。
+// CalcTurnOutputTokens 计算一次维护调用应发送的 max_tokens。
 //
 // 返回 <=0 表示**装不下,调用方应跳过**(而不是发一个必然失败或必然被截断的请求):
 // 维护调用的输入同样占窗口,只按 SummaryMaxTokens 硬发会在小窗模型上直接越界。
 //   - windowTokens <= 0(未配置窗口):沿用 maxTokens(与"窗口未知就不裁剪"同一口径);
 //   - 剩余额度不足 MaintenanceMinOutputTokens:返回 0(残文没有写入价值);
 //   - 否则取 min(剩余额度, maxTokens)。
-func CalcMaintenanceOutputTokens(windowTokens, maxTokens int, systemPrompt, userPrompt string) int {
+func CalcTurnOutputTokens(windowTokens, maxTokens int, systemPrompt, userPrompt string) int {
 	if windowTokens <= 0 {
 		return maxTokens
 	}
@@ -149,7 +120,7 @@ func CalcMaintenanceOutputTokens(windowTokens, maxTokens int, systemPrompt, user
 		{Role: hCommon.RoleSystem, Content: systemPrompt},
 		{Role: hCommon.RoleUser, Content: userPrompt},
 	})
-	if room < hCommon.MaintenanceMinOutputTokens {
+	if room < hCommon.TurnMinOutputTokens {
 		return 0
 	}
 	if room < maxTokens {
@@ -209,30 +180,24 @@ func EstimateInputTokens(messages []llmproto.ChatMessage) int {
 	return int(float64(total) * (1 + estimateSafetyFactor))
 }
 
-// NeedCompact 判断是否压缩(与 compaction_mode 无关)。
-//
-// 三个维度:
-//  1. **正确性主干**:确实有记录掉出窗口(DroppedFrom>0)且条数超过门槛 ——
-//     只有掉出窗口的记录才需要被摘要代表。提前压缩(历史没超预算就压)反而**有害**:
-//     那会用摘要替换还能回放的原文,白丢信息而预算收益为零。
-//  2. **收益**:被裁区间的体积达到 MinCompactionSrcRunes —— 体积小于摘要长度下限时
-//     压完不会更小,只白烧一次 LLM 调用(精确判定仍在 Compact 内部按选中的那一段做)。
-//  3. **预算**:摘要总量已超上限时**不压**,先让合并把摘要整理下来 ——
-//     否则 system 单调增长 → 历史预算更小 → 裁更多 → 再压,形成正反馈。
-//     被裁记录一直留在文件里,下一轮仍是同一批,不会漏(最多延迟一轮)。
-//
-// 历史预算为 0 时永不触发:压缩改变不了 system 预留,问题在配置。
+// NeedCompact 判断是否压缩(与 compaction_mode 无关),以下 4个条件同时满足才压缩。
 func NeedCompact(result hCommon.AssembleResult, droppedRunes int) bool {
 	if result.BudgetExhausted {
+		// 1. 此时预算耗尽,配置问题了,压缩改变不了问题
 		return false //budget=0,就没必要压缩了
 	}
+
+	// 2.正确性主干:确实有记录掉出窗口,且条数过门槛
 	if result.DroppedFrom <= 0 || result.DroppedRecordCount <= hCommon.CompactionMinRecords {
 		return false
 	}
+
+	// 3.收益维度:被裁的区间够大才值得调用一次LLM进行压缩
 	if droppedRunes < hCommon.MinCompactionSrcRunes {
 		return false
 	}
 
+	// 4.摘要总量已经超过上限 -> 不压缩,先让合并把摘要整理下来
 	overBudget := utf8.RuneCountInString(strings.TrimSpace(result.Summary)) > hCommon.MaxSummaryTotalRunes
 	return !overBudget
 }
@@ -313,20 +278,50 @@ func TokensToChars(tokens int) int {
 	return int(float64(tokens) * CharsPerCJKToken)
 }
 
-// CalcSystemReservedTokens 计算系统提示应占用的 token 额度
-func CalcSystemReservedTokens(policy hCommon.ContextPolicy, sysMsg llmproto.ChatMessage) int {
-	reversed := EstimateInputTokens([]llmproto.ChatMessage{sysMsg})
-	if policy.SystemPromptReserveTokens > reversed {
-		return policy.SystemPromptReserveTokens
+// PolicyWarnings 报告策略里"一看就会出问题"的配置(供调用方记日志;无问题时返回 nil)。
+//
+// 两类:
+//   - 必然 BudgetExhausted:系统提示预留 + 输出预留 就已经吃掉窗口(含本轮消息更不够)
+//     —— 此时历史一点都不回放,且压缩被禁用(NeedCompact 对 BudgetExhausted 返回 false);
+//   - 疑似把"系统提示预留"当成历史旋钮用:预留超出实测系统提示 + 摘要上限 时,
+//     真正应该调的是 MaxHistoryTokens
+func PolicyWarnings(policy hCommon.ContextPolicy, systemTokens int) []string {
+	var warnings []string
+
+	if policy.ContextWindow <= 0 {
+		return nil // 未配置窗口:不做任何预算推断,也就无可警告
 	}
 
-	return reversed
+	summarySlack := CharsToTokens(hCommon.MaxSummaryTotalRunes) // 摘要总量上限的 token 当量
+	if policy.SystemPromptReserveTokens > systemTokens+summarySlack {
+		warnings = append(warnings, fmt.Sprintf(
+			"SystemPromptReserveTokens=%d exceeds the measured system prompt (%d tokens) + summary cap (%d tokens); "+
+				"if the intent is \"replay less history\", use MaxHistoryTokens instead",
+			policy.SystemPromptReserveTokens, systemTokens, summarySlack))
+	}
+
+	if headroom := policy.SystemPromptReserveTokens + policy.OutputReserve + policy.ToolsReserveTokens; headroom >= policy.ContextWindow {
+		warnings = append(warnings, fmt.Sprintf(
+			"system reserve (%d) + output reserve (%d) + tools reserve (%d) >= context window (%d): "+
+				"history will never be replayed and compaction is disabled",
+			policy.SystemPromptReserveTokens, policy.OutputReserve, policy.ToolsReserveTokens, policy.ContextWindow))
+	}
+
+	// 维护调用(蒸馏/压缩/合并)同样要装进窗口:装不下时它们会被**整批跳过**,
+	if avail := CalcTurnAvailableTokens(policy.ContextWindow, hCommon.SummaryMaxTokens, ""); avail <= 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"context window (%d) minus the maintenance output budget (%d tokens) leaves no room for a maintenance call: "+
+				"distillation/compaction/merge will be skipped (use a larger window or lower SummaryMaxTokens)",
+			policy.ContextWindow, hCommon.SummaryMaxTokens))
+	}
+
+	return warnings
 }
 
 // ======================== private functions & methods ===========================
 
-// calcMaintenanceInputBudgetRunes 计算维护调用(蒸馏/压缩/合并)可发送的**源文本**预算(rune)
-func calcMaintenanceInputBudgetRunes(windowTokens, outputTokens int, systemPrompt string, hardCapRunes int) int {
+// calcTurnInputBudgetRunes 计算维护调用(蒸馏/压缩/合并)可发送的**源文本**预算(rune)
+func calcTurnInputBudgetRunes(windowTokens, outputTokens int, systemPrompt string, hardCapRunes int) int {
 	if hardCapRunes <= 0 {
 		return 0
 	}

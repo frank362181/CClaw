@@ -368,12 +368,14 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 	// 这里按 (窗口 - 维护输出额度 - 系统提示估量) 收窄,**装不下就不排这个动作**,
 	// 并把问题指向配置(面向运维的告警见 security.PolicyWarnings,每 agent 只记一次)。
 	// 窗口未知(ContextWindow<=0)时退化为硬上限,行为与收口前完全一致。
-	budgets := security.CalcMaintenanceBudgets(maintenanceReq.ContextWindow, DistillSystemPrompt, CompactionSystemPrompt, CompactionMergeSystemPrompt)
+	budgets := security.CalcTurnBudgets(maintenanceReq.ContextWindow, DistillSystemPrompt, CompactionSystemPrompt, CompactionMergeSystemPrompt)
 	if needDistill && budgets.DistillBudget <= 0 {
 		logging.LogDebugF("memory service: session=%s distill skipped, the window (%d) leaves no room for a maintenance call",
 			session.SessionId, maintenanceReq.ContextWindow)
 		needDistill = false
 	}
+
+	// 小模型装不下维护调用 -> 不压缩
 	if needCompact && budgets.CompactBudget <= 0 {
 		logging.LogDebugF("memory service: session=%s compact skipped, the window (%d) leaves no room for a maintenance call",
 			session.SessionId, maintenanceReq.ContextWindow)
@@ -389,9 +391,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 	compactCeiling := -1 // <0 表示"本轮无需收紧压缩区间"
 	if needCompact && watermarkKnown && maintenanceReq.Assembled.DroppedTo > watermark {
 		compactCeiling = watermark
-		// 补蒸同样受窗口预算约束:装不下就不强求 —— 此时压缩仍会被钳在水位处,
-		// 只是要等下一次蒸馏(会按同样的规则重试)。
-		needDistill = budgets.DistillBudget > 0
+		needDistill = budgets.DistillBudget > 0 // 补蒸
 		logging.LogDebugF("memory service: session=%s compaction range %d-%d reaches beyond the distill watermark %d, distill first (compaction may clamp, distill=%v)",
 			session.SessionId, maintenanceReq.Assembled.DroppedFrom, maintenanceReq.Assembled.DroppedTo, watermark, needDistill)
 	}
@@ -412,7 +412,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 	from, to, mode := maintenanceReq.Assembled.DroppedFrom, maintenanceReq.Assembled.DroppedTo, agent.CompactionMode
 
 	// 获得一个维护routine，避免无限次获取打满LLM
-	if !AcquireMaintenanceSlot() {
+	if !AcquireGoroutineBarrier() {
 		logging.LogDebugF("memory service: memory maintenance slot unavailable, skip session=%s", session.SessionId)
 		return
 	}
@@ -423,7 +423,7 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 	plan := maintenancePlan{distill: needDistill, compact: needCompact, merge: needMerge}
 
 	go func() {
-		defer ReleaseMaintenanceSlot()
+		defer ReleaseGoroutineBarrier()
 		defer func() { // 后台协程必须自兜 panic:否则单个会话的异常会带崩整个进程
 			if r := recover(); r != nil {
 				logging.LogErrorF("memory service: panic in memory maintenance of %s: %v", session.SessionId, r)
