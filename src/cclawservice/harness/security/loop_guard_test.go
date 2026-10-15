@@ -574,14 +574,14 @@ func TestLoopGuard_SignatureTruncatesByRunes(t *testing.T) {
 	outer := NewLoopGuard()
 	outer.Check("read_file", `{"path":"a.txt"}`, true, strings.Repeat("中", longRunes-1)+"文")
 	if g.recentTools[0] != outer.recentTools[0] {
-		t.Errorf("第 %d 个 rune 之后的差异不应影响签名", maxSignatureResultRunes)
+		t.Errorf("第 %d 个 rune 之后的差异不应影响签名", maxSignatureForRepeatToolCalling)
 	}
 
 	// 第 200 个 rune 之内的差异必须体现在签名里
 	inner := NewLoopGuard()
 	inner.Check("read_file", `{"path":"a.txt"}`, true, "文"+strings.Repeat("中", longRunes-1))
 	if g.recentTools[0] == inner.recentTools[0] {
-		t.Errorf("第 %d 个 rune 之内的差异必须体现在签名里", maxSignatureResultRunes)
+		t.Errorf("第 %d 个 rune 之内的差异必须体现在签名里", maxSignatureForRepeatToolCalling)
 	}
 }
 

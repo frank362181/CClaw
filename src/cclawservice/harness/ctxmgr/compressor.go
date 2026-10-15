@@ -323,7 +323,7 @@ func promptLineRunes(rec MemoryRecord) int {
 	body := utf8.RuneCountInString(strings.TrimSpace(rec.Content))
 	if body > MemoryExcerptRunes {
 		// 截断后的正文 = 上限 + 截断标记(与 pCommon.TruncateRunes 的行为一致)
-		body = MemoryExcerptRunes + utf8.RuneCountInString(TruncatedMarker)
+		body = MemoryExcerptRunes - 1 + utf8.RuneCountInString(TruncatedMarker)
 	}
 
 	return len("[") + len(strconv.Itoa(rec.Index)) + len("] ") +

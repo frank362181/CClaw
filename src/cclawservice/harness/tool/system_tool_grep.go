@@ -8,6 +8,10 @@ import (
 
 type GrepSystemTool struct{}
 
+func NewGrepSystemTool() *GrepSystemTool {
+	return &GrepSystemTool{}
+}
+
 func (t *GrepSystemTool) Name() string {
 	return SystemToolGrep.String()
 }

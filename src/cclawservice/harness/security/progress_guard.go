@@ -27,10 +27,9 @@ import (
 
 // 阈值(保守取值:宁可漏判、不可误杀)
 const (
-	progressWindowSize     = 12  //记忆窗口:只保留最近N次成功调用的结果签名
-	progressMaxNoNewCalls  = 8   // 连续N次成功调用的结果都无消息 -> 判定无进展
-	progressMaxResultRunes = 512 // 参与签名的结果前缀长度;过长仅取前缀
-	progressMinResultRunes = 8   // 短于该长度的结果不参与判定,视为ACK
+	progressWindowSize     = 12 //记忆窗口:只保留最近N次成功调用的结果签名
+	progressMaxNoNewCalls  = 8  // 连续N次成功调用的结果都无消息 -> 判定无进展
+	progressMinResultRunes = 8  // 短于该长度的结果不参与判定,视为ACK
 
 	// noProgressEnabled 是否启用规则 6(无进展检测)。当前固定开启:
 	// 置 false 可整包关闭该规则(灰度观察 / 快速回滚),无需改动其余逻辑。
@@ -133,7 +132,7 @@ func ResultSignatureForNoProgress(result string) string {
 
 func NormalizeResultForProgress(result string) string {
 	s := strings.TrimSpace(result)
-	s = pCommon.TruncateRunes(s, progressMaxResultRunes, pCommon.BlankString)
+	s = pCommon.TruncateRunes(s, maxSignatureForRepeatToolCalling, pCommon.BlankString)
 	s = pCommon.ReplaceStringWithRegexp(s, reUUID, "<uuid>")
 	s = pCommon.ReplaceStringWithRegexp(s, reTimestamp, "<ts>")
 	s = pCommon.ReplaceStringWithRegexp(s, reDateTimeCN, "<ts>")

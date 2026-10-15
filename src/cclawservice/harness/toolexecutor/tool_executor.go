@@ -8,37 +8,54 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"strings"
 
 	"my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/harness/tool"
+	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
 )
 
 type Executor struct {
 	pipeline *security.PermissionPipeline
-	tools    map[string]security.IBaseTool //存放注册进来的工具,就是待执行的工具
+	toolList map[string]security.IBaseTool //存放注册进来的工具,就是待执行的工具
 
 	SandboxEnabled bool //是否激活了沙箱
 	sandboxMgr     *SandBoxMgr
 }
 
-func NewExecutor(pipeline *security.PermissionPipeline, sandboxEnabled bool) *Executor {
-	return &Executor{
-		pipeline: pipeline,
-		tools:    make(map[string]security.IBaseTool),
+var toolExecutor = pCommon.GetSingleton(func() *Executor {
+	toolExecutor := &Executor{
+		pipeline: security.GetPermissionPipeline(), // singleton,default permission pipeline
+		toolList: make(map[string]security.IBaseTool),
 
-		sandboxMgr:     GetSandboxMgr(), // singleton
-		SandboxEnabled: sandboxEnabled,
+		sandboxMgr:     GetSandboxMgr(), // singleton,
+		SandboxEnabled: false,
 	}
+	return toolExecutor
+
+}).Instance()
+
+func GetExecutor(sandboxEnabled bool) *Executor {
+	toolExecutor.SandboxEnabled = sandboxEnabled
+	return toolExecutor
 }
 
 func (e *Executor) Register(baseTool security.IBaseTool) {
-	e.tools[baseTool.Name()] = baseTool
+	if baseTool == nil {
+		return
+	}
+
+	toolName := strings.ToLower(baseTool.Name())
+	if _, ok := e.toolList[toolName]; ok {
+		return
+	}
+	e.toolList[toolName] = baseTool
 }
 
 func (e *Executor) Execute(ctx context.Context, req *security.ToolCallRequest) (any, error) {
-	tmpTool, ok := e.tools[req.ToolName]
+	tmpTool, ok := e.toolList[req.ToolName]
 	if !ok {
 		return nil, pException.ParameterEmptyErrorEx2("unknown tool %s", req.ToolName)
 	}
@@ -78,7 +95,7 @@ func (e *Executor) enabledSandbox(req *security.ToolCallRequest, d *security.Dec
 	}
 
 	//只读工具跳过沙箱
-	if tmpTool, ok := e.tools[req.ToolName]; ok {
+	if tmpTool, ok := e.toolList[req.ToolName]; ok {
 		if tmpTool.IsReadOnly(req.Input) {
 			return false
 		}
@@ -103,7 +120,7 @@ func (e *Executor) enabledSandbox(req *security.ToolCallRequest, d *security.Dec
 
 func (e *Executor) executeSandboxed(ctx context.Context, req *security.ToolCallRequest, baseTool security.IBaseTool) (any, error) {
 	// 如果实现了ToolBuilder接口
-	cb, ok := baseTool.(tool.IToolBuilder)
+	cb, ok := baseTool.(tool.ISandboxedBuilder)
 	if !ok {
 		//fail-closed,此时须沙箱化
 		return nil, exception.SandboxExecutorErrEx2("tool %s requires sandbox but not implement IToolBuilder", req.ToolName)

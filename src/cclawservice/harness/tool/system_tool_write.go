@@ -8,6 +8,10 @@ import (
 
 type WriteSystemTool struct{}
 
+func NewWriteSystemTool() *WriteSystemTool {
+	return &WriteSystemTool{}
+}
+
 func (t *WriteSystemTool) Name() string {
 	return SystemToolWrite.String()
 }

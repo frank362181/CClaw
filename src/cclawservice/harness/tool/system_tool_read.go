@@ -12,6 +12,10 @@ import (
 
 type ReadSystemTool struct{}
 
+func NewReadSystemTool() *ReadSystemTool {
+	return &ReadSystemTool{}
+}
+
 func (t *ReadSystemTool) Name() string {
 	return SystemToolRead.String()
 }

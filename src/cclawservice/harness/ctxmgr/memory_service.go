@@ -756,7 +756,7 @@ func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRe
 			ToolCalled: true,
 			CallTime:   tool.CallTime,
 			ToolName:   tool.ToolName,
-			ToolResp:   pCommon.TruncateRunes(strings.TrimSpace(result), TurnToolRespMaxLen, pCommon.BlankString), //写入数据库时截断，仅仅写前256 runes
+			ToolResp:   pCommon.TruncateRunes(strings.TrimSpace(result), TurnToolRespToDBMaxlength, pCommon.BlankString), //写入数据库时截断，仅仅写前256 runes
 			RespTime:   tool.RespTime,
 		})
 		if fileName != "" {

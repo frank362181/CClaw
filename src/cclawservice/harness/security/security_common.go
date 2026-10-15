@@ -12,6 +12,10 @@ import (
 	"context"
 )
 
+const (
+	maxSignatureForRepeatToolCalling = 512 //是否重复调用时对工具结果进行签名的前缀token数量
+)
+
 type PermissionMode int //权限模式
 type Behavior string    //权限模式下的动作
 
@@ -87,7 +91,7 @@ type CallContext struct {
 	DeniedTools  []string //会话级 deny 规则
 	AskTools     []string //会话级 ask 规则
 
-	Hooks []IToolHook // hook 列表
+	PreToolHooks []IToolHook // hook 列表
 
 	UserConfirmFunc ConfirmFunc //交互确认回调
 

@@ -128,9 +128,8 @@ const (
 		"请立即停止重试，换一种完全不同的策略，或直接总结当前已获得的结论。"
 
 	// 调用签名(工具名 + 参数哈希 + 结果前缀)相关
-	maxRecentToolCallings   = 10  //签名窗口:只保留最近几次调用的签名
-	maxSignatureResultRunes = 200 //签名里保留的工具结果前缀长度(按 rune 截断,避免切坏多字节字符)
-	emptyToolArgsHash       = "-" //参数为空时的签名占位:SHA256 对空输入直接报错,空串会与"真实哈希"混淆
+	maxRecentToolCallings = 10  //签名窗口:只保留最近几次调用的签名
+	emptyToolArgsHash     = "-" //参数为空时的签名占位:SHA256 对空输入直接报错,空串会与"真实哈希"混淆
 )
 
 // LoopGuard 一轮对话的工具调用死循环判定器。
@@ -193,7 +192,7 @@ func (g *LoopGuard) Check(toolName, toolArgs string, resultOK bool, result strin
 	if err != nil {
 		argHash = emptyToolArgsHash // 参数为空:SHA256 直接报错,用占位符避开空白段
 	}
-	toolSig := toolName + ":" + argHash + ":" + pCommon.TruncateRunes(result, maxSignatureResultRunes, pCommon.BlankString)
+	toolSig := toolName + ":" + argHash + ":" + pCommon.TruncateRunes(result, maxSignatureForRepeatToolCalling, pCommon.BlankString)
 	g.recentTools = append(g.recentTools, toolSig)
 	if len(g.recentTools) > maxRecentToolCallings {
 		g.recentTools = g.recentTools[len(g.recentTools)-maxRecentToolCallings:] //只保留最近的几个

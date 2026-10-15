@@ -105,8 +105,9 @@ const (
 	AgentRoutingLLMMaxTokens      = 1024 // LLM 分类输出 token 上限(分类只需返回一个短 AgentId)。
 	SessionAgentBindingTTLSeconds = 3600 // 会话→Agent 内存绑定的有效期(秒),过期后重新路由。
 
-	DefaultToolReplayMaxRunes  = 1200 // 单条工具结果回放的最大字符数(控制历史体积;完整内容仍在文件里)
-	DefaultOutputReserveTokens = 4096 // 为模型输出预留的 token 数
+	TurnToolResultMaxRunes     = 1200                   // 每次工具调用的截断大小
+	DefaultToolReplayMaxRunes  = TurnToolResultMaxRunes // 单条工具结果回放的最大字符数(控制历史体积;完整内容仍在文件里)
+	DefaultOutputReserveTokens = 4096                   // 为模型输出预留的 token 数
 
 	// DefaultMaxHistoryTokens 历史回放上限的默认值(tokens):历史回放预算取
 	// min(窗口预算, 本值)，64K 差不多100轮的会话所需的历史消息
@@ -144,7 +145,8 @@ const (
 	ChatMemoryFileExt    = ".md"          // 历史文件扩展名。
 	SessionNameMaxLen    = 64             // 会话名称长度上限(对齐 t_session.session_name VARCHAR(64))。
 	SessionDefaultName   = "NewSession"   // 无可用标题时的会话名称(首条消息为空时兜底)。
-	TurnToolRespMaxLen   = 256            //工具输出截取的字符数
+
+	TurnToolRespToDBMaxlength = 256 // 工具调用结果写入到数据库的最大长度
 )
 
 // Summarizer 摘要生成器:由调用方注入(service 层包装 LLM 客户端)。

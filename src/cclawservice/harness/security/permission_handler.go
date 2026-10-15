@@ -74,7 +74,7 @@ type PreToolUseHook struct {
 }
 
 func (h *PreToolUseHook) Handle(ctx context.Context, req *ToolCallRequest, tool IBaseTool) (*Decision, error) {
-	for _, hook := range req.Context.Hooks {
+	for _, hook := range req.Context.PreToolHooks {
 		decision, err := hook.Run(ctx, req)
 		if err != nil {
 			return &Decision{

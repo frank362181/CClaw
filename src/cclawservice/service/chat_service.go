@@ -411,7 +411,7 @@ func (s *ChatService) EndChatSession(session dataobject.TSession, agent dataobje
 		Records:       records,
 		Closing:       true,
 		ContextWindow: int(llmProvider.ContextWindow),
-	}, s.summarizer(llmProvider))
+	}, summarizer(llmProvider))
 	return nil
 }
 
@@ -763,9 +763,11 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 			// 必须逐条拿到 role=tool 应答,缺一条下一轮会被上游判协议错(整轮失败)。
 			scriptFile, err := turn.scriptPathOf(call.Function.Name)
 			if err != nil {
-				result := toolResultForRecord(pCommon.BlankString, err)
+				result := normalizeResultOnError(pCommon.BlankString, err)
 				respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 				recorder.Record(call.Function.Name, callTime, respTime, result) // 旁路记录(recorder 为 nil 时静默)
+
+				result = pCommon.TruncateRunes(result, ctxmgr.TurnToolResultMaxRunes, ctxmgr.TruncatedMarker)
 				result = guard.ApplyLoopGuard(call.Function.Name, call.Function.Arguments, false, result, nil)
 				messages = append(messages, ctxmgr.BuildToolResultMessage(call.ID, result))
 
@@ -785,8 +787,10 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 			turn.turnTiming.ToolsMs += pCommon.MilliDiff(toolStart)
 
 			respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
-			result = toolResultForRecord(result, err)
+			result = normalizeResultOnError(result, err)
 			recorder.Finish(toolIdx, respTime, result) // 旁路记录(recorder 为 nil 时静默)
+
+			result = pCommon.TruncateRunes(result, ctxmgr.TurnToolResultMaxRunes, ctxmgr.TruncatedMarker) //将超过指定长度的工具调用结果截断
 
 			// 死循环判定:同步路径本身串行执行,顺序天然等于"模型声明的顺序"(同步接口无 notice 通道)
 			result = guard.ApplyLoopGuard(call.Function.Name, call.Function.Arguments, err == nil, result, nil)
@@ -935,7 +939,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 				respTime := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp
 				// 结果在**本协程内**即时回填,而不是等全部工具收尾后的串行回填段:
 				// 中断时那一段走不到,这一轮的工具有没有跑过就查不到了(见 M3)。
-				recorder.Finish(toolIdx, respTime, toolResultForRecord(res, err))
+				recorder.Finish(toolIdx, respTime, normalizeResultOnError(res, err))
 				close(stopHeart)
 				<-heartDone
 				results[k] = toolResultItem{item: run, result: res, err: err, callTime: startTime.Timestamp, respTime: respTime, elapsedMs: elapsedMs}
@@ -970,9 +974,10 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 				if onTool != nil {
 					onTool(ToolEvent{Phase: cCommon.ChatToolEventError, Seq: r.item.seq, Name: r.item.name, Detail: r.err.Error()})
 				}
-				result := toolResultForRecord(pCommon.BlankString, r.err)
+				result := normalizeResultOnError(pCommon.BlankString, r.err)
 
 				// 死循环判定必须落在串行回填点(同轮工具是并发执行的,这里才是"模型声明的顺序")
+				result = pCommon.TruncateRunes(result, ctxmgr.TurnToolResultMaxRunes, ctxmgr.TruncatedMarker)
 				loopGuardResult := guard.ApplyLoopGuard(r.item.name, r.item.arg, false, result, onNotice)
 				messages = append(messages, ctxmgr.BuildToolResultMessage(r.item.callID, loopGuardResult))
 				continue
@@ -982,7 +987,8 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 				// (前端按 phase 显示 "✓ 完成";失败仍走 error 事件携带错误文本,便于排查)
 				onTool(ToolEvent{Phase: cCommon.ChatToolEventDone, Seq: r.item.seq, Name: r.item.name})
 			}
-			loopGuardResult := guard.ApplyLoopGuard(r.item.name, r.item.arg, true, r.result, onNotice)
+			result := pCommon.TruncateRunes(r.result, ctxmgr.TurnToolResultMaxRunes, ctxmgr.TruncatedMarker) //将超过指定长度的工具调用结果截断
+			loopGuardResult := guard.ApplyLoopGuard(r.item.name, r.item.arg, true, result, onNotice)
 			messages = append(messages, ctxmgr.BuildToolResultMessage(r.item.callID, loopGuardResult))
 		}
 	}
@@ -1018,21 +1024,20 @@ func (s *ChatService) triggerMemoryMaintenance(session dataobject.TSession, turn
 		Records:       records,
 		TurnSeq:       turnSeq,
 		ContextWindow: int(turn.llm.ContextWindow),
-	}, s.summarizer(turn.llm))
+	}, summarizer(turn.llm))
 }
 
-// toolResultForRecord 归一"工具结果 → 落库文本":成功用原始输出,失败用 {"error":…}
-// (与回填给模型的文本一致)。抽成函数是为了让**执行协程内**与**串行回填段**两处
-// 不可能写出不同格式(见 interrupt-memory-chain.md M3)。
-func toolResultForRecord(result string, err error) string {
+// 对工具调用的结果进行是否错误的归一化处理
+func normalizeResultOnError(result string, err error) string {
 	if err != nil {
 		return fmt.Sprintf(`{"error":%q}`, err.Error())
 	}
+
 	return result
 }
 
 // summarizer 把 LLM 客户端包装为"摘要生成器"注入 knowledge。
-func (s *ChatService) summarizer(llmProvider dataobject.TLlm) ctxmgr.Summarizer {
+func summarizer(llmProvider dataobject.TLlm) ctxmgr.Summarizer {
 	return func(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 		// 输出额度按**窗口**收口(见 security.CalcMaintenanceOutputTokens):维护调用的输入同样占窗口,
 		// 若无脑发 SummaryMaxTokens,小窗模型上会变成"输入 + 输出 > 窗口"的必然失败 ——
@@ -1043,7 +1048,8 @@ func (s *ChatService) summarizer(llmProvider dataobject.TLlm) ctxmgr.Summarizer 
 				"maintenance call does not fit the context window: window=%d", llmProvider.ContextWindow))
 		}
 
-		text, finishReason, err := s.llmClient.Complete(ctx, llmProvider, systemPrompt, userPrompt, maxTokens)
+		llmClient := api.NewClient()
+		text, finishReason, err := llmClient.Complete(ctx, llmProvider, systemPrompt, userPrompt, maxTokens)
 		if err != nil {
 			return text, err
 		}

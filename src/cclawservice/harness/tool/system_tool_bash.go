@@ -8,6 +8,10 @@ import (
 
 type BashSystemTool struct{}
 
+func NewBashSystemTool() *BashSystemTool {
+	return &BashSystemTool{}
+}
+
 func (t *BashSystemTool) Name() string {
 	return SystemToolBash.String()
 }

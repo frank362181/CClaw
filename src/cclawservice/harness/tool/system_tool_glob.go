@@ -8,6 +8,10 @@ import (
 
 type GlobSystemTool struct{}
 
+func NewGlobSystemTool() *GlobSystemTool {
+	return &GlobSystemTool{}
+}
+
 func (t *GlobSystemTool) Name() string {
 	return SystemToolGlob.String()
 }

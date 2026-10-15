@@ -4,6 +4,8 @@
 
 package security
 
+import pCommon "my.favorite/platformutility/common"
+
 type PermissionPipeline struct {
 	Head   IPermissionHandler
 	Length int
@@ -19,7 +21,7 @@ type PermissionPipeline struct {
 //  7. PermissionModeHandler  —— 权限模式策略
 //  8. AllowRuleHandler       —— 自动放行规则 + 只读工具
 //  9. InteractiveConfirmHandler —— 用户交互确认（链尾）
-func NewDefaultPermissionPipeline() *PermissionPipeline {
+var defaultPermissionPipeline = pCommon.GetSingleton(func() *PermissionPipeline {
 	head := &ValidateInputHandler{}
 	prev := head.SetNext(&PreToolUseHook{})
 	prev = prev.SetNext(&DenyRuleHandler{})
@@ -31,4 +33,8 @@ func NewDefaultPermissionPipeline() *PermissionPipeline {
 	prev = prev.SetNext(&InteractiveConfirmHandler{})
 
 	return &PermissionPipeline{Head: head}
+}).Instance()
+
+func GetPermissionPipeline() *PermissionPipeline {
+	return defaultPermissionPipeline
 }

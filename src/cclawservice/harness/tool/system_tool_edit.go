@@ -8,6 +8,10 @@ import (
 
 type EditSystemTool struct{}
 
+func NewEditSystemTool() *EditSystemTool {
+	return &EditSystemTool{}
+}
+
 func (t *EditSystemTool) Name() string {
 	return SystemToolEdit.String()
 }

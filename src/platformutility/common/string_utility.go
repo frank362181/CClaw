@@ -197,7 +197,7 @@ func IsSimilarFact(a, b string, ratio float64, minRunes int) bool {
 	return FactSimilarity(a, b) >= ratio
 }
 
-// TruncateRunes 按 rune 安全截断,避免截断多字节字符;fast-path 直接按字节比较。
+// TruncateRunes 按 rune 安全截断,避免截断多字节字符;fast-path 直接按字节比较,加上Marker
 func TruncateRunes(s string, max int, marker string) string {
 	if max <= 0 || len(s) <= max {
 		return s
@@ -208,7 +208,7 @@ func TruncateRunes(s string, max int, marker string) string {
 		return s
 	}
 
-	return string(runes[:max]) + marker
+	return string(runes[:max-1]) + marker
 }
 
 func TruncateString(s string, beginIndex, length int) string {
