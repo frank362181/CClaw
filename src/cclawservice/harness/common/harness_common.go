@@ -317,6 +317,9 @@ type AssembleResult struct {
 	HistoryCapTokens    int // 生效的历史回放上限;<=0 表示不限制
 	HistoryBudgetTokens int // 最终给历史回放用的 token 预算(已扣本轮用户消息)
 	KeptHistoryTokens   int // 实际回放的历史估算 token
+
+	PromptSizeOverflow     bool // 当前的prompt在经过裁剪、压缩、merge之后是否依然超限
+	OverflowWithoutHistory bool // 剥离了历史记忆后是否超限的标记
 }
 
 /**

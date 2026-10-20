@@ -12,14 +12,30 @@ target/
 # 【不能写成 `bin/` 或 `**/bin/`(整目录忽略)】git 不会进入被忽略的父目录,
 # 之后的 `!` 负向规则对其内容一律无效 ⇒ bin/cclaw/skills 下的技能资产
 # (SKILL.md / scripts / config)会永远进不了版本库。故改为:
-# "忽略 bin 下全部内容" + "逐层放行技能目录"。
+# "忽略 bin 下全部内容" + "逐层放行需要纳管的子目录"。
+#
+# 目前已放行(纳管进版本库)的目录:
+#   - bin/cclaw/skills     : 技能资产(SKILL.md / scripts / config)
+#   - bin/cclaw/systemtool : 系统工具的 schema(*.json)与脚本实现(scripts/*.py)
+# 其余(可执行文件 agentService、log/、temp/、workspace/、chat_history/、100001/)继续忽略。
+#
+# 新增可纳管目录时:必须「目录本体」和「目录下全部内容」各放行一行,
+# 只写 `!**/bin/cclaw/xxx/**` 不够 —— 父目录仍被 **/bin/** 忽略时 git 不会下钻。
 **/bin/**
 !**/bin/cclaw/
 !**/bin/cclaw/skills/
 !**/bin/cclaw/skills/**
+!**/bin/cclaw/systemtool/
+!**/bin/cclaw/systemtool/**
 
 secret*.*
 *.pem
+
+### SQLite 运行态文件 ###
+# WAL 模式下每次运行都会生成/变化,不应进版本库。
+# 注意:库文件本体(cclaw.db / id_cache.db)目前仍纳管,如需一并忽略请另行 git rm --cached。
+*.db-wal
+*.db-shm
 
 ### tmp文件 & 文件夹
 .tmp-go-cache/

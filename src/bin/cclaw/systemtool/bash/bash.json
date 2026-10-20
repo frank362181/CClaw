@@ -1,0 +1,18 @@
+{
+  "name": "Bash",
+  "description": "执行一条 shell 命令并返回其输出与退出码。仅用于终端类操作（git、npm、go build、docker 等）。文件读写一律用专用工具，禁止用 shell 替代：读文件用 Read（不用 cat/head/tail）、改文件用 Edit（不用 sed/awk/perl）、找文件用 Glob（不用 find/ls）、搜内容用 Grep（不用 grep/rg）。\n用法：\n- 命令在 agent 工作区下用 /bin/bash 执行（缺失时回退 /bin/sh）；stdin 接 /dev/null，读取输入的命令会立即 EOF，不会挂起。\n- 非交互环境：PAGER/GIT_PAGER=cat、GIT_TERMINAL_PROMPT=0、TERM=dumb、NO_COLOR=1、DEBIAN_FRONTEND=noninteractive；建议显式加 -y/--no-pager 等参数。\n- timeout 为毫秒，默认 30000，下限 1000；实际上限 100000（脚本执行器本身有 120s 硬超时）。超时会杀掉整个进程组。\n- 输出采集上限 4MB、回传上限 200KB（stdout 160KB + stderr 40KB），超出即截断，建议把大输出重定向到文件再用 Read 分页查看。\n- 退出码写在结果正文里；命令失败不会让工具调用失败，请根据退出码与 stderr 自行判断并调整。\n- 危险命令拦截（防误操作，不是安全边界）：rm -rf /、mkfs、dd 写裸设备、关机重启、fork bomb、curl|sh、git push --force、git clean -fdx 等会被直接拒绝。\n- 需要长时间运行的进程请自行加 & 并重定向日志，否则会被超时终止。\n【必须】执行破坏性操作（删除、重置、强制推送）前先向用户确认；输出为空不代表命令未执行，请看退出码。",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "command": {
+        "type": "string",
+        "description": "要执行的 shell 命令（bash 语法），在工作区目录下运行。"
+      },
+      "timeout": {
+        "type": "number",
+        "description": "可选。超时毫秒数。默认 30000，下限 1000，实际上限 100000。"
+      }
+    },
+    "required": ["command"]
+  }
+}

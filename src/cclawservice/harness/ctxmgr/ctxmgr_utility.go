@@ -49,14 +49,6 @@ func NormalizeSkillDir(skillDir string) (string, error) {
 	return dir, nil
 }
 
-// defaultContextPolicy 返回默认策略(未配置任何压缩参数时的安全值)。
-func defaultContextPolicy() hCommon.ContextPolicy {
-	return hCommon.ContextPolicy{
-		OutputReserve:      DefaultOutputReserveTokens,
-		ToolReplayMaxRunes: DefaultToolReplayMaxRunes,
-	}
-}
-
 // GetContextPolicy 按 Agent 与模型配置推导装配策略。
 //   - context_window 来自 t_llm;
 //   - reverse_token_floor 是 t_agent 上**为系统提示预留的最小额度**(保护启动文档不被历史挤掉);
@@ -396,4 +388,13 @@ func FormatCompactDatetime(at *pCommon.DatetimeItem) string {
 // BuildTurnStreamKey 构造"进行中轮次"的注册键/中断键:<sender>:<turnId>。
 func BuildTurnStreamKey(sender, turnId string) string {
 	return strings.TrimSpace(sender) + ":" + strings.TrimSpace(turnId)
+}
+
+// ============== private function & methods for module ==========================
+// defaultContextPolicy 返回默认策略(未配置任何压缩参数时的安全值)。
+func defaultContextPolicy() hCommon.ContextPolicy {
+	return hCommon.ContextPolicy{
+		OutputReserve:      DefaultOutputReserveTokens,
+		ToolReplayMaxRunes: DefaultToolReplayMaxRunes,
+	}
 }

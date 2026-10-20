@@ -98,10 +98,7 @@ const (
 	ChatToolEventProgress = "progress" // 执行过程输出
 	ChatToolEventDone     = "done"     // 执行成功
 	ChatToolEventError    = "error"    // 执行失败
-)
 
-// 以独立 notice 事件下发,前端单独展示为警示行,不覆盖回答正文。
-const (
 	ChatNoticeTruncated     = "truncated"      // finish_reason=length:回答达到输出长度上限
 	ChatNoticeContentFilter = "content_filter" // finish_reason=content_filter:回答被内容安全策略拦截
 	ChatNoticeIncomplete    = "incomplete"     // 流中途中断(已输出部分内容):回答可能不完整
@@ -109,6 +106,8 @@ const (
 	// ChatNoticeError 需显式提醒用户的错误(欠费/密钥无效/未开通/内容合规/超时等):以独立
 	// 告警提示下发,不覆盖已输出内容,也不降级为"可能不完整";文案取自错误的 Kind.Msg。
 	ChatNoticeError = "chat_error"
+
+	ChatNoticeContextOverflow = "context_overflow" // 超过上游大模型的窗口上限
 
 	// ChatNoticeToolLoopGuard 工具死循环守卫首次命中(模型在重复调用工具,已提醒它换策略)。
 	// 再次命中会以 chat.tool_loop_guard 错误收尾,不再重复下发本提示。
@@ -132,4 +131,6 @@ const (
 	// ConstChatNoticeToolLoopGuardWarnMsg 工具死循环守卫命中提示(按判定级别取话术,见 security.LoopGuardLevel)
 	ConstChatNoticeToolLoopGuardWarnMsg = "模型在重复调用工具,已提醒它换一种方式"
 	ConstChatNoticeToolLoopGuardStopMsg = "检测到重复调用工具,已要求模型停止重试"
+
+	ConstChatNoticeOverflowMsg = "当前会话上下文已达模型上限且无法再压缩，请新建会话继续"
 )

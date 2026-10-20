@@ -473,6 +473,13 @@ func AssembleContext(systemPrompt string, records []MemoryRecord, currentUserMsg
 	messages = append(messages, current)
 
 	result.Messages = messages
+
+	// 判断是否超过context windows,作为是否新建会话的标记
+	estimate := security.EstimateInputTokens(result.Messages) + policy.OutputReserve + policy.ToolsReserveTokens
+	result.PromptSizeOverflow = estimate > policy.ContextWindow //整个prompt是否超过上下文窗口
+	//剥离了历史记忆后,是否超限
+	result.OverflowWithoutHistory = security.EstimateInputTokens([]llmproto.ChatMessage{system, current})+policy.OutputReserve+policy.ToolsReserveTokens > policy.ContextWindow
+
 	return result
 }
 
@@ -486,7 +493,7 @@ func AssembleContext(systemPrompt string, records []MemoryRecord, currentUserMsg
 //   - 其余消息按"组"裁剪,组以 user 消息为起点(assistant/tool 配对因此在同一组内,不会被切散);
 //   - 末组(本轮用户消息 + 其工具调用链)永远保留 —— 它属于本轮,丢了就没法继续;
 //   - 历史预算同样要扣除为系统提示预留的 SystemPromptReserveTokens(见 calcSystemReservedTokens)。
-func FitMessages(llmProvider dataobject.TLlm, messages []llmproto.ChatMessage, policy hCommon.ContextPolicy) []llmproto.ChatMessage {
+func FitMessages(messages []llmproto.ChatMessage, policy hCommon.ContextPolicy) []llmproto.ChatMessage {
 	if len(messages) <= 1 {
 		return messages
 	}

@@ -245,12 +245,10 @@ func NeedDistill(turns int, p DistillPressure) bool {
 	return turns > hCommon.DistillMinTurns && turns%hCommon.DistillIntervalTurns == 0
 }
 
-// NeedMerge 判断是否合并摘要:摘要总量超上限,且预算没有耗尽。
-//
-// 预算耗尽时不做合并 —— 摘要再小也装不下历史,问题在配置(与压缩被禁同一个理由)。
+// NeedMerge 判断是否合并摘要:摘要总量超上限
 func NeedMerge(result hCommon.AssembleResult) bool {
 	overBudget := utf8.RuneCountInString(strings.TrimSpace(result.Summary)) > hCommon.MaxSummaryTotalRunes
-	return !result.BudgetExhausted && overBudget
+	return overBudget
 }
 
 // CharsToTokens 把 rune 数按估算规则换算为 token(最坏情况按 CJK 计)。

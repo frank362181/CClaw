@@ -736,7 +736,7 @@ func (s *ChatService) runToolLoop(ctx context.Context, turn *chatTurn, messages 
 
 		turn.turnTiming.Rounds++
 		roundStart := time.Now()
-		content, calls, err := s.llmClient.CompleteWithTools(ctx, turn.llm, ctxmgr.FitMessages(turn.llm, messages, policy), roundTools, toolChoice)
+		content, calls, err := s.llmClient.CompleteWithTools(ctx, turn.llm, ctxmgr.FitMessages(messages, policy), roundTools, toolChoice)
 		turn.turnTiming.LlmMs += pCommon.MilliDiff(roundStart)
 		tool.VerifyForcedCall(turn.plan, calls, toolChoice, turn.scope) //哨兵:按本轮实际发送的 choice 判断
 
@@ -824,7 +824,7 @@ func (s *ChatService) streamToolLoop(ctx context.Context, turn *chatTurn, messag
 
 		roundStart := time.Now() //本轮上游调用端到端耗时(与 llm timing 行互为印证)
 		var roundIntents []int   // 本轮模型声明的工具调用序号(与返回的 calls 一一对应)
-		content, calls, finishReason, err := s.llmClient.StreamWithTools(ctx, turn.llm, ctxmgr.FitMessages(turn.llm, messages, policy), roundTools, toolChoice, onChunk, onReasoning,
+		content, calls, finishReason, err := s.llmClient.StreamWithTools(ctx, turn.llm, ctxmgr.FitMessages(messages, policy), roundTools, toolChoice, onChunk, onReasoning,
 			func(name string) { // onToolIntent:模型流式声明将调用某工具,立即告知前端
 				if onTool != nil {
 					seq++
