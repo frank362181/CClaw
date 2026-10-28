@@ -10,7 +10,7 @@ import (
 	"sort"
 	"sync"
 
-	"my.favorite/cclawservice/harness/api/llmproto"
+	"my.favorite/cclawservice/common/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/platformutility/logging"
 )

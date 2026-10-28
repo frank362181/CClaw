@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 
 	_ "my.favorite/agentService/docs"
@@ -71,37 +72,42 @@ func main() {
 	mainApp := cclawservice.NewMainApp(configFileName)
 	defer mainApp.Destroy()
 
+	fail := func(stage string, err error) {
+		logging.LogErrorF("startup failed at %s, error=%s", stage, err.Error())
+		os.Exit(1)
+	}
+
 	if err := mainApp.Init(); err != nil {
-		return
+		fail("Init", err)
 	}
 
 	// 添加 health controller
 	if err := mainApp.SetupHealthController(); err != nil {
-		return
+		fail("SetupHealthController", err)
 	}
 
 	if err := mainApp.SetupLoginController(); err != nil {
-		return
+		fail("SetupLoginController", err)
 	}
 
 	// 添加 agent 管理控制器(须在登录控制器之后安装,以复用认证 interceptor)
 	if err := mainApp.SetupAgentController(); err != nil {
-		return
+		fail("SetupAgentController", err)
 	}
 
 	// 添加聊天控制器(复用认证 interceptor,POST /api/chat)
 	if err := mainApp.SetupChatController(); err != nil {
-		return
+		fail("SetupChatController", err)
 	}
 
 	// 1. setup server
 	if err := mainApp.SetupServer(); err != nil {
-		return
+		fail("SetupServer", err)
 	}
 
 	// 2. start the server（启动失败（如端口被占用）时直接返回，defer mainApp.Destroy() 会完成资源清理）
 	if err := mainApp.Startup(); err != nil {
-		return
+		fail("Startup", err)
 	}
 
 	// 3. wait the exit signal

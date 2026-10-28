@@ -6,12 +6,14 @@ package common
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"my.favorite/cclawservice/harness/api/llmproto"
+	"my.favorite/cclawservice/common/llmproto"
+	"my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
@@ -76,15 +78,19 @@ func BasicToolToLLMTool(t BasicTool) (llmproto.Tool, bool) {
 //   - 空闲超时(仅内层 streamCtx 取消) → 传输层错误(可重试)
 //   - 其它(连接重置/EOF 等)          → 传输层错误(可重试)
 func StreamReadError(ctx context.Context, streamCtx context.Context, err error, requestID string, idle time.Duration) error {
+	if errors.Is(err, exception.ChatResponseTooLargeKind) {
+		return exception.ChatResponseTooLargeKind
+	}
+
 	if ctx.Err() != nil {
 		return llmproto.ErrRequestCanceled
 	}
 	if idle > 0 && streamCtx.Err() != nil {
-		return llmproto.NewLlmStreamTransportError(
+		return llmproto.GetLlmStreamTransportError(
 			fmt.Errorf("stream idle timeout after %s without data: %v", idle, err), requestID)
 	}
 	if pException.IsContextCanceled(streamCtx, err) {
 		return llmproto.ErrRequestCanceled
 	}
-	return llmproto.NewLlmStreamTransportError(err, requestID)
+	return llmproto.GetLlmStreamTransportError(err, requestID)
 }

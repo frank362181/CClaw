@@ -197,6 +197,16 @@ func IsSimilarFact(a, b string, ratio float64, minRunes int) bool {
 	return FactSimilarity(a, b) >= ratio
 }
 
+func FirstNotBlank(inputs ...string) string {
+	for _, v := range inputs {
+		if s := strings.TrimSpace(v); s != BlankString {
+			return s
+		}
+	}
+
+	return BlankString
+}
+
 // TruncateRunes 按 rune 安全截断,避免截断多字节字符;fast-path 直接按字节比较,加上Marker
 func TruncateRunes(s string, max int, marker string) string {
 	if max <= 0 || len(s) <= max {
@@ -407,4 +417,57 @@ func LooksLikeJson(line string) bool {
 	}
 
 	return json.Valid([]byte(trimmed))
+}
+
+// Intersects 报告两个字符串集合是否有交集
+func Intersects(left, want []string) bool {
+	if len(left) == 0 || len(want) == 0 {
+		return false
+	}
+
+	set := make(map[string]struct{}, len(want))
+	for _, n := range want {
+		set[strings.TrimSpace(n)] = struct{}{}
+	}
+
+	for _, n := range left {
+		if _, ok := set[n]; ok {
+			return true
+		}
+	}
+
+	return false
+}
+
+// Unknowns 返回left中不在 allowed里的字符串(保持顺序,去重)
+func Unknowns(left, allowed []string) []string {
+	if len(left) == 0 {
+		return nil
+	}
+
+	if len(allowed) == 0 {
+		return left
+	}
+
+	set := make(map[string]struct{}, len(allowed))
+	for _, n := range allowed {
+		set[strings.TrimSpace(n)] = struct{}{}
+	}
+
+	var out []string
+	seen := make(map[string]struct{}, len(left))
+	for _, n := range left {
+		if _, ok := set[n]; ok {
+			continue
+		}
+
+		if _, dup := seen[n]; dup {
+			continue
+		}
+
+		seen[n] = struct{}{}
+		out = append(out, n)
+	}
+
+	return out
 }

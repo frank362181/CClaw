@@ -63,7 +63,7 @@ func GetAgentRouter(agentRepo *repo.AgentRepository) *AgentRouter {
 // Resolve 解析本次会话的目标 Agent(混合路由)。
 //   - 返回 error 仅发生在:显式指定但 Agent 不存在/禁用,或该 comCode 下无任何可用 Agent;
 //   - 命中(含默认兜底)后会把结果绑定到会话,保证会话内上下文一致。
-func (r *AgentRouter) Resolve(ctx context.Context, comCode, sessionId, reqMsg, explicitAgentId string, classifyAgent ClassifyAgent) (dataobject.TAgent, error) {
+func (r *AgentRouter) Resolve(ctx context.Context, comCode, sessionId, reqMsg, explicitAgentId string, classifyAgent hCommon.ClassifyAgent) (dataobject.TAgent, error) {
 	agents := r.availableAgents(comCode) //获取当前comCode的agent
 	if len(agents) == 0 {
 		return dataobject.TAgent{}, pException.UnMatchErrorEx2("no available chat agent for comCode:%s", comCode)
@@ -186,7 +186,7 @@ func (r *AgentRouter) matchKeyword(agents []dataobject.TAgent, comCode, reqMsg s
 
 // classifyByLLM 用 LLM 从可用 Agent 中挑选最合适者。
 // 输出仅接受"已配置 AgentId 的精确匹配",否则视为未命中(回落默认),绝不信任模型自由文本。
-func (r *AgentRouter) classifyByLLM(ctx context.Context, comCode string, agents []dataobject.TAgent, reqMsg string, classifyAgent ClassifyAgent) (dataobject.TAgent, bool) {
+func (r *AgentRouter) classifyByLLM(ctx context.Context, comCode string, agents []dataobject.TAgent, reqMsg string, classifyAgent hCommon.ClassifyAgent) (dataobject.TAgent, bool) {
 	if strings.TrimSpace(reqMsg) == "" {
 		return dataobject.TAgent{}, false
 	}
@@ -211,7 +211,7 @@ func (r *AgentRouter) classifyByLLM(ctx context.Context, comCode string, agents 
 		})
 	}
 
-	content, _, err := classifyAgent(classifyCtx, provider, BuildClassifySystemPrompt(candidates), reqMsg, r.llmMaxTokens)
+	content, err := classifyAgent(classifyCtx, provider, BuildClassifyAgentPrompt(candidates), reqMsg, r.llmMaxTokens)
 	if err != nil {
 		logging.LogDebugF("agent router: runtime classify skipped, err:%s", err.Error())
 		return dataobject.TAgent{}, false
@@ -219,7 +219,7 @@ func (r *AgentRouter) classifyByLLM(ctx context.Context, comCode string, agents 
 
 	// 严格校验:只接受精确匹配的 AgentId(忽略首尾空白,大小写不敏感)
 	for _, a := range agents {
-		if strings.EqualFold(strings.TrimSpace(content), a.AgentId) {
+		if strings.EqualFold(strings.TrimSpace(content.Content), a.AgentId) {
 			return a, true
 		}
 	}

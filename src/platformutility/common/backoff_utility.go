@@ -85,12 +85,3 @@ func ApplyJitter(delay time.Duration, ratio float64) time.Duration {
 	}
 	return jittered
 }
-
-// SecondsToDuration 秒(float,可含小数) → time.Duration;<=0 返回 0。
-// 用于把配置中的秒数(如 retry_max_delay=60.0)统一换算为时长。
-func SecondsToDuration(seconds float64) time.Duration {
-	if seconds <= 0 {
-		return 0
-	}
-	return time.Duration(seconds * float64(time.Second))
-}

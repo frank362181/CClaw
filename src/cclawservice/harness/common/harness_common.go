@@ -5,10 +5,12 @@
 package common
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 
-	"my.favorite/cclawservice/harness/api/llmproto"
+	"my.favorite/cclawservice/common/llmproto"
+	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 )
 
@@ -78,18 +80,31 @@ const (
 	ChatRunTimeout   = "CCLAW_CHAT_RUN_TIMEOUT_SEC" //聊天最长的时间环境变量
 	AgentToolLoopMax = 100                          // function-calling 工具循环的最大迭代次数(防止模型反复请求工具导致死循环/超时)。
 
-	NonStreamResponseTimeout = 60 // 单次 LLM 同步请求的默认超时，同步情况下起作用
-	StreamResponseTimeout    = 60 // 流式读取空闲上限(秒):LLM无返回的最大时间
-	SSEStreamHeartbeatSecs   = 15 // SSE 空闲心跳间隔(秒)
+	// MaxIdleConnectionsPerHost ------------- 超时
+	MaxIdleConnectionsPerHost = 128 // 单个LLM供应商最大的链接数
+	MaxIdleConnectionTimeout  = 90  // http链接超时时间，second
+	MaxTLSHandleShakeTimeout  = 10  // http 握手超时
+
+	NonStreamResponseTimeout = 60  // 单次 LLM 同步请求的默认超时，同步情况下起作用
+	StreamResponseTimeout    = 60  // 流式读取空闲上限(秒):LLM无返回的最大时间
+	SSEStreamHeartbeatSecs   = 15  // SSE 空闲心跳间隔(秒)
+	MaxStreamTotalTimeout    = 600 // 流式最大的超时时间
+	ChatThinkingLimitTimeout = 90  // 只是思考无正文内容的最大超时时间
+	ChatStallLimitTimeout    = 300 // 工具执行硬性兜底停止时间:工具卡死/上游静默
 
 	ToolCallingHeartbeatInterval = 3 //工具调用超时时间，unit = second,用于区分是长时间挂起还是工具在执行
+
+	MaxDegradeRounds = 2 // 降级重试的次数,第一次正常,第2次开始才降级
 
 	LlmRetryMaxAttempts = 3    // 可重试错误(429/5xx/断流)的最大尝试次数(含首次)
 	LlmRetryBaseDelayMs = 500  // 指数退避基准(毫秒):500 → 1000 → 2000 …
 	LlmRetryMaxDelayMs  = 4000 // 单次退避上限(毫秒)
 	LlmRetryJitterRatio = 0.2  // 退避抖动比例(±20%):打散并发重试,避免惊群
 
-	MaxResponseBytes = 8 << 20 // 单次从response中读取上限(8MB),防止超大响应耗尽内存。
+	// DefaultSSELineBytes -------------- 容量
+	DefaultSSELineBytes = 64 * 1024 // SSE初始化时默认的buffer大小
+	MaxSSELineBytes     = 1 << 20   // SSE单行上限
+	MaxResponseBytes    = 4 << 20   // 单次从response中读取上限(4MB),防止超大响应耗尽内存。
 )
 
 // MissingFileMarker 缺失文件标记(OpenClaw context-file: [MISSING] Expected at: <path>)
@@ -523,3 +538,7 @@ func (t ToolPromptItem) OwnerTag() string {
 
 	return pCommon.BlankString
 }
+
+type ClassifyAgent func(ctx context.Context, llm dataobject.TLlm, system string, user string, maxTokens int) (llmproto.LlmReply, error)
+
+//type ClassifyAgent func(ctx context.Context, llm dataobject.TLlm, req llmproto.LlmRequest) (string, string, error)

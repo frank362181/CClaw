@@ -12,7 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"my.favorite/cclawservice/harness/api/llmproto"
+	"my.favorite/cclawservice/common/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"

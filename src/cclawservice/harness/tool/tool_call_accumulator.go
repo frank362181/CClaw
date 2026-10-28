@@ -13,7 +13,7 @@ package tool
 import (
 	"strings"
 
-	"my.favorite/cclawservice/harness/api/llmproto"
+	"my.favorite/cclawservice/common/llmproto"
 )
 
 // FunctionCallAccumulator 流式工具调用累积器:按 index 保存调用,并拼接分片的 function.arguments。
@@ -57,6 +57,7 @@ func (a *FunctionCallAccumulator) Result() []llmproto.ToolCall {
 	for _, idx := range a.order {
 		call := a.calls[idx]
 		call.Function.Arguments = a.args[idx].String()
+		call.Index = idx // <- 关键代码:不在丢弃
 		out = append(out, *call)
 	}
 	return out

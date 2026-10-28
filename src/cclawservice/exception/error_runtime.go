@@ -4,7 +4,7 @@
 * 归属:属**内部成因**类错误 —— 在聊天链路上会被 exception.LlmError 归一化为
 * ChatLLMKind(502 + 可读文案),因此不对外暴露业务码(Code=0)。
 *
-* 相关:上游 LLM 协议类型与解析/分类在 llmproto 包;聊天域 Kind 表见 error_chat.go。
+* 相关:上游 LLM 协议类型与解析/分类在 llmproto 包;聊天域 Kind 表见 error_harness.go。
 **/
 
 package exception
@@ -20,8 +20,6 @@ import (
 const (
 	codeRuntimeClientError = codeErrorRuntimeClientBase + 1 + iota
 	codePermissionDeniedError
-	codeSandboxExecutorError
-	codeAgentFileUnavailable
 )
 
 // RuntimeClientKind harness 调用上游失败(构造请求/解析响应/空响应等)。
@@ -59,38 +57,4 @@ func PermissionDeniedErrEx(errTxt string) *apperr.Error {
 
 func PermissionDeniedErrEx2(errTxt string, a ...interface{}) *apperr.Error {
 	return PermissionDeniedKind.Newf(errTxt, a...)
-}
-
-var SandboxExecutorKind = apperr.Register(apperr.Kind{
-	Name:       "harness.sandbox_executor",
-	Code:       codeSandboxExecutorError,
-	HTTPStatus: http.StatusOK,
-	Msg:        "沙箱执行环境",
-})
-
-var SandboxExecutorErr = PermissionDeniedKind.Sentinel()
-
-func SandboxExecutorErrEx(errTxt string) *apperr.Error {
-	return SandboxExecutorKind.New(errTxt)
-}
-
-func SandboxExecutorErrEx2(errTxt string, a ...interface{}) *apperr.Error {
-	return SandboxExecutorKind.Newf(errTxt, a...)
-}
-
-var AgentFileUnavailableKind = apperr.Register(apperr.Kind{
-	Name:       "harness.agent_file_unavailable",
-	Code:       codeAgentFileUnavailable,
-	HTTPStatus: http.StatusOK,
-	Msg:        "启动文件不可用(文件过大或读取失败)",
-})
-
-var AgentFileUnavailableErr = AgentFileUnavailableKind.Sentinel()
-
-func AgentFileUnavailableErrEx(errTxt string) *apperr.Error {
-	return AgentFileUnavailableKind.New(errTxt)
-}
-
-func AgentFileUnavailableErrEx2(errTxt string, a ...interface{}) *apperr.Error {
-	return AgentFileUnavailableKind.Newf(errTxt, a...)
 }

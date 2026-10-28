@@ -1,0 +1,1189 @@
+basePath: /
+definitions:
+  basic.CommonResponse:
+    properties:
+      data:
+        description: 具体的相应内容
+      reqId:
+        type: string
+      reqMethod:
+        description: 用户请求的方法
+        type: string
+      reqPath:
+        type: string
+      reqTimestamp:
+        type: integer
+      respCode:
+        description: 响应码,业务层级
+        type: integer
+      respMsg:
+        description: 响应的消息
+        type: string
+      respTimestamp:
+        type: integer
+    type: object
+  dataobject.TAgent:
+    properties:
+      AgentDir:
+        description: agent启动文件所在的路径
+        type: string
+      AgentId:
+        type: string
+      AgentName:
+        type: string
+      BootstrapTotalChars:
+        description: 启动文件最大的大小
+        type: integer
+      CompactionMode:
+        description: 压缩模式
+        type: integer
+      Deleted:
+        type: boolean
+      Description:
+        type: string
+      Disabled:
+        type: boolean
+      Fallbacks:
+        type: string
+      ImageEmoji:
+        type: string
+      ImageName:
+        description: agent的公众形象名称
+        type: string
+      ImageTheme:
+        type: string
+      IsDefault:
+        type: boolean
+      MaxConcurrents:
+        description: DDL 列为 max_concurrent
+        type: integer
+      OwnerId:
+        type: string
+      PrimaryModel:
+        description: 主要使用的AI模型,如deepseek,qwen-3.8-flash等
+        type: string
+      ReasoningMode:
+        description: 推理展示的方式 0/1/2:off/生成后附带/2 streaming
+        type: integer
+      ReverseTokenFloor:
+        description: 压缩时保留的最小token数量
+        type: integer
+      SubAgents:
+        type: integer
+      ToolProgress:
+        description: 工具执行的进度
+        type: integer
+      Workspace:
+        description: 表示该agent的工作空间
+        type: string
+      dVersion:
+        $ref: '#/definitions/optimisticlock.Version'
+    type: object
+  dataobject.TLlm:
+    properties:
+      AuthMode:
+        type: integer
+      CachedReadCost:
+        description: 每百万命中缓存读的单价
+        type: number
+      CachedWriteCost:
+        description: 每百万命中缓存写的单价
+        type: number
+      ContextWindow:
+        type: integer
+      Deleted:
+        type: boolean
+      Disabled:
+        type: boolean
+      Input:
+        description: 支持的输入模态:0/1/2:text/image/audio...
+        type: integer
+      InputCost:
+        description: 每百万token输入的单价
+        type: number
+      MaxTokens:
+        description: 单词聊天返回的最大的token数量大小
+        type: integer
+      OutputCost:
+        description: 每百万token输出的单价
+        type: number
+      OwnerId:
+        type: string
+      UsageInStreaming:
+        type: boolean
+      aliasName:
+        description: 供应商别名
+        type: string
+      api:
+        description: 供应商的API协议类型
+        type: string
+      baseUrl:
+        description: 供应商的基础URL
+        type: string
+      dVersion:
+        allOf:
+        - $ref: '#/definitions/optimisticlock.Version'
+        description: 乐观锁
+      model:
+        description: 实际请求使用的模型名(厂商命名,如 deepseek-v4-pro);为空回退 ProviderId
+        type: string
+      providerId:
+        description: 供应商ID
+        type: string
+      providerName:
+        description: 供应商名称
+        type: string
+      reasoning:
+        description: 是否支持推理
+        type: boolean
+      reasoningEx:
+        description: 是否支持推理力度参数
+        type: boolean
+      thinkingNonStreaming:
+        description: 非流模式下是否支持思考,false/true=否/是
+        type: boolean
+      vendor:
+        description: LLM厂家名称,如deepseek,anthropic,OpenAI等
+        type: string
+    type: object
+  dataobject.TSkill:
+    properties:
+      Deleted:
+        type: boolean
+      Disabled:
+        type: boolean
+      OwnerId:
+        type: string
+      dVersion:
+        $ref: '#/definitions/optimisticlock.Version'
+      skillDir:
+        description: 指向skill对应的相对路径,定位SKILL.md
+        type: string
+      skillId:
+        type: string
+      skillName:
+        type: string
+      skillScope:
+        description: 指向skill的作用域
+        type: integer
+    type: object
+  optimisticlock.Version:
+    properties:
+      int64:
+        format: int64
+        type: integer
+      valid:
+        description: Valid is true if Int64 is not NULL
+        type: boolean
+    type: object
+  request.AgentIDRequest:
+    properties:
+      agentId:
+        type: string
+    required:
+    - agentId
+    type: object
+  request.AgentStartupFileRequest:
+    properties:
+      agentId:
+        type: string
+      fileName:
+        type: string
+    required:
+    - agentId
+    - fileName
+    type: object
+  request.ChatInterruptRequest:
+    properties:
+      turnId:
+        description: 会话标识,对应发起聊天时的 sessionId
+        type: string
+    type: object
+  request.ChatRequest:
+    properties:
+      agentId:
+        description: 可选:会话对应的目标Agent(暂未启用)
+        type: string
+      chatChannel:
+        description: 聊天的频道,1=WEB,2=FEISHU 等
+        type: integer
+      chatType:
+        description: 聊天类型，0/1:私聊/群聊
+        type: integer
+      genAt:
+        description: 消息的发送时间
+        type: integer
+      requestMsg:
+        description: 聊天的内容
+        type: string
+      senderId:
+        description: 发送者,以服务端认证信息为准
+        type: string
+      sessionId:
+        description: 表示会话的session，在一个会话中的就属于同一个session
+        type: string
+      turnId:
+        description: turn id
+        type: string
+    type: object
+  request.ChatResponse:
+    properties:
+      chatChannel:
+        description: 聊天的频道,1=WEB,2,FEISHU 等
+        type: integer
+      chatType:
+        description: 聊天类型，0/1:私聊/群聊
+        type: integer
+      reply:
+        description: AI 回复内容(由 LLM 引擎返回的真实回复)
+        type: string
+      respTime:
+        description: 消息响应的时间
+        type: integer
+      senderId:
+        description: 发送者,以服务端认证信息为准
+        type: string
+      sessionId:
+        type: string
+      turnId:
+        description: 本次聊天的消息ID,用于标识本次聊天的位置
+        type: string
+    type: object
+  request.LLMProviderIDRequest:
+    properties:
+      providerId:
+        type: string
+    required:
+    - providerId
+    type: object
+  request.LoginRequest:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    type: object
+  request.SkillIDRequest:
+    properties:
+      skillId:
+        type: string
+    required:
+    - skillId
+    type: object
+host: localhost:8443
+info:
+  contact: {}
+  description: API服务入口
+  title: 企业级AI助手操作系统
+  version: 1.0.0
+paths:
+  /api/agent/add:
+    post:
+      consumes:
+      - application/json
+      description: 新增一个Agent,AgentId 重复时返回409
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: Agent 对象
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dataobject.TAgent'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 新增Agent
+      tags:
+      - Agent管理
+  /api/agent/remove:
+    post:
+      consumes:
+      - application/json
+      description: 软删除Agent,记录不存在时返回404
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: AgentId
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/request.AgentIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 删除Agent
+      tags:
+      - Agent管理
+  /api/agent/startupFile:
+    post:
+      consumes:
+      - application/json
+      description: 返回指定 Agent 指定启动文件(须命中启动文件白名单)的原始内容
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: AgentId + 启动文件名
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/request.AgentStartupFileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 获取Agent启动文件内容
+      tags:
+      - Agent管理
+  /api/agent/startupFiles:
+    post:
+      consumes:
+      - application/json
+      description: 返回指定 Agent 的全部启动文件(AGENTS.md/SOUL.md/...),仅元数据,不含文件内容
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: AgentId
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/request.AgentIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 获取Agent启动文件列表
+      tags:
+      - Agent管理
+  /api/agent/update:
+    post:
+      consumes:
+      - application/json
+      description: 更新Agent,需携带 dVersion(乐观锁),版本冲突时返回409
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: Agent 对象(含 dVersion)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dataobject.TAgent'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 更新Agent
+      tags:
+      - Agent管理
+  /api/agents:
+    get:
+      consumes:
+      - application/json
+      description: 获取全部未删除的Agent列表
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 获取Agent列表
+      tags:
+      - Agent管理
+  /api/chat:
+    post:
+      consumes:
+      - application/json
+      description: 接收 cclawchat 聊天界面发来的消息并返回 AI 应答
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: 聊天内容
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/request.ChatRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/request.ChatResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 发送聊天消息
+      tags:
+      - 聊天管理
+  /api/chat/interrupt:
+    post:
+      consumes:
+      - application/json
+      description: 用户点击中断按钮后,立即停止指定会话正在进行的思考/推理/流式输出,并通知大模型停止。仅在聊天已开始(流式进行中)时支持,否则返回"未在聊天"错误。
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: 中断参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/request.ChatInterruptRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 中断流式聊天
+      tags:
+      - 聊天管理
+  /api/chat/stream:
+    post:
+      consumes:
+      - application/json
+      description: 接收 cclawchat 聊天界面发来的消息,以 SSE(Server-Sent Events)流式返回 AI 应答;增量在
+        data 的 {"reply":"..."} 中,[DONE] 表示结束,error 事件表示失败
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: 聊天内容
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/request.ChatRequest'
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/request.ChatResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 流式发送聊天消息
+      tags:
+      - 聊天管理
+  /api/llmProvider/add:
+    post:
+      consumes:
+      - application/json
+      description: 新增一个LLM Provider,ProviderId 重复时返回409
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: LLM Provider 对象
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dataobject.TLlm'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 新增LLM Provider
+      tags:
+      - Agent管理
+  /api/llmProvider/remove:
+    post:
+      consumes:
+      - application/json
+      description: 软删除LLM Provider,记录不存在时返回404
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: ProviderId
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/request.LLMProviderIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 删除LLM Provider
+      tags:
+      - Agent管理
+  /api/llmProvider/update:
+    post:
+      consumes:
+      - application/json
+      description: 更新LLM Provider,需携带 dVersion(乐观锁),版本冲突时返回409
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: LLM Provider 对象(含 dVersion)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dataobject.TLlm'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 更新LLM Provider
+      tags:
+      - Agent管理
+  /api/llmProviders:
+    get:
+      consumes:
+      - application/json
+      description: 获取全部未删除的LLM Provider列表
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 获取LLM Provider列表
+      tags:
+      - Agent管理
+  /api/login:
+    post:
+      consumes:
+      - application/json
+      description: 实现用户登录功能
+      parameters:
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: 登录用户名和密码
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/request.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 用户登入API
+      tags:
+      - 用户登入登出
+  /api/logout:
+    get:
+      consumes:
+      - application/json
+      description: 实现用户登出功能
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 用户登出API
+      tags:
+      - 用户登入登出
+    post:
+      consumes:
+      - application/json
+      description: 实现用户登出功能
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 用户登出API
+      tags:
+      - 用户登入登出
+  /api/skill/add:
+    post:
+      consumes:
+      - application/json
+      description: 新增一个Skill,SkillId 重复时返回409
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: Skill 对象
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dataobject.TSkill'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 新增Skill
+      tags:
+      - Agent管理
+  /api/skill/remove:
+    post:
+      consumes:
+      - application/json
+      description: 软删除Skill,记录不存在时返回404
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: SkillId
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/request.SkillIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 删除Skill
+      tags:
+      - Agent管理
+  /api/skill/update:
+    post:
+      consumes:
+      - application/json
+      description: 更新Skill,需携带 dVersion(乐观锁),版本冲突时返回409
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: Skill 对象(含 dVersion)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dataobject.TSkill'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 更新Skill
+      tags:
+      - Agent管理
+  /api/skills:
+    get:
+      consumes:
+      - application/json
+      description: 获取全部未删除的Skill列表
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: 盐
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求端请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 对请求内容的签名秒数
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 获取Skill列表
+      tags:
+      - Agent管理
+  /heartbeat:
+    get:
+      consumes:
+      - application/json
+      description: 返回健康检测结果，JSON
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 健康检测函数
+      tags:
+      - 健康检测
+securityDefinitions:
+  ApiKeyAuth:
+    in: header
+    name: AUTHORIZATION
+    type: apiKey
+swagger: "2.0"

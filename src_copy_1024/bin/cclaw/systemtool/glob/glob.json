@@ -1,0 +1,26 @@
+{
+  "name": "Glob",
+  "description": "按文件名/路径模式查找文件，只返回文件路径，不读取内容（要搜文件内容请用 Grep 工具）。\n用法：\n- pattern 支持 * ? [abc] ** 与 {a,b} 花括号；** 表示任意层级，'**/*.py' 也能命中根目录下的 a.py。\n- pattern 不含 \"/\" 时按文件名匹配（任意深度都会命中，例如 '*.py'）；含 \"/\" 时按相对路径匹配（例如 'src/*.py' 只匹配 src 下一层）。\n- path 支持绝对路径、~/ 路径与工作区相对路径，可以是目录或单个文件；省略时搜索 agent 工作区。\n- 结果按修改时间倒序（最新的在前），同一时刻按路径升序，输出稳定可复现。\n- case_insensitive 忽略大小写，默认 false（区分大小写）。\n- max_results 为返回条数上限（默认 200），超出会在末尾提示收窄条件。\n- 只列出普通文件：目录、管道、设备、socket 不会出现在结果中。\n- 自动跳过噪声目录（.git、node_modules、__pycache__、.venv 等）与敏感文件名（.env、*.pem、*.key、*.db 等），并在末尾汇总跳过数量。\n- 输出每行一个相对于搜索目录的路径，可直接用于后续 Read 工具。\n【必须】按文件名查找一律使用本工具，禁止用 shell 的 find/ls/tree 等命令代替；无匹配时本工具会明确返回「没有匹配的文件」，禁止凭猜测编造文件路径。",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "pattern": {
+        "type": "string",
+        "description": "要匹配的 glob 模式，例如 '**/*.py'、'src/**/*.ts'、'*.{js,ts}'。不含 \"/\" 时按文件名匹配。"
+      },
+      "path": {
+        "type": "string",
+        "description": "可选。要搜索的目录或单个文件；支持绝对路径、~/ 路径与工作区相对路径。省略时搜索 agent 工作区。"
+      },
+      "case_insensitive": {
+        "type": "boolean",
+        "description": "可选。是否忽略大小写。默认 false（区分大小写）。"
+      },
+      "max_results": {
+        "type": "number",
+        "description": "可选。返回条数上限。默认 200，须 ≥ 1。"
+      }
+    },
+    "required": ["pattern"]
+  }
+}

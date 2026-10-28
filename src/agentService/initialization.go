@@ -9,8 +9,8 @@ import (
 )
 
 var (
-	Version   = "1.0.0"
-	Commit    = "unknown"
+	Version   = "2.0.0"
+	Commit    = "feature 1:添加工具执行时安全的支持"
 	BuildTime = common.GetDatetimeUtilityInstance().GetCurrentDatetime().DateStr
 
 	GoVersion = runtime.Version() //运行时自动获取

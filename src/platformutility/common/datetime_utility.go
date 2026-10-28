@@ -29,6 +29,12 @@ func MilliDiff(t time.Time) int64 {
 	return time.Since(t).Milliseconds()
 }
 
+// MilliDiff2 与当前时间的差值的毫秒数
+func MilliDiff2(oldTime int64) int64 {
+	nowTime := GetDatetimeUtilityInstance().getCurrentDatetime().MilliTimestamp
+	return nowTime - oldTime
+}
+
 // weekdayCN 中文星期名(下标与 time.Weekday 对齐,0=周日)
 var weekdayCN = [...]string{"周日", "周一", "周二", "周三", "周四", "周五", "周六"}
 
@@ -43,6 +49,15 @@ func FormatCurrentTime() string {
 		"(" + weekdayCN[now.Weekday()] + ", " + now.Format("MST") + ")" +
 		"。用户说的\"今天/明天/后天\"一律以此为准;历史消息与工具结果带的是各自的记录时间," +
 		"可能已经过期 —— 引用任何历史数据前,先与当前时间核对。"
+}
+
+// SecondsToDuration 秒(float,可含小数) → time.Duration;<=0 返回 0。
+// 用于把配置中的秒数(如 retry_max_delay=60.0)统一换算为时长。
+func SecondsToDuration(seconds float64) time.Duration {
+	if seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds * float64(time.Second))
 }
 
 type DatetimeUtility struct {
@@ -60,6 +75,10 @@ func GetDatetimeUtilityInstance() *DatetimeUtility {
 func (u *DatetimeUtility) GetCurrentDatetime() *DatetimeItem {
 	datetimeItem := u.getCurrentDatetime()
 	return datetimeItem
+}
+
+func (u *DatetimeUtility) GetNow() time.Time {
+	return time.Now().In(u.timezone)
 }
 
 func (u *DatetimeUtility) Until(s, e int64) time.Duration {

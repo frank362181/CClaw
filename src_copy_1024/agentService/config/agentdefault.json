@@ -1,0 +1,39 @@
+{
+  "agentconfig": {
+    "default": {
+      "model": {
+        "primary": "deepseek-v4-pro",
+        "fallbacks": ["deepseek-v4-flash"]
+      },
+      "workspace": "",
+
+      "compaction":{
+        "mode":"default",
+        "reserveTokensFloor": 40000
+      },
+      "concurrent":{
+        "maxConcurrent":8,
+        "subagents":4
+      },
+
+      "reasoningMode":"stream",
+      "toolProgress":"explain",
+      "skills":[]
+    }
+  },
+
+  "messages": {
+    "ackReactionScope":"group-mentions"
+  },
+
+  "session":{
+    "dmScope":"per-channel-peer"
+  },
+
+  "commands":{
+    "native":"auto",
+    "nativeSkills":"auto",
+    "restart":true,
+    "ownerDisplay":"raw"
+  }
+}

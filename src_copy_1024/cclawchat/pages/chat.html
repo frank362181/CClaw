@@ -1,0 +1,51 @@
+<!--
+    ============================================================
+    聊天页组件视图 (ChatPage)
+    ============================================================
+    本文件是 <chat-page> 组件的视图模板（纯 HTML 片段），
+    由 scripts/modules/component.js 动态加载并注入 Shadow DOM，
+    交互逻辑由 scripts/modules/chat.js 控制。
+    注意：初始不带 active 类，登录组件优先展示，
+    由 Auth.restore() 决定是否切换到聊天页。
+    ============================================================
+-->
+<div id="chatPage" class="chat-page">
+
+    <!-- 主聊天区域（对话历史侧边栏已移除） -->
+    <main class="chat-main">
+        <!-- 顶部栏 -->
+        <header class="chat-header">
+            <div class="chat-title">
+                <span id="chatTitle">新对话</span>
+                <span class="status-dot" title="在线"></span>
+            </div>
+            <div class="chat-actions">
+                <button id="btnNewChat" class="btn-new-chat" title="新建对话">+</button>
+                <button id="btnClearChat" class="btn-header-icon" title="清空对话">🗑</button>
+                <button id="btnHideChat" class="btn-header-icon" title="隐藏聊天窗口">🗕</button>
+            </div>
+        </header>
+
+        <!-- 消息列表 -->
+        <div id="messageList" class="message-list">
+            <!-- 空状态 -->
+            <div class="empty-state" id="emptyState">
+                <div class="empty-icon">💬</div>
+                <h3>开始新的对话</h3>
+                <p>在下方输入消息，AI 助手将为您提供智能回复</p>
+            </div>
+            <!-- 动态消息渲染 -->
+        </div>
+
+        <!-- 输入区域 -->
+        <div class="chat-input-area">
+            <div class="input-wrapper">
+                <textarea id="chatInput" rows="3" placeholder="输入消息…" disabled></textarea>
+            </div>
+            <button id="btnSend" class="btn-send" disabled>
+                <span class="send-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></span>
+            </button>
+        </div>
+    </main>
+
+</div>

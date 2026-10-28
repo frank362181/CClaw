@@ -1,0 +1,34 @@
+{
+  "name": "Grep",
+  "description": "在文件内容中按正则表达式搜索，返回命中的行（文件路径 + 行号 + 原文）。只在文件**内容**里找；按文件名找请用 Glob 工具。\n用法：\n- pattern 支持完整正则（Python re 语法）；非法正则会返回可读错误。\n- path 支持绝对路径、~/ 路径与工作区相对路径，可以是目录或单个文件；省略时搜索 agent 工作区。\n- include 按文件名过滤，支持 '*.py' 与 '*.{ts,tsx}' 写法；含 '/' 时按相对路径匹配。\n- case_insensitive 忽略大小写；files_only 只返回命中文件清单（附每文件命中条数）。\n- max_results 为命中条数上限（默认 200），超出会在末尾提示收窄条件。\n- 单行超过 2000 字符会被截断并就地标注。\n- 自动跳过二进制、非 UTF-8、超过 2MB 的文件，以及敏感文件与噪声目录（.git、node_modules、__pycache__ 等），并在末尾汇总跳过数量。\n- 输出被预算或上限截断时会给出提示，按提示收窄 pattern/include 或提高 max_results 后重试。\n【必须】搜索文件内容一律使用本工具，禁止用 shell 的 grep/rg/ack 等命令代替；无命中时本工具会明确返回 no matches，禁止凭猜测编造匹配结果。",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "pattern": {
+        "type": "string",
+        "description": "要搜索的正则表达式（Python re 语法），例如 'func\\s+\\w+\\('。"
+      },
+      "path": {
+        "type": "string",
+        "description": "Optional. 要搜索的目录或单个文件；支持绝对路径、~/ 路径与工作区相对路径。省略时搜索 agent 工作区。"
+      },
+      "include": {
+        "type": "string",
+        "description": "Optional. 仅搜索匹配该 glob 的文件，例如 '*.py' 或 '*.{ts,tsx}'；含 '/' 时按相对路径匹配。"
+      },
+      "case_insensitive": {
+        "type": "boolean",
+        "description": "Optional. 是否忽略大小写。默认 false。"
+      },
+      "files_only": {
+        "type": "boolean",
+        "description": "Optional. 只返回命中的文件清单（附命中条数），不返回具体行。默认 false。"
+      },
+      "max_results": {
+        "type": "number",
+        "description": "Optional. 命中条数上限。默认 200。"
+      }
+    },
+    "required": ["pattern"]
+  }
+}

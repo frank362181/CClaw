@@ -22,6 +22,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	cCommon "my.favorite/cclawservice/common"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
@@ -248,7 +249,7 @@ func parseDistilledFacts(text string) []string {
 
 	facts := make([]string, 0, len(items))
 	for _, item := range items {
-		facts = append(facts, pCommon.TruncateRunes(item, hCommon.DistillMaxFactRunes, TruncatedMarker))
+		facts = append(facts, pCommon.TruncateRunes(item, hCommon.DistillMaxFactRunes, cCommon.TruncatedMarker))
 		if len(facts) >= hCommon.DistillMaxMemoryFacts {
 			break
 		}

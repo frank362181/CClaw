@@ -1,0 +1,44 @@
+/*
+*	middleware 内部使用的各种通用结构体
+ */
+
+package basic
+
+import (
+	"net/url"
+)
+
+type RequestInfo struct {
+	RequestId     string
+	RemoteAddr    string
+	RemoteIp      string
+	RequestURL    string
+	RequestMethod string
+
+	RelativeURL string
+	RequestPath string
+	QueryString string
+	QueryParams url.Values
+
+	ReqAtdTimestamp int64 //请求达到的时间
+
+	Nonce string
+
+	//querystring中timestamp的时间戳,请求端放入的,必须是unsigned long(1970-1-1 00:00:00以来的秒数)
+	QueryTimestamp int64
+
+	Signature string
+}
+
+type CommonResponse struct {
+	ReqID         string `json:"reqId"`
+	ReqPath       string `json:"reqPath"`
+	ReqMethod     string `json:"reqMethod"` //用户请求的方法
+	ReqTimestamp  int64  `json:"reqTimestamp"`
+	RespTimestamp int64  `json:"respTimestamp"`
+
+	RespCode int    `json:"respCode"` //响应码,业务层级
+	RespMsg  string `json:"respMsg"`  //响应的消息
+
+	Data interface{} `json:"data"` //具体的相应内容
+}

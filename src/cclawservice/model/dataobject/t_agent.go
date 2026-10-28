@@ -25,6 +25,7 @@ type TLlm struct {
 	Api     string `json:"api"`     //供应商的API协议类型
 
 	ThkNonStreaming bool `json:"thinkingNonStreaming"` //非流模式下是否支持思考,false/true=否/是
+	ThinkingLocked  bool `json:"thinkingLocked"`       // 思考模式不可关闭:true时禁止下发tool_choice
 
 	Reasoning   bool `json:"reasoning"`   //是否支持推理
 	ReasoningEx bool `json:"reasoningEx"` //是否支持推理力度参数
@@ -59,6 +60,7 @@ func LlmValues(p *TLlm) map[string]interface{} {
 		"vendor":             p.Vendor,
 		"api":                p.Api,
 		"thk_non_streaming":  p.ThkNonStreaming,
+		"thinking_locked":    p.ThinkingLocked,
 		"reasoning":          p.Reasoning,
 		"reasoning_ex":       p.ReasoningEx,
 		"input":              p.Input,

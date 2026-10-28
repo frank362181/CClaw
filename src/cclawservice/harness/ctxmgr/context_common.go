@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	hCommon "my.favorite/cclawservice/harness/common"
-	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 )
 
@@ -169,9 +168,6 @@ func CompactionModeName(mode int) string {
 	}
 }
 
-// TruncatedMarker 截断标记:工具/历史的截断处显式标出省略号。
-const TruncatedMarker = "…"
-
 // 压缩模式 safeguard(保全模式,mode=1)**专属**参数
 const (
 	SafeguardBlockRecords    = 20  // 分块大小(每块单独摘要后拼接)
@@ -205,8 +201,6 @@ type ClassificationAgent struct {
 	AgentName string
 	Label     string
 }
-
-type ClassifyAgent func(ctx context.Context, llm dataobject.TLlm, system, user string, maxTokens int) (string, string, error)
 
 // TurnContext 表示每轮注入的 **动态上下文** (放在历史之后、本轮用户消息之前)
 // 后置的原因:前缀缓存按最长公共前缀命中 -- system 里只要有一个字符变化即缓存作废

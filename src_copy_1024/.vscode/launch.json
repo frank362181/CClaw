@@ -1,0 +1,44 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug AgentService",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/agentService",
+            "cwd": "${workspaceFolder}",
+            "env": {},
+            "args": []
+        },
+        {
+            "name": "Debug AgentOs",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/agentos",
+            "cwd": "${workspaceFolder}",
+            "env": {},
+            "args": []
+        },
+        {
+            "name": "Debug tui",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/tui",
+            "cwd": "${workspaceFolder}",
+            "env": {},
+            "args": []
+        },
+        {
+            "name": "CClaw Chat",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:5500/cclawchat/index.html",
+            "webRoot":"${workspaceFolder}/cclawchat",
+            "userDataDir":"${workspaceFolder}/.vscode/cclawchat/chrome",
+            "preLaunchTask": "cclawchat: start web server (5500)"
+        }
+    ]
+}

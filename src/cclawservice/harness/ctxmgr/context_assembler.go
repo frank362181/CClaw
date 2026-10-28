@@ -26,7 +26,8 @@ import (
 	"strings"
 	"sync"
 
-	"my.favorite/cclawservice/harness/api/llmproto"
+	cCommon "my.favorite/cclawservice/common"
+	"my.favorite/cclawservice/common/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/model/dataobject"
@@ -179,13 +180,11 @@ func getSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope,
 	return sp, nil
 }
 
-// =========================== 以下是构建prompt 和 LLM API Request请求部分===========================
-
 // =========================== block for building prompt =================================
 
-// BuildClassifySystemPrompt 构建用来通过用户问题的意图询问LLM返回合适Agent的 prompt
+// BuildClassifyAgentPrompt 构建用来通过用户问题的意图询问LLM返回合适Agent的 prompt
 // 简介优先使用各 Agent 工作区 AGENTS.md 的摘要(已由调用方解析进 ClassifyAgent.Label)
-func BuildClassifySystemPrompt(agents []ClassificationAgent) string {
+func BuildClassifyAgentPrompt(agents []ClassificationAgent) string {
 	var sb strings.Builder
 	sb.WriteString("你是一个智能体路由器。请根据用户的问题,从下面的智能体列表中选择最合适的一个。\n")
 	sb.WriteString("智能体列表(格式: 编号|名称|简介):\n")
@@ -337,8 +336,8 @@ func BuildChatCompletionRequestWithToolChoice(llmProvider dataobject.TLlm, messa
 	return req
 }
 
-// BuildDistillUserPrompt 拼装蒸馏输入:「已有长期记忆」(可空) + 本次新增对话。
-func BuildDistillUserPrompt(existingMemory []string, batch []MemoryRecord, newLines []string) string {
+// buildDistillUserPrompt 拼装蒸馏输入:「已有长期记忆」(可空) + 本次新增对话。
+func buildDistillUserPrompt(existingMemory []string, batch []MemoryRecord, newLines []string) string {
 	if len(batch) == 0 {
 		return pCommon.BlankString
 	}
@@ -376,33 +375,6 @@ func BuildDistillAppendUserPrompt(batch []MemoryRecord, newLines []string) strin
 
 	_, _ = fmt.Fprintf(&sb, "\n"+DistillAppendNotice, hCommon.DistillNoneMark)
 	return sb.String()
-}
-
-// DegradeChatRequest 错误信息中包含的信息对chat request降级
-func DegradeChatRequest(req *llmproto.ChatCompletionRequest, err error) bool {
-	if req == nil || err == nil {
-		return false
-	}
-
-	if req.ToolChoice == pCommon.BlankString && req.EnableThinking == nil && req.StreamOptions == nil {
-		return false
-	}
-
-	msg := strings.ToLower(err.Error())
-	if !strings.Contains(msg, "tool_choice") && !strings.Contains(msg, "enable_thinking") &&
-		!strings.Contains(msg, "stream_options") && !strings.Contains(msg, "include_usage") {
-		return false
-	}
-
-	logging.LogWarnF("llm client: provider rejected tool forced-call params (clear tool_choice=%s/enable_thinking), retry: %s",
-		req.ToolChoice, err.Error())
-
-	//对强制工具调用进行降级
-	req.ToolChoice = pCommon.BlankString
-	req.EnableThinking = nil
-	req.StreamOptions = nil //代价:LLM供应商流式拿不到usage,将退化为"不可观测",而非报错
-
-	return true
 }
 
 // AssembleContext 装配完整上下文。
@@ -1173,7 +1145,7 @@ func renderToolBlock(tools []MemoryRecord, maxRunes int) string {
 		if name == "" {
 			name = "tool"
 		}
-		body := pCommon.TruncateRunes(strings.TrimSpace(t.Content), maxRunes, TruncatedMarker)
+		body := pCommon.TruncateRunes(strings.TrimSpace(t.Content), maxRunes, cCommon.TruncatedMarker)
 		if timeText := strings.TrimSpace(t.TimeText); timeText != "" {
 			_, _ = fmt.Fprintf(&sb, "\n- [%s] %s: %s", timeText, name, body)
 		} else {

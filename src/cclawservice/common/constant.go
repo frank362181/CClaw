@@ -26,10 +26,7 @@ const (
 
 	// DefaultReloadDatabaseCacheTTLSeconds 配置缓存 TTL(多实例部署时,各实例从 DB 刷新 LLM provider/agent/skill 配置的过期时间)
 	DefaultReloadDatabaseCacheTTLSeconds = 30 // 默认 30 秒;<=0 表示禁用 TTL 刷新(仅启动时加载一次)
-)
 
-// ==================== agent 根据内容意图识别确定agent ====================
-const (
 	// DefaultMaxChatConcurrency 全局聊天并发闸默认上限:每实例同时在聊天请求数(同步+流式)。
 	DefaultMaxChatConcurrency = 1000
 
@@ -78,6 +75,10 @@ const (
 	ChatTypeGroup   = 1 //群聊
 )
 
+const (
+	TruncatedMarker = "…"
+)
+
 // ==================== channel type ====================
 const (
 	ChatChannelWeb      = 1 //WEB端
@@ -105,9 +106,8 @@ const (
 
 	// ChatNoticeError 需显式提醒用户的错误(欠费/密钥无效/未开通/内容合规/超时等):以独立
 	// 告警提示下发,不覆盖已输出内容,也不降级为"可能不完整";文案取自错误的 Kind.Msg。
-	ChatNoticeError = "chat_error"
-
-	ChatNoticeContextOverflow = "context_overflow" // 超过上游大模型的窗口上限
+	ChatNoticeError           = "chat_error"
+	ChatNoticeThinkingTimeout = "thinking_timeout"
 
 	// ChatNoticeToolLoopGuard 工具死循环守卫首次命中(模型在重复调用工具,已提醒它换策略)。
 	// 再次命中会以 chat.tool_loop_guard 错误收尾,不再重复下发本提示。
@@ -131,6 +131,5 @@ const (
 	// ConstChatNoticeToolLoopGuardWarnMsg 工具死循环守卫命中提示(按判定级别取话术,见 security.LoopGuardLevel)
 	ConstChatNoticeToolLoopGuardWarnMsg = "模型在重复调用工具,已提醒它换一种方式"
 	ConstChatNoticeToolLoopGuardStopMsg = "检测到重复调用工具,已要求模型停止重试"
-
-	ConstChatNoticeOverflowMsg = "当前会话上下文已达模型上限且无法再压缩，请新建会话继续"
+	ConstChatNoticeThinkingTimeoutMsg   = "模型思考时间过长,已终止本轮;可换个更具体的问法或稍后重试"
 )

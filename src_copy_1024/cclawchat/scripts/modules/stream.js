@@ -1,0 +1,176 @@
+import { API } from './api.js';
+import { State } from './state.js';
+import { ChatPage } from './chat.js';
+import { genId } from '../utils/helper.js';
+
+// 中断兜底超时：通知后端中断后，若后端未及时关闭流，超时后本地中止以保证“立即停止”。
+const INTERRUPT_FALLBACK_MS = 3000;
+
+export const StreamEngine = {
+    _activeRequest: null,
+
+    start(convId, userContent, onComplete, onError) {
+        this.cancel();
+        // turnId 即"本轮"标识:由前端生成,随聊天请求下发(后端用于落库 t_turn.turn_id 与应答回显),
+        // 中断时再回传给后端(后端以 <登录名>:<turnId> 定位本轮进行中的流)。
+        const turnId = genId();
+        const msgId = genId();
+        const request = { turnId, convId, msgId, controller: null, content: '', statusText: '', reasoning: '', interruptFallback: null };
+        this._activeRequest = request;
+        State.isStreaming = true;
+        ChatPage.updateSendButton(); // 流式中:发送按钮变为中断按钮
+        State.addMessage(convId, 'assistant', '', msgId);
+        ChatPage.appendStreamingMessage(convId, msgId);
+
+        const isCurrent = () => this._activeRequest?.turnId === turnId;
+        const finish = () => {
+            if (!isCurrent()) return false;
+            this._activeRequest = null;
+            State.isStreaming = false;
+            if (request.interruptFallback) {
+                clearTimeout(request.interruptFallback);
+                request.interruptFallback = null;
+            }
+            ChatPage.setInputEnabled(true);
+            ChatPage.updateSendButton();
+            return true;
+        };
+
+        request.controller = API.sendMessageStream(
+            convId,
+            turnId,
+            userContent,
+            State.user?.token,
+            content => {
+                if (!isCurrent()) return;
+                request.content = content;
+                State.updateMessageContent(convId, msgId, content, { persist: false });
+                ChatPage.updateStreamingMessage(msgId, content, false);
+            },
+            content => {
+                if (!isCurrent()) return;
+                request.content = content || request.content;
+                try {
+                    State.updateMessageStatus(convId, msgId, '');
+                    State.updateMessageContent(convId, msgId, request.content);
+                    ChatPage.updateStreamingMessage(msgId, request.content, true);
+                } finally {
+                    // 无论 UI 更新是否抛错,都必须复位流式状态与发送按钮
+                    if (finish()) onComplete?.(request.content);
+                }
+            },
+            error => {
+                if (!isCurrent()) return;
+                try {
+                    // 内容已送达过:保留已输出内容,不再用错误提示整体覆盖(内容对用户仍有价值)
+                    if (request.content) {
+                        State.updateMessageStatus(convId, msgId, '');
+                        State.updateMessageContent(convId, msgId, request.content);
+                        ChatPage.updateStreamingMessage(msgId, request.content, true);
+                    } else {
+                        // notify=true 的错误(欠费/密钥/内容合规等)用醒目标注,与普通故障区分
+                        const icon = error?.notify ? '⛔' : '⚠️';
+                        const message = `${icon} ${error?.message || '网络错误，请稍后重试'}`;
+                        State.updateMessageStatus(convId, msgId, '');
+                        State.updateMessageContent(convId, msgId, message);
+                        ChatPage.updateStreamingMessage(msgId, message, true);
+                    }
+                } finally {
+                    // 无论 UI 更新是否抛错,都必须复位流式状态与发送按钮
+                    if (finish()) {
+                        if (request.content) onComplete?.(request.content);
+                        else onError?.(error);
+                    }
+                }
+            },
+            status => {
+                // 内容开始前,展示 Agent 当前阶段(拆解任务/思考/推理等)
+                if (!isCurrent()) return;
+                request.statusText = status?.text || '';
+                State.updateMessageStatus(convId, msgId, request.statusText);
+                ChatPage.updateStreamingStatus(msgId, status?.text);
+            },
+            delta => {
+                // 思考过程(reasoning_content)增量:实时展示思考过程(不写入 content)
+                if (!isCurrent()) return;
+                request.reasoning = (request.reasoning || '') + delta;
+                State.updateMessageReasoning(convId, msgId, request.reasoning);
+                ChatPage.updateStreamingReasoning(msgId, request.reasoning);
+            },
+            tool => {
+                // 工具调用进度(intent/running/done/error):实时渲染工具卡片 + 记录到消息
+                if (!isCurrent()) return;
+                State.updateMessageTool(convId, msgId, tool);
+                ChatPage.updateStreamingTool(msgId, tool);
+            },
+            notice => {
+                // 收尾提示(truncated/content_filter/incomplete):独立展示,不覆盖回答内容
+                if (!isCurrent()) return;
+                State.updateMessageNotice(convId, msgId, notice);
+                ChatPage.updateStreamingNotice(msgId, notice);
+            },
+        );
+        return { msgId, cancel: () => this.cancel(turnId) };
+    },
+
+    /**
+     * 用户点击中断按钮：停止当前会话的流式聊天（思考/推理/流式输出）。
+     * - 立即标记消息“已中断”并给出反馈（保留已输出内容）；
+     * - 通知后端中断 API，后端取消该会话的 LLM 流式上下文并关闭 SSE（主机制）；
+     * - 后端未及时关闭流或接口失败时，由本地中止兜底，保证“立即停止”。
+     * @param {string} convId 会话标识
+     * @returns {Promise<boolean>} 是否存在可中断的流
+     */
+    async interrupt(convId) {
+        const request = this._activeRequest;
+        if (!request || request.convId !== convId) return false;
+        const turnId = request.turnId;
+
+        // 先标记“已中断”（无论后端经流关闭还是本地中止收尾，用户都能看到反馈）
+        State.markMessageInterrupted(request.convId, request.msgId);
+        State.updateMessageStatus(request.convId, request.msgId, '');
+        ChatPage.markStreamingInterrupted(request.msgId);
+
+        // 兜底：后端未及时关闭流时本地中止
+        request.interruptFallback = setTimeout(() => {
+            if (this.isActive() && this._activeRequest?.turnId === turnId) {
+                this.cancel(turnId, { interrupted: true });
+            }
+        }, INTERRUPT_FALLBACK_MS);
+
+        // 通知后端停止本轮流式聊天（主机制）
+        try {
+            await API.interruptChat(turnId, State.user?.token);
+        } catch (_) {
+            // 后端不可达/该轮次未在聊天：由本地中止兜底
+            this.cancel(turnId, { interrupted: true });
+        }
+        return true;
+    },
+
+    cancel(turnId, opts = {}) {
+        const request = this._activeRequest;
+        if (!request || (turnId && request.turnId !== turnId)) return false;
+        this._activeRequest = null;
+        State.isStreaming = false;
+        if (request.interruptFallback) {
+            clearTimeout(request.interruptFallback);
+            request.interruptFallback = null;
+        }
+        request.controller?.abort();
+        State.updateMessageStatus(request.convId, request.msgId, '');
+        State.updateMessageContent(request.convId, request.msgId, request.content);
+        ChatPage.updateStreamingMessage(request.msgId, request.content, true);
+        if (opts.interrupted) {
+            State.markMessageInterrupted(request.convId, request.msgId);
+            ChatPage.markStreamingInterrupted(request.msgId);
+        }
+        ChatPage.setInputEnabled(true);
+        ChatPage.updateSendButton();
+        return true;
+    },
+
+    isActive() {
+        return Boolean(this._activeRequest);
+    },
+};

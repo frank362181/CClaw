@@ -10,12 +10,27 @@ import (
 	"os/exec"
 	"strings"
 
+	"my.favorite/cclawservice/common/llmproto"
 	"my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/harness/tool"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
 )
+
+type ToolExecutor struct{}
+
+func NewToolExecutor() llmproto.IToolScriptRunner {
+	return &ToolExecutor{}
+}
+
+func (e *ToolExecutor) Run(ctx context.Context, arg llmproto.ToolScriptArg) (string, error) {
+	if arg.OnLine == nil {
+		return RunScript(ctx, arg.Path, arg.Args, arg.WorkRoot)
+	}
+
+	return RunScriptStream(ctx, arg.Path, arg.Args, arg.WorkRoot, arg.OnLine)
+}
 
 type Executor struct {
 	pipeline *security.PermissionPipeline

@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
+	"my.favorite/cclawservice/chat"
 	selfController "my.favorite/cclawservice/controller"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
@@ -22,8 +23,8 @@ import (
 	selfInterceptor "my.favorite/cclawservice/interceptor"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/cclawservice/service"
-	serviceCore "my.favorite/cclawservice/service/core"
 	pCommon "my.favorite/platformutility/common"
+	"my.favorite/platformutility/concurrency"
 	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/database"
 	"my.favorite/platformutility/database/core"
@@ -59,8 +60,7 @@ type ServiceMain struct {
 	agentDocCache            *ctxmgr.AgentDocumentCache
 
 	// 并发闸:流式(SSE)在飞连接数、全局聊天在飞请求数(各自上限在 Init 按 ini 配置)
-	streamGate *serviceCore.ConcurrencyGate
-	chatGate   *serviceCore.ConcurrencyGate
+	concurrent concurrency.IConcurrencyController
 }
 
 // NewMainApp 相当于构造函数
@@ -100,10 +100,9 @@ func (m *ServiceMain) Init() error {
 	}
 
 	// 并发闸上限(ini [server],<=0 用默认):全局并发限制 + 流式并发限制
-	maxStreams, _ := m.configHelper.GetIntValueDefault("server", "maxStreamConcurrency", cCommon.DefaultMaxStreamConcurrency)
-	maxChats, _ := m.configHelper.GetIntValueDefault("server", "maxChatConcurrency", cCommon.DefaultMaxChatConcurrency)
-	m.streamGate = serviceCore.GetStreamConcurrencyGate(maxStreams)
-	m.chatGate = serviceCore.GetChatConcurrencyGate(maxChats)
+	//maxStreams, _ := m.configHelper.GetIntValueDefault("server", "maxStreamConcurrency", cCommon.DefaultMaxStreamConcurrency)
+	maxConcurrency, _ := m.configHelper.GetIntValueDefault("server", "maxChatConcurrency", cCommon.DefaultMaxChatConcurrency)
+	m.concurrent = concurrency.GetConcurrentController(maxConcurrency) //serviceCore.GetStreamConcurrencyGate(maxStreams)
 
 	// 3. initialize the app
 	m.memoryDB = memory_db.CreateMemoryDb(m.configHelper)
@@ -242,8 +241,8 @@ func (m *ServiceMain) SetupChatController() error {
 	// 会话记录开关来自 ini [chat] sessionRecord(阶段1双写:只写不读的旁路,默认开启)
 	sessionRecord, _ := m.configHelper.GetBoolValueDefault("chat", "sessionRecord", true)
 
-	chatService := service.GetChatService(m.database, functionCalling, sessionRecord)
-	chatController := selfController.GetChatController(chatService, m.streamGate, m.chatGate)
+	chatService := service.GetChattingService(m.database, m.agentRepo, functionCalling, sessionRecord)
+	chatController := selfController.GetChatController(chatService, m.concurrent)
 
 	urlFunMap := make(map[string]gin.HandlerFunc)
 	urlFunMap[cCommon.RelativeChatUrl] = chatController.Chat
@@ -316,7 +315,9 @@ func (m *ServiceMain) Destroy() {
 		_ = m.memoryDB.CloseMemoryDb()
 	}
 
-	serviceCore.GetAgentGateRegistry().Destroy() //释放agent gate
+	chat.GetTransportPool().Close() // 彻底关闭所有链接
+
+	concurrency.GetConcurrentAdvance().Destroy() //释放agent gate
 	tool.GetToolsSearch().Destroy()              //释放工具仓库
 
 	if m.defaultAgentConfigHelper != nil {

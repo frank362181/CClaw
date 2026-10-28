@@ -16,7 +16,7 @@ import (
 	"regexp"
 	"strings"
 
-	"my.favorite/cclawservice/harness/api/llmproto"
+	"my.favorite/cclawservice/common/llmproto"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
@@ -29,6 +29,10 @@ func NormalizeOwner(ownerId *string) {
 }
 
 func ValidateLLMProvider(p dataobject.TLlm) error {
+	if p.ThinkingLocked && !p.Reasoning {
+		return pException.ParameterEmptyErrorEx2("provider %s : thinking_locked requires reasoning=true", p.ProviderId)
+	}
+
 	if strings.TrimSpace(p.ProviderId) == "" {
 		return pException.ParameterEmptyErrorEx("provider id is empty")
 	}

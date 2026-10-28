@@ -730,11 +730,28 @@ func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRe
 	fileName := strings.TrimSpace(sess.ChatData)
 	writer := GetMemoryFileWriter()
 
+	// 本轮是否值得写入历史文件。**必须先判定再写 user 记录**。
+	//
+	// 为什么不能"只跳过 assistant 记录":
+	//
+	//	曾经的做法是"中断且无产出 → 不写 assistant 记录,但 user 照写",结果历史里
+	//	留下连续的 user,user。实测(100 题 E2E)直接导致两个可复现的错答:
+	//	  · 上一题上游 400 后被跳过 assistant,下一题的回复把上一题答案也一并写出来
+	//	    (模型看到连续两个 user,会主动"补写"上一轮的答复);
+	//	  · 更糟的是整段回复变成上一题的答案,当前问题被吞掉。
+	//	对话协议要求 user/assistant 严格交替,缺失一侧比"没有这轮"更危险。
+	//
+	// 取舍:中断且零产出的一轮**整轮不入历史**(可审计信息仍在 t_turn:
+	// status=TurnStatusInterruptedEmpty + interrupt_reason),拒绝与用户重问
+	// 时形成脏上下文。
+	writeHistory := fileName != "" &&
+		(!outcome.Interrupted || strings.TrimSpace(reply) != pCommon.BlankString)
+
 	// 5. 历史文件:按真实发生顺序写入 问题 → 工具 → 回复。
 	//    每条都带上期望序号(从 DB 推出的 nextIndex 起递增),
 	//    写入器会取"DB 序号与本进程缓存"的最大值,保证序号只增不减(见写入器的序号契约)。
 	chatIndex := 0
-	if fileName != "" {
+	if writeHistory {
 		if idx, err := writer.Append(sess.Sender, sessionId, fileName, HistoryRecordTypeUser, "", req.ReqMsg, pCommon.TimestampText(chatTime), nextIndex); err == nil {
 			chatIndex = idx
 		} else {
@@ -759,7 +776,7 @@ func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRe
 			ToolResp:   pCommon.TruncateRunes(strings.TrimSpace(result), TurnToolRespToDBMaxlength, pCommon.BlankString), //写入数据库时截断，仅仅写前256 runes
 			RespTime:   tool.RespTime,
 		})
-		if fileName != "" {
+		if writeHistory {
 			if _, err := writer.Append(sess.Sender, sessionId, fileName, HistoryRecordTypeTool, tool.ToolName, result, pCommon.TimestampText(tool.CallTime), nextIndex+1+i); err != nil {
 				logging.LogWarnF("memory service: append tool record error:%s", err.Error())
 			}
@@ -772,8 +789,9 @@ func (s *MemoryService) appendTurn(sess dataobject.TSession, req *request.ChatRe
 	if outcome.Interrupted {
 		assistantTitle = HistoryRecordTypeInterrupted
 	}
-	// 中断且没有任何产出时不写助手记录:空记录无信息量,徒增噪声(resp_index 保持 0)
-	if fileName != "" && (!outcome.Interrupted || strings.TrimSpace(reply) != pCommon.BlankString) {
+	// 中断且没有任何产出时整轮不入历史(见 writeHistory 的说明):
+	// 只跳 assistant 会留下 user,user 的断裂序列,比缺这一整轮危险得多。
+	if writeHistory {
 		if idx, err := writer.Append(sess.Sender, sessionId, fileName, HistoryRecordTypeAssistant, assistantTitle, reply, pCommon.TimestampText(now.Timestamp), nextIndex+1+len(tools)); err == nil {
 			respIndex = idx
 		} else {
@@ -905,7 +923,7 @@ func (s *MemoryService) compactWithBudget(ctx context.Context, session dataobjec
 	// 先按**落盘上限**截断,再做保全校验。
 	// 必须这个顺序:校验的应当是真正写进去的那段文本 —— 否则会出现
 	// "校验通过、截断后关键信息丢了"的假通过(保全校验就失去意义)。
-	summaryText = pCommon.TruncateRunes(strings.TrimSpace(summaryText), summaryCap, TruncatedMarker)
+	summaryText = pCommon.TruncateRunes(strings.TrimSpace(summaryText), summaryCap, cCommon.TruncatedMarker)
 	if summaryText == pCommon.BlankString {
 		GetCompactionThrottle().RecordFailure(session.SessionId, now) // 调用已发生,同样计入冷却
 		return result, nil
@@ -1062,7 +1080,7 @@ func (s *MemoryService) distillWithBudget(ctx context.Context, session dataobjec
 
 	prompt := BuildDistillAppendUserPrompt(batch, newLines)
 	if mode == DistillModeMerge {
-		prompt = BuildDistillUserPrompt(oldFacts, batch, newLines) // 带已有记忆,要求完整列表
+		prompt = buildDistillUserPrompt(oldFacts, batch, newLines) // 带已有记忆,要求完整列表
 	}
 
 	text, err := summarize(ctx, DistillSystemPrompt, prompt)
@@ -1151,7 +1169,7 @@ func (s *MemoryService) mergeAttempt(ctx context.Context, session dataobject.TSe
 		return result, mergeNoGain, err
 	}
 
-	text = pCommon.TruncateRunes(strings.TrimSpace(text), summaryCap, TruncatedMarker)
+	text = pCommon.TruncateRunes(strings.TrimSpace(text), summaryCap, cCommon.TruncatedMarker)
 	if text == pCommon.BlankString {
 		logging.LogWarnF("chat memory merge: session=%s summarizer returned empty text (merged=%d)", session.SessionId, len(set))
 		return result, mergeEmptyOutput, nil

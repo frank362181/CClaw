@@ -19,6 +19,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	cCommon "my.favorite/cclawservice/common"
 	hCommon "my.favorite/cclawservice/harness/common"
 	pCommon "my.favorite/platformutility/common"
 )
@@ -40,7 +41,7 @@ func buildMergeUserPrompt(set []MemoryRecord, from, to int) string {
 	_, _ = fmt.Fprintf(&sb, CompactionMergeUserHeader, from, to)
 	for i := range set {
 		_, _ = fmt.Fprintf(&sb, "[%d] (covers %d-%d): %s\n", set[i].Index, set[i].CoversFrom, set[i].CoversTo,
-			pCommon.TruncateRunes(strings.TrimSpace(set[i].Content), MemoryExcerptRunes, TruncatedMarker))
+			pCommon.TruncateRunes(strings.TrimSpace(set[i].Content), MemoryExcerptRunes, cCommon.TruncatedMarker))
 	}
 	return sb.String()
 }
@@ -307,7 +308,7 @@ func summarizeInBlocks(ctx context.Context, targets []MemoryRecord, summarize Su
 
 // compactionPromptLine 渲染一条记录送入摘要模型的文本(逐条限长)。
 func compactionPromptLine(rec MemoryRecord) string {
-	body := pCommon.TruncateRunes(strings.TrimSpace(rec.Content), MemoryExcerptRunes, TruncatedMarker)
+	body := pCommon.TruncateRunes(strings.TrimSpace(rec.Content), MemoryExcerptRunes, cCommon.TruncatedMarker)
 	return fmt.Sprintf("[%d] %s: %s\n", rec.Index, recordLabel(rec), body)
 }
 
@@ -323,7 +324,7 @@ func promptLineRunes(rec MemoryRecord) int {
 	body := utf8.RuneCountInString(strings.TrimSpace(rec.Content))
 	if body > MemoryExcerptRunes {
 		// 截断后的正文 = 上限 + 截断标记(与 pCommon.TruncateRunes 的行为一致)
-		body = MemoryExcerptRunes - 1 + utf8.RuneCountInString(TruncatedMarker)
+		body = MemoryExcerptRunes - 1 + utf8.RuneCountInString(cCommon.TruncatedMarker)
 	}
 
 	return len("[") + len(strconv.Itoa(rec.Index)) + len("] ") +
@@ -368,7 +369,7 @@ func recordLabel(rec MemoryRecord) string {
 // 再截断一次只是幂等兜底(保证"校验过的文本"与"落盘的文本"永远一致);
 // 调大 MaxSummaryRunes 不会放大实际摘要 —— 实际上限看 effectiveSummaryCap。
 func buildSummaryRecordContent(from, to int, summary string) string {
-	return fmt.Sprintf("covers: %d-%d\n\n%s", from, to, pCommon.TruncateRunes(summary, hCommon.MaxSummaryRunes, TruncatedMarker))
+	return fmt.Sprintf("covers: %d-%d\n\n%s", from, to, pCommon.TruncateRunes(summary, hCommon.MaxSummaryRunes, cCommon.TruncatedMarker))
 }
 
 // 【safeguard 专属】keyRetentionRatio 计算"关键信息保有率":源记录中出现的关键标记(path/编号/文件名)

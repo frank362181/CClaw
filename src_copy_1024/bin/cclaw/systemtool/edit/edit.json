@@ -1,0 +1,26 @@
+{
+  "name": "Edit",
+  "description": "在已有文件中按字面原文做精确替换（不是正则，不解释任何元字符）。修改局部内容一律用本工具，禁止用 shell 的 sed/awk/perl 代替。\n用法：\n- file_path 支持绝对路径、~/ 路径与工作区相对路径；目标必须是已存在的普通文件。\n- old_string 必须与文件内容**逐字符一致**（含缩进、空格、引号）；建议先用 Read 读取目标区域再复制，不要凭记忆编写。\n- old_string 在文件中必须唯一；若出现多次会报错并列出现有行号，此时请补充上下文使其唯一，或设 replace_all=true 全部替换。\n- old_string 不能为空；新建文件或整体覆盖请用 Write 工具；new_string 传空字符串表示删除该段。\n- old_string 与 new_string 不能相同。\n- 自动兼容换行符：Read 输出的是 LF 文本，本工具按 LF 匹配后会把文件还原成原本的 CRLF/LF 风格，并保留 UTF-8 BOM。\n- 拒绝敏感文件（.env、*.pem、*.key、*.db 等）、二进制/非 UTF-8 文件，单文件上限 2MB。\n- 写入是原子的（临时文件 + 原子替换），失败不会把原文件截断；新内容过大（>48KB）会报错，请拆成多次编辑。\n【必须】无匹配时本工具会明确报错，禁止反复猜测原文后重试，应先用 Read 核实。",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "file_path": {
+        "type": "string",
+        "description": "要编辑的文件路径。支持绝对路径、~/ 路径与工作区相对路径；必须是已存在的普通文件。"
+      },
+      "old_string": {
+        "type": "string",
+        "description": "要被替换的原文，必须与文件内容逐字符一致（含缩进与空格），且不能为空。"
+      },
+      "new_string": {
+        "type": "string",
+        "description": "替换后的文本；传空字符串表示删除 old_string 这段内容。"
+      },
+      "replace_all": {
+        "type": "boolean",
+        "description": "可选。为 true 时替换全部出现位置，否则要求 old_string 在文件中唯一。默认 false。"
+      }
+    },
+    "required": ["file_path", "old_string", "new_string"]
+  }
+}
