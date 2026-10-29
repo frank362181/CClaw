@@ -13,7 +13,6 @@ import (
 	"my.favorite/cclawservice/common/llmproto"
 	"my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/harness/security"
-	"my.favorite/cclawservice/harness/tool"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
 )
@@ -135,7 +134,7 @@ func (e *Executor) enabledSandbox(req *security.ToolCallRequest, d *security.Dec
 
 func (e *Executor) executeSandboxed(ctx context.Context, req *security.ToolCallRequest, baseTool security.IBaseTool) (any, error) {
 	// 如果实现了ToolBuilder接口
-	cb, ok := baseTool.(tool.ISandboxedBuilder)
+	cb, ok := baseTool.(ISandboxedBuilder)
 	if !ok {
 		//fail-closed,此时须沙箱化
 		return nil, exception.SandboxExecutorErrEx2("tool %s requires sandbox but not implement IToolBuilder", req.ToolName)

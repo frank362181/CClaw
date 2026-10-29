@@ -1,4 +1,9 @@
-package chat
+// functionCallingHeartbeat 工具调用期间的心跳
+// 作用:工具脚本长时间无新输出时向UI推一行 progress,让UI能区分
+//
+//	"仍在运行" 与 "已经挂起" 的区别
+
+package toolexecutor
 
 import (
 	"context"
@@ -12,17 +17,13 @@ import (
 	pCommon "my.favorite/platformutility/common"
 )
 
-// 工具调用期间的心跳
-// 作用:工具脚本长时间无新输出时向UI推一行 progress,让UI能区分
-//
-//	仍在运行与已经挂起的泣别
 type functionCallingHeartbeat struct {
 	out     chan<- ToolEvent
 	seq     int
 	name    string
 	startAt int64 //工具开始执行的时间(Unix 秒),用于计算运行了 N 秒
 
-	lastOut atomic.Int64 //最后一次由新输出的时刻(UnixNano)
+	lastOut atomic.Int64 //最后一次有新输出的时刻(UnixNano)
 
 	stop chan struct{}
 	done chan struct{}
@@ -38,7 +39,7 @@ func (h *functionCallingHeartbeat) Touch() {
 	h.lastOut.Store(pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().NanoTimestamp)
 }
 
-// Emit 推送一行真是进度(调用方已经过滤 JSON)
+// Emit 推送一行真实进度(调用方已经过滤 JSON)
 func (h *functionCallingHeartbeat) Emit(line string) {
 	if h == nil {
 		return
@@ -58,7 +59,7 @@ func (h *functionCallingHeartbeat) Stop() {
 
 // ========================= private functions =========================
 
-// 非阻塞投递
+// trySend 非阻塞投递
 func (h *functionCallingHeartbeat) trySend(e ToolEvent) bool {
 	select {
 	case h.out <- e:

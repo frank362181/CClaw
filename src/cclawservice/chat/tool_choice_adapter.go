@@ -39,7 +39,7 @@
 *	- 上游required 当软约束,不应该因此中断
 **/
 
-package tool
+package chat
 
 import (
 	"fmt"

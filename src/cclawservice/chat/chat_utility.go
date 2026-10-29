@@ -1,13 +1,14 @@
 package chat
 
 import (
-	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/common/llmproto"
 	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/harness/observatory"
+	"my.favorite/cclawservice/harness/toolexecutor"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
 	pCommon "my.favorite/platformutility/common"
@@ -57,25 +58,6 @@ func NewCommand(comCode, sender string, chatReq *request.ChatRequest) (*Command,
 		Message: msg,
 		AgentID: chatReq.AgentId, ChatType: chatType, ChatChannel: channel, GenAt: genAt,
 	}, nil
-}
-
-// ResolveToolName 解析工具名 -> scripts绝对路径
-func ResolveToolName(env ToolEnv, toolName string) (string, error) {
-	toolName = strings.TrimSpace(toolName)
-	if len(toolName) == 0 {
-		return "", fmt.Errorf("tool name is empty")
-	}
-
-	path, err := env.Resolver.Resolve(toolName)
-	if err != nil {
-		return "", fmt.Errorf("tool script not registered for tool name %s", toolName)
-	}
-
-	if path = strings.TrimSpace(path); path == "" {
-		return "", fmt.Errorf("tool script not registered for tool name %s", toolName)
-	}
-
-	return path, nil
 }
 
 // ToChatRecords 将记忆文件读取出来的MemoryRecord翻译成Record,用在装配时使用
@@ -149,6 +131,24 @@ func ToChatRequest(cmd Command) *request.ChatRequest {
 	}
 }
 
+// BindToolInvocation 将模型声明的调用与序号配对
+func BindToolInvocation(calls []llmproto.ToolCall, seq *seqSink) []toolexecutor.ToolInvocation {
+	out := make([]toolexecutor.ToolInvocation, 0, len(calls))
+	seen := make(map[int]struct{}, len(calls))
+
+	for i := range calls {
+		key := calls[i].Index
+		if _, dup := seen[key]; dup {
+			key = -1 - i //负数 -> SeqOf 走独立分配
+		}
+		seen[key] = struct{}{}
+
+		out = append(out, toolexecutor.ToolInvocation{Seq: seq.SeqOf(key), Call: calls[i]})
+	}
+
+	return out
+}
+
 func ToTurnTiming(t *TurnTiming) observatory.TurnTiming {
 	if t == nil {
 		return observatory.TurnTiming{}
@@ -168,6 +168,19 @@ func ToTurnTiming(t *TurnTiming) observatory.TurnTiming {
 		Rounds:    t.Rounds,
 		ToolCalls: t.ToolCalls,
 	}
+}
+
+// ForModel 返回回填给模型的文本:截断到 maxRunes(省略号计入总数)
+// 与 ForRecord(写历史,完整原文)相对:两条互相冲突的消息口径收敛在这个函数里,
+// 调用点不需要自己决定怎么截断。
+func ForModel(o toolexecutor.ToolOutcome, maxRunes int) string {
+	marker := cCommon.TruncatedMarker
+	m := utf8.RuneCountInString(marker)
+	if maxRunes <= 0 || m >= maxRunes {
+		return pCommon.TruncateRunes(o.ForRecord(), maxRunes, marker)
+	}
+
+	return pCommon.TruncateRunes(o.ForRecord(), maxRunes-m+1, marker)
 }
 
 func buildPartial(content string, calls []llmproto.ToolCall, finish string) llmproto.LlmReply {

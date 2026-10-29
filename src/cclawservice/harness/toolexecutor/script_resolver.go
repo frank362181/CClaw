@@ -5,7 +5,7 @@
 *
 **/
 
-package chat
+package toolexecutor
 
 import (
 	"fmt"
@@ -13,6 +13,13 @@ import (
 
 	pCommon "my.favorite/platformutility/common"
 )
+
+// IScriptsResolver 工具名 -> 工具脚本绝对路径的解析。
+// 只暴露读侧(执行期不可写),由本包的 ScriptsResolver 提供默认实现;
+// 调用方(如 chat.TurnState)只依赖这个接口,不感知底层是 map 还是别的索引
+type IScriptsResolver interface {
+	Resolve(toolName string) (string, error)
+}
 
 type ScriptsResolver map[string]string
 

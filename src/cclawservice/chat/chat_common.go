@@ -1,18 +1,20 @@
-/*
-* 全局通用的聊天相关的类型定义,不同于model.go中的定义：
-*	- model.go中定义的与 LLM 厂家协议相关,port.go中定义在创建后将不会改变
+/**
+* 一轮对话的 **值对象与用例接口**
+*
+* 只放"数据长什么样"和"用例需要什么能力",不放任何实现:
+*   - 值对象: Command / Provider / Session / Record / Assembled / Reply / TurnTiming
+*   - 用例接口: Transport / Plan / Assemble / Journal / Ledger / Guard / Maintainer / Registrator / Preparer / Reporter
+*
+* 与 model.go 的分工:model.go 描述 LLM 厂家协议,本文件描述本进程内的业务契约。
 **/
 
 package chat
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
-	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/common/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
@@ -31,20 +33,6 @@ func (p Provider) MaxOutput() int {
 	return p.Llm.MaxTokens
 }
 func (p Provider) Identifier() string { return p.Llm.ProviderId }
-
-// IStreamObserver 上游增量的 **传输级** 出口,同步路径注入 NopObserver
-type IStreamObserver interface {
-	OnDelta(delta string)
-	OnReasoning(delta string)
-	OnToolIntent(index int, name string)
-}
-
-// NopObserver 空对象:让同步路径无需if-nil判断,也让"已输出即不重试"的判定天然为 false
-type NopObserver struct{}
-
-func (NopObserver) OnDelta(delta string)                {}
-func (NopObserver) OnReasoning(delta string)            {}
-func (NopObserver) OnToolIntent(index int, name string) {}
 
 // Reply 用例输出,不带任何 HTTP/DB 语义,对LlmReply进行归一化
 type Reply struct {
@@ -73,11 +61,6 @@ type IRoundPlanner interface {
 	Verify(calls []llmproto.ToolCall, toolChoice string)
 }
 
-// IScriptsResolver 工具名 -> 工具脚本绝对函数的解析
-type IScriptsResolver interface {
-	Resolve(toolName string) (string, error)
-}
-
 // IMemoryJournal 轮次记账(旁路、失败不阻断对话)
 type IMemoryJournal interface {
 	Begin(ctx context.Context, turnState *TurnState) (Session, error)
@@ -104,6 +87,8 @@ type Record struct {
 	CoversFrom int // kind = summary时有效;0 表示不覆盖
 	CoversTo   int
 }
+
+// Assembled 一次上下文装配的产物:消息序列 + 预算信息 + 历史条目
 type Assembled struct {
 	Messages []llmproto.ChatMessage
 
@@ -151,52 +136,9 @@ type ILoopGuard interface {
 	StopError(scope string) error
 }
 
-// IToolExecutor 工具执行策略:同步接口串行、流式接口同轮并行 + 进度汇集
-// 这是 runToolLoop和streamToolLoop之间的唯一的差异
-type IToolExecutor interface {
-	// RunAll 执行本轮模型声明的全部工具调用
-	// 契约:
-	// 	- 返回的outcome **顺序**必须与 calls 一致
-	//  - 返回条数 <= len(calls):只有 ctx 已取消时才能缺条
-	RunAll(ctx context.Context, env ToolEnv, invocations []ToolInvocation, sink ISink, ledger IMemoryLedger) []ToolOutcome
-}
-
-// ======================= 一轮对话的 **业务事件出口** =============================
-
-// ToolEvent 业务层工具事件
-type ToolEvent struct {
-	Phase  string
-	Seq    int
-	Name   string
-	Detail string
-}
-
-// ISink 由于同时满足 IStreamObserver,因此可以直接传给 ILlmGateway.Stream
-// 这是同步/异步编排的关键:同步路径注入NopSink
-type ISink interface {
-	IStreamObserver
-
-	IsStreamed() bool //是否流式
-
-	OnStatus(code, text string)
-	OnTool(event ToolEvent)
-	OnNotice(code, message string)
-	OnJournal(err error)
-	OnFinishReason(reason string)
-}
-
-// IStreamedSink 能读出已经下发给用户的内容的Sink
-// 单独成接口,而不是直接塞入到ISink:同步路径的 NopSink 没有内容可读
-type IStreamedSink interface {
-	ISink
-
-	// Streamed 返回截止当前已通过OnDelta下发的正文(不包含思考过程)
-	Streamed() string
-}
-
 // Command 是聊天用例的 **输入值对象**
 // 与request.ChatRequest的区别:
-//   - ChatRequest 是 **线协议 DTO**,字段克被客户端伪造,只在 controller里存在
+//   - ChatRequest 是 **线协议 DTO**,字段可被客户端伪造,只在 controller里存在
 //   - Command 是 **规范化、已鉴权的业务输入**,构造后不可变
 type Command struct {
 	Sender      string
@@ -235,45 +177,6 @@ type ITurnPreparer interface {
 type ITurnReporter interface {
 	Begin(ctx context.Context, c Command) (context.Context, *TurnTiming)
 	End(ctx context.Context, t *TurnTiming, firstVisibleMs int64, r Reply, err error, startAt time.Time)
-}
-
-// ToolOutcome 一次工具调用的结果值对象
-// [关键不变量] 将两条互相冲突的消息口径封装在类型里,调用点不需要自己决定怎么截断:
-//   - ForModel: 返回给模型 --- 截断到maxRunes(总长含省略号)
-//   - ForRecord: 写历史文件 --- 完整原文(DB的 256 rune截断由journal负责)
-type ToolOutcome struct {
-	Seq    int
-	CallID string
-	Name   string
-	Arg    string
-
-	Full   string // 工具调用的完整原始输出
-	Reason error  // 非nil表示执行失败
-
-	CallAt, RespAt int64
-	ElapseMs       int64 // 工具执行耗费的时间,毫秒
-}
-
-func (o ToolOutcome) Failed() bool { return o.Reason != nil }
-
-// ForRecord 返回写入历史/旁路记录的文本:完整/截断
-func (o ToolOutcome) ForRecord() string {
-	if o.Reason != nil {
-		return fmt.Sprintf(`{"error":%q}`, o.Reason.Error())
-	}
-
-	return o.Full
-}
-
-// ForModel 返回回填给模型的文本:截断到maxRunes(省略号计入总数)
-func (o ToolOutcome) ForModel(maxRunes int) string {
-	marker := cCommon.TruncatedMarker
-	m := utf8.RuneCountInString(marker)
-	if maxRunes <= 0 || m >= maxRunes {
-		return pCommon.TruncateRunes(o.ForRecord(), maxRunes, marker)
-	}
-
-	return pCommon.TruncateRunes(o.ForRecord(), maxRunes-m+1, marker)
 }
 
 // ----------------------- 计时------------------

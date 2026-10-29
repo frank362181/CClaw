@@ -22,6 +22,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"my.favorite/cclawservice/harness/toolexecutor"
 	pCommon "my.favorite/platformutility/common"
 )
 
@@ -76,7 +77,7 @@ func (c *CapturingSink) OnReasoning(delta string) {
 	c.ISink.OnReasoning(delta)
 }
 
-func (c *CapturingSink) OnTool(event ToolEvent) {
+func (c *CapturingSink) OnTool(event toolexecutor.ToolEvent) {
 	c.markVisible()
 	c.ISink.OnTool(event)
 }

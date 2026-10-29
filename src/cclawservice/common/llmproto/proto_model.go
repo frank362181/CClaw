@@ -201,6 +201,16 @@ type ChatCompletionChunkChoice struct {
 	FinishReason *string                  `json:"finish_reason"`
 }
 
+// LlmRequest 一次上游调用的完整参数(parameter object)
+// 取代 Complete / CompleteWithTools / ChatCompleteMessages等函数的签名
+type LlmRequest struct {
+	Messages   []ChatMessage
+	Tools      []Tool
+	ToolChoice string // llmproto.ToolChoice*;空=auto
+	Streamed   bool
+	MaxTokens  int // <= 0:由ctxmgr按context_window动态推导
+}
+
 // ToolScriptArg 工具脚本执行的参数
 type ToolScriptArg struct {
 	Path     string // 脚本绝对路径
@@ -216,4 +226,12 @@ type ToolScriptArg struct {
 // 只暴露一个 **方法
 type IToolScriptRunner interface {
 	Run(ctx context.Context, toolArgs ToolScriptArg) (string, error)
+}
+
+// LlmReply 一次上游调用的返回(值对象)
+// 取代StreamWithTools 返回的 4个值,现在仅一个
+type LlmReply struct {
+	Content      string
+	ToolCalls    []ToolCall
+	FinishReason string
 }

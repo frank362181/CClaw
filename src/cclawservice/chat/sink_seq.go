@@ -10,7 +10,10 @@
 
 package chat
 
-import cCommon "my.favorite/cclawservice/common"
+import (
+	cCommon "my.favorite/cclawservice/common"
+	"my.favorite/cclawservice/harness/toolexecutor"
+)
 
 type seqSink struct {
 	ISink // 转发其他事件;nil时由构造函数替换为 NopSink
@@ -56,7 +59,7 @@ func (s *seqSink) OnToolIntent(index int, name string) {
 	_, exists := s.cur[index]
 	seq := s.SeqOf(index)
 	if !exists {
-		s.ISink.OnTool(ToolEvent{
+		s.ISink.OnTool(toolexecutor.ToolEvent{
 			Phase: cCommon.ChatToolEventIntent,
 			Seq:   seq,
 			Name:  name,

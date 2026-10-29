@@ -1,4 +1,4 @@
-package chat
+package toolexecutor
 
 import (
 	"context"
@@ -7,12 +7,12 @@ import (
 	"my.favorite/cclawservice/common/llmproto"
 )
 
-// 同步执行工具
+// serialExecutor 同步执行一轮内的工具调用(非流式接口走这里)
 type serialExecutor struct {
 	core executorCore
 }
 
-func NewToolExecutorSerial(runner llmproto.IToolScriptRunner) IToolExecutor {
+func NewRoundExecutorSerial(runner llmproto.IToolScriptRunner) IToolRoundExecutor {
 	if runner == nil {
 		panic("function calling: serial executor requires a non-nil IToolScriptRunner")
 	}
@@ -24,7 +24,9 @@ func NewToolExecutorSerial(runner llmproto.IToolScriptRunner) IToolExecutor {
 	}
 }
 
-func (se *serialExecutor) RunAll(ctx context.Context, env ToolEnv, invocations []ToolInvocation, sink ISink, ledger IMemoryLedger) []ToolOutcome {
+func (se *serialExecutor) RunAll(ctx context.Context, env ToolEnv, invocations []ToolInvocation,
+	sink ToolEventSink, ledger ToolLedger) []ToolOutcome {
+
 	out := make([]ToolOutcome, 0, len(invocations))
 	for _, invocation := range invocations {
 		// 中断加速:已取消就不再发起新的工具调用

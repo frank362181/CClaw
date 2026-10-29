@@ -9,6 +9,7 @@ import (
 
 	"my.favorite/cclawservice/common/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
+	"my.favorite/cclawservice/harness/toolexecutor"
 	"my.favorite/cclawservice/model/dataobject"
 )
 
@@ -26,7 +27,7 @@ type TurnState struct {
 	Policy             hCommon.ContextPolicy // 完整预算策略
 	ToolsMaxRunes      int                   //单条工具结果回填给模型的上限
 
-	Scripts  IScriptsResolver
+	Scripts  toolexecutor.IScriptsResolver
 	WorkRoot string // agent的工作区根目录
 
 	Timing *TurnTiming
@@ -39,7 +40,7 @@ type TurnState struct {
 
 	// 可变:消息序列 + 工具结果
 	messages []llmproto.ChatMessage
-	outcomes []ToolOutcome
+	outcomes []toolexecutor.ToolOutcome
 }
 
 // Request 构造本轮的一次上游请求
@@ -71,7 +72,7 @@ func (t *TurnState) AppendToolResult(callId string, body string) {
 }
 
 // RecordOutcomes 收集本轮工具结果(收尾时交给 Journal落库)
-func (t *TurnState) RecordOutcomes(outcomes []ToolOutcome) {
+func (t *TurnState) RecordOutcomes(outcomes []toolexecutor.ToolOutcome) {
 	t.outcomes = append(t.outcomes, outcomes...)
 }
 
@@ -92,13 +93,13 @@ func (t *TurnState) Scoped() string {
 	return t.Scope
 }
 
-func (t *TurnState) Env() ToolEnv {
-	return ToolEnv{
+func (t *TurnState) Env() toolexecutor.ToolEnv {
+	return toolexecutor.ToolEnv{
 		Resolver: t.Scripts,
 		WorkRoot: t.WorkRoot,
 	}
 }
 
-func (t *TurnState) Outcomes() []ToolOutcome {
+func (t *TurnState) Outcomes() []toolexecutor.ToolOutcome {
 	return t.outcomes
 }

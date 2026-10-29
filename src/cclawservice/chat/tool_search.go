@@ -5,7 +5,7 @@
 * 本层只把已解析的文档派生成:LLM 侧工具 schema、脚本绝对路径、技能级元数据(意图门用)。
 **/
 
-package tool
+package chat
 
 import (
 	"fmt"

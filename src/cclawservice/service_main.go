@@ -19,7 +19,6 @@ import (
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/harness/observatory"
-	"my.favorite/cclawservice/harness/tool"
 	selfInterceptor "my.favorite/cclawservice/interceptor"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/cclawservice/service"
@@ -318,7 +317,7 @@ func (m *ServiceMain) Destroy() {
 	chat.GetTransportPool().Close() // 彻底关闭所有链接
 
 	concurrency.GetConcurrentAdvance().Destroy() //释放agent gate
-	tool.GetToolsSearch().Destroy()              //释放工具仓库
+	chat.GetToolsSearch().Destroy()              //释放工具仓库
 
 	if m.defaultAgentConfigHelper != nil {
 		m.defaultAgentConfigHelper.Destroy()

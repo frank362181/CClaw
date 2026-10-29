@@ -1,4 +1,4 @@
-package chat
+package toolexecutor
 
 import (
 	"context"
@@ -9,17 +9,18 @@ import (
 	pCommon "my.favorite/platformutility/common"
 )
 
-// UI 刷新事件缓冲大小,lineCh的大小
+// UI 刷新事件缓冲大小,lines 的大小
 // 太小 -> 事件频繁丢弃(UI刷新落后);太大->用户断链后残留更多无用事件
 const defaultProgressBuffer = 16
 
+// parallelExecutor 流式接口下,同一轮的多个工具调用并行执行并把进度汇集到一个 sink
 type parallelExecutor struct {
 	core executorCore
 
 	buf int //允许覆盖
 }
 
-func NewToolExecutorParallel(runner llmproto.IToolScriptRunner) IToolExecutor {
+func NewRoundExecutorParallel(runner llmproto.IToolScriptRunner) IToolRoundExecutor {
 	if runner == nil {
 		panic("function calling: parallel executor requires a non-nil IToolScriptRunner")
 	}
@@ -31,7 +32,9 @@ func NewToolExecutorParallel(runner llmproto.IToolScriptRunner) IToolExecutor {
 	}
 }
 
-func (pe *parallelExecutor) RunAll(ctx context.Context, env ToolEnv, invocations []ToolInvocation, sink ISink, ledger IMemoryLedger) []ToolOutcome {
+func (pe *parallelExecutor) RunAll(ctx context.Context, env ToolEnv, invocations []ToolInvocation,
+	sink ToolEventSink, ledger ToolLedger) []ToolOutcome {
+
 	buf := pe.buf
 	if buf <= 0 {
 		buf = defaultProgressBuffer
@@ -53,7 +56,7 @@ func (pe *parallelExecutor) RunAll(ctx context.Context, env ToolEnv, invocations
 	var wg sync.WaitGroup
 
 	for i, invocation := range invocations {
-		// running必须再**派发前**发出:否则可能出现 "progress先到、running后到",前端卡片状态倒退的现象
+		// running必须在**派发前**发出:否则可能出现 "progress先到、running后到",前端卡片状态倒退的现象
 		if !send(ctx, lines, ToolEvent{Phase: cCommon.ChatToolEventRunning, Seq: invocation.Seq, Name: invocation.Name()}) {
 			break
 		}
@@ -92,7 +95,7 @@ func (pe *parallelExecutor) RunAll(ctx context.Context, env ToolEnv, invocations
 	return res
 }
 
-// 带ctx的阻塞投递
+// send 带ctx的阻塞投递
 func send(ctx context.Context, ch chan<- ToolEvent, evt ToolEvent) bool {
 	select {
 	case ch <- evt:

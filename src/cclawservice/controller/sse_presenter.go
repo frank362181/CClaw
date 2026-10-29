@@ -26,6 +26,7 @@ import (
 	cCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	hCommon "my.favorite/cclawservice/harness/common"
+	"my.favorite/cclawservice/harness/toolexecutor"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging"
 	"my.favorite/platformutility/webbase/middleware/basic"
@@ -126,7 +127,7 @@ func (p *SSEPresenter) OnStatus(code, text string) {
 	})
 }
 
-func (p *SSEPresenter) OnTool(evt chat.ToolEvent) {
+func (p *SSEPresenter) OnTool(evt toolexecutor.ToolEvent) {
 	p.lock.Lock()
 	p.lastProgressAt = pCommon.GetDatetimeUtilityInstance().GetNow()
 	switch evt.Phase {

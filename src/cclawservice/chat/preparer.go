@@ -19,7 +19,7 @@ import (
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/harness/security"
-	"my.favorite/cclawservice/harness/tool"
+	"my.favorite/cclawservice/harness/toolexecutor"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	pCommon "my.favorite/platformutility/common"
@@ -31,7 +31,7 @@ type Preparer struct {
 	agentRepo     *repo.AgentRepository
 	agentRouter   *ctxmgr.AgentRouter
 	agentDocCache *ctxmgr.AgentDocumentCache
-	toolsSearch   *tool.ToolsSearch
+	toolsSearch   *ToolsSearch
 
 	functionCalling bool
 
@@ -45,7 +45,7 @@ var chatPreparer = pCommon.GetSingleton(func() *Preparer {
 		agentRepo:     nil,
 		agentRouter:   nil,
 		agentDocCache: ctxmgr.GetAgentDocCache(),
-		toolsSearch:   tool.GetToolsSearch(),
+		toolsSearch:   GetToolsSearch(),
 	}
 }).Instance()
 
@@ -99,7 +99,7 @@ func (p *Preparer) Prepare(ctx context.Context, cmd Command) (*TurnState, error)
 	visible := bundle.VisibleTools(gate)
 	var plan IRoundPlanner
 	if p.functionCalling {
-		plan = tool.NewRoundPlannerAdapter(tool.BuildFirstRoundToolPlan(visible, gate.ForcedTools, tool.GetLlmProviderThinking(llmProvider)),
+		plan = NewRoundPlannerAdapter(BuildFirstRoundToolPlan(visible, gate.ForcedTools, GetLlmProviderThinking(llmProvider)),
 			fmt.Sprintf("agent=%s,turn=%s", agent.AgentId, cmd.TurnID))
 	} else {
 		visible, plan = nil, nil
@@ -122,7 +122,7 @@ func (p *Preparer) Prepare(ctx context.Context, cmd Command) (*TurnState, error)
 		Plan:          plan,
 		Policy:        policy,
 		ToolsMaxRunes: ctxmgr.TurnToolResultMaxRunes,
-		Scripts:       GetScriptsResolver(bundle.Scripts),
+		Scripts:       toolexecutor.GetScriptsResolver(bundle.Scripts),
 		WorkRoot:      workRoot,
 		Timing:        timing,
 		Ledger:        NewMemoryLedger(ctxmgr.NewTurnRecorder()), //创建本轮对话所需的账本,两阶段对话

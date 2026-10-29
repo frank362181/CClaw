@@ -26,7 +26,7 @@ import (
 type ToolLoop struct {
 	transport ITransportClient
 
-	toolExecutor IToolExecutor
+	toolExecutor toolexecutor.IToolRoundExecutor
 	assembler    IContextAssembler //上下文组装器
 
 	loopGuardFn func() ILoopGuard
@@ -36,13 +36,13 @@ type ToolLoop struct {
 }
 
 func NewToolLoop(transport ITransportClient, asm IContextAssembler, streaming bool) *ToolLoop {
-	var exec IToolExecutor
+	var exec toolexecutor.IToolRoundExecutor
 	if streaming {
 		//并行
-		exec = NewToolExecutorParallel(toolexecutor.NewToolExecutor())
+		exec = toolexecutor.NewRoundExecutorParallel(toolexecutor.NewToolExecutor())
 	} else {
 		//串行
-		exec = NewToolExecutorSerial(toolexecutor.NewToolExecutor())
+		exec = toolexecutor.NewRoundExecutorSerial(toolexecutor.NewToolExecutor())
 	}
 
 	return &ToolLoop{
@@ -86,7 +86,7 @@ func (l *ToolLoop) Run(ctx context.Context, st *TurnState, sink ISink) (llmproto
 		}
 
 		st.AppendAssistant(reply)
-		toolInvocations := bindToolInvocation(reply.ToolCalls, seq)
+		toolInvocations := BindToolInvocation(reply.ToolCalls, seq)
 		outcomes := l.toolExecutor.RunAll(ctx, st.Env(), toolInvocations, sink, st.Ledger)
 
 		// 计时汇总,单协程完成
@@ -112,13 +112,13 @@ func (l *ToolLoop) Run(ctx context.Context, st *TurnState, sink ISink) (llmproto
 		for _, oc := range outcomes {
 			if oc.Failed() {
 				// done/error先发,让UI先看到工具执行结果
-				sink.OnTool(ToolEvent{Phase: cCommon.ChatToolEventError, Seq: oc.Seq, Name: oc.Name, Detail: oc.Reason.Error()})
+				sink.OnTool(toolexecutor.ToolEvent{Phase: cCommon.ChatToolEventError, Seq: oc.Seq, Name: oc.Name, Detail: oc.Reason.Error()})
 			} else {
-				sink.OnTool(ToolEvent{Phase: cCommon.ChatToolEventDone, Seq: oc.Seq, Name: oc.Name})
+				sink.OnTool(toolexecutor.ToolEvent{Phase: cCommon.ChatToolEventDone, Seq: oc.Seq, Name: oc.Name})
 			}
 
 			// 回填给模型的文本:截断的副本 + 守卫提示(可能)
-			body := guard.ApplyLoopGuard(oc.Name, oc.Arg, !oc.Failed(), oc.ForModel(l.maxToolResultRunes), sink.OnNotice)
+			body := guard.ApplyLoopGuard(oc.Name, oc.Arg, !oc.Failed(), ForModel(oc, l.maxToolResultRunes), sink.OnNotice)
 			st.AppendToolResult(oc.CallID, body)
 		}
 

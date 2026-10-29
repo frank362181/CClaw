@@ -35,24 +35,6 @@ var requestIDHeaders = []string{
 // ErrRequestCanceled 表示请求上下文被取消(客户端断开/超时),而非上游故障。
 var ErrRequestCanceled = errors.New("runtime client: request context canceled")
 
-// LlmRequest 一次上游调用的完整参数(parameter object)
-// 取代 Complete / CompleteWithTools / ChatCompleteMessages等函数的签名
-type LlmRequest struct {
-	Messages   []ChatMessage
-	Tools      []Tool
-	ToolChoice string // llmproto.ToolChoice*;空=auto
-	Streamed   bool
-	MaxTokens  int // <= 0:由ctxmgr按context_window动态推导
-}
-
-// LlmReply 一次上游调用的返回(值对象)
-// 取代StreamWithTools 返回的 4个值,现在仅一个
-type LlmReply struct {
-	Content      string
-	ToolCalls    []ToolCall
-	FinishReason string
-}
-
 // ======================== 错误体 DTO 与结构化错误类型 ========================
 
 // LlmAPIError 供应商返回的错误体(OpenAI 风格)。

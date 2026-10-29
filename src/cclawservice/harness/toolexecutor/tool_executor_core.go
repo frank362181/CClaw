@@ -1,8 +1,8 @@
 /*
-* 工具执行的共享内核:环境值对象 + 单次执行实现
+* 串行/并行 共用的单次执行实现
 **/
 
-package chat
+package toolexecutor
 
 import (
 	"context"
@@ -12,19 +12,14 @@ import (
 	pCommon "my.favorite/platformutility/common"
 )
 
-type ToolEnv struct {
-	Resolver IScriptsResolver // 工具名 -> 脚本绝对路径
-	WorkRoot string
-}
-
-// 串行/并行 共用的单次执行实现
+// executorCore 串行/并行 共用的单次执行实现
 type executorCore struct {
 	runner llmproto.IToolScriptRunner
 }
 
-// 执行一次工具调用,返回自洽的ToolOutcome
+// executeOne 执行一次工具调用,返回自洽的 ToolOutcome
 func (e *executorCore) executeOne(ctx context.Context, env ToolEnv, invocation ToolInvocation,
-	ledger IMemoryLedger, onLine func(string)) ToolOutcome {
+	ledger ToolLedger, onLine func(string)) ToolOutcome {
 
 	oc := ToolOutcome{
 		Seq:    invocation.Seq,
@@ -54,7 +49,7 @@ func (e *executorCore) executeOne(ctx context.Context, env ToolEnv, invocation T
 	}()
 
 	ledgerIdx = ledger.Start(oc.Name, oc.CallAt)
-	script, err := ResolveToolName(env, oc.Name)
+	script, err := env.ScriptPath(oc.Name)
 	if err != nil {
 		oc.Reason = err // 不进执行器:空路径只会执行失败
 		return oc
