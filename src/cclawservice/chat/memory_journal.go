@@ -3,6 +3,7 @@
 * MemoryJournal,MemoryLedger的区别:
 *	- MemoryLedger:本轮对话 **台账** (纯内存):并发执行器在每次工具调用前后
 *	  Start/Finish,两阶段留痕,支持"已发送未返回"的审计
+*
 *	- MemoryJournal:会话历史的写入器,有IO,一轮开头 Begin建档
 *	  结尾Finish/FinishPartial 时把Ledger.Snapshot() 一次性落库
 *
@@ -25,6 +26,7 @@ type MemoryLedger struct {
 	turnRecorder *ctxmgr.TurnRecorder
 }
 
+// NewMemoryLedger MemoryLedger表示一轮对话,因此必须每轮对话都要创建一个新的
 func NewMemoryLedger(turnRecorder *ctxmgr.TurnRecorder) *MemoryLedger {
 	return &MemoryLedger{turnRecorder: turnRecorder}
 }

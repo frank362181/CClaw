@@ -66,10 +66,6 @@ func ResolveToolName(env ToolEnv, toolName string) (string, error) {
 		return "", fmt.Errorf("tool name is empty")
 	}
 
-	if env.Resolver == nil {
-		return "", fmt.Errorf("scripts is empty")
-	}
-
 	path, err := env.Resolver.Resolve(toolName)
 	if err != nil {
 		return "", fmt.Errorf("tool script not registered for tool name %s", toolName)

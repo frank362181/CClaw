@@ -193,7 +193,13 @@ func (search *ToolsSearch) GetToolsBundle(skillDocs []hCommon.SkillDocument) Too
 			// 用转换后的名字(已 TrimSpace),与 schema 名、模型回传名严格同源
 			bundle.ForcedNames = append(bundle.ForcedNames, llmTool.Function.Name)
 		}
-		bundle.Scripts[strings.TrimSpace(t.Name)] = t.Script //此时执行脚本是绝对路径
+
+		bundleKey := strings.TrimSpace(t.Name)
+		if prev, dup := bundle.Scripts[bundleKey]; dup && prev != t.Script {
+			// 如果重复,打印日志
+			logging.LogWarnF("tool name conflict :%q -> %s override %s", bundleKey, t.Script, prev)
+		}
+		bundle.Scripts[bundleKey] = t.Script //此时执行脚本是绝对路径
 	}
 
 	bundle.ForcedNames = pCommon.NormalizeStrings(bundle.ForcedNames) //规范化名称,去重等

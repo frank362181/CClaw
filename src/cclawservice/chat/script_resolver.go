@@ -16,21 +16,7 @@ import (
 
 type ScriptsResolver map[string]string
 
-func (r ScriptsResolver) Resolve(toolName string) (string, error) {
-	toolName = strings.TrimSpace(toolName)
-	if toolName == pCommon.BlankString {
-		return pCommon.BlankString, fmt.Errorf("blank string")
-	}
-
-	path := strings.TrimSpace(r[toolName]) // nil map读取安全:返回零值
-	if path == pCommon.BlankString {
-		return pCommon.BlankString, fmt.Errorf("tool %s: no script registered", toolName)
-	}
-
-	return path, nil
-}
-
-func ScriptsOf(scripts map[string]string) IScriptsResolver {
+func GetScriptsResolver(scripts map[string]string) IScriptsResolver {
 	out := make(ScriptsResolver, len(scripts))
 	for name, path := range scripts {
 		key := strings.TrimSpace(name)
@@ -46,4 +32,21 @@ func ScriptsOf(scripts map[string]string) IScriptsResolver {
 	return out
 }
 
-var _ IScriptsResolver = (*ScriptsResolver)(nil)
+func (r ScriptsResolver) Resolve(toolName string) (string, error) {
+	toolName = strings.TrimSpace(toolName)
+	if toolName == pCommon.BlankString {
+		return pCommon.BlankString, fmt.Errorf("blank string")
+	}
+
+	path := strings.TrimSpace(r[toolName]) // nil map读取安全:返回零值
+	if path == pCommon.BlankString {
+		return pCommon.BlankString, fmt.Errorf("tool %s: no script registered", toolName)
+	}
+
+	return path, nil
+}
+
+var (
+	_ IScriptsResolver = (ScriptsResolver)(nil)
+	_ IScriptsResolver = (*ScriptsResolver)(nil)
+)

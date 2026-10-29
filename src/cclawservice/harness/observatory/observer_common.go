@@ -68,6 +68,9 @@ type LlmCallTiming struct {
 	PromptTokens int
 	CachedTokens int
 
+	Round int    // 轮次
+	Kind  string // decide/final
+
 	Err string // 非空 = 本次调用失败(慢失败同样要留痕,否则看不到"卡住的那次")
 }
 

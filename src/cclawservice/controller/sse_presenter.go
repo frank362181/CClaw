@@ -328,15 +328,15 @@ func (p *SSEPresenter) startHeartbeat() {
 				// writing不走idle:思考不停刷新 lastAt,idle永远 < interval
 				if !first {
 					stalled := now.Sub(lastProgress)
-					//if stalled > time.Duration(300)*time.Second || (runningToolLength == 0 && stalled >= time.Duration(hCommon.ChatThinkingLimitTimeout)*time.Second) {
-					//	p.abortStalled(stalled, runningToolLength)
-					//	return
-					//}
-
-					if runningToolLength == 0 && stalled > time.Duration(hCommon.ChatThinkingLimitTimeout)*time.Second {
+					if stalled > time.Duration(300)*time.Second || (runningToolLength == 0 && stalled >= time.Duration(hCommon.ChatThinkingLimitTimeout)*time.Second) {
 						p.abortStalled(stalled, runningToolLength)
 						return
 					}
+
+					//if runningToolLength == 0 && stalled > time.Duration(hCommon.ChatThinkingLimitTimeout)*time.Second {
+					//	p.abortStalled(stalled, runningToolLength)
+					//	return
+					//}
 				}
 				first = false
 

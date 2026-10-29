@@ -122,10 +122,10 @@ func (p *Preparer) Prepare(ctx context.Context, cmd Command) (*TurnState, error)
 		Plan:          plan,
 		Policy:        policy,
 		ToolsMaxRunes: ctxmgr.TurnToolResultMaxRunes,
-		Scripts:       ScriptsOf(bundle.Scripts),
+		Scripts:       GetScriptsResolver(bundle.Scripts),
 		WorkRoot:      workRoot,
 		Timing:        timing,
-		Ledger:        NewMemoryLedger(ctxmgr.NewTurnRecorder()),
+		Ledger:        NewMemoryLedger(ctxmgr.NewTurnRecorder()), //创建本轮对话所需的账本,两阶段对话
 		Scope:         fmt.Sprintf("agent=%s,turn=%s", agent.AgentId, cmd.TurnID),
 	}, nil
 }
