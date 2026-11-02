@@ -39,10 +39,10 @@ func NewToolLoop(transport ITransportClient, asm IContextAssembler, streaming bo
 	var exec toolexecutor.IToolRoundExecutor
 	if streaming {
 		//并行
-		exec = toolexecutor.NewRoundExecutorParallel(toolexecutor.NewToolExecutor())
+		exec = toolexecutor.NewRoundExecutorParallel(toolexecutor.GetSimpleScriptExecutor())
 	} else {
 		//串行
-		exec = toolexecutor.NewRoundExecutorSerial(toolexecutor.NewToolExecutor())
+		exec = toolexecutor.NewRoundExecutorSerial(toolexecutor.GetSimpleScriptExecutor())
 	}
 
 	return &ToolLoop{
@@ -56,7 +56,7 @@ func NewToolLoop(transport ITransportClient, asm IContextAssembler, streaming bo
 }
 
 // Run 执行本轮工具调用;模型不再请求工具时返回结果
-func (l *ToolLoop) Run(ctx context.Context, st *TurnState, sink ISink) (llmproto.LlmReply, error) {
+func (l *ToolLoop) Run(ctx context.Context, st *TurnState, sink ISink, rules toolexecutor.ToolConfigRules) (llmproto.LlmReply, error) {
 	if sink == nil {
 		sink = NopSink{}
 	}
@@ -87,7 +87,7 @@ func (l *ToolLoop) Run(ctx context.Context, st *TurnState, sink ISink) (llmproto
 
 		st.AppendAssistant(reply)
 		toolInvocations := BindToolInvocation(reply.ToolCalls, seq)
-		outcomes := l.toolExecutor.RunAll(ctx, st.Env(), toolInvocations, sink, st.Ledger)
+		outcomes := l.toolExecutor.RunAll(ctx, st.NewToolEnv(rules), toolInvocations, sink, st.Ledger)
 
 		// 计时汇总,单协程完成
 		if st.Timing != nil {

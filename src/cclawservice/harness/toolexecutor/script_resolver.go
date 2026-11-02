@@ -8,7 +8,6 @@
 package toolexecutor
 
 import (
-	"fmt"
 	"strings"
 
 	pCommon "my.favorite/platformutility/common"
@@ -18,39 +17,61 @@ import (
 // 只暴露读侧(执行期不可写),由本包的 ScriptsResolver 提供默认实现;
 // 调用方(如 chat.TurnState)只依赖这个接口,不感知底层是 map 还是别的索引
 type IScriptsResolver interface {
-	Resolve(toolName string) (string, error)
+	Resolve(toolName string) (ToolSpec, bool)
 }
 
-type ScriptsResolver map[string]string
+type ScriptsResolver map[string]ToolSpec
 
-func GetScriptsResolver(scripts map[string]string) IScriptsResolver {
-	out := make(ScriptsResolver, len(scripts))
-	for name, path := range scripts {
-		key := strings.TrimSpace(name)
-		if key == pCommon.BlankString {
+func GetScriptsResolver(specs map[string]ToolSpec) IScriptsResolver {
+	out := make(ScriptsResolver, len(specs))
+	for key, raw := range specs {
+		spec := raw.Normalize()
+		if spec.Name == pCommon.BlankString {
+			spec.Name = strings.TrimSpace(strings.TrimSpace(key))
+		}
+
+		if !spec.IsValid() {
 			continue
 		}
 
-		if p := strings.TrimSpace(path); p != pCommon.BlankString {
-			out[key] = p
+		if _, dup := out[spec.Name]; dup {
+			continue
 		}
+
+		out[spec.Name] = spec
 	}
 
 	return out
 }
 
-func (r ScriptsResolver) Resolve(toolName string) (string, error) {
-	toolName = strings.TrimSpace(toolName)
-	if toolName == pCommon.BlankString {
-		return pCommon.BlankString, fmt.Errorf("blank string")
+func (r ScriptsResolver) Resolve(toolName string) (ToolSpec, bool) {
+	key := strings.ToLower(strings.TrimSpace(toolName))
+	if key == pCommon.BlankString {
+		return ToolSpec{}, false
 	}
 
-	path := strings.TrimSpace(r[toolName]) // nil map读取安全:返回零值
-	if path == pCommon.BlankString {
-		return pCommon.BlankString, fmt.Errorf("tool %s: no script registered", toolName)
+	toolSpec, ok := r[key] // nil map读取安全:返回零值
+	if !ok {
+		return ToolSpec{}, false
 	}
 
-	return path, nil
+	return toolSpec, true
+}
+
+// Names 已经注册的工具名排序,用于日志与测试断言
+func (r ScriptsResolver) Names() []string {
+	out := make([]string, 0, len(r))
+	for name := range r {
+		out = append(out, name)
+	}
+
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j] < out[j-1]; j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+
+	return out
 }
 
 var (

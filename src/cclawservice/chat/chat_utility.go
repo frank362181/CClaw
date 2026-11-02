@@ -170,10 +170,42 @@ func ToTurnTiming(t *TurnTiming) observatory.TurnTiming {
 	}
 }
 
+var nonRetryMarkers = []string{
+	"operation not permitted",    // 沙箱拒绝写
+	"denied by configured rules", // 配置的规则拒绝
+	"requires an isolated run",   // 沙箱后端不可用
+	"no sandbox backend",         //需要沙箱环境,但系统不支持
+	"read-only file system",      //
+	"permission denied",
+}
+
+const noRetryHint = "\n\n[提示]该调用被安全策略或沙箱拒绝,属于确定性限制:同一轮内重试不会成功," +
+	"请勿重复同一调用;如需继续,请改用被允许的方式,或向用户说明该限制。"
+
+func needNoRetryHint(o toolexecutor.ToolOutcome) bool {
+	if o.Reason == nil {
+		return false
+	}
+
+	msg := strings.ToLower(o.Reason.Error())
+	for _, marker := range nonRetryMarkers {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // ForModel 返回回填给模型的文本:截断到 maxRunes(省略号计入总数)
-// 与 ForRecord(写历史,完整原文)相对:两条互相冲突的消息口径收敛在这个函数里,
-// 调用点不需要自己决定怎么截断。
+// 与 ForRecord(写历史,完整原文)相对:两条互相冲突的消息口径收敛在这个函数里,调用方不需要关心如何截断
 func ForModel(o toolexecutor.ToolOutcome, maxRunes int) string {
+	text := o.ForRecord()
+	if needNoRetryHint(o) {
+		// 如果以上原因,可给LLM提示不需要再试了,同一轮内出现以上提示工具不可能执行成功
+		text += noRetryHint
+	}
+
 	marker := cCommon.TruncatedMarker
 	m := utf8.RuneCountInString(marker)
 	if maxRunes <= 0 || m >= maxRunes {

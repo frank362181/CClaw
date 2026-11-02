@@ -93,11 +93,8 @@ func (t *TurnState) Scoped() string {
 	return t.Scope
 }
 
-func (t *TurnState) Env() toolexecutor.ToolEnv {
-	return toolexecutor.ToolEnv{
-		Resolver: t.Scripts,
-		WorkRoot: t.WorkRoot,
-	}
+func (t *TurnState) NewToolEnv(rules toolexecutor.ToolConfigRules) toolexecutor.ToolEnv {
+	return toolexecutor.NewToolEnv(t.Scripts, t.WorkRoot, rules)
 }
 
 func (t *TurnState) Outcomes() []toolexecutor.ToolOutcome {

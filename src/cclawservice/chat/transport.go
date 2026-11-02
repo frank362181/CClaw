@@ -19,7 +19,6 @@ import (
 	"my.favorite/cclawservice/exception"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/observatory"
-	"my.favorite/cclawservice/harness/tool"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
@@ -300,7 +299,7 @@ func (t *TransportClient) streamOnce(ctx context.Context, p Provider, req llmpro
 		finish   string
 		reported = make(map[int]bool, 2)
 	)
-	acc := tool.NewToolCallAccumulator()
+	acc := NewToolCallAccumulator()
 	body := newLimitedReader(resp.Body, t.maxResponse) // 流式每次读取的上限
 	sse := newSSEDecoder(body, hCommon.MaxSSELineBytes, func() {
 		if idleTimer != nil {

@@ -8,7 +8,6 @@
 package llmproto
 
 import (
-	"context"
 	"encoding/json"
 )
 
@@ -209,23 +208,6 @@ type LlmRequest struct {
 	ToolChoice string // llmproto.ToolChoice*;空=auto
 	Streamed   bool
 	MaxTokens  int // <= 0:由ctxmgr按context_window动态推导
-}
-
-// ToolScriptArg 工具脚本执行的参数
-type ToolScriptArg struct {
-	Path     string // 脚本绝对路径
-	Args     string //模型给出的JSON参数,原样作为脚本入参
-	WorkRoot string // 脚本的工作目录
-
-	// 非nil表示调用方消费进度:实现应走流式执行,逐行回调 stdout + stderr;
-	// nil表示无消费者,实现可走缓冲路径(省掉逐行回调与管道编排的开销)
-	OnLine func(line string)
-}
-
-// IToolScriptRunner 执行一个工具脚本
-// 只暴露一个 **方法
-type IToolScriptRunner interface {
-	Run(ctx context.Context, toolArgs ToolScriptArg) (string, error)
 }
 
 // LlmReply 一次上游调用的返回(值对象)

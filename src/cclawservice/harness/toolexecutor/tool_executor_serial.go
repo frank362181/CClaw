@@ -4,7 +4,6 @@ import (
 	"context"
 
 	cCommon "my.favorite/cclawservice/common"
-	"my.favorite/cclawservice/common/llmproto"
 )
 
 // serialExecutor 同步执行一轮内的工具调用(非流式接口走这里)
@@ -12,7 +11,7 @@ type serialExecutor struct {
 	core executorCore
 }
 
-func NewRoundExecutorSerial(runner llmproto.IToolScriptRunner) IToolRoundExecutor {
+func NewRoundExecutorSerial(runner IScriptRunner) IToolRoundExecutor {
 	if runner == nil {
 		panic("function calling: serial executor requires a non-nil IToolScriptRunner")
 	}

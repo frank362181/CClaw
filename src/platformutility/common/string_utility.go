@@ -267,14 +267,35 @@ func SplitString(dottedKey string) []string {
 	return segments
 }
 
+// SplitStringEx 逗号分隔,去重,去空格,保留原来的顺序
 func SplitStringEx(input string, splitStr string) []string {
-	var segments []string
-	if strings.TrimSpace(input) == "" {
+	rawInput := strings.TrimSpace(input)
+
+	segments := make([]string, 0, 4)
+
+	if len(rawInput) == 0 {
 		segments = append(segments, input)
-	} else {
-		lines := strings.Split(input, splitStr)
-		segments = make([]string, 0, len(lines))
-		segments = append(segments, lines...)
+		return segments
+	}
+
+	seen := make(map[string]struct{}, 4)
+	lines := strings.Split(rawInput, splitStr)
+	for _, item := range lines {
+		key := strings.TrimSpace(item)
+		if len(key) == 0 {
+			continue
+		}
+
+		if _, dup := seen[key]; dup {
+			continue
+		}
+
+		seen[key] = struct{}{}
+		segments = append(segments, item)
+	}
+
+	if len(segments) == 0 {
+		return nil
 	}
 
 	return segments
@@ -284,6 +305,23 @@ func SplitKeyWords(keywords string) []string {
 	return strings.FieldsFunc(keywords, func(r rune) bool {
 		return r == ',' || r == '，'
 	})
+}
+
+func GetStringList(v any) []string {
+	switch t := v.(type) {
+	case []string:
+		return t
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			}
+		}
+
+		return out
+	}
+	return nil
 }
 
 // ValueToString 把配置树节点转换为字符串。

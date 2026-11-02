@@ -4,6 +4,7 @@ package common
 
 import (
 	"os"
+	"os/exec"
 	"syscall"
 )
 
@@ -32,4 +33,31 @@ func OpenFileNoFollow(path string) (*os.File, os.FileInfo, error) {
 	}
 
 	return f, stat, nil
+}
+
+func SetProcessGroup(cmd *exec.Cmd) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Setpgid = true
+}
+
+func KillProcessGroup(cmd *exec.Cmd) {
+	if cmd.SysProcAttr == nil {
+		return
+	}
+
+	pgid, err := syscall.Getpgid(cmd.Process.Pid)
+	if err != nil {
+		// 拿不到组号:回退只kill sub-process
+		_ = cmd.Process.Kill()
+		return
+	}
+
+	if pgid <= 1 {
+		_ = cmd.Process.Kill()
+		return
+	}
+
+	_ = syscall.Kill(-pgid, syscall.SIGKILL)
 }

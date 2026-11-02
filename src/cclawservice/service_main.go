@@ -22,6 +22,7 @@ import (
 	selfInterceptor "my.favorite/cclawservice/interceptor"
 	"my.favorite/cclawservice/model/repo"
 	"my.favorite/cclawservice/service"
+	core2 "my.favorite/cclawservice/service/core"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/concurrency"
 	"my.favorite/platformutility/config"
@@ -234,13 +235,16 @@ func (m *ServiceMain) SetupAgentController() error {
 }
 
 func (m *ServiceMain) SetupChatController() error {
-	// function-calling 开关来自 ini [sandBox] functionCalling(默认关闭,安全兜底)
-	functionCalling, _ := m.configHelper.GetBoolValueDefault("sandBox", "functionCalling", false)
+	// function-calling 开关来自 ini [toolRule] functionCalling(默认关闭,安全兜底)
+	functionCalling, _ := m.configHelper.GetBoolValueDefault("toolRule", "functionCalling", false)
 
 	// 会话记录开关来自 ini [chat] sessionRecord(阶段1双写:只写不读的旁路,默认开启)
 	sessionRecord, _ := m.configHelper.GetBoolValueDefault("chat", "sessionRecord", true)
 
-	chatService := service.GetChattingService(m.database, m.agentRepo, functionCalling, sessionRecord)
+	// 工具执行的配置规则,从配置文件加载
+	toolRules := core2.LoadToolConfiguredRules(m.configHelper)
+
+	chatService := service.GetChattingService(m.database, m.agentRepo, functionCalling, sessionRecord, toolRules)
 	chatController := selfController.GetChatController(chatService, m.concurrent)
 
 	urlFunMap := make(map[string]gin.HandlerFunc)

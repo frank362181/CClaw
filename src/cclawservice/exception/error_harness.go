@@ -32,10 +32,12 @@ const (
 	codeChatLLMRateLimit
 	codeChatLLMContentFilter
 	codeAgentFileUnavailable
+	codeChatToolArgInvalid
 	codeSandboxExecutorError
 	codeChatToolLoopGuard
 	codeChatToolLoopExceeded
 	codeChatToolExecutionMisMatched
+	codeChatToolExecutionConfig
 	codeChatResponseTooLarge
 )
 
@@ -203,6 +205,13 @@ var (
 		Msg:        "启动文件不可用(文件过大或读取失败)",
 	})
 
+	ToolArgInvalidKind = apperr.Register(apperr.Kind{
+		Name:       "harness.tool_arg_invalid",
+		Code:       codeChatToolArgInvalid,
+		HTTPStatus: http.StatusOK,
+		Msg:        "工具所需参数非JSON格式",
+	})
+
 	SandboxExecutorKind = apperr.Register(apperr.Kind{
 		Name:       "harness.sandbox_executor",
 		Code:       codeSandboxExecutorError,
@@ -222,6 +231,16 @@ var (
 		Code:       codeChatToolExecutionMisMatched,
 		HTTPStatus: http.StatusOK,
 		Msg:        "工具调用返回结果不匹配",
+	})
+
+	ToolExecutionConfigKind = apperr.Register(apperr.Kind{
+		Name:       "harness.tool_execution_config",
+		Code:       codeChatToolExecutionConfig,
+		HTTPStatus: http.StatusOK,
+		Msg:        "工具调用被配置安全策略拒绝",
+		Retryable:  false,
+		Silent:     false,
+		Notify:     true,
 	})
 
 	ChatResponseTooLargeKind = apperr.Register(apperr.Kind{

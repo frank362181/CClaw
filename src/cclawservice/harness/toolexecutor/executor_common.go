@@ -11,25 +11,30 @@ package toolexecutor
 
 import (
 	"context"
-	"os/exec"
-
-	"my.favorite/cclawservice/harness/security"
+	"time"
 )
 
 type SystemToolName string
 
 const (
-	SystemToolGlob  SystemToolName = "Glob"  //搜索路径
-	SystemToolGrep  SystemToolName = "Grep"  //搜索文件内容
-	SystemToolRead  SystemToolName = "Read"  //读取
-	SystemToolWrite SystemToolName = "Write" //覆盖或创建
-	SystemToolEdit  SystemToolName = "Edit"  //replace
-	SystemToolBash  SystemToolName = "Bash"  //执行
+	SystemToolGlob  SystemToolName = "glob"  //搜索路径
+	SystemToolGrep  SystemToolName = "grep"  //搜索文件内容
+	SystemToolRead  SystemToolName = "read"  //读取
+	SystemToolWrite SystemToolName = "write" //覆盖或创建
+	SystemToolEdit  SystemToolName = "edit"  //replace
+	SystemToolBash  SystemToolName = "bash"  //执行
 )
 
 func (s SystemToolName) String() string {
 	return string(s)
 }
+
+const (
+	scriptBin          = "python3"         // 脚本解释器(与 SKILL.md requires.bins 对齐)
+	scriptRunTimeout   = 120 * time.Second // 单次脚本执行默认超时(OCR/大目录耗时,可用 CCLAW_SCRIPT_TIMEOUT_SEC 覆盖)
+	scriptMaxOutput    = 256 * 1024        // stdout/stderr 各 256KB 上限
+	scriptMaxInputJSON = 64 * 1024         // 传入参数 JSON 上限
+)
 
 // IToolRoundExecutor 工具执行策略:同步接口串行、流式接口同轮并行 + 进度汇集
 // 这是 runToolLoop 与 streamToolLoop 之间唯一的差异,故抽成可替换的策略对象。
@@ -38,11 +43,25 @@ type IToolRoundExecutor interface {
 	// 契约:
 	//   - 返回的 outcome **顺序**必须与 invocations 一致
 	//   - 返回条数 <= len(invocations):只有 ctx 已取消时才能缺条
-	RunAll(ctx context.Context, env ToolEnv, invocations []ToolInvocation,
-		sink ToolEventSink, ledger ToolLedger) []ToolOutcome
+	RunAll(ctx context.Context, env ToolEnv, invocations []ToolInvocation, sink ToolEventSink, ledger ToolLedger) []ToolOutcome
 }
 
-type ISandboxedBuilder interface {
-	// BuildCommand  沙箱化包装接口,从工具输入构建原始命令,返回 *exec.Cmd 尚未被沙箱包装
-	BuildCommand(ctx context.Context, input map[string]any, cc security.CallContext) (*exec.Cmd, error)
+// ScriptArgument 工具脚本执行的参数
+type ScriptArgument struct {
+	Path     string // 脚本绝对路径
+	Args     string //模型给出的JSON参数,原样作为脚本入参
+	WorkRoot string // 脚本的工作目录
+
+	// 非nil表示调用方消费进度:实现应走流式执行,逐行回调 stdout + stderr;
+	// nil表示无消费者,实现可走缓冲路径(省掉逐行回调与管道编排的开销)
+	OnLine func(line string)
+
+	// 沙箱规格,零值(Enabled == false) = 不套沙箱
+	Sandbox SandBoxSpec // 沙箱规格
+}
+
+// IScriptRunner 执行一个工具脚本
+// 只暴露一个 **方法
+type IScriptRunner interface {
+	Run(ctx context.Context, toolArgs ScriptArgument) (string, error)
 }

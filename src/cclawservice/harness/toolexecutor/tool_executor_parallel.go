@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	cCommon "my.favorite/cclawservice/common"
-	"my.favorite/cclawservice/common/llmproto"
 	pCommon "my.favorite/platformutility/common"
 )
 
@@ -20,7 +19,7 @@ type parallelExecutor struct {
 	buf int //允许覆盖
 }
 
-func NewRoundExecutorParallel(runner llmproto.IToolScriptRunner) IToolRoundExecutor {
+func NewRoundExecutorParallel(runner IScriptRunner) IToolRoundExecutor {
 	if runner == nil {
 		panic("function calling: parallel executor requires a non-nil IToolScriptRunner")
 	}

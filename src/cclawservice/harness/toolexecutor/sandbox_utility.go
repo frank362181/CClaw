@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"my.favorite/cclawservice/harness/security"
+	pCommon "my.favorite/platformutility/common"
 )
 
 // buildSeatbeltProfile 构建 SBPL 策略字符串。
@@ -32,12 +33,15 @@ func buildSeatbeltProfile(spec *SandBoxSpec) string {
 	// 文件写入：只允许 workspace 和 AllowWrite
 	b.WriteString("(deny file-write*)\n")
 	if spec.WorkingDir != "" {
-		b.WriteString(fmt.Sprintf("(allow file-write* (subpath \"%s\"))\n",
-			escapeSBPL(spec.WorkingDir)))
+		b.WriteString(fmt.Sprintf("(allow file-write* (subpath \"%s\"))\n", escapeSBPL(spec.WorkingDir)))
 	}
 	for _, w := range spec.AllowedDirWrite {
 		b.WriteString(fmt.Sprintf("(allow file-write* (subpath \"%s\"))\n", escapeSBPL(w)))
 	}
+
+	// 兜底设备: python/subprocess 经常写 dev/null,不会放行会导致莫名其妙的 EACCESS
+	b.WriteString("(allow file-write* (literal \"/dev/null\"))\n")
+	b.WriteString("(allow file-write* (literal \"/dev/tty\"))\n")
 
 	// 网络
 	if spec.AllowedNetwork {
@@ -55,6 +59,9 @@ func buildSeatbeltProfile(spec *SandBoxSpec) string {
 func escapeSBPL(s string) string {
 	s = strings.ReplaceAll(s, "\\", "\\\\")
 	s = strings.ReplaceAll(s, "\"", "\\\"")
+	s = strings.ReplaceAll(s, "\n", "")
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\t", " ")
 	return s
 }
 
@@ -77,8 +84,9 @@ func defaultDeniedReadPaths() []string {
 	}
 }
 
-func sandboxSpecFromCallContext(toolName string, cc security.CallContext) *SandBoxSpec {
+func getSandboxSpecFromCallContext(toolName string, cc security.CallContext) *SandBoxSpec {
 	spec := &SandBoxSpec{
+		Enabled:    enabledSandboxFromContext(cc), // 与调用方判断一致
 		ToolName:   toolName,
 		WorkingDir: cc.WorkingDir,
 	}
@@ -126,4 +134,19 @@ func enabledSandboxFromContext(cc security.CallContext) bool {
 	default:
 		return true
 	}
+}
+
+// getProcessEnv 沙箱开启时追加 PYTHONDONTWRITEBYTECODE=1:python 默认会往脚本目录写 __pycache__,
+// 沙箱只允许写 WorkingDir,不关掉字节码缓存会让整次调用以"写入被拒"失败。
+func getProcessEnv(workspaceRoot string, sandboxed bool) []string {
+	env := pCommon.GetOSEnvironments()
+	if workspaceRoot != "" {
+		env = append(env, "CCLAW_AGENT_WORKSPACE="+workspaceRoot)
+	}
+
+	if sandboxed {
+		env = append(env, "PYTHONDONTWRITEBYTECODE=1")
+	}
+
+	return env
 }

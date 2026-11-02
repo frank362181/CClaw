@@ -1,5 +1,8 @@
-/*
+/**
+* 9️九段式的带有tool调用前的检查,沙箱支持的脚本执行器
+*
 * 将责任链与工具执行链接起来,是工具函数调用的入口
+*
 **/
 
 package toolexecutor
@@ -10,28 +13,13 @@ import (
 	"os/exec"
 	"strings"
 
-	"my.favorite/cclawservice/common/llmproto"
 	"my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/harness/security"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
 )
 
-type ToolExecutor struct{}
-
-func NewToolExecutor() llmproto.IToolScriptRunner {
-	return &ToolExecutor{}
-}
-
-func (e *ToolExecutor) Run(ctx context.Context, arg llmproto.ToolScriptArg) (string, error) {
-	if arg.OnLine == nil {
-		return RunScript(ctx, arg.Path, arg.Args, arg.WorkRoot)
-	}
-
-	return RunScriptStream(ctx, arg.Path, arg.Args, arg.WorkRoot, arg.OnLine)
-}
-
-type Executor struct {
+type ComposedScriptExecutor struct {
 	pipeline *security.PermissionPipeline
 	toolList map[string]security.IBaseTool //存放注册进来的工具,就是待执行的工具
 
@@ -39,8 +27,8 @@ type Executor struct {
 	sandboxMgr     *SandBoxMgr
 }
 
-var toolExecutor = pCommon.GetSingleton(func() *Executor {
-	toolExecutor := &Executor{
+var toolExecutor = pCommon.GetSingleton(func() *ComposedScriptExecutor {
+	toolExecutor := &ComposedScriptExecutor{
 		pipeline: security.GetPermissionPipeline(), // singleton,default permission pipeline
 		toolList: make(map[string]security.IBaseTool),
 
@@ -51,12 +39,12 @@ var toolExecutor = pCommon.GetSingleton(func() *Executor {
 
 }).Instance()
 
-func GetExecutor(sandboxEnabled bool) *Executor {
+func GetExecutor(sandboxEnabled bool) *ComposedScriptExecutor {
 	toolExecutor.SandboxEnabled = sandboxEnabled
 	return toolExecutor
 }
 
-func (e *Executor) Register(baseTool security.IBaseTool) {
+func (e *ComposedScriptExecutor) Register(baseTool security.IBaseTool) {
 	if baseTool == nil {
 		return
 	}
@@ -68,7 +56,7 @@ func (e *Executor) Register(baseTool security.IBaseTool) {
 	e.toolList[toolName] = baseTool
 }
 
-func (e *Executor) Execute(ctx context.Context, req *security.ToolCallRequest) (any, error) {
+func (e *ComposedScriptExecutor) Execute(ctx context.Context, req *security.ToolCallRequest) (any, error) {
 	tmpTool, ok := e.toolList[req.ToolName]
 	if !ok {
 		return nil, pException.ParameterEmptyErrorEx2("unknown tool %s", req.ToolName)
@@ -103,7 +91,7 @@ func (e *Executor) Execute(ctx context.Context, req *security.ToolCallRequest) (
 	return tmpTool.Call(ctx, req.Input, req.Context)
 }
 
-func (e *Executor) enabledSandbox(req *security.ToolCallRequest, d *security.Decision) bool {
+func (e *ComposedScriptExecutor) enabledSandbox(req *security.ToolCallRequest, d *security.Decision) bool {
 	if !e.SandboxEnabled {
 		return false
 	}
@@ -132,7 +120,7 @@ func (e *Executor) enabledSandbox(req *security.ToolCallRequest, d *security.Dec
 	}
 }
 
-func (e *Executor) executeSandboxed(ctx context.Context, req *security.ToolCallRequest, baseTool security.IBaseTool) (any, error) {
+func (e *ComposedScriptExecutor) executeSandboxed(ctx context.Context, req *security.ToolCallRequest, baseTool security.IBaseTool) (any, error) {
 	// 如果实现了ToolBuilder接口
 	cb, ok := baseTool.(ISandboxedBuilder)
 	if !ok {
@@ -146,7 +134,7 @@ func (e *Executor) executeSandboxed(ctx context.Context, req *security.ToolCallR
 	}
 
 	//构建沙箱环境
-	spec := sandboxSpecFromCallContext(req.ToolName, req.Context)
+	spec := getSandboxSpecFromCallContext(req.ToolName, req.Context)
 
 	// 如果实现了自定义的沙箱策略
 	if sa, ok := baseTool.(ISandboxSpecAware); ok {

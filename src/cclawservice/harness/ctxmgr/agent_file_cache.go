@@ -16,6 +16,7 @@ package ctxmgr
 
 import (
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -348,6 +349,19 @@ func (dc *AgentDocumentCache) GetSystemToolSchemaDocument(allowedList, disallowe
 	}
 	dc.mu.RUnlock()
 
+	// 1. allowed-tool 非空即白名单
+	if allowed := pCommon.NormalizeStringsSet(allowedList); len(allowed) > 0 {
+		kept := make([]string, 0, len(visibleList))
+		for _, name := range visibleList {
+			if _, ok := allowed[name]; ok {
+				kept = append(kept, name)
+			}
+		}
+
+		visibleList = kept
+	}
+
+	// 2. disallowed-tools 优先级高于 allowed-tools:显示禁止一定生效
 	if len(disallowedList) > 0 {
 		denied := pCommon.NormalizeStringsSet(disallowedList)
 		if len(denied) > 0 {
@@ -362,11 +376,18 @@ func (dc *AgentDocumentCache) GetSystemToolSchemaDocument(allowedList, disallowe
 		}
 	}
 
+	// 3. 排序
+	sort.Strings(visibleList)
+
 	var documents []hCommon.SystemToolSchemaDocument
 	dc.mu.RLock()
 	defer dc.mu.RUnlock()
 	for _, item := range visibleList {
-		documents = append(documents, dc.systemToolSchemaCache[item])
+		doc, ok := dc.systemToolSchemaCache[item]
+		if !ok {
+			continue
+		}
+		documents = append(documents, doc)
 	}
 
 	return documents, nil

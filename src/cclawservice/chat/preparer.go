@@ -115,14 +115,15 @@ func (p *Preparer) Prepare(ctx context.Context, cmd Command) (*TurnState, error)
 	workRoot, _ := hCommon.BuildAgentBootstrapRoot(agent)
 
 	return &TurnState{
-		Cmd: cmd, Agent: agent,
+		Cmd:           cmd,
+		Agent:         agent,
 		Provider:      Provider{Llm: llmProvider},
 		SystemPrompt:  *sysPrompt,
 		VisibleTools:  visible,
 		Plan:          plan,
 		Policy:        policy,
 		ToolsMaxRunes: ctxmgr.TurnToolResultMaxRunes,
-		Scripts:       toolexecutor.GetScriptsResolver(bundle.Scripts),
+		Scripts:       toolexecutor.GetScriptsResolver(bundle.Specs),
 		WorkRoot:      workRoot,
 		Timing:        timing,
 		Ledger:        NewMemoryLedger(ctxmgr.NewTurnRecorder()), //创建本轮对话所需的账本,两阶段对话

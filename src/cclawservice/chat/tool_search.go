@@ -15,6 +15,7 @@ import (
 	"my.favorite/cclawservice/common/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
+	"my.favorite/cclawservice/harness/toolexecutor"
 	"my.favorite/platformutility/common"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging"
@@ -59,6 +60,9 @@ type ToolsBundle struct {
 	ForcedNames []string          // 声明了force-call的工具名
 	Scripts     map[string]string // 工具名 --> 脚本路径(绝对路径)
 	Slots       []SkillSlot       // 技能级元数据(意图门 + SOP 注入的输入)
+
+	// 取代原来的map[string]string表示的路径
+	Specs map[string]toolexecutor.ToolSpec
 }
 
 // Activate 根据本轮用户问题判定“哪些技能相关”(意图门)
@@ -180,6 +184,7 @@ func (search *ToolsSearch) GetToolsBundle(skillDocs []hCommon.SkillDocument) Too
 		ForcedNames: make([]string, 0, len(basicTools)),
 		Scripts:     make(map[string]string),
 		Slots:       slots,
+		Specs:       make(map[string]toolexecutor.ToolSpec),
 	}
 
 	for _, t := range basicTools {
@@ -194,12 +199,27 @@ func (search *ToolsSearch) GetToolsBundle(skillDocs []hCommon.SkillDocument) Too
 			bundle.ForcedNames = append(bundle.ForcedNames, llmTool.Function.Name)
 		}
 
-		bundleKey := strings.TrimSpace(t.Name)
-		if prev, dup := bundle.Scripts[bundleKey]; dup && prev != t.Script {
-			// 如果重复,打印日志
-			logging.LogWarnF("tool name conflict :%q -> %s override %s", bundleKey, t.Script, prev)
+		bundleKey := strings.ToLower(strings.TrimSpace(t.Name))
+		spec := toolexecutor.ToolSpec{
+			Name:       bundleKey,
+			Script:     t.Script,     //此时已经是绝对路径了
+			Schema:     t.Parameters, // 工具参数
+			ReadOnly:   t.ReadOnly,
+			Shelled:    t.Shelled,
+			Sandboxed:  t.Sandboxed,
+			PathFields: t.PathFields, // 系统工具 + SKILL.md
+		}.Normalize()
+		if !spec.IsValid() {
+			logging.LogWarnF("tool repository: tool %q has no script, dropped from spec table", bundleKey)
+			continue
 		}
-		bundle.Scripts[bundleKey] = t.Script //此时执行脚本是绝对路径
+
+		if prev, dup := bundle.Specs[bundleKey]; dup &&
+			(prev.Script != spec.Script || prev.ReadOnly != spec.ReadOnly || prev.Sandboxed != spec.Sandboxed) {
+			// 如果重复,打印日志
+			logging.LogWarnF("tool name conflict :%q -> %s(%s) override %s", bundleKey, spec.Script, spec.Flags(), prev.Script, prev.Flags())
+		}
+		bundle.Specs[bundleKey] = spec //此时执行脚本是绝对路径
 	}
 
 	bundle.ForcedNames = pCommon.NormalizeStrings(bundle.ForcedNames) //规范化名称,去重等
@@ -286,12 +306,18 @@ func (search *ToolsSearch) collectToolsFromSkill(skillDocs []hCommon.SkillDocume
 			continue
 		}
 
+		toolName := strings.ToLower(strings.TrimSpace(doc.ToolName))
+		profile := toolexecutor.LookupSystemToolProfile(toolName)
 		sysTool := hCommon.BasicTool{
 			Source:      hCommon.TSourceSystem,
-			Name:        strings.ToLower(strings.TrimSpace(doc.ToolName)),
+			Name:        toolName,
 			Description: doc.SysToolSchemaMeta.Description,
 			Script:      scriptFile,
 			Parameters:  doc.SysToolSchemaMeta.InputSchema,
+			ReadOnly:    profile.ReadOnly,
+			Sandboxed:   profile.Sandboxed,
+			PathFields:  profile.PathFields,
+			Shelled:     profile.Shelled,
 		}
 
 		visibleTools = append(visibleTools, sysTool)

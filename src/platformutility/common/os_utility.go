@@ -103,27 +103,6 @@ func GetExecutableDir() string {
 	return filepath.Dir(realPath)
 }
 
-func GetRelativePath(path, cwd string) (string, bool) {
-	resolvedCwd := ResolvePath(cwd, "")
-	resolvedPath := ResolvePath(path, resolvedCwd)
-
-	rel, err := filepath.Rel(resolvedCwd, resolvedPath)
-	if err != nil {
-		return "", false
-	}
-
-	sep := string(filepath.Separator)
-	if rel == "." || rel == "" {
-		return ".", true
-	}
-
-	if rel == ".." || strings.HasPrefix(rel, ".."+sep) || filepath.IsAbs(rel) {
-		return "", false
-	}
-
-	return rel, true
-}
-
 func FileExists(filename string) bool {
 	_, err := os.Stat(filename)
 	if err == nil {
@@ -266,45 +245,64 @@ func IsLocalPath(path string) bool {
 }
 
 // ResolvePath 将两个目录合并,并规范化后返回绝对路径
-func ResolvePath(input, baseDir string) string {
-	if baseDir == "" {
-		wd, _ := os.Getwd()
-		baseDir = wd
+// - 展开 ~/,~/xxx,去 Unicode 空格、识别 file:\\ --与脚本(如read.py等脚本)侧口径一致
+// - 相对路径以baseDir为基准
+// - 存在则EvalSymlinks; 不存在则沿父链解析后拼回
+func ResolvePath(raw, baseDir string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return BlankString, fmt.Errorf("path is empty")
 	}
 
-	normalized := NormalizePath(input, "", false, false, false, false)
-	normalizedBaseDir := NormalizePath(baseDir, "", false, true, false, false)
-
-	if filepath.IsAbs(normalized) {
-		return filepath.Clean(normalized)
+	p := NormalizePath(trimmed, "", true, true, false, true)
+	if len(p) == 0 {
+		return BlankString, fmt.Errorf("path is empty")
 	}
 
-	joined := filepath.Join(normalizedBaseDir, normalized)
-	if !filepath.IsAbs(joined) {
-		joined, _ = filepath.Abs(joined)
+	if !filepath.IsAbs(p) {
+		root := strings.TrimSpace(baseDir)
+		if len(root) == 0 {
+			return BlankString, fmt.Errorf("relative path %s without work root", raw)
+		}
+		p = filepath.Join(root, p)
 	}
 
-	return filepath.Clean(joined)
+	realPath := ResolveRealPath(filepath.Clean(p))
+	if len(realPath) == 0 {
+		return BlankString, fmt.Errorf("resolve path %s failed", raw)
+	}
+
+	return realPath, nil
 }
 
 // ResolveRealPath 解析路径的真实路径;文件不存在时沿父目录链向上找最近存在的祖先,
 // 解析其真实路径后拼接剩余部分,保证符号链接前缀(如 macOS /var -> /private/var)也被正确解析。
 func ResolveRealPath(path string) string {
-	_, err := filepath.Abs(path)
-	if err != nil {
-		return ""
-	}
+	var missing []string
+	cur := path
 
-	if r, err := filepath.EvalSymlinks(path); err == nil {
-		return r
-	}
+	for {
+		realPath, err := filepath.EvalSymlinks(cur)
+		if err == nil {
+			if len(missing) == 0 {
+				return realPath
+			}
+			parts := append([]string{realPath}, missing...)
+			return filepath.Join(parts...)
+		}
 
-	parent := filepath.Dir(path)
-	if parent == path {
-		return path
-	}
+		if !os.IsNotExist(err) {
+			return BlankString
+		}
 
-	return filepath.Join(ResolveRealPath(parent), filepath.Base(path))
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return BlankString
+		}
+
+		missing = append([]string{filepath.Base(cur)}, missing...)
+		cur = parent
+	}
 }
 
 // FileURLToPath converts a file ://URL to an O-native path
@@ -395,6 +393,26 @@ func SafeJoinWithRoot(realRoot, target string) (string, error) {
 	}
 
 	return targetAbs, nil
+}
+
+// WithinRoots 判断realPath是否落在rootDirs的目录之内,返回命中的那个 root
+func WithinRoots(realPath string, rootDirs []string) (bool, string) {
+	if strings.TrimSpace(realPath) == BlankString {
+		return false, BlankString
+	}
+
+	for _, root := range rootDirs {
+		r := strings.TrimSpace(root)
+		if r == BlankString || !filepath.IsAbs(r) {
+			continue
+		}
+
+		if _, err := SafeJoinWithRoot(r, realPath); err != nil {
+			return true, r
+		}
+	}
+
+	return false, BlankString
 }
 
 func ComputeStringFingerprint(text string, maxBytes int) string {

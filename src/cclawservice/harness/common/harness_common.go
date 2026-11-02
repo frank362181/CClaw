@@ -499,7 +499,15 @@ type BasicTool struct {
 	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
 	Script      string         `json:"script,omitempty" yaml:"script,omitempty"`
 	Parameters  map[string]any `json:"parameters,omitempty" yaml:"parameters,omitempty"`
-	ForceCall   bool           `json:"forceCall,omitempty" yaml:"force-call,omitempty"`
+	ForceCall   bool           `json:"forceCall,omitempty" yaml:"forceCall,omitempty"`
+
+	ReadOnly  bool `json:"readOnly,omitempty" yaml:"readOnly,omitempty"`
+	Shelled   bool `json:"shelled,omitempty" yaml:"shelled,omitempty"`
+	Sandboxed bool `json:"sandboxed,omitempty" yaml:"sandboxed,omitempty"`
+
+	// PathFields参数来自于SKILL.md:path-fields
+	// 系统工具则由toolexecutor.SystemToolProfile填充
+	PathFields []string `json:"pathFields,omitempty" yaml:"pathFields,omitempty"`
 }
 
 type SystemicTool struct {

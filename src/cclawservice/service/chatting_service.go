@@ -12,6 +12,7 @@ import (
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/harness/observatory"
+	"my.favorite/cclawservice/harness/toolexecutor"
 	"my.favorite/cclawservice/model/repo"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/concurrency"
@@ -35,6 +36,8 @@ type ChattingService struct {
 	agentConcurrent  concurrency.IConcurrencyController // 按照Agent维度的并发控制器
 	turnRegistrator  chat.ITurnRegistrator
 	turnReporter     chat.ITurnReporter
+
+	toolConfiguredRules toolexecutor.ToolConfigRules
 }
 
 var chattingService = pCommon.GetSingleton(func() *ChattingService {
@@ -43,7 +46,7 @@ var chattingService = pCommon.GetSingleton(func() *ChattingService {
 	}
 }).Instance()
 
-func GetChattingService(db core.IBaseDatabase, agentRepo *repo.AgentRepository, functionCalling bool, sessionRecord bool) *ChattingService {
+func GetChattingService(db core.IBaseDatabase, agentRepo *repo.AgentRepository, functionCalling bool, sessionRecord bool, toolRules toolexecutor.ToolConfigRules) *ChattingService {
 	if db == nil || agentRepo == nil {
 		panic("service.GetChattingService: db / agentRepo must not be nil")
 	}
@@ -65,6 +68,8 @@ func GetChattingService(db core.IBaseDatabase, agentRepo *repo.AgentRepository, 
 	chattingService.journal = chat.GetMemoryJournal(memoryService)
 	chattingService.turnRegistrator = chat.GetChatTurnRegistrator()
 	chattingService.turnReporter = chat.GetTurnReporter()
+
+	chattingService.toolConfiguredRules = toolRules
 
 	return chattingService
 }
@@ -208,8 +213,8 @@ func (s *ChattingService) invoke(ctx context.Context, turnState *chat.TurnState,
 
 	// 有工具调用
 	if turnState.IsStreamed() {
-		return s.asyncLooper.Run(ctx, turnState, sink)
+		return s.asyncLooper.Run(ctx, turnState, sink, s.toolConfiguredRules)
 	}
 
-	return s.syncLooper.Run(ctx, turnState, sink)
+	return s.syncLooper.Run(ctx, turnState, sink, s.toolConfiguredRules)
 }

@@ -18,29 +18,53 @@ import (
 type ToolEnv struct {
 	Resolver IScriptsResolver // 工具名 -> 脚本绝对路径
 	WorkRoot string           // agent 工作区根目录(工具相对路径的基准)
+
+	ConfiguredRules ToolConfigRules // 执行的安全配置策略
 }
 
-// ScriptPath 解析工具名 -> 脚本绝对路径。
-// 放在值对象上而不是包级函数:它只依赖自身两个字段,调用点也只有执行器内部,
-// 顺带把"工具不存在"的三种成因(空名/无resolver/未注册)收敛成一句可读错误。
-func (e ToolEnv) ScriptPath(toolName string) (string, error) {
+func NewToolEnv(resolver IScriptsResolver, workRoot string, rules ToolConfigRules) ToolEnv {
+	return ToolEnv{
+		Resolver:        resolver,
+		WorkRoot:        workRoot,
+		ConfiguredRules: rules,
+	}
+}
+
+// Spec 解析工具名 -> 执行期元数据
+// 三种不可用工具的成因(空名 / 无 resolver / 未注册 / 无脚本)
+func (e ToolEnv) Spec(toolName string) (ToolSpec, error) {
 	toolName = strings.TrimSpace(toolName)
 	if len(toolName) == 0 {
-		return pCommon.BlankString, fmt.Errorf("tool name is empty")
+		return ToolSpec{}, fmt.Errorf("tool name is empty")
 	}
 
 	if e.Resolver == nil {
-		return pCommon.BlankString, fmt.Errorf("scripts is empty")
+		return ToolSpec{}, fmt.Errorf("tool %s:scripts is empty", toolName)
 	}
 
-	path, err := e.Resolver.Resolve(toolName)
+	spec, ok := e.Resolver.Resolve(toolName)
+	if !ok {
+		return ToolSpec{}, fmt.Errorf("tool script not registered for tool name %s", toolName)
+	}
+
+	spec = spec.Normalize()
+	if !spec.IsValid() {
+		return ToolSpec{}, fmt.Errorf("tool script not registered for tool name %s", toolName)
+	}
+
+	return spec, nil
+}
+
+// ScriptPath 只要路径的便捷入口函数
+func (e ToolEnv) ScriptPath(toolName string) (string, error) {
+	spec, err := e.Spec(toolName)
 	if err != nil {
-		return pCommon.BlankString, fmt.Errorf("tool script not registered for tool name %s", toolName)
+		return pCommon.BlankString, err
 	}
 
-	if path = strings.TrimSpace(path); path == pCommon.BlankString {
-		return pCommon.BlankString, fmt.Errorf("tool script not registered for tool name %s", toolName)
-	}
+	return spec.Script, nil
+}
 
-	return path, nil
+func (e ToolEnv) AdmitRule(invocation ToolInvocation) Permission {
+	return e.ConfiguredRules.AdmitRule(e, invocation)
 }

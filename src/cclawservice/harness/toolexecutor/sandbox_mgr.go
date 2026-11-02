@@ -28,17 +28,19 @@ func GetSandboxMgr() *SandBoxMgr {
 func (mgr *SandBoxMgr) SelectSandbox(cc security.CallContext) ISandBox {
 	if cc.SandboxConfig != nil && len(cc.SandboxConfig.Backend) > 0 {
 		for _, b := range mgr.backends {
+			if b == nil {
+				continue
+			}
+
 			if strings.EqualFold(b.Name(), cc.SandboxConfig.Backend) {
 				if b.Available() {
 					return b
 				}
 
-				// 显式指定不可用
+				// 显式指定但不可用
 				return nil
 			}
 		}
-
-		// 指定后端名称不存在
 	}
 
 	return mgr.active
@@ -56,20 +58,22 @@ func (mgr *SandBoxMgr) Active() ISandBox {
 
 func (mgr *SandBoxMgr) registerDefaultSandbox() {
 	switch runtime.GOOS {
-	case "linux":
-		mgr.backends = append(mgr.backends, nil)
 	case "darwin":
 		mgr.backends = append(mgr.backends, NewSeatbeltSandbox())
 	}
 }
 
 func (mgr *SandBoxMgr) activeSandbox() {
+	mgr.active = nil
+
 	for _, b := range mgr.backends {
+		if b == nil {
+			continue
+		}
+
 		if b.Available() {
 			mgr.active = b
 			return
 		}
 	}
-
-	mgr.active = nil
 }
