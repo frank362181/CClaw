@@ -11,7 +11,7 @@ package exception
 import (
 	"net/http"
 
-	"my.favorite/cclawservice/apperr"
+	"my.favorite/platformutility/apperr"
 )
 
 const (

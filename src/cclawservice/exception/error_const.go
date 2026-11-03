@@ -1,14 +1,14 @@
 package exception
 
 import (
-	"my.favorite/platformutility/webbase/middleware/basic"
+	pException "my.favorite/platformutility/exception"
 )
 
 // 定义每个error类型的编码段
 const (
-	codeErrorUserBase          = basic.ConstErrorMax + 1000
-	codeErrorDatabase          = basic.ConstErrorMax + 1400
-	codeErrorAgentBase         = basic.ConstErrorMax + 2000
-	codeErrorRuntimeClientBase = basic.ConstErrorMax + 2500
-	codeErrorHarnessChatBase   = basic.ConstErrorMax + 2600
+	codeErrorUserBase          = pException.ErrorIdSystemBase + 1000
+	codeErrorDatabase          = pException.ErrorIdSystemBase + 1400
+	codeErrorAgentBase         = pException.ErrorIdSystemBase + 2000
+	codeErrorRuntimeClientBase = pException.ErrorIdSystemBase + 2500
+	codeErrorHarnessChatBase   = pException.ErrorIdSystemBase + 2600
 )

@@ -21,12 +21,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"my.favorite/cclawservice/apperr"
 	"my.favorite/cclawservice/chat"
 	cCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/toolexecutor"
+	"my.favorite/platformutility/apperr"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging"
 	"my.favorite/platformutility/webbase/middleware/basic"

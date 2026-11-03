@@ -20,13 +20,18 @@ type ToolEnv struct {
 	WorkRoot string           // agent 工作区根目录(工具相对路径的基准)
 
 	ConfiguredRules ToolConfigRules // 执行的安全配置策略
+
+	// 本轮唯一的标识,用作goroutine的作用域名称
+	// 空表示未提供,执行器会退化为"tool-turn"
+	ScopeName string
 }
 
-func NewToolEnv(resolver IScriptsResolver, workRoot string, rules ToolConfigRules) ToolEnv {
+func NewToolEnv(resolver IScriptsResolver, workRoot string, scope string, rules ToolConfigRules) ToolEnv {
 	return ToolEnv{
 		Resolver:        resolver,
 		WorkRoot:        workRoot,
 		ConfiguredRules: rules,
+		ScopeName:       scope,
 	}
 }
 

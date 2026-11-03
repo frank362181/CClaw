@@ -9,8 +9,8 @@ import (
 )
 
 var (
-	Version   = "0.0.0"
-	Commit    = "unknown"
+	Version   = "1.1.0"
+	Commit    = "feature:1.多goroutine支持"
 	BuildTime = common.GetDatetimeUtilityInstance().GetCurrentDatetime().DateStr
 
 	GoVersion = runtime.Version() //运行时自动获取

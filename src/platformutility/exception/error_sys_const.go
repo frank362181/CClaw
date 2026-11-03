@@ -59,7 +59,7 @@ const (
 
 // 服务器监听 / 网络 / Web 错误（500 段，连续）
 const (
-	ErrorIdSysAddUsing             = iota + 800 // 服务器监听相关错误
+	ErrorIdSysAddUsing             = iota + 500 // 服务器监听相关错误
 	ErrorIdSysSocketConnectTimeout              // socket 链接超时
 	ErrorIdSysSocketOverBuffer                  // socket 读缓冲区溢出
 	ErrorIdSysWebServer                         // Web 服务器错误

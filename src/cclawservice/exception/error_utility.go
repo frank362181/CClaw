@@ -7,8 +7,8 @@ package exception
 import (
 	"errors"
 
-	"my.favorite/cclawservice/apperr"
 	"my.favorite/cclawservice/common/llmproto"
+	"my.favorite/platformutility/apperr"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
 )

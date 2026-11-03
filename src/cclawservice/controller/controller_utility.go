@@ -9,10 +9,10 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"my.favorite/cclawservice/apperr"
 	cclawcommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/request"
+	"my.favorite/platformutility/apperr"
 	pException "my.favorite/platformutility/exception"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )

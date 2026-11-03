@@ -298,6 +298,16 @@ func (m *ServiceMain) Destroy() {
 		_ = m.baseRouter.Shutdown()
 	}
 
+	chat.GetTransportPool().Close() // 彻底关闭所有链接
+
+	concurrency.GetConcurrentAdvance().Destroy() //释放agent gate
+	chat.GetToolsSearch().Destroy()              //释放工具仓库
+
+	concurrency.GetTaskManager().CancelScope()
+	concurrency.GetTaskManager().CancelDaemon()
+
+	logging.CloseLogger() // 日志最后刷盘
+
 	if m.agentRepo != nil {
 		m.agentRepo.Destroy()
 	}
@@ -317,11 +327,6 @@ func (m *ServiceMain) Destroy() {
 	if m.memoryDB != nil {
 		_ = m.memoryDB.CloseMemoryDb()
 	}
-
-	chat.GetTransportPool().Close() // 彻底关闭所有链接
-
-	concurrency.GetConcurrentAdvance().Destroy() //释放agent gate
-	chat.GetToolsSearch().Destroy()              //释放工具仓库
 
 	if m.defaultAgentConfigHelper != nil {
 		m.defaultAgentConfigHelper.Destroy()

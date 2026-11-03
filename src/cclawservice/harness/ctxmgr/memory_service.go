@@ -29,6 +29,7 @@ import (
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/request"
 	pCommon "my.favorite/platformutility/common"
+	"my.favorite/platformutility/concurrency"
 	"my.favorite/platformutility/database/core"
 	"my.favorite/platformutility/logging"
 	baseService "my.favorite/platformutility/webbase/middleware/service"
@@ -133,6 +134,10 @@ type MemoryService struct {
 	sessionAccessor dataaccessor.ISessionAccessor
 	enabled         bool
 }
+
+var memoryMaintenanceScope = sync.OnceValue(func() concurrency.IRoutineScope {
+	return concurrency.GetTaskManager().NewScope("memory-maintenance", hCommon.CompactionMaxConcurrent)
+})
 
 var memoryService = pCommon.GetSingleton(func() *MemoryService {
 	return &MemoryService{
@@ -411,93 +416,91 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 	// 常量与名称见 dataobject.CompactionMode*,模式差异集中在 knowledge/compressor.go。
 	from, to, mode := maintenanceReq.Assembled.DroppedFrom, maintenanceReq.Assembled.DroppedTo, agent.CompactionMode
 
-	// 获得一个维护routine，避免无限次获取打满LLM
-	if !AcquireGoroutineBarrier() {
-		logging.LogDebugF("memory service: memory maintenance slot unavailable, skip session=%s", session.SessionId)
-		return
-	}
-
 	// 判定阶段结束:入参里的记录快照只服务于判定(见 MaintenanceRequest.Records),
 	// 显式释放,避免后台协程在 CompactionRunTimeout 内白白拖住整个切片。
 	maintenanceReq.Records = nil
 	plan := maintenancePlan{distill: needDistill, compact: needCompact, merge: needMerge}
 
-	go func() {
-		defer ReleaseGoroutineBarrier()
-		defer func() { // 后台协程必须自兜 panic:否则单个会话的异常会带崩整个进程
-			if r := recover(); r != nil {
-				logging.LogErrorF("memory service: panic in memory maintenance of %s: %v", session.SessionId, r)
+	if err := memoryMaintenanceScope().TryGo(context.Background(), concurrency.RoutineSpec{
+		Name: "memory-maintenance",
+		Fn: func(runCtx context.Context) error {
+			ctx, cancel := context.WithTimeout(runCtx, time.Duration(hCommon.CompactionRunTimeout)*time.Second)
+			defer cancel()
+
+			// 重读一份**最新**记录供各动作使用:判定用的请求路径快照省一次 IO,
+			// 动作必须用重读结果 —— 上面每个判定都已在获槽前完成,之后才排队。
+			records, err := s.ReadRecords(*session)
+			if err != nil {
+				logging.LogWarnF("memory service: read records for memory maintenance error:%s", err.Error())
+				return nil
 			}
-		}()
 
-		ctx, cancel := context.WithTimeout(context.Background(), hCommon.CompactionRunTimeout*time.Second)
-		defer cancel()
+			// 动作顺序见 maintenancePlan.steps:蒸馏 → 压缩 → 合并摘要。
+			// 先蒸馏再压缩,两个目标都达到:长期记忆拿到完整原文,历史体积随后有界。
+			//
+			// compactCeiling >= 0 表示请求路径发现"被裁区间越过了水位":此时压缩上界先收在水位处,
+			// 再由蒸馏结果把它往前推(蒸馏本轮**判定过**的区间可以放心交给压缩覆盖)。
+			compactLimit := compactCeiling
+			for _, step := range plan.steps() {
+				switch step {
+				case stepDistill:
+					// 与压缩共用同一份重读结果:本轮的追加记录不能漏蒸(用请求路径的旧快照会漏)
+					distilled, distillErr := s.distillWithBudget(ctx, *session, records, *agent, summarizer, budgets.DistillBudget)
+					if distillErr != nil {
+						logging.LogWarnF("memory service: distill memory of %s error:%s", session.SessionId, distillErr.Error())
+					}
+					// CoversTo 非零 = 这批原文已被蒸馏"定案"(送进模型,或本地预筛判定无长期价值)。
+					// 失败/未选批时为 0 —— 那就保持在水位上,压缩本轮不越过它。
+					if compactCeiling >= 0 && distilled.CoversTo > compactLimit {
+						compactLimit = distilled.CoversTo
+					}
 
-		// 重读一份**最新**记录供各动作使用:判定用的请求路径快照省一次 IO,
-		// 动作必须用重读结果 —— 上面每个判定都已在获槽前完成,之后才排队。
-		records, err := s.ReadRecords(*session)
-		if err != nil {
-			logging.LogWarnF("memory service: read records for memory maintenance error:%s", err.Error())
-			return
-		}
+				case stepCompact:
+					compactTo := to
+					if compactLimit >= 0 && compactTo > compactLimit {
+						// 被裁区间里有一部分还没被蒸馏定案:先压水位以内的部分,
+						// 其余留给下一轮蒸馏之后再压(留着的记录本来也已不在回放窗口里,不额外损失)。
+						logging.LogWarnF("memory service: session=%s compact range clamped to %d-%d (asked %d-%d, beyond the distilled range)",
+							session.SessionId, from, compactLimit, from, to)
+						compactTo = compactLimit
+					}
+					if compactTo < from {
+						logging.LogDebugF("memory service: session=%s compact deferred: %d-%d is not distilled yet",
+							session.SessionId, from, to)
+						break
+					}
+					if _, err = s.compactWithBudget(ctx, *session, records, from, compactTo, mode, summarizer, budgets.CompactBudget); err != nil {
+						logging.LogWarnF("memory service: compact history of %s error:%s", session.SessionId, err.Error())
+					}
 
-		// 动作顺序见 maintenancePlan.steps:蒸馏 → 压缩 → 合并摘要。
-		// 先蒸馏再压缩,两个目标都达到:长期记忆拿到完整原文,历史体积随后有界。
-		//
-		// compactCeiling >= 0 表示请求路径发现"被裁区间越过了水位":此时压缩上界先收在水位处,
-		// 再由蒸馏结果把它往前推(蒸馏本轮**判定过**的区间可以放心交给压缩覆盖)。
-		compactLimit := compactCeiling
-		for _, step := range plan.steps() {
-			switch step {
-			case stepDistill:
-				// 与压缩共用同一份重读结果:本轮的追加记录不能漏蒸(用请求路径的旧快照会漏)
-				distilled, distillErr := s.distillWithBudget(ctx, *session, records, *agent, summarizer, budgets.DistillBudget)
-				if distillErr != nil {
-					logging.LogWarnF("memory service: distill memory of %s error:%s", session.SessionId, distillErr.Error())
-				}
-				// CoversTo 非零 = 这批原文已被蒸馏"定案"(送进模型,或本地预筛判定无长期价值)。
-				// 失败/未选批时为 0 —— 那就保持在水位上,压缩本轮不越过它。
-				if compactCeiling >= 0 && distilled.CoversTo > compactLimit {
-					compactLimit = distilled.CoversTo
-				}
+				case stepMerge:
+					// 合并必须基于**最新**内容:压缩刚写完摘要,摘要集合与总量都变了。
+					// (蒸馏只动 MEMORY.md,不改历史文件,因此无需为它重读。)
+					if latest, readErr := s.ReadRecords(*session); readErr == nil {
+						records = latest
+					} else {
+						logging.LogWarnF("memory service: re-read records before merge of %s error:%s",
+							session.SessionId, readErr.Error())
+					}
 
-			case stepCompact:
-				compactTo := to
-				if compactLimit >= 0 && compactTo > compactLimit {
-					// 被裁区间里有一部分还没被蒸馏定案:先压水位以内的部分,
-					// 其余留给下一轮蒸馏之后再压(留着的记录本来也已不在回放窗口里,不额外损失)。
-					logging.LogWarnF("memory service: session=%s compact range clamped to %d-%d (asked %d-%d, beyond the distilled range)",
-						session.SessionId, from, compactLimit, from, to)
-					compactTo = compactLimit
-				}
-				if compactTo < from {
-					logging.LogDebugF("memory service: session=%s compact deferred: %d-%d is not distilled yet",
-						session.SessionId, from, to)
-					break
-				}
-				if _, err = s.compactWithBudget(ctx, *session, records, from, compactTo, mode, summarizer, budgets.CompactBudget); err != nil {
-					logging.LogWarnF("memory service: compact history of %s error:%s", session.SessionId, err.Error())
-				}
-
-			case stepMerge:
-				// 合并必须基于**最新**内容:压缩刚写完摘要,摘要集合与总量都变了。
-				// (蒸馏只动 MEMORY.md,不改历史文件,因此无需为它重读。)
-				if latest, readErr := s.ReadRecords(*session); readErr == nil {
-					records = latest
-				} else {
-					logging.LogWarnF("memory service: re-read records before merge of %s error:%s",
-						session.SessionId, readErr.Error())
-				}
-
-				// 以**重读后**的判定为准:压缩本身也可能把摘要总量推过阈值。
-				if SummariesRunes(records) > hCommon.MaxSummaryTotalRunes {
-					if _, err = s.mergeWithBudget(ctx, *session, records, summarizer, budgets.MergeBudget); err != nil {
-						logging.LogWarnF("memory service: merge summaries of %s error:%s", session.SessionId, err.Error())
+					// 以**重读后**的判定为准:压缩本身也可能把摘要总量推过阈值。
+					if SummariesRunes(records) > hCommon.MaxSummaryTotalRunes {
+						if _, err = s.mergeWithBudget(ctx, *session, records, summarizer, budgets.MergeBudget); err != nil {
+							logging.LogWarnF("memory service: merge summaries of %s error:%s", session.SessionId, err.Error())
+						}
 					}
 				}
 			}
+			return nil
+		},
+	}); err != nil {
+		if errors.Is(err, concurrency.ErrTaskNoCapacity) {
+			logging.LogDebugF("memory service: memory maintenance slot unavailable, skip session=%s", session.SessionId)
+			return
 		}
-	}()
+
+		logging.LogWarnF("memory service: submit memory maintenance of %s failed:%s", session.SessionId, err.Error())
+	}
 }
 
 // TurnCount 返回会话已记录的轮次数(供后台记忆维护做节流判断;失败返回 0)。

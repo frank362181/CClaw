@@ -18,9 +18,9 @@ type executorCore struct {
 
 // executeOne 执行一次工具调用,返回自洽的 ToolOutcome
 func (e *executorCore) executeOne(ctx context.Context, env ToolEnv, invocation ToolInvocation,
-	ledger ToolLedger, onLine func(string)) ToolOutcome {
+	ledger ToolLedger, onLine func(string)) (oc ToolOutcome) {
 
-	oc := ToolOutcome{
+	oc = ToolOutcome{
 		Seq:    invocation.Seq,
 		CallID: invocation.ID(),
 		Name:   invocation.Name(),

@@ -133,27 +133,6 @@ func ResolveSkillDocPath(skillDir string) (string, error) {
 	return absPath, nil
 }
 
-// maintenanceSlots 后台记忆维护的全局并发闸(压缩/蒸馏都要调用 LLM),即最大的goroutine个数
-var goroutineBarriers = make(chan struct{}, hCommon.CompactionMaxConcurrent)
-
-// AcquireGoroutineBarrier 非阻塞获取一个维护名额(拿不到就放弃本次)。
-func AcquireGoroutineBarrier() bool {
-	select {
-	case goroutineBarriers <- struct{}{}:
-		return true
-	default:
-		return false
-	}
-}
-
-// ReleaseGoroutineBarrier 释放维护名额。
-func ReleaseGoroutineBarrier() {
-	select {
-	case <-goroutineBarriers:
-	default:
-	}
-}
-
 // IsKindAllowedInScope 按会话范围过滤启动文档(参考 OpenClaw filterBootstrapFilesForSession)。
 //   - normal:   注入全部(含 MEMORY.md)
 //   - subagent: 仅 AGENTS.md(不继承父 agent 的人格/用户/记忆)
