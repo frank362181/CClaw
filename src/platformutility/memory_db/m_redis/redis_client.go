@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"my.favorite/platformutility/concurrency"
 	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
@@ -27,6 +28,9 @@ type RedisClient struct {
 	isClosed  bool      //标记是否已经关闭
 
 	mClient *redis.Client
+
+	// 健康检查的scope
+	healthScope concurrency.IRoutineScope
 }
 
 // 单例模式
@@ -70,23 +74,32 @@ func GetRedisClient(config *config.ConfigurationHelper) redisdb.IMemoryDB {
 	// 链接数据库
 	if err := client.connectMemoryDb(); err != nil {
 		cancel()
-		logging.LogInfoF("%s", err.Error())
+		logging.LogInfoF("[redis memory db], failed to connect with %s", err.Error())
 		return nil
 	}
 
 	// 启动后台的健康检查
-	go client.HealthCheck()
+	client.healthScope = concurrency.GetTaskManager().NewScope("memory-db-health", 1)
+	if err := client.healthScope.Go(ctx, concurrency.RoutineSpec{
+		Name: "redis-healthcheck",
+		Fn: func(runCtx context.Context) error {
+			client.HealthCheck(runCtx)
+			return nil
+		},
+	}); err != nil {
+		logging.LogInfoF("[redis memory db], health check not started: %s", err.Error())
+	}
 
 	return client
 }
 
-func (rdb *RedisClient) HealthCheck() {
+func (rdb *RedisClient) HealthCheck(ctx context.Context) {
 	ticker := time.NewTicker(time.Duration(rdb.MConfig.HealthCheckInterval) * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-rdb.Ctx.Done():
+		case <-ctx.Done():
 			logging.LogInfoF("[Redis] health check done")
 			return
 		case <-ticker.C:
@@ -100,8 +113,8 @@ func (rdb *RedisClient) HealthCheck() {
 				continue
 			}
 
-			ctx, cancel := context.WithTimeout(rdb.Ctx, 3*time.Second)
-			err := client.Ping(ctx).Err()
+			pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			err := client.Ping(pingCtx).Err()
 			cancel()
 
 			if err != nil {
@@ -333,6 +346,19 @@ func (rdb *RedisClient) CloseMemoryDb() error {
 		//先取消context
 		rdb.Cancel()
 
+		// 取消并等待
+		if rdb.healthScope != nil {
+			rdb.healthScope.Cancel()
+
+			drainCtx, cancelDrain := context.WithTimeout(context.Background(), time.Duration(3)*time.Second)
+			if err := rdb.healthScope.Wait(drainCtx); err != nil {
+				logging.LogWarnF("[redis] health check not drained: %s", err.Error())
+			}
+
+			cancelDrain()
+		}
+
+		// 关闭链接
 		rdb.mu.Lock()
 		defer rdb.mu.Unlock()
 

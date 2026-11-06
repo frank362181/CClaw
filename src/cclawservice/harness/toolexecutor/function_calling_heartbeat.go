@@ -15,6 +15,7 @@ import (
 	cCommon "my.favorite/cclawservice/common"
 	hCommon "my.favorite/cclawservice/harness/common"
 	pCommon "my.favorite/platformutility/common"
+	"my.favorite/platformutility/logging"
 )
 
 type functionCallingHeartbeat struct {
@@ -91,6 +92,19 @@ func startHeartbeat(ctx context.Context, out chan<- ToolEvent, seq int, name str
 	go func() {
 		defer close(h.done)
 
+		/*
+		* [为何这里不迁移进入到concurrency模块进行统一管理]
+		* - 生命周期已经完整:调用方(runOne)在返回前 defer h.Stop(),Stop()内部 <-h.done
+		*   因此toolScope.Wait返回本routine必定已经退出,close(lines)不会撞到“向已关闭通道发送”
+		* - 迁移代价为负的:它若也占一个托管的扇出名额,单轮12个工具就只能并发6个了
+		**/
+		defer func() {
+			if r := recover(); r != nil {
+				logging.LogWarnF("tool executor:panic in heartbeat of tool %s(seq=%d):%v",
+					h.name, h.seq, r)
+			}
+		}()
+
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -101,7 +115,6 @@ func startHeartbeat(ctx context.Context, out chan<- ToolEvent, seq int, name str
 				return
 			case <-h.stop:
 				return
-
 			case now := <-ticker.C:
 				if time.Duration(now.UnixNano()-h.lastOut.Load()) < interval {
 					// 期间有新输出 -> 不打扰用户

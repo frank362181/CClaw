@@ -499,6 +499,12 @@ func (s *MemoryService) TriggerMemoryMaintenance(maintenanceReq MaintenanceReque
 			return
 		}
 
+		if concurrency.GetTaskManager().IsDraining() {
+			// 关停中:拒绝是预期行为,不必刷warn
+			logging.LogDebugF("memory service: memory draining,skip session:%s", session.SessionId)
+			return
+		}
+
 		logging.LogWarnF("memory service: submit memory maintenance of %s failed:%s", session.SessionId, err.Error())
 	}
 }

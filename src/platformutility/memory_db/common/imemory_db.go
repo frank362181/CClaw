@@ -1,11 +1,12 @@
 package common
 
 import (
+	"context"
 	"time"
 )
 
 type IMemoryDB interface {
-	HealthCheck()
+	HealthCheck(ctx context.Context)
 	PingMemoryDb() error
 
 	IsClosed() bool

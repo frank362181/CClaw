@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"my.favorite/platformutility/concurrency"
 	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/webbase/middleware"
 	"my.favorite/platformutility/webbase/middleware/basic"
@@ -19,6 +20,9 @@ type BaseRouter struct {
 	keyFile  string
 
 	filterInterceptorMgr *middleware.FilterInterceptorMgr
+
+	// http server作用域:shutdown时要等他真正退出
+	httpServerScope concurrency.IRoutineScope
 }
 
 type IBaseRouter interface {

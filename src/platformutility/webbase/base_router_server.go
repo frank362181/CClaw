@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/common/hash"
+	"my.favorite/platformutility/concurrency"
 	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
@@ -190,19 +191,26 @@ func (router *BaseRouter) Startup(ssl bool) bool {
 		return false
 	}
 
-	// 在 goroutine 中启动服务：ServeTLS 会同时启用 HTTP/2；
-	// ErrServerClosed 属正常关闭（由 Shutdown 触发），其余错误视为服务异常并记录。
-	go func() {
-		var serveErr error
-		if ssl {
-			serveErr = router.Server.ServeTLS(listener, router.certFile, router.keyFile)
-		} else {
-			serveErr = router.Server.Serve(listener)
-		}
-		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-			logging.LogErrorF("[Startup] server at %s stopped with error: %s", router.Server.Addr, serveErr.Error())
-		}
-	}()
+	router.httpServerScope = concurrency.GetTaskManager().NewScope("http-server", 1)
+	if err := router.httpServerScope.Go(context.Background(), concurrency.RoutineSpec{
+		Name: "http-server",
+		Fn: func(_ context.Context) error {
+			var serveErr error
+			if ssl {
+				serveErr = router.Server.ServeTLS(listener, router.certFile, router.keyFile)
+			} else {
+				serveErr = router.Server.Serve(listener)
+			}
+			if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				logging.LogErrorF("[Startup] server at %s stopped with error: %s", router.Server.Addr, serveErr.Error())
+			}
+			return nil
+		},
+	}); err != nil {
+		_ = listener.Close() // 任务没有起来,监听必须自己关闭
+		logging.LogErrorF("[Startup] server at %s stop with: %s", router.Server.Addr, err.Error())
+		return false
+	}
 
 	logging.LogDebugF("server started at:%s,time = %s", router.Server.Addr, common.GetDatetimeUtilityInstance().GetCurrentDatetime().DatetimeStr)
 	return true
@@ -214,11 +222,23 @@ func (router *BaseRouter) Shutdown() error {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := router.Server.Shutdown(ctx); err != nil {
-		logging.LogErrorF("Server force to Shutdown with error: %s", err.Error())
+		logging.LogWarnF("Server shutdown with in-flight long connections (expected for SSE): %s", err.Error())
+	}
+
+	// shutdown 只保证"不再接受新链接 + 在飞链接处理完"
+	// 但server 协程本身要再调度一次才会返回,这里等它,避免后续关闭DB时还在运行
+	if router.httpServerScope != nil {
+		// 这里大概率会空转
+		drainCtx, cancelDrain := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelDrain()
+
+		if err := router.httpServerScope.Wait(drainCtx); err != nil {
+			logging.LogWarnF("http server task not drained with 5s: %s", err.Error())
+		}
 	}
 
 	logging.LogInfoF("server shutdown complete")

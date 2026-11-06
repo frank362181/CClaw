@@ -5,11 +5,13 @@
 package cclawservice
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -297,16 +299,14 @@ func (m *ServiceMain) Destroy() {
 	if m.baseRouter != nil {
 		_ = m.baseRouter.Shutdown()
 	}
+	concurrency.GetTaskManager().CancelScope()
+	m.destroy("request-scoped", 10)
+	concurrency.GetTaskManager().CancelDaemon()
+	m.destroy("daemon", 3)
 
-	chat.GetTransportPool().Close() // 彻底关闭所有链接
-
+	chat.GetTransportPool().Close()              // 彻底关闭所有链接
 	concurrency.GetConcurrentAdvance().Destroy() //释放agent gate
 	chat.GetToolsSearch().Destroy()              //释放工具仓库
-
-	concurrency.GetTaskManager().CancelScope()
-	concurrency.GetTaskManager().CancelDaemon()
-
-	logging.CloseLogger() // 日志最后刷盘
 
 	if m.agentRepo != nil {
 		m.agentRepo.Destroy()
@@ -335,6 +335,9 @@ func (m *ServiceMain) Destroy() {
 	if m.configHelper != nil {
 		m.configHelper.Destroy()
 	}
+
+	// 这个一定要放在最后,退出前的日志还在缓冲区中
+	logging.CloseLogger() // 日志最后刷盘
 }
 
 // ================================== private function & methods ==========================
@@ -442,4 +445,25 @@ func (m *ServiceMain) setupSwaggerController() {
 			logging.LogWarnF("[setGlobalFilterAndSwagger], failed to setup swagger controller,err:%s", err.Error())
 		}
 	}
+}
+
+func (m *ServiceMain) destroy(scopeName string, timeout int64) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	defer cancel()
+
+	start := pCommon.GetDatetimeUtilityInstance().GetNow()
+	before := concurrency.GetTaskManager().AllRoutineStats()
+	if err := concurrency.GetTaskManager().Drain(ctx); err != nil {
+		logging.LogWarnF("[service_main] %s drain unfinished after %s,err:%s", scopeName, timeout, err.Error())
+		return
+	}
+
+	after := concurrency.GetTaskManager().AllRoutineStats()
+	logging.LogInfoF("[service-main] shutdown: %s drained in %s | inflight=%d->%d maxInflight=%d | global started=%d completed=%d failed=%d panicked=%d rejected=%d",
+		scopeName,
+		pCommon.GetDatetimeUtilityInstance().GetNow().Sub(start).Truncate(time.Millisecond),
+		before.Inflight, after.Inflight,
+		after.MaxInflight,
+		after.Started, after.Completed, after.Failed, after.Panicked, after.Rejected,
+	)
 }

@@ -85,12 +85,13 @@ const (
 	MaxIdleConnectionTimeout  = 90  // http链接超时时间，second
 	MaxTLSHandleShakeTimeout  = 10  // http 握手超时
 
-	NonStreamResponseTimeout = 60  // 单次 LLM 同步请求的默认超时，同步情况下起作用
-	StreamResponseTimeout    = 60  // 流式读取空闲上限(秒):LLM无返回的最大时间
-	SSEStreamHeartbeatSecs   = 15  // SSE 空闲心跳间隔(秒)
-	MaxStreamTotalTimeout    = 600 // 流式最大的超时时间
-	ChatThinkingLimitTimeout = 90  // 只是思考无正文内容的最大超时时间
-	ChatStallLimitTimeout    = 300 // 工具执行硬性兜底停止时间:工具卡死/上游静默
+	NonStreamResponseTimeout       = 60  // 单次 LLM 同步请求的默认超时，同步情况下起作用
+	StreamResponseTimeout          = 60  // 流式读取空闲上限(秒):LLM无返回的最大时间
+	SSEStreamHeartbeatSecs         = 15  // SSE 空闲心跳间隔(秒)
+	SSEStreamHeartbeatDrainTimeout = 5   // SSE 空闲routine退出的最大时间
+	MaxStreamTotalTimeout          = 600 // 流式最大的超时时间
+	ChatThinkingLimitTimeout       = 90  // 只是思考无正文内容的最大超时时间
+	ChatStallLimitTimeout          = 300 // 工具执行硬性兜底停止时间:工具卡死/上游静默
 
 	ToolCallingHeartbeatInterval = 3 //工具调用超时时间，unit = second,用于区分是长时间挂起还是工具在执行
 

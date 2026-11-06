@@ -28,6 +28,7 @@ import (
 	"my.favorite/cclawservice/harness/toolexecutor"
 	"my.favorite/platformutility/apperr"
 	pCommon "my.favorite/platformutility/common"
+	"my.favorite/platformutility/concurrency"
 	"my.favorite/platformutility/logging"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
@@ -53,9 +54,11 @@ type SSEPresenter struct {
 	streamed       bool      // 是否下发过 **正式正文**(不包含思考/工具事件)
 
 	runningTools map[int]struct{}
-	heartStop    chan struct{}
-	heartDone    chan struct{}
-	closeOnce    sync.Once
+
+	// 输出内容的goroutine scope
+	sseHeartbeatScope concurrency.IRoutineScope
+
+	closeOnce sync.Once
 }
 
 func NewSSEPresenter(gc *gin.Context, turnID string, interrupt func(turnID string)) (*SSEPresenter, bool) {
@@ -81,8 +84,6 @@ func NewSSEPresenter(gc *gin.Context, turnID string, interrupt func(turnID strin
 		lastAt:         pCommon.GetDatetimeUtilityInstance().GetNow(),
 		lastProgressAt: pCommon.GetDatetimeUtilityInstance().GetNow(),
 		runningTools:   make(map[int]struct{}),
-		heartStop:      make(chan struct{}),
-		heartDone:      make(chan struct{}),
 	}
 	presenter.startHeartbeat()
 
@@ -166,15 +167,6 @@ func (p *SSEPresenter) Done() {
 	p.emit("message", "[DONE]")
 }
 
-// Close 停止心跳并等待其退出,必须defer 在handler里调用
-// 否则handler返回后可能有goroutine持有gin.Context并写响应
-func (p *SSEPresenter) Close() {
-	p.closeOnce.Do(func() {
-		close(p.heartStop)
-		<-p.heartDone
-	})
-}
-
 // Fail 把业务错误翻译成 SSE 事件
 // 四种情形:
 // - 客户端已经断开 -> 静默结束,不再尝试写
@@ -224,6 +216,25 @@ func (p *SSEPresenter) Fail(err error) {
 			"notify": apperr.Notify(err),
 		})
 	}
+}
+
+// Close 停止心跳并等待其退出,必须defer 在handler里调用
+// 否则handler返回后可能有goroutine持有gin.Context并写响应
+func (p *SSEPresenter) Close() {
+	p.closeOnce.Do(func() {
+		if p.sseHeartbeatScope == nil {
+			return
+		}
+
+		p.sseHeartbeatScope.Cancel() // 取消任务
+		drainCtx, cancel := context.WithTimeout(context.Background(), time.Duration(hCommon.SSEStreamHeartbeatDrainTimeout)*time.Second)
+		defer cancel()
+
+		if err := p.sseHeartbeatScope.Wait(drainCtx); err != nil {
+			logging.LogWarnF("sse presenter: keepalive of turn %s not drained within %s:%s",
+				p.chatTurnID, hCommon.SSEStreamHeartbeatDrainTimeout, err.Error())
+		}
+	})
 }
 
 // ================================ private functions & methods ====================================
@@ -296,59 +307,66 @@ func (p *SSEPresenter) fireInterrupt() {
 func (p *SSEPresenter) startHeartbeat() {
 	interval := time.Duration(hCommon.SSEStreamHeartbeatSecs) * time.Second
 	if interval <= 0 {
-		close(p.heartDone)
 		return
 	}
 
-	go func() {
-		defer close(p.heartDone)
+	p.sseHeartbeatScope = concurrency.GetTaskManager().NewScope("sse:"+p.chatTurnID, 1)
+	if err := p.sseHeartbeatScope.Go(p.ctx, concurrency.RoutineSpec{
+		Name: "sse-keepalive",
+		Fn: func(ctx context.Context) error {
+			p.heartbeatLoop(ctx, interval)
+			return nil
+		},
+	}); err != nil {
+		// 只在manger close或draining时发生,心跳尽力而为 -> 不阻断请求
+		logging.LogWarnF("sse presenter: keepalive of turn %s not started:%s", p.chatTurnID, err.Error())
+	}
+}
 
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
+func (p *SSEPresenter) heartbeatLoop(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 
-		first := true //首个tick仅仅做keep alive
+	first := true //首个tick仅仅做keep alive
 
-		for {
-			select {
-			case <-p.heartStop:
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			p.lock.Lock()
+			idle, dead := now.Sub(p.lastAt), p.dead
+			lastProgress, timedOut := p.lastProgressAt, p.timedOut
+			runningToolLength := len(p.runningTools)
+			p.lock.Unlock()
+
+			if dead || timedOut {
 				return
-			case <-p.ctx.Done():
-				return
-			case now := <-ticker.C:
-				p.lock.Lock()
-				idle, dead := now.Sub(p.lastAt), p.dead
-				lastProgress, timedOut := p.lastProgressAt, p.timedOut
-				runningToolLength := len(p.runningTools)
-				p.lock.Unlock()
+			}
 
-				if dead || timedOut {
+			// 看门狗必须放在idle判断之前,否则会被下面的continue跳过
+			// writing不走idle:思考不停刷新 lastAt,idle永远 < interval
+			if !first {
+				stalled := now.Sub(lastProgress)
+				if stalled > time.Duration(300)*time.Second || (runningToolLength == 0 && stalled >= time.Duration(hCommon.ChatThinkingLimitTimeout)*time.Second) {
+					p.abortStalled(stalled, runningToolLength)
 					return
 				}
 
-				// 看门狗必须放在idle判断之前,否则会被下面的continue跳过
-				// writing不走idle:思考不停刷新 lastAt,idle永远 < interval
-				if !first {
-					stalled := now.Sub(lastProgress)
-					if stalled > time.Duration(300)*time.Second || (runningToolLength == 0 && stalled >= time.Duration(hCommon.ChatThinkingLimitTimeout)*time.Second) {
-						p.abortStalled(stalled, runningToolLength)
-						return
-					}
-
-					//if runningToolLength == 0 && stalled > time.Duration(hCommon.ChatThinkingLimitTimeout)*time.Second {
-					//	p.abortStalled(stalled, runningToolLength)
-					//	return
-					//}
-				}
-				first = false
-
-				if idle < interval {
-					continue // 期间有事件往来,无需心跳
-				}
-
-				p.emit("heartbeat", gin.H{"ts": pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp})
+				//if runningToolLength == 0 && stalled > time.Duration(hCommon.ChatThinkingLimitTimeout)*time.Second {
+				//	p.abortStalled(stalled, runningToolLength)
+				//	return
+				//}
 			}
+			first = false
+
+			if idle < interval {
+				continue // 期间有事件往来,无需心跳
+			}
+
+			p.emit("heartbeat", gin.H{"ts": pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp})
 		}
-	}()
+	}
 }
 
 // compile assert
