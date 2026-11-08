@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -299,10 +298,7 @@ func (m *ServiceMain) Destroy() {
 	if m.baseRouter != nil {
 		_ = m.baseRouter.Shutdown()
 	}
-	concurrency.GetTaskManager().CancelScope()
-	m.destroy("request-scoped", 10)
-	concurrency.GetTaskManager().CancelDaemon()
-	m.destroy("daemon", 3)
+	_ = concurrency.GetTaskManager().Close(context.Background())
 
 	chat.GetTransportPool().Close()              // 彻底关闭所有链接
 	concurrency.GetConcurrentAdvance().Destroy() //释放agent gate
@@ -445,25 +441,4 @@ func (m *ServiceMain) setupSwaggerController() {
 			logging.LogWarnF("[setGlobalFilterAndSwagger], failed to setup swagger controller,err:%s", err.Error())
 		}
 	}
-}
-
-func (m *ServiceMain) destroy(scopeName string, timeout int64) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
-	defer cancel()
-
-	start := pCommon.GetDatetimeUtilityInstance().GetNow()
-	before := concurrency.GetTaskManager().AllRoutineStats()
-	if err := concurrency.GetTaskManager().Drain(ctx); err != nil {
-		logging.LogWarnF("[service_main] %s drain unfinished after %s,err:%s", scopeName, timeout, err.Error())
-		return
-	}
-
-	after := concurrency.GetTaskManager().AllRoutineStats()
-	logging.LogInfoF("[service-main] shutdown: %s drained in %s | inflight=%d->%d maxInflight=%d | global started=%d completed=%d failed=%d panicked=%d rejected=%d",
-		scopeName,
-		pCommon.GetDatetimeUtilityInstance().GetNow().Sub(start).Truncate(time.Millisecond),
-		before.Inflight, after.Inflight,
-		after.MaxInflight,
-		after.Started, after.Completed, after.Failed, after.Panicked, after.Rejected,
-	)
 }

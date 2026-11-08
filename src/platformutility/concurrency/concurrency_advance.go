@@ -1,3 +1,8 @@
+/**
+* 对concurrency_controller类进行封装,实现基于key的并发控制器
+* 即可为每个不同场景(基于key)实现并发控制
+**/
+
 package concurrency
 
 import (

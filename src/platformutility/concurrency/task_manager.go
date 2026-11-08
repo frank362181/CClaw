@@ -160,13 +160,31 @@ func (tm *TaskManager) Close(ctx context.Context) error {
 	tm.CancelScope()
 	tm.CancelDaemon()
 
+	timeout := time.Duration(tm.taskConfig.DrainTimeout) * time.Second
 	if ctx == nil {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(tm.taskConfig.DrainTimeout)*time.Second)
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 	}
 
-	return tm.Drain(ctx)
+	start := pCommon.GetDatetimeUtilityInstance().GetNow()
+	before := GetTaskManager().AllRoutineStats()
+	err := tm.Drain(ctx)
+
+	if err != nil {
+		logging.LogWarnF("[service_main] drain unfinished after %s,err:%s", timeout, err.Error())
+		return err
+	}
+
+	after := GetTaskManager().AllRoutineStats()
+	logging.LogInfoF("[service-main] shutdown: drained in %s | inflight=%d->%d maxInflight=%d | global started=%d completed=%d failed=%d panicked=%d rejected=%d",
+		pCommon.GetDatetimeUtilityInstance().GetNow().Sub(start).Truncate(time.Millisecond),
+		before.Inflight, after.Inflight,
+		after.MaxInflight,
+		after.Started, after.Completed, after.Failed, after.Panicked, after.Rejected,
+	)
+
+	return err
 }
 
 // Drain 等待所有启动的任务结束
