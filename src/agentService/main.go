@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 
 	_ "my.favorite/agentService/docs"
@@ -74,7 +73,6 @@ func main() {
 
 	fail := func(stage string, err error) {
 		logging.LogErrorF("startup failed at %s, error=%s", stage, err.Error())
-		os.Exit(1)
 	}
 
 	if err := mainApp.Init(); err != nil {

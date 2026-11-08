@@ -556,9 +556,10 @@ func TestLoopGuard_StopMessageNotBlank(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestLoopGuard_SignatureTruncatesByRunes 验证签名按 rune 截断:
-// 按字节截断会把多字节字符切坏(签名出现非法 UTF-8),且 200 字节对 CJK 只有 ~66 个字,窗口失真。
+// 按字节截断会把多字节字符切坏(签名出现非法 UTF-8),且字节窗口对 CJK 只有 1/3 个字,窗口失真。
 func TestLoopGuard_SignatureTruncatesByRunes(t *testing.T) {
-	const longRunes = 250 // rune 数(750 字节,远超 200 字节)
+	// 必须真正超出签名窗口,否则"窗口之后的差异"根本不存在:从常量推导,避免再次写死过时而失效。
+	const longRunes = maxSignatureForRepeatToolCalling + 50
 
 	g := NewLoopGuard()
 	g.Check("read_file", `{"path":"a.txt"}`, true, strings.Repeat("中", longRunes))
@@ -570,14 +571,14 @@ func TestLoopGuard_SignatureTruncatesByRunes(t *testing.T) {
 		t.Errorf("签名应为合法 UTF-8(按 rune 截断), got %q", g.recentTools[0])
 	}
 
-	// 第 200 个 rune 之后的差异不进签名
+	// 第 maxSignatureForRepeatToolCalling 个 rune 之后的差异不进签名
 	outer := NewLoopGuard()
 	outer.Check("read_file", `{"path":"a.txt"}`, true, strings.Repeat("中", longRunes-1)+"文")
 	if g.recentTools[0] != outer.recentTools[0] {
 		t.Errorf("第 %d 个 rune 之后的差异不应影响签名", maxSignatureForRepeatToolCalling)
 	}
 
-	// 第 200 个 rune 之内的差异必须体现在签名里
+	// 第 maxSignatureForRepeatToolCalling 个 rune 之内的差异必须体现在签名里
 	inner := NewLoopGuard()
 	inner.Check("read_file", `{"path":"a.txt"}`, true, "文"+strings.Repeat("中", longRunes-1))
 	if g.recentTools[0] == inner.recentTools[0] {

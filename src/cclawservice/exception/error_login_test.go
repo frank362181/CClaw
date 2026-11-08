@@ -16,7 +16,7 @@ import (
 	"net/http"
 	"testing"
 
-	"my.favorite/cclawservice/apperr"
+	"my.favorite/platformutility/apperr"
 	platformException "my.favorite/platformutility/exception"
 )
 

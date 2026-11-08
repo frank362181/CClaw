@@ -15,9 +15,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"my.favorite/cclawservice/apperr"
 	cCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
+	"my.favorite/platformutility/apperr"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
 

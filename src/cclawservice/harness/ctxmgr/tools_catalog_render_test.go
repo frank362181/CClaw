@@ -51,13 +51,18 @@ func TestRenderToolsCatalog(t *testing.T) {
 	// 单条描述超限 → 截断到上限并加省略号。
 	// 这是**节选**而不是内容丢失(完整描述仍在 schema 里) ⇒ **不得**标记 truncated:
 	// 否则每个 agent 每轮都会看到一条误导性的 Bootstrap Context Notice(实测踩过)。
+	// 口径:pCommon.TruncateRunes 保证"含省略号在内总长 ≤ max",即 max-1 个正文字符 + "…"。
 	long := strings.Repeat("甲", MaxToolDescPromptRunes+50)
 	got, truncated = renderToolsCatalog([]hCommon.ToolPromptItem{{Name: "x", Description: long}})
 	if truncated {
 		t.Fatalf("仅描述被节选不应标记截断(权威定义仍在 schema 里)")
 	}
-	if !strings.Contains(got, strings.Repeat("甲", MaxToolDescPromptRunes)+"…") {
-		t.Fatalf("描述应按上限截断且可见: %q", got)
+	wantDesc := strings.Repeat("甲", MaxToolDescPromptRunes-1) + "…"
+	if !strings.Contains(got, wantDesc) {
+		t.Fatalf("描述应按上限截断且可见(期望 %d 个甲 + …): %q", MaxToolDescPromptRunes-1, got)
+	}
+	if strings.Contains(got, strings.Repeat("甲", MaxToolDescPromptRunes)+"…") {
+		t.Fatalf("截断后总长不得超出 MaxToolDescPromptRunes=%d(省略号也算长度)", MaxToolDescPromptRunes)
 	}
 
 	// 总量超限 → 保前丢后,且结果不超上限

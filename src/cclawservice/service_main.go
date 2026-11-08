@@ -5,7 +5,6 @@
 package cclawservice
 
 import (
-	"context"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -298,7 +297,7 @@ func (m *ServiceMain) Destroy() {
 	if m.baseRouter != nil {
 		_ = m.baseRouter.Shutdown()
 	}
-	_ = concurrency.GetTaskManager().Close(context.Background())
+	_ = concurrency.GetTaskManager().Close(nil)
 
 	chat.GetTransportPool().Close()              // 彻底关闭所有链接
 	concurrency.GetConcurrentAdvance().Destroy() //释放agent gate

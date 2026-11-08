@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	"my.favorite/cclawservice/apperr"
 	myException "my.favorite/cclawservice/exception"
+	"my.favorite/platformutility/apperr"
 	pCommon "my.favorite/platformutility/common"
 )
 

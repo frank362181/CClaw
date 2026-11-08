@@ -45,8 +45,8 @@ type TaskManager struct {
 }
 
 var taskManager = pCommon.GetSingleton(func() *TaskManager {
-	rCtx, rCancel := context.WithCancel(context.Background())
-	dCtx, dCancel := context.WithCancel(context.Background())
+	rCtx, rCancel := context.WithCancel(context.Background()) //scope请求个context
+	dCtx, dCancel := context.WithCancel(context.Background()) //daemon独立的context,不受scope影响
 
 	taskManager := &TaskManager{
 		scopeCtx:    rCtx,
