@@ -11,18 +11,19 @@
 -->
 <div id="chatPage" class="chat-page">
 
-    <!-- 主聊天区域（对话历史侧边栏已移除） -->
+    <!-- 主聊天区域 -->
     <main class="chat-main">
         <!-- 顶部栏 -->
         <header class="chat-header">
             <div class="chat-title">
+                <button type="button" id="btnHistory" class="btn-history" title="历史会话" aria-label="历史会话">🕘</button>
                 <span id="chatTitle">新对话</span>
+                <span id="chatAgent" class="chat-agent" title="当前会话绑定的智能体" hidden></span>
                 <span class="status-dot" title="在线"></span>
             </div>
             <div class="chat-actions">
                 <button id="btnNewChat" class="btn-new-chat" title="新建对话">+</button>
                 <button id="btnClearChat" class="btn-header-icon" title="清空对话">🗑</button>
-                <button id="btnHideChat" class="btn-header-icon" title="隐藏聊天窗口">🗕</button>
             </div>
         </header>
 
@@ -47,5 +48,16 @@
             </button>
         </div>
     </main>
+
+    <!-- 历史会话抽屉（从聊天面板左侧滑出） -->
+    <div id="historyOverlay" class="history-overlay"></div>
+    <aside id="historyDrawer" class="history-drawer" aria-hidden="true" aria-label="历史会话">
+        <div class="history-head">
+            <span class="history-head-title">历史会话</span>
+            <button type="button" id="btnHistoryNew" class="btn-history-new" title="新建对话">＋</button>
+            <button type="button" id="btnHistoryClose" class="btn-history-close" title="关闭">✕</button>
+        </div>
+        <div id="historyList" class="history-list"></div>
+    </aside>
 
 </div>

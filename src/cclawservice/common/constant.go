@@ -67,6 +67,9 @@ const (
 	RelativeChatUrl          = "/chat"
 	RelativeChatStreamUrl    = "/chat/stream"
 	RelativeChatInterruptUrl = "/chat/interrupt"
+
+	RelativeGetSessions     = "/GetSessions"
+	RelativeGetSessionTurns = "/GetSessionTurns"
 )
 
 // ================ chat type ================

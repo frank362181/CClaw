@@ -251,6 +251,8 @@ func (m *ServiceMain) SetupChatController() error {
 	urlFunMap[cCommon.RelativeChatUrl] = chatController.Chat
 	urlFunMap[cCommon.RelativeChatStreamUrl] = chatController.ChatStream
 	urlFunMap[cCommon.RelativeChatInterruptUrl] = chatController.InterruptChat
+	urlFunMap[cCommon.RelativeGetSessions] = chatController.GetSessions
+	urlFunMap[cCommon.RelativeGetSessionTurns] = chatController.GetSessionTurns
 
 	// 复用登录控制器创建的 APIGroupRequire 分组(含认证 interceptor),
 	// 因此本方法必须后于 SetupLoginController 调用。
@@ -263,6 +265,7 @@ func (m *ServiceMain) SetupChatController() error {
 	}
 
 	urlFunMap = nil //释放内存
+
 	return nil
 }
 

@@ -17,7 +17,7 @@ python -m http.server 8080
 - `API_BASE_URL`：后端 API 地址。
 - `ENABLE_MOCK`：`true` 使用本地模拟回复；`false` 调用 `/chat` 流式接口。
 - `CHAT_STREAM_FORMAT`：预留字段，LLM 流式引擎接入后的响应格式（当前真实聊天为一次性 JSON 应答）。
-- `SESSION_CHECK_PATH`：恢复页面会话时用于验证令牌的受保护只读接口。
+- `SESSIONS_PATH`：历史会话抽屉的数据来源（后端 `ChatController.GetSessions`，POST + 签名，无请求体；按时间倒序返回最近 15 条）。
 - `REQUEST_TIMEOUT`：Axios 普通请求超时。
 
 登录和退出始终调用真实后端。聊天请求在非 Mock 模式下发送与后端 `ChatRequest` 对应的 JSON。
@@ -28,7 +28,7 @@ python -m http.server 8080
 cclawchat/
 ├── config/env.js
 ├── pages/                 # Shadow DOM 视图片段
-├── scripts/main.js        # 应用编排和聊天抽屉
+├── scripts/main.js        # 应用编排与主界面左右分栏
 ├── scripts/modules/       # API、认证、状态、流式引擎和页面控制器
 ├── scripts/utils/
 ├── styles/main.css
@@ -39,7 +39,7 @@ cclawchat/
 ## 状态与认证
 
 - 登录令牌只保存在 `sessionStorage`，关闭标签页后失效；后端仍必须验证每个受保护请求。
-- 页面刷新恢复会话时，会调用 `SESSION_CHECK_PATH` 验证令牌。
+- 页面刷新恢复会话时，会调用 `GetSessions` 验证令牌（后端无独立的校验接口，该接口受保护且只读）。
 - 对话历史按规范化用户名分别保存在 `localStorage`，登出后内存中的对话立即清空。
 - 每个对话最多保留 200 条消息，流式输出只在结束、取消或失败时持久化。
 

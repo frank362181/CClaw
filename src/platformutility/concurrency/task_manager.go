@@ -44,7 +44,7 @@ type TaskManager struct {
 	wg sync.WaitGroup // 所有已启动的任务(scope任务 + daemon)
 }
 
-var taskManager = pCommon.GetSingleton(func() *TaskManager {
+func newTaskManager(taskCfg TaskConfig) *TaskManager {
 	rCtx, rCancel := context.WithCancel(context.Background()) //scope请求个context
 	dCtx, dCancel := context.WithCancel(context.Background()) //daemon独立的context,不受scope影响
 
@@ -62,7 +62,7 @@ var taskManager = pCommon.GetSingleton(func() *TaskManager {
 	}
 
 	// 必须先对task manager的配置进行初始化
-	taskManager.taskConfig = taskManager.taskConfig.defaultTaskConfig()
+	taskManager.taskConfig = taskCfg.defaultTaskConfig()
 
 	if taskManager.taskConfig.MaxInflight > 0 {
 		taskManager.globalSemaphore = make(chan struct{}, taskManager.taskConfig.MaxInflight)
@@ -72,10 +72,16 @@ var taskManager = pCommon.GetSingleton(func() *TaskManager {
 	taskManager.quickScope = taskManager.newScope("quickScope", taskManager.taskConfig.DefaultPerNameLimit)
 
 	return taskManager
-}).Instance()
+}
+
+var taskManagerInstance = newTaskManager(TaskConfig{})
 
 func GetTaskManager() IRoutineManager {
-	return taskManager
+	if p := taskManagerOverride.Load(); p != nil {
+		return *p
+	}
+
+	return taskManagerInstance
 }
 
 func (tm *TaskManager) Go(ctx context.Context, routineSpec RoutineSpec) error {
@@ -168,7 +174,7 @@ func (tm *TaskManager) Close(ctx context.Context) error {
 	}
 
 	start := pCommon.GetDatetimeUtilityInstance().GetNow()
-	before := GetTaskManager().AllRoutineStats()
+	before := tm.AllRoutineStats()
 	err := tm.Drain(ctx)
 
 	if err != nil {
@@ -176,7 +182,7 @@ func (tm *TaskManager) Close(ctx context.Context) error {
 		return err
 	}
 
-	after := GetTaskManager().AllRoutineStats()
+	after := tm.AllRoutineStats()
 	logging.LogInfoF("[service-main] shutdown: drained in %s | inflight=%d->%d maxInflight=%d | global started=%d completed=%d failed=%d panicked=%d rejected=%d",
 		pCommon.GetDatetimeUtilityInstance().GetNow().Sub(start).Truncate(time.Millisecond),
 		before.Inflight, after.Inflight,
@@ -563,7 +569,6 @@ func (tm *TaskManager) snapshotRunning(scopeName string) []RunningTask {
 	tm.lock.RLock()
 	defer tm.lock.RUnlock()
 
-	startAt := pCommon.GetDatetimeUtilityInstance().GetNow()
 	out := make([]RunningTask, 0, len(tm.running))
 	for id, rt := range tm.running {
 		if scopeName != pCommon.BlankString && scopeName != rt.Scope {
@@ -574,8 +579,8 @@ func (tm *TaskManager) snapshotRunning(scopeName string) []RunningTask {
 			TaskId:  id,
 			Name:    rt.Name,
 			Scope:   rt.Scope,
-			Start:   startAt,
-			Elapsed: time.Since(startAt),
+			Start:   rt.Start,
+			Elapsed: time.Since(rt.Start),
 		})
 	}
 

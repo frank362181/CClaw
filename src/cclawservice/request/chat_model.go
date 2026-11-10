@@ -12,6 +12,11 @@ type ChatRequest struct {
 	GenAt       int64  `json:"genAt"`       // 消息的发送时间
 }
 
+// SessionTurnsRequest 读取某一会话的历史轮次所需参数（只读查询，不含聊天内容）
+type SessionTurnsRequest struct {
+	SessionId string `json:"sessionId"` //会话标识,对应聊天时使用的 sessionId
+}
+
 // ChatInterruptRequest 中断进行中的流式聊天所需参数
 // 仅需会话标识(turnId),对应发起聊天时 ChatRequest.turnId;发送者由服务端认证决定。
 type ChatInterruptRequest struct {

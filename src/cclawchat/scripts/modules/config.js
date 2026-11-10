@@ -37,6 +37,10 @@ export const CONFIG = {
     IS_PROD: ENV.NODE_ENV === 'production',
     ENABLE_MOCK: ENV.ENABLE_MOCK,
     CHAT_STREAM_FORMAT: ENV.CHAT_STREAM_FORMAT || 'sse',
-    SESSION_CHECK_PATH: ENV.SESSION_CHECK_PATH || '/getsessionlist',
+    // 会话主题列表（后端 ChatController.GetSessions，POST；按时间倒序返回最近 15 条）
+    // 该接口同时用于刷新页面时校验令牌是否仍然有效
+    SESSIONS_PATH: '/GetSessions',
+    // 某会话的历史轮次（后端 ChatController.GetSessionTurns，POST；返回最近 15 轮）
+    SESSION_TURNS_PATH: '/GetSessionTurns',
     DEBUG: ENV.DEBUG,
 };

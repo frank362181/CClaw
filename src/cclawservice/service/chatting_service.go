@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"my.favorite/cclawservice/chat"
@@ -13,16 +14,22 @@ import (
 	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/harness/observatory"
 	"my.favorite/cclawservice/harness/toolexecutor"
+	"my.favorite/cclawservice/model/dataaccessor"
+	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/concurrency"
 	"my.favorite/platformutility/database/core"
+	pException "my.favorite/platformutility/exception"
 	baseService "my.favorite/platformutility/webbase/middleware/service"
 )
 
 // ChattingService 只做编排
 type ChattingService struct {
 	baseService.BaseService
+
+	sessionAccessor dataaccessor.ISessionAccessor
+	memoryService   *ctxmgr.MemoryService
 
 	preparer  chat.ITurnPreparer
 	assembler chat.IContextAssembler
@@ -51,12 +58,15 @@ func GetChattingService(db core.IBaseDatabase, agentRepo *repo.AgentRepository, 
 		panic("service.GetChattingService: db / agentRepo must not be nil")
 	}
 
+	// 初始化session数据库访问类
+	chattingService.sessionAccessor, _ = dataaccessor.GetSessionAccessor(db)
+
 	// 1. 传输层
 	transport := chat.NewTransportClient(hCommon.NonStreamResponseTimeout)
 
 	// 2. 装配器
-	memoryService := ctxmgr.GetMemoryService(db, sessionRecord)
-	assembler := chat.GetAssembler(memoryService)
+	chattingService.memoryService = ctxmgr.GetMemoryService(db, sessionRecord)
+	assembler := chat.GetAssembler(chattingService.memoryService)
 
 	chattingService.preparer = chat.GetChatPreparer(agentRepo, functionCalling, transport.SimpleComplete)
 	chattingService.agentConcurrent = concurrency.GetConcurrentAdvance()
@@ -64,14 +74,89 @@ func GetChattingService(db core.IBaseDatabase, agentRepo *repo.AgentRepository, 
 	chattingService.transport = transport
 	chattingService.syncLooper = chat.NewToolLoop(transport, assembler, false) // 同步执行
 	chattingService.asyncLooper = chat.NewToolLoop(transport, assembler, true) // 异步执行
-	chattingService.memoryMaintainer = chat.GetMemoryMaintainer(memoryService, transport)
-	chattingService.journal = chat.GetMemoryJournal(memoryService)
+	chattingService.memoryMaintainer = chat.GetMemoryMaintainer(chattingService.memoryService, transport)
+	chattingService.journal = chat.GetMemoryJournal(chattingService.memoryService)
 	chattingService.turnRegistrator = chat.GetChatTurnRegistrator()
 	chattingService.turnReporter = chat.GetTurnReporter()
 
 	chattingService.toolConfiguredRules = toolRules
 
 	return chattingService
+}
+
+func (s *ChattingService) GetSessions(loginName string, limit int) ([]dataobject.TSession, error) {
+	loginName = strings.TrimSpace(loginName)
+	if len(loginName) == 0 {
+		return nil, pException.ParameterEmptyErrorEx2("chattingService.GetSessions: empty loginName")
+	}
+	return s.sessionAccessor.ListSessions(loginName, limit)
+}
+
+func (s *ChattingService) GetSessionTurns(sessionId string, loginName string, limit int) ([]dataobject.SessionTurnView, error) {
+	sessionId = strings.TrimSpace(sessionId)
+	loginName = strings.TrimSpace(loginName)
+	if len(sessionId) == 0 || len(loginName) == 0 {
+		return nil, pException.ParameterEmptyErrorEx2("sessionId or LoginName must not be empty")
+	}
+
+	session, err := s.sessionAccessor.GetSession(sessionId)
+	if err != nil {
+		return nil, err
+	}
+
+	if session == nil {
+		return []dataobject.SessionTurnView{}, nil
+	}
+
+	// 越权保护:只允许读取当前登录用户自己的会话
+	if sender := strings.TrimSpace(session.Sender); len(sender) > 0 && sender != loginName {
+		return nil, myException.PermissionDeniedErrEx2("session %s does not belong to current user", sessionId)
+	}
+
+	turns, err := s.sessionAccessor.GetTurns(sessionId, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(turns) == 0 {
+		return []dataobject.SessionTurnView{}, nil
+	}
+
+	records := s.memoryService.LoadHistoryTurnRecords(session.ChatData, sessionId, loginName)
+	views := make([]dataobject.SessionTurnView, 0, len(turns))
+	for _, turn := range turns {
+		view := dataobject.SessionTurnView{
+			TurnId:          turn.TurnId,
+			Seq:             turn.Seq,
+			ChatTime:        turn.ChatTime,
+			RespTime:        turn.RespTime,
+			Status:          turn.Status,
+			InterruptReason: turn.InterruptReason,
+		}
+
+		// 问题记录:chat_index -> user 记录正文
+		if record, ok := records[turn.ChatIndex]; ok && record.RecordType == ctxmgr.HistoryRecordTypeUser {
+			view.Question = record.Content
+		}
+
+		// 首轮提问在落盘前就被中断时 chat_index=0,正文永远读不到;
+		// 用会话主题兜底(主题由首条消息生成),否则该轮在 UI 上只剩中断提示、看不到提问。
+		if len(view.Question) == 0 && turn.Seq == 1 {
+			view.Question = strings.TrimSpace(session.SessionName)
+		}
+
+		// 回复记录:resp_index = 0 表示未落盘(中断无产出/写失败)
+		if turn.RespIndex > 0 {
+			if record, ok := records[turn.RespIndex]; ok && record.RecordType == ctxmgr.HistoryRecordTypeAssistant {
+				view.Answer = record.Content
+				view.AnswerInterrupted = record.IsInterrupted()
+			}
+		}
+
+		views = append(views, view)
+	}
+
+	return views, nil
 }
 
 func (s *ChattingService) Send(ctx context.Context, cmd chat.Command) (chat.Reply, error) {

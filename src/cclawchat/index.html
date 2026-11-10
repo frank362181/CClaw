@@ -13,30 +13,59 @@
     <meta http-equiv="Expires" content="0" />
 
     <!-- 外链全局样式（带版本号，防缓存白屏） -->
-    <link rel="stylesheet" href="./styles/main.css" />
+    <link rel="stylesheet" href="./styles/main.css?v=20261110o" />
 
     <style>
-        /* -------- 应用外壳 ---------- */
+        /* -------- 应用外壳：主界面左右分栏（左侧项目内容 / 右侧聊天） ---------- */
         #app {
             width: 100%;
             height: 100vh;
             overflow: hidden;
+            display: flex;
         }
 
         /* 自定义元素（页面组件）宿主布局 */
         login-page,
-        home-page,
-        chat-page {
+        home-page {
             display: block;
-            width: 100%;
+            flex: 1 1 auto;
+            min-width: 0;
             height: 100%;
         }
 
-        /* 聊天抽屉内嵌聊天组件：占满抽屉内容区 */
-        .drawer-body chat-page {
-            display: block;
-            width: 100%;
+        /* 聊天面板：登录后常驻右侧，固定占主界面 40% 宽（显隐由 ChatPage.show/hide 控制） */
+        chat-page {
+            display: none;
+            flex: 0 0 40%;
+            width: 40%;
+            min-width: 0;
             height: 100%;
+            /* 顶部工具栏横跨整屏，聊天面板内容整体下移，避免被工具栏遮挡 */
+            padding-top: var(--home-header-height, 44px);
+            border-left: 1px solid #E8ECF1;
+            background: #FFFFFF;
+        }
+
+        /* 小屏：左右分栏改为上下分栏，聊天面板占 40% 高度 */
+        @media (max-width: 768px) {
+            #app {
+                flex-direction: column;
+            }
+
+            login-page,
+            home-page {
+                flex: 1 1 auto;
+                height: auto;
+                min-height: 0;
+            }
+
+            chat-page {
+                flex: 0 0 40%;
+                width: 100%;
+                height: 40%;
+                border-left: none;
+                border-top: 1px solid #E8ECF1;
+            }
         }
 
         /* 组件加载占位（组件挂载后由 Shadow DOM 内容替换） */
@@ -76,7 +105,7 @@
         </div>
     </login-page>
 
-    <!-- 主页组件（登录后显示：左侧目录树 + 内容区 + 聊天气泡，视图来自 pages/home.html） -->
+    <!-- 主页组件（登录后显示：左侧项目内容区，视图来自 pages/home.html） -->
     <home-page>
         <div class="loading-placeholder">
             <div class="spinner"></div>
@@ -84,36 +113,20 @@
         </div>
     </home-page>
 
-    <!-- 聊天抽屉（最右侧，内含聊天组件 chat.html） -->
-    <div id="chatDrawer" class="chat-drawer">
-        <div id="drawerOverlay" class="drawer-overlay"></div>
-        <div class="drawer-panel">
-            <div class="drawer-resizer" id="drawerResizer" title="拖动调整聊天窗口宽度"></div>
-            <div class="drawer-header">
-                <div class="drawer-title">
-                    <span class="drawer-icon">💬</span>
-                    <span>AI 助手</span>
-                    <span class="drawer-status-dot" title="在线"></span>
-                </div>
-            </div>
-            <div class="drawer-body">
-                <!-- 聊天组件（视图来自 pages/chat.html） -->
-                <chat-page>
-                    <div class="loading-placeholder">
-                        <div class="spinner"></div>
-                        <span>加载聊天组件…</span>
-                    </div>
-                </chat-page>
-            </div>
+    <!-- 右侧聊天面板（常驻，占主界面 40%，内含聊天组件 chat.html） -->
+    <chat-page>
+        <div class="loading-placeholder">
+            <div class="spinner"></div>
+            <span>加载聊天组件…</span>
         </div>
-    </div>
+    </chat-page>
 </div>
 
 <!-- axios（本地 vendor 的全局 UMD 构建，挂载到 window.axios，供 scripts/modules/api.js 使用；离线可用） -->
 <script src="./scripts/modules/vendor/axios.min.js"></script>
 
 <!-- 主应用脚本 (ES Module) —— 带版本号，强制浏览器在版本更新时重新拉取，避免缓存导致白屏 -->
-<script type="module" src="./scripts/main.js?v=20260910"></script>
+<script type="module" src="./scripts/main.js?v=20261110o"></script>
 
 </body>
 </html>

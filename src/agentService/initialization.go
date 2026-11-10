@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	Version   = "2.1.0"
-	Commit    = strings.Join([]string{"feature 1:工具执行安全策略配置化;2.支持工具沙箱环境运行.\n"}, platformutility.Commit)
+	Version   = "3.0.0"
+	Commit    = strings.Join([]string{"feature 1:coordinator-worker架构支持.\n"}, platformutility.Commit)
 	BuildTime = common.GetDatetimeUtilityInstance().GetCurrentDatetime().DateStr
 
 	GoVersion = runtime.Version() //运行时自动获取

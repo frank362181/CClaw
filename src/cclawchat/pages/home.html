@@ -7,8 +7,8 @@
     交互逻辑由 scripts/modules/home.js 控制。
 
     页面结构：
-      - 左侧边栏：目录树菜单（我的项目 / 系统设置）
-      - 右侧核心内容显示区域（按菜单动态渲染）
+      - 顶部内容头：品牌标识 + 面包屑 + 用户菜单（系统设置 / 修改密码 / 修改个人信息）+ 退出登录
+      - 核心内容显示区域（按菜单动态渲染，登录后直接进入「我的项目」）
       - 右上角聊天气泡：点击后由外部以抽屉方式打开 chat.html
     注意：初始不带 active 类，登录组件优先展示，
     由 Auth.restore() / Auth.login() 决定是否切换到主页。
@@ -16,48 +16,23 @@
 -->
 <div id="homePage" class="home-page">
 
-    <!-- 移动端主侧边栏遮罩 -->
-    <div id="homeSidebarOverlay" class="home-sidebar-overlay"></div>
-
-    <!-- 左侧应用侧边栏：目录树 -->
-    <aside id="homeSidebar" class="home-sidebar">
-        <div class="home-sidebar-header">
-            <a href="#" class="home-brand">
-                <span class="home-logo">AI</span>
-                <span class="home-brand-name">资产管理智能助手</span>
-            </a>
-        </div>
-
-        <!-- 目录树 -->
-        <nav class="menu-tree" id="menuTree">
-            <div class="tree-group-label">导航</div>
-
-            <div class="tree-item" data-menu="npa" title="我的项目">
-                <span class="tree-icon">🏦</span>
-                <span class="tree-label">我的项目</span>
-            </div>
-
-            <div class="tree-item" data-menu="settings" title="系统设置">
-                <span class="tree-icon">⚙️</span>
-                <span class="tree-label">系统设置</span>
-            </div>
-        </nav>
-
-    </aside>
-
-    <!-- 右侧核心内容显示区域 -->
+    <!-- 核心内容显示区域 -->
     <main class="home-main">
         <header class="home-content-header">
             <div class="content-header-left">
-                <button id="btnToggleHomeSidebar" class="btn-toggle-home-sidebar" title="切换侧边栏">☰</button>
+                <a href="#" class="home-brand" id="homeBrand" title="返回我的项目">
+                    <span class="home-logo">AI</span>
+                    <span class="home-brand-name">资产管理智能助手</span>
+                </a>
+                <span class="content-header-divider" aria-hidden="true"></span>
                 <div class="content-breadcrumb">
-                    <span class="crumb-root">首页</span>
+                    <span class="crumb-root" id="crumbHome" title="返回我的项目">首页</span>
                     <span class="crumb-sep">/</span>
                     <span id="contentTitle" class="crumb-current">我的项目</span>
                 </div>
             </div>
             <div class="content-actions">
-                <!-- 右上角：当前登录用户（点击弹出 修改密码/修改个人信息 菜单） + 退出登录 -->
+                <!-- 右上角：当前登录用户（点击弹出 系统设置/修改密码/修改个人信息 菜单） + 退出登录 -->
                 <div class="home-user-wrap">
                     <div class="home-user" id="homeUserInfo" title="当前登录用户">
                         <span class="avatar" id="homeAvatar">U</span>
@@ -65,6 +40,8 @@
                         <span class="user-caret">▾</span>
                     </div>
                     <div class="user-menu" id="userMenu">
+                        <button type="button" class="user-menu-item" id="btnSystemSettings">⚙️ 系统设置</button>
+                        <div class="user-menu-divider" role="separator"></div>
                         <button type="button" class="user-menu-item" id="btnChangePassword">🔒 修改密码</button>
                         <button type="button" class="user-menu-item" id="btnEditProfile">👤 修改个人信息</button>
                     </div>
@@ -78,11 +55,6 @@
             <!-- 由 HomePage.selectMenu() 渲染 -->
         </div>
     </main>
-
-    <!-- AI 助手浮动入口：右下角悬浮图标，点击以侧窗口（抽屉）方式打开 chat.html -->
-    <button id="chatBubble" class="chat-bubble chat-bubble-float" title="打开 AI 助手">
-        <span class="bubble-icon">💬</span>
-    </button>
 
     <!-- 退出确认弹窗（二次确认） -->
     <div id="homeLogoutConfirm" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="homeLogoutConfirmTitle">

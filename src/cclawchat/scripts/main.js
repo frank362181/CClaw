@@ -5,6 +5,7 @@
  */
 
 import { State } from './modules/state.js';
+import { API } from './modules/api.js';
 import { Auth } from './modules/auth.js';
 import { StreamEngine } from './modules/stream.js';
 import { LoginPage } from './modules/login.js';
@@ -34,15 +35,15 @@ const App = {
                 onInterrupt: () => this.interruptChat(),
                 onNewChat: () => this.newConversation(),
                 onClearChat: () => this.clearConversation(),
-                onHideChat: () => this.toggleChatDrawer(false),
+                // 历史会话抽屉：打开时拉取当前用户的会话主题（后端按时间倒序返回最近 15 条）
+                onLoadSessions: () => API.getSessions(State.user?.token),
+                onSelectConversation: (convId, title, agentId) => this.selectConversation(convId, title, agentId),
+                onDeleteConversation: (convId) => this.deleteConversation(convId),
             });
 
             HomePage.init(homeComp, {
-                // 点击右上角聊天气泡：以抽屉方式打开 chat.html
-                onToggleChat: () => this.toggleChatDrawer(),
                 // 二次确认后：执行退出，回到登录页
                 onConfirmLogout: async () => {
-                    this.toggleChatDrawer(false);
                     await Auth.logout();
                 },
             });
@@ -54,6 +55,12 @@ const App = {
             const restored = await Auth.restore();
             if (!restored) {
                 LoginPage.focusUsername();
+            } else {
+                // 刷新后停在"只有服务端记录"的会话上：补拉该会话轮次，避免只剩空状态
+                const conv = State.getCurrentConversation();
+                if (conv && conv.messages.length === 0) {
+                    this.loadSessionTurns(conv.id);
+                }
             }
 
             console.log('🚀 App initialized', {
@@ -67,24 +74,6 @@ const App = {
     },
 
     _bindEvents() {
-        // 窗口尺寸变化：桌面端收起主侧边栏与聊天抽屉
-        let resizeTimer;
-        window.addEventListener('resize', () => {
-            clearTimeout(resizeTimer);
-            resizeTimer = setTimeout(() => {
-                if (window.innerWidth > 768) {
-                    HomePage.closeSidebar();
-                }
-            }, 200);
-        });
-
-        // 聊天抽屉：点击遮罩 / 关闭按钮收起
-        document.getElementById('drawerOverlay').addEventListener('click', () => {
-            if (this.isChatDrawerOpen()) {
-                this.toggleChatDrawer(false);
-            }
-        });
-
         // 全局快捷键
         document.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.shiftKey && e.key === 'N') {
@@ -93,142 +82,67 @@ const App = {
                     this.newConversation();
                 }
             }
-            if (e.key === 'Escape') {
-                if (this.isChatDrawerOpen()) {
-                    this.toggleChatDrawer(false);
-                } else if (window.innerWidth <= 768) {
-                    HomePage.closeSidebar();
-                }
-            }
         });
-
-        // 聊天抽屉：宽度可拖拽调节
-        this._initDrawerResize();
     },
 
-    /* ================= 聊天抽屉（chat.html 以抽屉方式展示） ================= */
-
-    /**
-     * 聊天抽屉宽度拖拽调节（桌面端）。
-     * - 拖动抽屉左缘的调节条即可改宽度（带最小/最大钳制）。
-     * - 消息列表为 flex 自适应，宽度会跟随抽屉同步放大/缩小。
-     * - 记住用户上次的宽度（localStorage）；移动端强制全宽。
-     */
-    _initDrawerResize() {
-        const resizer = document.getElementById('drawerResizer');
-        const panel = document.querySelector('#chatDrawer .drawer-panel');
-        if (!resizer || !panel) return;
-
-        const rootStyle = getComputedStyle(document.documentElement);
-        const parsePx = (v) => parseInt(v, 10) || 0;
-        const MIN_W = parsePx(rootStyle.getPropertyValue('--chat-drawer-min-width')) || 320;
-        const MAX_W = parsePx(rootStyle.getPropertyValue('--chat-drawer-max-width')) || 960;
-        const STORE_KEY = 'cclaw.chatDrawerWidth';
-
-        /* 恢复上次宽度（仅桌面端；移动端由 CSS 全宽接管） */
-        const restoreWidth = () => {
-            if (window.innerWidth <= 768) {
-                panel.style.width = '';
-                return;
-            }
-            const saved = parseInt(localStorage.getItem(STORE_KEY), 10);
-            if (Number.isFinite(saved) && saved >= MIN_W && saved <= MAX_W) {
-                panel.style.width = `${saved}px`;
-            }
-        };
-
-        let dragging = false;
-        let startX = 0;
-        let startWidth = 0;
-
-        const clampWidth = (w) => {
-            const maxAllowed = Math.min(MAX_W, window.innerWidth - 16);
-            return Math.max(MIN_W, Math.min(maxAllowed, w));
-        };
-
-        const onMove = (e) => {
-            if (!dragging) return;
-            // 面板锚定右侧：向左拖动（clientX 变小）则加宽
-            const w = clampWidth(startWidth + (startX - e.clientX));
-            panel.style.width = `${w}px`;
-        };
-
-        const onUp = () => {
-            if (!dragging) return;
-            dragging = false;
-            resizer.classList.remove('active');
-            document.body.classList.remove('drawer-resizing');
-            resizer.removeEventListener('pointermove', onMove);
-            resizer.removeEventListener('pointerup', onUp);
-            resizer.removeEventListener('pointercancel', onUp);
-            const w = parseInt(panel.style.width, 10);
-            if (Number.isFinite(w) && w >= MIN_W) {
-                try { localStorage.setItem(STORE_KEY, String(w)); } catch (err) { /* 忽略存储失败 */ }
-            }
-        };
-
-        resizer.addEventListener('pointerdown', (e) => {
-            if (window.innerWidth <= 768) return; // 移动端不启用拖拽
-            dragging = true;
-            startX = e.clientX;
-            startWidth = panel.getBoundingClientRect().width;
-            resizer.classList.add('active');
-            document.body.classList.add('drawer-resizing');
-            try { resizer.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
-            resizer.addEventListener('pointermove', onMove);
-            resizer.addEventListener('pointerup', onUp);
-            resizer.addEventListener('pointercancel', onUp);
-            e.preventDefault();
-        });
-
-        // 视口跨断点：进入移动端恢复全宽，回到桌面端恢复上次宽度
-        window.addEventListener('resize', () => {
-            if (window.innerWidth <= 768) {
-                panel.style.width = '';
-            } else {
-                restoreWidth();
-            }
-        });
-
-        restoreWidth();
-    },
-
-    isChatDrawerOpen() {
-        const drawer = document.getElementById('chatDrawer');
-        return drawer ? drawer.classList.contains('open') : false;
-    },
-
-    /**
-     * 打开 / 收起聊天抽屉
-     * @param {boolean|undefined} open 未传则切换
-     */
-    toggleChatDrawer(open) {
-        const drawer = document.getElementById('chatDrawer');
-        if (!drawer) return;
-
-        const isOpen = drawer.classList.contains('open');
-        const target = open !== undefined ? open : !isOpen;
-
-        // 抽屉打开时隐藏右下角 AI 浮动气泡，避免遮挡发送按钮
-        HomePage.setChatBubbleVisible(!target);
-
-        if (target) {
-            // 打开：展示聊天组件并渲染会话状态
-            drawer.classList.add('open');
-            ChatPage.show();
-            const conv = State.getCurrentConversation();
-            if (conv) {
-                ChatPage.renderMessages(conv);
-                ChatPage.updateChatTitle(conv.title);
-            }
-            ChatPage.setInputEnabled(true);
-            ChatPage.updateSendButton();
-            ChatPage.focusInput();
+    /** 切换到指定会话（历史会话抽屉点击）；本地无记录时创建占位，并拉取该会话最近轮次 */
+    selectConversation(convId, title, agentId) {
+        if (!convId) return;
+        if (State.isStreaming) StreamEngine.cancel();
+        const isLocal = State.conversations.some(c => c.id === convId);
+        if (isLocal) {
+            if (!State.setCurrentConversation(convId)) return;
+            // 历史会话带着自己的 Agent：选定后一并绑定，后续消息续用同一 Agent
+            State.setConversationAgent(convId, agentId);
         } else {
-            // 收起：隐藏聊天组件
-            drawer.classList.remove('open');
-            ChatPage.hide();
+            State.ensureConversation(convId, title, agentId);
         }
+        const conv = State.getCurrentConversation();
+        ChatPage.renderMessages(conv);
+        ChatPage.updateChatTitle(conv?.title || '新对话', conv?.agentId);
+        ChatPage.setInputEnabled(true);
+        ChatPage.updateSendButton();
+        ChatPage.closeHistory();
+
+        // 本地无消息内容（占位会话）时，从后端拉取该会话最近 15 轮并展示
+        if (conv && conv.messages.length === 0) {
+            this.loadSessionTurns(conv.id);
+        }
+    },
+
+    /** 拉取并渲染指定会话的历史轮次（失败时在消息区给出提示，不影响继续对话） */
+    async loadSessionTurns(sessionId) {
+        if (!sessionId) return;
+        ChatPage.showTurnLoading();
+        try {
+            const turns = await API.getSessionTurns(State.user?.token, sessionId);
+            // 期间用户可能已切换到其它会话：只渲染仍处于当前会话的结果
+            if (State.currentConvId !== sessionId) return;
+            ChatPage.renderTurns(turns);
+        } catch (err) {
+            if (State.currentConvId !== sessionId) return;
+            console.warn('[Turns] 获取会话历史失败：', err);
+            ChatPage.showTurnError(err?.message || '加载历史对话失败');
+        }
+    },
+
+    /** 删除指定会话（历史会话抽屉删除按钮） */
+    deleteConversation(convId) {
+        const conv = State.conversations.find(c => c.id === convId);
+        if (!conv) return;
+        if (!confirm(`确定删除会话「${conv.title || '新对话'}」？删除后不可恢复。`)) return;
+
+        if (State.isStreaming && State.currentConvId === convId) {
+            StreamEngine.cancel();
+        }
+        State.deleteConversation(convId);
+
+        const current = State.getCurrentConversation();
+        ChatPage.renderMessages(current);
+        ChatPage.updateChatTitle(current?.title || '新对话', current?.agentId);
+        ChatPage.setInputEnabled(true);
+        ChatPage.updateSendButton();
+        ChatPage.removeSessionFromList(convId);
     },
 
     /** 清空当前对话 */
@@ -239,7 +153,7 @@ const App = {
             State.clearCurrentConversation();
             const updated = State.getCurrentConversation();
             ChatPage.renderMessages(updated);
-            ChatPage.updateChatTitle(updated?.title || '新对话');
+            ChatPage.updateChatTitle(updated?.title || '新对话', updated?.agentId);
             ChatPage.focusInput();
         }
     },
@@ -251,7 +165,7 @@ const App = {
         let conv = State.getCurrentConversation();
         if (!conv) {
             const newConv = State.createConversation('新对话');
-            ChatPage.updateChatTitle(newConv.title);
+            ChatPage.updateChatTitle(newConv.title, newConv.agentId);
             conv = State.getCurrentConversation();
             if (!conv) return;
         }
@@ -273,7 +187,7 @@ const App = {
                 const updatedConv = State.getCurrentConversation();
                 if (updatedConv) {
                     ChatPage.renderMessages(updatedConv);
-                    ChatPage.updateChatTitle(updatedConv.title);
+                    ChatPage.updateChatTitle(updatedConv.title, updatedConv.agentId);
                 }
                 ChatPage.setInputEnabled(true);
                 ChatPage.updateSendButton();
@@ -302,7 +216,7 @@ const App = {
         }
         const conv = State.createConversation('新对话');
         ChatPage.renderMessages(conv);
-        ChatPage.updateChatTitle(conv.title);
+        ChatPage.updateChatTitle(conv.title, conv.agentId);
         ChatPage.setInputEnabled(true);
         ChatPage.updateSendButton();
         ChatPage.focusInput();

@@ -17,6 +17,9 @@ package ctxmgr
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"math"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -179,6 +182,43 @@ func (s *MemoryService) Enabled() bool {
 // 调用方仍应继续聊天流程。
 var ErrSessionOwnershipConflict = errors.New("memory service: session belongs to another sender")
 
+// LoadHistoryTurnRecords 读取历史会话文件,建立"记录序号-->记录"索引
+// 读不到文件(未生成/被清理)时返回空索引,由调用方以空正文降级
+func (s *MemoryService) LoadHistoryTurnRecords(dataFileName string, sessionId string, sender string) map[int]MemoryRecord {
+	records := make(map[int]MemoryRecord)
+	dataFileName = strings.TrimSpace(dataFileName)
+	sessionId = strings.TrimSpace(sessionId)
+	if len(dataFileName) == 0 || len(sessionId) == 0 {
+		return records
+	}
+
+	path, err := pCommon.SafeJoin(BuildMemoryRoot(sender), filepath.Base(dataFileName))
+	if err != nil {
+		logging.LogWarnF("session turns:resolve history path error:session=%s err=%s", sessionId, err.Error())
+		return records
+	}
+
+	data, _, err := pCommon.ReadFile(path, math.MaxInt64)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			logging.LogWarnF("session turns:read history error:session=%s err=%s", sessionId, err.Error())
+		}
+
+		return records
+	}
+
+	parsed, _ := ParseMemoryRecords(string(data))
+	for _, record := range parsed {
+		if record.IsSummary() {
+			continue // 摘要不是原始内容,不参与正文拼接
+		}
+
+		records[record.Index] = record
+	}
+
+	return records
+}
+
 // Begin 会话建档(幂等):不存在则创建 t_session + 历史文件,已存在则复用并按需补齐历史文件名。
 //
 // 返回值:
@@ -215,7 +255,10 @@ func (s *MemoryService) Begin(sender string, agent dataobject.TAgent, req *reque
 				existing.SessionId, existing.Sender, strings.TrimSpace(sender))
 			return dataobject.TSession{}, false, ErrSessionOwnershipConflict
 		}
-		return s.ensureMemoryFile(sender, sessionId, *existing, now), true, nil
+
+		// 存量会话补齐,因为agentId为空的话会导致整段历史记忆读不进来
+		session := s.ensureSessionAgent(sessionId, *existing, agent)
+		return s.ensureMemoryFile(sender, sessionId, session, now), true, nil
 	}
 
 	// 2. 首条消息 → 建档
@@ -632,6 +675,22 @@ func (s *MemoryService) usable() bool {
 // 与 usable 分开判定,避免无 DB 的场景把文件能力一并禁掉(也让单测无需搭库)。
 func (s *MemoryService) fileStorageUsable() bool {
 	return s != nil && s.enabled
+}
+
+func (s *MemoryService) ensureSessionAgent(sessionId string, session dataobject.TSession, agent dataobject.TAgent) dataobject.TSession {
+	agentId := strings.TrimSpace(session.AgentId)
+	if agentId == pCommon.BlankString || strings.TrimSpace(session.AgentId) != pCommon.BlankString {
+		return session // 无可用agent,或已绑定
+	}
+
+	session.AgentId = agentId // 本轮立即生效
+	if err := s.sessionAccessor.SetSessionAgentId(sessionId, agentId); err != nil {
+		logging.LogWarnF("memory service: backfill agent id of session %s error:%s", sessionId, err.Error())
+		return session
+	}
+
+	logging.LogDebugF("memory service: session %s agent id backfilled to %s", sessionId, agentId)
+	return session
 }
 
 // ensureMemoryFile 保证会话已有历史文件:chat_data 为空(此前创建失败)时补建并回写。

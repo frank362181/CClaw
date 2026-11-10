@@ -7,14 +7,20 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"my.favorite/cclawservice/chat"
+	cCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/service"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/concurrency"
+	pException "my.favorite/platformutility/exception"
 	"my.favorite/platformutility/webbase/middleware/basic"
 	baseController "my.favorite/platformutility/webbase/middleware/controller"
 	pService "my.favorite/platformutility/webbase/middleware/service"
+)
+
+const (
+	SessionLimitPage = 15
 )
 
 type ChatController struct {
@@ -44,6 +50,98 @@ func GetChatController(svc pService.IService, cc concurrency.IConcurrencyControl
 	return chatController
 }
 
+// GetSessions 根据当前登录的用户返回聊天的主题列表
+//
+// @Summary		获取聊天列表
+// @Description 根据当前登录用户获取聊天历史列表(按开始时间倒序,最多 SessionLimitPage 条)
+// @Tags		主题列表
+// @Accept		json
+// @Produce		json
+// @Param		AUTHORIZATION	header	string	true	"Login成功返回后得到的token"
+// @Param		NONCE 			query	string	true	"salt"
+// @Param		TIMESTAMP		query	string	true	"数值,表示请求段请求的时间(秒数)"
+// @Param		SIGNATURE		query	string	true	"请求内容的签名"
+// @Success 	200				{object}	basic.CommonResponse
+// @Failure		400				{object}	basic.CommonResponse
+// @Router		/api/GetSessions [post]
+func (cc *ChatController) GetSessions(c *gin.Context) {
+	chatService, ok := cc.getChattingService(c)
+	if !ok {
+		return
+	}
+
+	// 用户身份以服务端认证结果为准,GET 请求无需请求体
+	login, ok := getAuthentication(c)
+	if !ok {
+		return
+	}
+
+	loginName := strings.TrimSpace(login.LoginName)
+	if len(loginName) == 0 {
+		respondAgentError(c, pException.ParameterEmptyErrorEx2("sender should not be empty"))
+		return
+	}
+
+	sessions, err := chatService.GetSessions(loginName, SessionLimitPage)
+	if err != nil {
+		respondAgentError(c, err)
+		return
+	}
+
+	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, sessions)
+}
+
+// GetSessionTurns 返回指定会话最近若干轮的对话明细(问题/回答正文)
+//
+// @Summary		获取会话轮次明细
+// @Description 按 sessionId 返回最近 SessionLimitPage 轮对话:含提问与回复正文
+// @Tags		主题列表
+// @Accept		json
+// @Produce		json
+// @Param		AUTHORIZATION	header	string	true	"Login成功返回后得到的token"
+// @Param		NONCE 			query	string	true	"salt"
+// @Param		TIMESTAMP		query	string	true	"数值,表示请求段请求的时间(秒数)"
+// @Param		SIGNATURE		query	string	true	"请求内容的签名"
+// @Param		body			body	request.SessionTurnsRequest true "会话标识"
+// @Success 	200				{object}	basic.CommonResponse
+// @Failure		400				{object}	basic.CommonResponse
+// @Router		/api/GetSessionTurns [post]
+func (cc *ChatController) GetSessionTurns(c *gin.Context) {
+	chatService, ok := cc.getChattingService(c)
+	if !ok {
+		return
+	}
+
+	// 身份以服务端认证结果为准；只读查询不需要聊天消息体，仅取 sessionId
+	login, ok := getAuthentication(c)
+	if !ok {
+		return
+	}
+
+	var req request.SessionTurnsRequest
+	if err := c.ShouldBindBodyWithJSON(&req); err != nil {
+		respondKind(c, myException.ChatParameterKind)
+		return
+	}
+
+	// 会话 ID 与写入时保持同一规整规则(单位编码前缀 + 紧凑 ID)，兼容旧客户端传入的裸 UUID
+	sessionId := strings.TrimSpace(req.SessionId)
+	if len(sessionId) == 0 {
+		respondAgentError(c, pException.ParameterEmptyError)
+		return
+	}
+	prefix := cCommon.NormalizeCompactId(login.ComCode)
+	sessionId = cCommon.NormalizeCompactId(prefix + strings.TrimPrefix(cCommon.NormalizeCompactId(sessionId), prefix))
+
+	turns, err := chatService.GetSessionTurns(sessionId, login.LoginName, SessionLimitPage)
+	if err != nil {
+		respondAgentError(c, err)
+		return
+	}
+
+	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, turns)
+}
+
 // Chat 接收一条聊天消息并返回应答
 //
 //	@Summary		发送聊天消息
@@ -54,7 +152,7 @@ func GetChatController(svc pService.IService, cc concurrency.IConcurrencyControl
 //	@Param			AUTHORIZATION	header		string				true	"Login成功返回后得到的token"
 //	@Param			NONCE			query		string				true	"盐"
 //	@Param			TIMESTAMP		query		string				true	"数值,表示请求端请求的时间(秒数)"
-//	@Param			SIGNATURE		query		string				true	"对请求内容的签名秒数"
+//	@Param			SIGNATURE		query		string				true	"对请求内容的签名"
 //	@Param			body		body			request.ChatRequest	true	"聊天内容"
 //	@Success		200			{object}		request.ChatResponse
 //	@Failure		400			{object}		basic.CommonResponse

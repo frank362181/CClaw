@@ -3,8 +3,8 @@
  * 主页组件控制器 (HomePage)
  * ============================================================
  * 登录成功后显示的主页面：
- *   - 左侧边栏：目录树菜单（我的项目 / 系统设置）
- *   - 右侧核心内容显示区域（按菜单动态渲染）
+ *   - 顶部内容头：品牌标识 + 面包屑 + 用户菜单（系统设置 / 修改密码 / 修改个人信息）+ 退出登录
+ *   - 核心内容显示区域（按菜单动态渲染，登录后直接进入「我的项目」）
  *   - 右上角聊天气泡：点击后由外部以抽屉方式打开 chat.html
  *
  * 高内聚：仅负责主页视图的渲染与交互。
@@ -17,14 +17,15 @@ import { State } from './state.js';
 import { API } from './api.js';
 import { CONFIG } from './config.js';
 
-/* ---------- 菜单定义（目录树） ---------- */
+/* ---------- 内容页定义 ----------
+   npa：默认落地页；settings：右上角用户菜单入口（点击后替换主内容区显示） */
 const MENUS = {
     npa: { id: 'npa', label: '我的项目', title: '我的项目' },
     settings: { id: 'settings', label: '系统设置', title: '系统设置' },
 };
 
-/* 登录后的默认落地页：取菜单定义中的第一个 */
-const DEFAULT_MENU = Object.keys(MENUS)[0];
+/* 登录后的默认落地页：我的项目 */
+const DEFAULT_MENU = 'npa';
 
 /* ---------- 系统设置：Agents / Skills 展示数据（MCP / Storages / Knowledge 暂无后端数据） ---------- */
 /* Agents 本地示例数据：后端不可用或 Mock 模式下降级使用（真实数据来自 GET /api/agents） */
@@ -286,6 +287,7 @@ export const HomePage = {
     handlers: {},
     username: '',
     currentMenu: DEFAULT_MENU,
+    menuHistory: [],       // 页面来源栈（仅记录当前页的上一个页面，用于「返回」）
     skillsFilter: 'all',
     agents: null,          // 智能体列表（null=尚未加载，由后端接口填充）
     agentsLoading: false,  // 防止重复并发加载
@@ -302,22 +304,19 @@ export const HomePage = {
     /**
      * 初始化组件
      * @param {object} comp 组件实例（mountComponent 返回）
-     * @param {{ onToggleChat?: Function, onConfirmLogout?: Function }} handlers
+     * @param {{ onConfirmLogout?: Function }} handlers
      */
     init(comp, handlers = {}) {
         this.comp = comp;
         this.handlers = handlers;
         this.els = {
             homePage: comp.query('#homePage'),
-            homeSidebar: comp.query('#homeSidebar'),
-            homeSidebarOverlay: comp.query('#homeSidebarOverlay'),
-            menuTree: comp.query('#menuTree'),
+            homeBrand: comp.query('#homeBrand'),
             contentTitle: comp.query('#contentTitle'),
             contentBreadcrumb: comp.query('.content-breadcrumb'),
+            crumbHome: comp.query('#crumbHome'),
             contentView: comp.query('#contentView'),
-            chatBubble: comp.query('#chatBubble'),
             btnHomeLogout: comp.query('#btnHomeLogout'),
-            btnToggleHomeSidebar: comp.query('#btnToggleHomeSidebar'),
             homeAvatar: comp.query('#homeAvatar'),
             homeUserName: comp.query('#homeUserName'),
             // 退出确认弹窗
@@ -344,6 +343,7 @@ export const HomePage = {
             // 用户菜单（点击登录名弹出）
             homeUserInfo: comp.query('#homeUserInfo'),
             userMenu: comp.query('#userMenu'),
+            btnSystemSettings: comp.query('#btnSystemSettings'),
             btnChangePassword: comp.query('#btnChangePassword'),
             btnEditProfile: comp.query('#btnEditProfile'),
             // 修改密码弹窗
@@ -363,22 +363,16 @@ export const HomePage = {
             editProfileError: comp.query('#editProfileError'),
         };
 
-        // 目录树：点击菜单切换内容
-        this.els.menuTree.querySelectorAll('.tree-item').forEach(item => {
-            item.addEventListener('click', () => this.selectMenu(item.dataset.menu));
+        // 品牌标识 / 面包屑：品牌与「首页」一键回到我的项目；详情页点当前页签返回系统设置
+        this.els.homeBrand.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.backToDefaultMenu();
         });
-
-        // 面包屑：智能体详情内点击「首页 / 系统设置」返回系统设置
-        this.els.contentBreadcrumb.addEventListener('click', () => {
-            if (this.currentAgentDetail) this.closeAgentDetail();
+        this.els.contentBreadcrumb.addEventListener('click', (e) => {
+            if (e.target.closest('#crumbHome')) { this.backToDefaultMenu(); return; }
+            if (this.currentAgentDetail) { this.closeAgentDetail(); return; }
+            this.backToDefaultMenu();
         });
-
-        // 聊天气泡：通知外部以抽屉方式打开聊天窗口（低耦合，交由 App 处理）
-        this.els.chatBubble.addEventListener('click', () => this.handlers.onToggleChat?.());
-
-        // 移动端主侧边栏折叠
-        this.els.btnToggleHomeSidebar.addEventListener('click', () => this.toggleSidebar());
-        this.els.homeSidebarOverlay.addEventListener('click', () => this.closeSidebar());
 
         // 退出登录：先弹出二次确认（是否真正退出由外部决定）
         this.els.btnHomeLogout.addEventListener('click', () => this.openLogoutConfirm());
@@ -402,6 +396,10 @@ export const HomePage = {
             const agentCard = e.target.closest('[data-agent]');
             if (agentCard) { this.openAgentDetail(agentCard.dataset.agent); return; }
             if (e.target.closest('#btnBackToSettings')) { this.closeAgentDetail(); return; }
+            // 智能体详情：一键返回我的项目
+            if (e.target.closest('#btnBackToHomeFromDetail')) { this.backToDefaultMenu(); return; }
+            // 系统设置工具栏：返回进入设置前的页面
+            if (e.target.closest('#btnBackFromSettings')) { this.goBack(); return; }
             if (e.target.closest('#btnSaveAgent')) { this.submitAgentEdit(); return; }
             const agentTab = e.target.closest('[data-agent-tab]');
             if (agentTab) { this.switchAgentTab(agentTab.dataset.agentTab); return; }
@@ -444,10 +442,14 @@ export const HomePage = {
             if (e.target === this.els.npaFileModal) this.closeNpaHouseholdFile();
         });
 
-        // 用户菜单：点击登录名弹出 修改密码 / 修改个人信息
+        // 用户菜单：点击登录名弹出 系统设置 / 修改密码 / 修改个人信息
         this.els.homeUserInfo.addEventListener('click', (e) => {
             e.stopPropagation();
             this.toggleUserMenu();
+        });
+        this.els.btnSystemSettings.addEventListener('click', () => {
+            this.closeUserMenu();
+            this.selectMenu('settings');
         });
         this.els.btnChangePassword.addEventListener('click', () => {
             this.closeUserMenu();
@@ -499,26 +501,29 @@ export const HomePage = {
         this.els.homePage.style.display = 'none';
         // 仅隐藏 Shadow DOM 内部元素不会释放 <home-page> 宿主占据的整屏高度。
         this.comp.el.style.display = 'none';
-        this.closeSidebar();
     },
 
     /**
      * 选择菜单并渲染对应内容
      * @param {string} menuId
+     * @param {{ trackHistory?: boolean }} [options] trackHistory=false 时不记录来源（供「返回」自身使用）
      */
-    selectMenu(menuId) {
+    selectMenu(menuId, options = {}) {
         const menu = MENUS[menuId] || MENUS[DEFAULT_MENU];
+        const previous = this.currentMenu;
         this.currentMenu = menu.id;
+        // 记录来源页：进入非默认页时记录上一页；回到默认页时清空，避免来回切换堆积无效历史
+        if (options.trackHistory !== false && menu.id !== previous) {
+            this.menuHistory = menu.id === DEFAULT_MENU ? [] : [previous];
+        }
         // 切换菜单时退出智能体详情二级页
         this.currentAgentDetail = null;
         this.startupFilesCache = null; // 离开详情页释放启动文件缓存（防跨 agent 残留）
-        // 面包屑退出链接态（仅智能体详情内可点击返回）
-        this.els.contentBreadcrumb.classList.remove('linkable');
+        // 面包屑：不在默认页时「首页」可点击一键返回我的项目
+        this._syncBreadcrumb();
 
-        // 高亮目录树菜单项
-        this.els.menuTree.querySelectorAll('.tree-item').forEach(item => {
-            item.classList.toggle('active', item.dataset.menu === menu.id);
-        });
+        // 高亮用户菜单中的系统设置入口
+        this.els.btnSystemSettings.classList.toggle('active', menu.id === 'settings');
 
         // 更新面包屑标题
         this.els.contentTitle.textContent = menu.label;
@@ -533,11 +538,24 @@ export const HomePage = {
         } else {
             this.els.contentView.innerHTML = this.renderNpa();
         }
+    },
 
-        // 移动端选中菜单后收起主侧边栏
-        if (window.innerWidth <= 768) {
-            this.closeSidebar();
-        }
+    /* 返回默认页（我的项目）；已在默认页时不做无谓重渲染 */
+    backToDefaultMenu() {
+        if (this.currentMenu === DEFAULT_MENU && !this.currentAgentDetail) return;
+        this.selectMenu(DEFAULT_MENU);
+    },
+
+    /* 返回进入当前页之前的页面；无来源记录时回到默认页（我的项目） */
+    goBack() {
+        const target = this.menuHistory.pop() || DEFAULT_MENU;
+        this.selectMenu(target, { trackHistory: false });
+    },
+
+    /* 同步面包屑可点击态：非默认页时「首页」可回我的项目；详情页内当前页签可回系统设置 */
+    _syncBreadcrumb() {
+        this.els.crumbHome.classList.toggle('crumb-link', this.currentMenu !== DEFAULT_MENU);
+        this.els.contentTitle.classList.toggle('crumb-link', !!this.currentAgentDetail);
     },
 
     /* ========== 系统设置内容：Agents / Skills / MCP / Storages / Knowledge 设置区块 ========== */
@@ -552,6 +570,9 @@ export const HomePage = {
             <div class="content-toolbar">
                 <div class="content-title-block">
                     <h2>系统设置</h2>
+                </div>
+                <div class="toolbar-actions">
+                    <button type="button" class="btn-modal-cancel btn-back-page" id="btnBackFromSettings" title="返回上一页">← 返回</button>
                 </div>
             </div>
 
@@ -768,8 +789,8 @@ export const HomePage = {
         if (!agent) return;
         this.currentAgentDetail = agent;
         this.currentAgentTab = 'basic'; // 每次进入详情默认展示第一个页签
-        // 面包屑保持「首页 / 系统设置」并支持点击返回
-        this.els.contentBreadcrumb.classList.add('linkable');
+        // 面包屑：详情页内「首页」回我的项目、当前页签回系统设置
+        this._syncBreadcrumb();
         this.els.contentView.innerHTML = this.renderAgentDetail(agent);
     },
 
@@ -804,6 +825,7 @@ export const HomePage = {
                         </div>
                     </div>
                     <div class="agent-detail-actions">
+                        <button type="button" class="btn-modal-cancel" id="btnBackToHomeFromDetail" title="返回我的项目">← 返回我的项目</button>
                         <button type="button" class="btn-modal-cancel" id="btnBackToSettings">← 返回系统设置</button>
                         <button type="button" class="btn-primary-add" id="btnSaveAgent">保存修改</button>
                     </div>
@@ -1552,24 +1574,6 @@ export const HomePage = {
         }
     },
 
-    toggleSidebar(open) {
-        const isOpen = this.els.homeSidebar.classList.contains('open');
-        const target = open !== undefined ? open : !isOpen;
-        this.els.homeSidebar.classList.toggle('open', target);
-        this.els.homeSidebarOverlay.classList.toggle('active', target);
-    },
-
-    closeSidebar() {
-        this.toggleSidebar(false);
-    },
-
-    /* 控制 AI 助手浮动气泡显示/隐藏（聊天抽屉打开时隐藏，避免遮挡发送按钮） */
-    setChatBubbleVisible(visible) {
-        if (this.els.chatBubble) {
-            this.els.chatBubble.style.display = visible ? '' : 'none';
-        }
-    },
-
     /* ========== 用户菜单：修改密码 / 修改个人信息 ========== */
     toggleUserMenu() {
         const isOpen = this.els.userMenu.classList.contains('show');
@@ -1676,7 +1680,6 @@ export const HomePage = {
         this.closeUserMenu();
         this.closeChangePwdModal();
         this.closeEditProfileModal();
-        this.closeSidebar();
         this.npaProjects = [];
         this.pendingDeleteId = null;
         this.currentHousehold = null;
@@ -1688,6 +1691,7 @@ export const HomePage = {
         this.startupFilesCache = null; // 切换登录用户后按新用户重新拉取（避免跨用户残留）
         this.skills = null;            // 技能列表（公司级）切换用户后重新拉取（避免跨用户残留）
         this._skillsLoadPromise = null;
+        this.menuHistory = [];         // 清空页面来源栈，避免跨用户残留
         this.updateUserInfo('');
         this.selectMenu(DEFAULT_MENU);
     },

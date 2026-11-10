@@ -34,6 +34,7 @@ type ISessionAccessor interface {
 	CreateSession(session *dataobject.TSession) error
 	GetSession(sessionId string) (*dataobject.TSession, error)
 	ListSessions(sender string, limit int) ([]dataobject.TSession, error)
+	SetSessionAgentId(sessionId, agentId string) error
 	SetSessionChatData(sessionId, chatData string) error
 	SetSessionArchived(sessionId string, archived bool, timestamp int64) error
 	SetSessionEnded(sessionId string, reason int, timestamp int64) error
@@ -42,7 +43,7 @@ type ISessionAccessor interface {
 	// CreateTurn ------------------------------ 轮次(t_turn) ------------------------------
 	CreateTurn(turn *dataobject.TTurn) error
 	GetTurn(turnId string) (*dataobject.TTurn, error)
-	GetTurns(sessionId string) ([]dataobject.TTurn, error)
+	GetTurns(sessionId string, limit int) ([]dataobject.TTurn, error)
 	GetMaxTurnSeq(sessionId string) (int, error)
 	GetMaxRespIndex(sessionId string) (int, error)
 
@@ -127,6 +128,12 @@ func (g *SessionAccessor) ListSessions(sender string, limit int) ([]dataobject.T
 	return list, nil
 }
 
+// SetSessionAgentId 回写绑定的Agent
+// 用于存量会话补齐agentId,Session.HasHistory()==false时,历史记录不会被读入
+func (g *SessionAccessor) SetSessionAgentId(sessionId, agentId string) error {
+	return g.updateSession(sessionId, map[string]interface{}{"agent_id": agentId})
+}
+
 // SetSessionChatData 回写会话历史文件名(t_session.chat_data)。
 func (g *SessionAccessor) SetSessionChatData(sessionId, chatData string) error {
 	return g.updateSession(sessionId, map[string]interface{}{"chat_data": chatData})
@@ -201,12 +208,24 @@ func (g *SessionAccessor) GetTurn(turnId string) (*dataobject.TTurn, error) {
 	return &turn, nil
 }
 
-// GetTurns 按轮次序号升序读取某会话的全部轮次。
-func (g *SessionAccessor) GetTurns(sessionId string) ([]dataobject.TTurn, error) {
+// GetTurns 读取某会话**最近** limit 轮的对话轮次，返回结果按轮次序号升序（便于前端顺序渲染）。
+// limit<=0 时读取全部。
+func (g *SessionAccessor) GetTurns(sessionId string, limit int) ([]dataobject.TTurn, error) {
 	var list []dataobject.TTurn
-	err := g.gormDb.Where("session_id = ?", sessionId).Order("seq ASC").Find(&list).Error
-	if err != nil {
+	q := g.gormDb.Where("session_id = ?", sessionId)
+	if limit > 0 {
+		// 先按序号倒序取最近 N 轮，再翻转为升序（Limit 必须在 Find 之前生效）
+		q = q.Order("seq DESC").Limit(limit)
+	} else {
+		q = q.Order("seq ASC")
+	}
+	if err := q.Find(&list).Error; err != nil {
 		return nil, exception2.DatabaseQueryErrEx2("load turns error:%s", err.Error())
+	}
+	if limit > 0 {
+		for i, j := 0, len(list)-1; i < j; i, j = i+1, j-1 {
+			list[i], list[j] = list[j], list[i]
+		}
 	}
 	return list, nil
 }

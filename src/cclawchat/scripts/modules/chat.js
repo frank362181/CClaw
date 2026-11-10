@@ -2,40 +2,76 @@
  * ============================================================
  * 聊天页组件控制器 (ChatPage)
  * ============================================================
- * 高内聚：仅负责聊天页视图（侧边栏 / 会话 / 消息 / 输入区）的渲染与交互。
- * 低耦合：不直接依赖 App，通过注入回调与外部协作；会话切换 / 删除
- *         通过 document 自定义事件对外广播。
+ * 高内聚：仅负责聊天页视图（历史会话抽屉 / 消息 / 输入区）的渲染与交互。
+ * 低耦合：不直接依赖 App，通过注入回调与外部协作（会话切换 / 删除由 App 落库）。
  */
 
 import { State } from './state.js';
-import { getInitials, formatTime } from '../utils/helper.js';
+import { getInitials, formatTime, formatDate, truncate, escapeHtml } from '../utils/helper.js';
 
 // 发送/中断按钮图标:使用内联 SVG 而非文本字形(➤/⏹ + 变体选择符),
 // 避免 Safari 等系统把字形按 emoji 绘制(带背景的彩色方块/箭头),出现"覆盖一层图标"的观感。
 const ICON_SEND = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>';
 const ICON_INTERRUPT = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M6 6h12v12H6z"/></svg>';
 
+// 历史会话抽屉：只展示最近 15 条（与后端 SessionLimitPage 一致）
+const HISTORY_LIMIT = 15;
+
+// 会话历史轮次：只展示最近 15 轮（与后端 SessionLimitPage 一致）
+const TURNS_LIMIT = 15;
+
+// 轮次状态（与后端 TurnStatus* 对齐）
+// 0=正常 1=中断且无产出 2=中断但有部分产出 3=助手记录未落盘
+const TURN_INTERRUPTED = new Set([1, 2, 3]);
+
+// 中断来源（与后端 Interrupt* 对齐）
+const INTERRUPT_REASON_TEXT = {
+    0: '',
+    1: '用户中断',
+    2: '客户端断开',
+    3: '运行超时',
+    4: '上游流被取消',
+    5: '上游/流错误',
+    6: '已中断（来源未知）',
+};
+
+// 空状态默认提示语（服务端会话本地无缓存时会被替换为说明文案）
+const DEFAULT_EMPTY_HINT = '在下方输入消息，AI 助手将为您提供智能回复';
+const REMOTE_SESSION_HINT = '该会话暂无本地消息；继续发送将续写在同一会话中。';
+
 export const ChatPage = {
     comp: null,
     els: {},
+    _sessions: null,     // 后端返回的会话主题（null=尚未加载）
+    _sessionsError: '',  // 加载失败原因（非空时降级为本地会话）
+    _sessionsReqId: 0,   // 请求序号，用于丢弃过期响应
 
     /**
      * 初始化组件
      * @param {object} comp 组件实例（mountComponent 返回）
-     * @param {{ onSend?: Function, onNewChat?: Function, onClearChat?: Function, onHideChat?: Function }} handlers
+     * @param {{ onSend?: Function, onNewChat?: Function, onClearChat?: Function,
+     *           onSelectConversation?: Function, onDeleteConversation?: Function }} handlers
      */
     init(comp, handlers = {}) {
         this.comp = comp;
+        this.handlers = handlers;
         this.els = {
             chatPage: comp.query('#chatPage'),
             messageList: comp.query('#messageList'),
             emptyState: comp.query('#emptyState'),
             chatInput: comp.query('#chatInput'),
             btnSend: comp.query('#btnSend'),
-            btnHideChat: comp.query('#btnHideChat'),
             btnNewChat: comp.query('#btnNewChat'),
             btnClearChat: comp.query('#btnClearChat'),
             chatTitle: comp.query('#chatTitle'),
+            chatAgent: comp.query('#chatAgent'),
+            // 历史会话抽屉
+            btnHistory: comp.query('#btnHistory'),
+            historyDrawer: comp.query('#historyDrawer'),
+            historyOverlay: comp.query('#historyOverlay'),
+            historyList: comp.query('#historyList'),
+            btnHistoryNew: comp.query('#btnHistoryNew'),
+            btnHistoryClose: comp.query('#btnHistoryClose'),
         };
 
         // 输入区自适应高度 + 发送按钮状态
@@ -62,12 +98,35 @@ export const ChatPage = {
                 handlers.onSend?.();
             }
         });
-        this.els.btnHideChat.addEventListener('click', () => handlers.onHideChat?.());
         this.els.btnNewChat.addEventListener('click', () => handlers.onNewChat?.());
         this.els.btnClearChat.addEventListener('click', () => handlers.onClearChat?.());
+
+        // 历史会话抽屉：打开 / 关闭 / 新建 / 切换 / 删除
+        this.els.btnHistory.addEventListener('click', () => this.toggleHistory());
+        this.els.btnHistoryClose.addEventListener('click', () => this.closeHistory());
+        this.els.historyOverlay.addEventListener('click', () => this.closeHistory());
+        this.els.btnHistoryNew.addEventListener('click', () => {
+            this.closeHistory();
+            handlers.onNewChat?.();
+        });
+        this.els.historyList.addEventListener('click', (e) => {
+            const del = e.target.closest('[data-conv-delete]');
+            if (del) {
+                e.stopPropagation();
+                handlers.onDeleteConversation?.(del.dataset.convDelete);
+                return;
+            }
+            const item = e.target.closest('[data-conv-id]');
+            if (item) handlers.onSelectConversation?.(item.dataset.convId, item.dataset.convTitle || '', item.dataset.convAgent || '');
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.isHistoryOpen()) this.closeHistory();
+        });
     },
 
     show() {
+        // 宿主元素（主界面右侧 40% 分栏）与内部页面一起显示
+        this.comp.el.style.display = 'flex';
         this.els.chatPage.style.display = 'flex';
         requestAnimationFrame(() => {
             this.els.chatPage.classList.add('active');
@@ -75,8 +134,10 @@ export const ChatPage = {
     },
 
     hide() {
+        this.closeHistory();
         this.els.chatPage.classList.remove('active');
         this.els.chatPage.style.display = 'none';
+        this.comp.el.style.display = 'none';
     },
 
 
@@ -84,10 +145,12 @@ export const ChatPage = {
     renderMessages(conv) {
         const container = this.els.messageList;
         const empty = this.els.emptyState;
+        this._clearTurns(); // 实时消息渲染时移除历史轮次视图
 
         if (!conv || !conv.messages || conv.messages.length === 0) {
             container.querySelectorAll('.message').forEach(el => el.remove());
             empty.style.display = 'flex';
+            this.setEmptyStateHint(conv?.placeholder ? REMOTE_SESSION_HINT : '');
             return;
         }
 
@@ -418,10 +481,153 @@ export const ChatPage = {
         this.scrollToBottom();
     },
 
+    /* ========== 历史会话抽屉 ========== */
+
+    isHistoryOpen() {
+        return this.els.historyDrawer.classList.contains('open');
+    },
+
+    toggleHistory() {
+        if (this.isHistoryOpen()) this.closeHistory();
+        else this.openHistory();
+    },
+
+    /** 打开抽屉：立即展开，并向后端拉取当前用户的会话主题（最近 15 条，倒序） */
+    openHistory() {
+        this.els.historyDrawer.classList.add('open');
+        this.els.historyDrawer.setAttribute('aria-hidden', 'false');
+        this.els.historyOverlay.classList.add('active');
+        this.els.btnHistory.classList.add('active');
+        this._loadSessions();
+    },
+
+    closeHistory() {
+        this.els.historyDrawer.classList.remove('open');
+        this.els.historyDrawer.setAttribute('aria-hidden', 'true');
+        this.els.historyOverlay.classList.remove('active');
+        this.els.btnHistory.classList.remove('active');
+        this._sessionsReqId += 1; // 关闭后丢弃在途请求结果
+    },
+
+    /** 拉取会话主题列表；失败时降级展示本地会话，避免抽屉空白 */
+    async _loadSessions() {
+        const reqId = ++this._sessionsReqId;
+        this._sessions = null;
+        this._sessionsError = '';
+        this.renderHistory(true);
+
+        try {
+            const list = await this.handlers.onLoadSessions?.();
+            if (reqId !== this._sessionsReqId) return;
+            this._sessions = this._normalizeSessions(list);
+        } catch (err) {
+            if (reqId !== this._sessionsReqId) return;
+            this._sessionsError = err?.message || '加载历史会话失败';
+            console.warn('[Sessions] 获取会话列表失败，使用本地会话数据：', err);
+        }
+        this.renderHistory();
+    },
+
+    /**
+     * 渲染历史会话列表。
+     * - 数据源为后端 GetSessions 返回的会话主题（TSession），按 BeginTimestamp 倒序取前 HISTORY_LIMIT 条；
+     * - 后端不可用时降级为本地会话（localStorage），并给出提示。
+     * @param {boolean} [loading] true 时渲染加载占位
+     */
+    renderHistory(loading = false) {
+        const list = this.els.historyList;
+        if (!list) return;
+
+        if (loading) {
+            list.innerHTML = '<div class="history-empty">正在加载历史会话…</div>';
+            return;
+        }
+
+        const sessions = this._sessions !== null
+            ? this._sessions
+            : this._localSessionsFallback();
+
+        const items = sessions
+            .slice()
+            .sort((a, b) => (b.time || 0) - (a.time || 0))
+            .slice(0, HISTORY_LIMIT);
+
+        const notice = this._sessionsError
+            ? `<div class="history-notice">⚠️ ${escapeHtml(this._sessionsError)}，已显示本地记录</div>`
+            : '';
+
+        if (items.length === 0) {
+            list.innerHTML = `${notice}<div class="history-empty">暂无历史会话</div>`;
+            return;
+        }
+
+        list.innerHTML = notice + items.map(item => {
+            const active = item.id === State.currentConvId;
+            const local = State.conversations.some(c => c.id === item.id);
+            return `
+                <div class="history-item${active ? ' active' : ''}">
+                    <button type="button" class="history-item-main" data-conv-id="${escapeHtml(item.id)}" data-conv-title="${escapeHtml(item.title)}" data-conv-agent="${escapeHtml(item.agentId || '')}">
+                        <span class="history-item-title">${escapeHtml(truncate(item.title || '新对话', 24))}</span>
+                        <span class="history-item-meta">${escapeHtml(item.metaText)}</span>
+                    </button>
+                    ${local ? `<button type="button" class="history-item-del" data-conv-delete="${escapeHtml(item.id)}" title="移除本地记录">🗑</button>` : ''}
+                </div>
+            `;
+        }).join('');
+    },
+
+    /** 后端 TSession → 抽屉视图项 { id, title, time, metaText } */
+    _normalizeSessions(list) {
+        return (Array.isArray(list) ? list : []).map(session => {
+            const id = String(session?.SessionId ?? session?.sessionId ?? '');
+            const beginTs = Number(session?.BeginTimestamp ?? session?.beginTimestamp ?? 0);
+            const time = beginTs > 0 ? beginTs * 1000 : (Number(session?.updatedAt) || 0);
+            const ended = Boolean(session?.Ended ?? session?.ended);
+            const dateText = time ? formatDate(time) : '未知时间';
+            const metaText = ended ? `${dateText} · 已结束` : dateText;
+            return {
+                id,
+                title: String(session?.SessionName ?? session?.sessionName ?? '新对话'),
+                // 会话绑定的智能体：选定该会话后，后续消息沿用同一 Agent
+                agentId: String(session?.AgentId ?? session?.agentId ?? ''),
+                time,
+                metaText,
+            };
+        }).filter(item => item.id);
+    },
+
+    /** 从抽屉列表中移除一条会话（仅影响当前展示，后端记录仍在） */
+    removeSessionFromList(convId) {
+        if (!Array.isArray(this._sessions)) return;
+        this._sessions = this._sessions.filter(item => item.id !== convId);
+        this.renderHistory();
+    },
+
+    /** 后端不可用时的本地会话（localStorage）映射，字段与后端会话视图一致 */
+    _localSessionsFallback() {
+        return State.conversations.map(conv => {
+            const count = Array.isArray(conv.messages) ? conv.messages.length : 0;
+            return {
+                id: conv.id,
+                title: conv.title || '新对话',
+                agentId: conv.agentId || '',
+                time: conv.updatedAt || conv.createdAt || 0,
+                metaText: `${formatDate(conv.updatedAt || conv.createdAt || Date.now())} · ${count} 条消息`,
+            };
+        });
+    },
+
     scrollToBottom() {
         const container = this.els.messageList;
         requestAnimationFrame(() => {
             container.scrollTop = container.scrollHeight;
+        });
+    },
+
+    scrollToTop() {
+        const container = this.els.messageList;
+        requestAnimationFrame(() => {
+            container.scrollTop = 0;
         });
     },
 
@@ -504,14 +710,24 @@ export const ChatPage = {
     },
 
     updateUserInfo(username) {
-        // 对话历史侧边栏已移除：用户信息展示由主页(HomePage)负责，此处无需操作。
+        // 用户信息展示由主页(HomePage)负责，聊天面板内无需操作。
     },
 
-    updateChatTitle(title) {
+    updateChatTitle(title, agentId) {
         // 防护：视图缺失 #chatTitle 时不抛错（避免拖垮登录/会话流程）
         if (this.els.chatTitle) {
             this.els.chatTitle.textContent = title || '新对话';
         }
+        this.updateChatAgent(agentId);
+    },
+
+    /** 会话绑定的智能体徽标：有 agentId 才显示，便于确认历史会话将继续由哪个 Agent 处理 */
+    updateChatAgent(agentId) {
+        const badge = this.els.chatAgent;
+        if (!badge) return;
+        const id = String(agentId || '').trim();
+        badge.textContent = id ? `🧩 ${id}` : '';
+        badge.hidden = !id;
     },
 
     getInputValue() {
@@ -526,10 +742,292 @@ export const ChatPage = {
         this.els.chatInput.focus();
     },
 
+    /* ========== 历史轮次（选中历史会话时展示） ========== */
+
+    /** 轮次加载中占位 */
+    showTurnLoading() {
+        this._clearTurns();
+        this.els.emptyState.style.display = 'none';
+        const box = document.createElement('div');
+        box.className = 'turn-loading';
+        box.textContent = '正在加载历史对话…';
+        this.els.messageList.appendChild(box);
+    },
+
+    /** 轮次加载失败提示 */
+    showTurnError(message) {
+        this._clearTurns();
+        this.els.emptyState.style.display = 'none';
+        const box = document.createElement('div');
+        box.className = 'turn-error';
+        box.textContent = `⚠️ ${message || '加载历史对话失败'}`;
+        this.els.messageList.appendChild(box);
+    },
+
+    /**
+     * 渲染某会话的历史对话（最近 TURNS_LIMIT 轮，按时间倒序：最新一轮在最上方）。
+     *
+     * 期望后端返回的单个轮次结构（字段大小写不敏感，前端同时兼容常见别名）：
+     * {
+     *   Seq: number,            // 轮次序号（从 1 开始）
+     *   ChatTime: number,       // 提问时间，Unix 秒（毫秒亦可）
+     *   RespTime: number,       // 回答时间，Unix 秒（毫秒亦可）
+     *   Status: 0 | 1 | 2,      // 0=正常 1=中断无产出 2=中断有部分产出
+     *   Question: string,       // 用户提问正文
+     *   Answer: string,         // 助手回复正文
+     *   Reasoning?: string,     // 可选：思考过程（reasoning_content）
+     *   Tools?: Array<{         // 可选：本轮工具调用
+     *     ToolName: string, ToolResp: string, CallTime: number, RespTime: number
+     *   }>
+     * }
+     * @param {Array<object>} turns 后端轮次原始对象数组
+     */
+    renderTurns(turns) {
+        this._clearTurns();
+        const items = this._normalizeTurns(turns)
+            .sort((a, b) => (b.time - a.time) || (b.seq - a.seq))
+            .slice(0, TURNS_LIMIT);
+
+        if (!items.length) {
+            this.els.emptyState.style.display = 'flex';
+            return;
+        }
+        // 中断轮即使没有正文也承载信息（"回答已中断：原因"），不能因此被当作"空卡片"过滤掉
+        const hasContent = (turn) => Boolean(turn.question || turn.answer || turn.reasoning || turn.tools.length || turn.interrupted);
+        if (!items.some(hasContent)) {
+            // 后端只返回轮次元数据（没有 Question/Answer 正文），一次性说清楚，避免一排空卡片
+            this.els.emptyState.style.display = 'none';
+            const box = document.createElement('div');
+            box.className = 'turn-empty-state';
+            box.textContent = `服务端返回了 ${items.length} 轮记录，但没有对话正文（Question/Answer 字段为空），暂无法展示聊天内容。`;
+            this.els.messageList.appendChild(box);
+            return;
+        }
+
+        this.els.emptyState.style.display = 'none';
+        const fragment = document.createDocumentFragment();
+        items.forEach(turn => fragment.appendChild(this._makeTurnNode(turn)));
+        this.els.messageList.appendChild(fragment);
+        this.scrollToTop(); // 倒序展示：最新一轮在顶部
+    },
+
+    /**
+     * TTurn → 视图项。
+     * 时间统一转成毫秒；正文从多个候选字段里取第一个非空值，便于后端循序补充字段。
+     */
+    _normalizeTurns(list) {
+        const STATUS_TEXT = { 0: '正常', 1: '已中断', 2: '部分中断' };
+        const pick = (obj, keys) => {
+            for (const key of keys) {
+                const value = obj?.[key];
+                if (typeof value === 'string' && value.trim()) return value;
+            }
+            return '';
+        };
+
+        return (Array.isArray(list) ? list : []).map(turn => {
+            const chatTime = this._toMs(turn?.ChatTime ?? turn?.chatTime);
+            const respTime = this._toMs(turn?.RespTime ?? turn?.respTime);
+            const status = Number(turn?.Status ?? turn?.status ?? 0);
+            const reason = Number(turn?.InterruptReason ?? turn?.interruptReason ?? 0);
+            const tools = Array.isArray(turn?.Tools) ? turn.Tools
+                : Array.isArray(turn?.tools) ? turn.tools
+                : Array.isArray(turn?.ToolList) ? turn.ToolList
+                : [];
+
+            // 兼容后端把一轮拆成 messages 数组返回：取最后一条 user / assistant
+            const messages = Array.isArray(turn?.Messages) ? turn.Messages
+                : Array.isArray(turn?.messages) ? turn.messages
+                : [];
+            const roleOf = (m) => String(m?.Role ?? m?.role ?? '').toLowerCase();
+            const textOf = (m) => String(m?.Content ?? m?.content ?? m?.Text ?? m?.text ?? '');
+            const lastUser = [...messages].reverse().find(m => roleOf(m) === 'user');
+            const lastAssistant = [...messages].reverse().find(m => roleOf(m) === 'assistant');
+
+            // 后端 AnswerInterrupted=助手记录是 assistant:interrupted（只产出了部分回复）。
+            // 以它为准补充中断判定，并回落到「部分中断」，避免正文被截断却看不出原因。
+            const answerInterrupted = turn?.AnswerInterrupted === true || turn?.answerInterrupted === true;
+            const interrupted = TURN_INTERRUPTED.has(status) || answerInterrupted;
+            const effStatus = TURN_INTERRUPTED.has(status) ? status : (answerInterrupted ? 2 : status);
+
+            return {
+                seq: Number(turn?.Seq ?? turn?.seq ?? 0),
+                time: chatTime || respTime || 0,
+                respTime,
+                status,
+                interrupted,
+                statusText: STATUS_TEXT[status] || '',
+                interruptText: this._interruptText(effStatus, reason),
+                question: pick(turn, ['Question', 'question', 'ReqMsg', 'reqMsg', 'UserMsg', 'userMsg', 'Prompt', 'prompt']) || (lastUser ? textOf(lastUser) : ''),
+                answer: pick(turn, ['Answer', 'answer', 'Reply', 'reply', 'RespMsg', 'respMsg', 'AssistantMsg', 'assistantMsg', 'Content', 'content']) || (lastAssistant ? textOf(lastAssistant) : ''),
+                reasoning: pick(turn, ['Reasoning', 'reasoning', 'ReasoningText', 'reasoningText', 'ReasoningContent', 'reasoningContent']),
+                tools: tools.map(tool => ({
+                    name: String(tool?.ToolName ?? tool?.toolName ?? tool?.name ?? '工具'),
+                    detail: String(tool?.ToolResp ?? tool?.toolResp ?? tool?.detail ?? tool?.ToolResp ?? ''),
+                    time: this._toMs(tool?.CallTime ?? tool?.callTime) || this._toMs(tool?.RespTime ?? tool?.respTime),
+                })),
+            };
+        }).filter(item => item.seq > 0 || item.time > 0);
+    },
+
+    /** 中断文案：结合 status（有没有产出）和 reason（谁打断的）生成一句人读说明 */
+    _interruptText(status, reason) {
+        if (!TURN_INTERRUPTED.has(status)) return '';
+        // reason=0 表示源头没记录中断来源（例如只靠 AnswerInterrupted 判定出来），此时不加原因后缀
+        const reasonText = reason in INTERRUPT_REASON_TEXT ? INTERRUPT_REASON_TEXT[reason] : '原因未知';
+        const suffix = reasonText ? `：${reasonText}` : '';
+        if (status === 1) return `\u23F9\uFE0E 回答已中断${suffix}（本轮未产生回复）`;
+        if (status === 3) return `\u26A0\uFE0E 回复未保存${suffix}`;
+        return `\u23F9\uFE0E 回答已中断${suffix}`;
+    },
+
+    /** 时间戳统一转为毫秒（后端可能给秒或毫秒） */
+    _toMs(value) {
+        const num = Number(value) || 0;
+        if (num <= 0) return 0;
+        return num > 1e12 ? num : num * 1000;
+    },
+
+    /** 单轮节点：提问气泡 + 回答气泡（不显示"第 N 轮"） */
+    _makeTurnNode(turn) {
+        const wrap = document.createElement('div');
+        wrap.className = 'turn-item';
+
+        const body = document.createElement('div');
+        body.className = 'turn-body';
+        if (turn.question) {
+            body.appendChild(this._makeTurnMessage('user', turn.question));
+        }
+        body.appendChild(this._makeAssistantTurn(turn));
+
+        if (turn.time) {
+            const meta = document.createElement('div');
+            meta.className = 'turn-meta';
+            meta.textContent = `${formatDate(turn.time)} ${formatTime(turn.time)}`;
+            body.appendChild(meta);
+        }
+
+        wrap.appendChild(body);
+        return wrap;
+    },
+
+    /** 气泡行（用户提问右对齐 / 助手回答左对齐） */
+    _makeTurnMessage(role, text) {
+        const row = document.createElement('div');
+        row.className = `turn-msg ${role}`;
+
+        const avatar = document.createElement('div');
+        avatar.className = 'turn-avatar';
+        avatar.textContent = role === 'user'
+            ? (State.user ? getInitials(State.user.username) : 'U')
+            : 'AI';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'turn-bubble';
+        bubble.innerHTML = this._escapeHtml(text).replace(/\n/g, '<br/>');
+
+        if (role === 'user') {
+            row.appendChild(bubble);
+            row.appendChild(avatar);
+        } else {
+            row.appendChild(avatar);
+            row.appendChild(bubble);
+        }
+        return row;
+    },
+
+    /**
+     * 助手回答：
+     * - 正常结束：展示思考过程（可选）、工具卡片（可选）与回答正文；
+     * - 被中断：展示已产出的部分回答（若有），并明确标注中断原因；
+     * - 完全无产出：仅展示中断说明。
+     */
+    _makeAssistantTurn(turn) {
+        const row = this._makeTurnMessage('assistant', '');
+        const bubble = row.querySelector('.turn-bubble');
+
+        if (turn.reasoning) {
+            const details = document.createElement('details');
+            details.className = 'reasoning-wrap';
+            const summary = document.createElement('summary');
+            summary.textContent = `${State.agentEmoji || '🤖'} 思考过程`;
+            const text = document.createElement('div');
+            text.className = 'reasoning-text';
+            text.innerHTML = this._escapeHtml(turn.reasoning).replace(/\n/g, '<br/>');
+            details.appendChild(summary);
+            details.appendChild(text);
+            bubble.appendChild(details);
+        }
+
+        if (turn.tools.length) {
+            const list = document.createElement('div');
+            list.className = 'tool-list';
+            turn.tools.forEach(tool => {
+                const item = document.createElement('div');
+                item.className = 'tool-item done';
+                const header = document.createElement('div');
+                header.className = 'tool-header';
+                header.innerHTML = `<span class="tool-icon">⚙️</span><span class="tool-name">${this._escapeHtml(tool.name)}</span>`;
+                if (tool.time) {
+                    const time = document.createElement('span');
+                    time.className = 'tool-status';
+                    time.textContent = formatTime(tool.time);
+                    header.appendChild(time);
+                }
+                item.appendChild(header);
+                if (tool.detail) {
+                    const detail = document.createElement('div');
+                    detail.className = 'tool-detail';
+                    detail.textContent = tool.detail;
+                    item.appendChild(detail);
+                }
+                list.appendChild(item);
+            });
+            bubble.appendChild(list);
+        }
+
+        if (turn.answer) {
+            const content = document.createElement('div');
+            content.className = 'turn-answer';
+            content.innerHTML = this._escapeHtml(turn.answer).replace(/\n/g, '<br/>');
+            bubble.appendChild(content);
+        }
+
+        if (turn.interrupted) {
+            // 中断：以醒目标记替代"完整回答"，并给出中断来源
+            const tag = document.createElement('div');
+            tag.className = 'interrupted-tag turn-interrupt';
+            tag.textContent = turn.interruptText;
+            bubble.appendChild(tag);
+        } else if (!turn.answer) {
+            const empty = document.createElement('div');
+            empty.className = 'turn-empty';
+            empty.textContent = '该轮暂无回复内容';
+            bubble.appendChild(empty);
+        }
+        return row;
+    },
+
+    _clearTurns() {
+        this.els.messageList.querySelectorAll('.turn-item, .turn-loading, .turn-error, .turn-empty-state').forEach(el => el.remove());
+    },
+
+    /** 设置空状态提示语；不传则恢复默认文案 */
+    setEmptyStateHint(text) {
+        const p = this.els.emptyState?.querySelector('p');
+        if (p) p.textContent = text || DEFAULT_EMPTY_HINT;
+    },
+
     reset() {
+        this.closeHistory();
+        this.setEmptyStateHint();
+        this._sessions = null;      // 切换登录用户后按新用户重新拉取
+        this._sessionsError = '';
         if (this.els.chatTitle) {
             this.els.chatTitle.textContent = '新对话';
         }
+        this.els.historyList.innerHTML = '';
+        this._clearTurns();
         this.els.messageList.querySelectorAll('.message').forEach(el => el.remove());
         this.els.emptyState.style.display = 'flex';
     },

@@ -33,6 +33,7 @@ export const Auth = {
             State.login(result.user.userName, result.token, {
                 displayName: result.user.displayName,
                 expiresAt: result.expiresAt,
+                comCode: result.user.comCode,
             });
         } catch (err) {
             console.error('登录状态持久化失败:', err);
@@ -47,20 +48,21 @@ export const Auth = {
             const conv = State.getCurrentConversation();
             if (conv) {
                 ChatPage.renderMessages(conv);
-                ChatPage.updateChatTitle(conv.title);
+                ChatPage.updateChatTitle(conv.title, conv.agentId);
             } else {
                 const newConv = State.createConversation('新对话');
                 ChatPage.renderMessages(newConv);
-                ChatPage.updateChatTitle(newConv.title);
+                ChatPage.updateChatTitle(newConv.title, newConv.agentId);
             }
             ChatPage.setInputEnabled(true);
             ChatPage.updateSendButton();
         } catch (err) {
             console.error('登录成功但页面渲染异常:', err);
         } finally {
-            // 无论渲染是否异常都切到主页，避免卡在登录页
+            // 无论渲染是否异常都切到主页，避免卡在登录页（右侧聊天面板常驻）
             LoginPage.hide();
             HomePage.show();
+            ChatPage.show();
         }
 
         return true;
@@ -113,12 +115,13 @@ export const Auth = {
             const conv = State.getCurrentConversation();
             if (conv) {
                 ChatPage.renderMessages(conv);
-                ChatPage.updateChatTitle(conv.title);
+                ChatPage.updateChatTitle(conv.title, conv.agentId);
             }
             ChatPage.setInputEnabled(true);
             ChatPage.updateSendButton();
             LoginPage.hide();
             HomePage.show();
+            ChatPage.show();
             return true;
         } else {
             ChatPage.hide();

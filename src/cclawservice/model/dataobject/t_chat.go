@@ -122,3 +122,16 @@ type TTurnTool struct {
 
 // TableName 显式声明表名。
 func (TTurnTool) TableName() string { return "t_turn_tool" }
+
+// SessionTurnView 轮次会话的视图
+type SessionTurnView struct {
+	TurnId            string          `json:"turnId"`            // 轮次主键
+	Seq               int             `json:"seq"`               // 会话内轮次的次序
+	ChatTime          int64           `json:"chatTime"`          // 提问时间
+	RespTime          int64           `json:"respTime"`          // 回答时间
+	Status            int             `json:"status"`            // 见TurnStatus
+	InterruptReason   InterruptReason `json:"InterruptReason"`   // 见Interrupt
+	Question          string          `json:"question"`          // 提问正文
+	Answer            string          `json:"answer"`            // 回复正文
+	AnswerInterrupted bool            `json:"AnswerInterrupted"` // 是否被中断的标志
+}

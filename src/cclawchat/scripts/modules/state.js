@@ -1,5 +1,5 @@
 import { CONFIG } from './config.js';
-import { genId, safeJSON } from '../utils/helper.js';
+import { genId, safeJSON, newSessionId, normalizeSessionId } from '../utils/helper.js';
 
 function normalizeConversation(conv) {
     if (!conv || typeof conv !== 'object' || !Array.isArray(conv.messages)) return null;
@@ -18,6 +18,10 @@ function normalizeConversation(conv) {
             })),
         createdAt: Number(conv.createdAt) || Date.now(),
         updatedAt: Number(conv.updatedAt) || Date.now(),
+        // 会话绑定的 Agent（由 GetSessions 带回）：必须持久化，否则刷新后无法续用同一 Agent
+        agentId: String(conv.agentId || ''),
+        // true=仅服务端存在、本地无历史缓存的占位会话（GetSessionTurns 未实现，历史不可回放）
+        placeholder: Boolean(conv.placeholder),
     };
 }
 
@@ -90,8 +94,83 @@ export const State = {
         return this.conversations.find(c => c.id === this.currentConvId) || null;
     },
 
+    /** 确保指定 id 的会话存在（服务端已有、本地缺失时创建占位，便于继续同一 session）；返回会话对象 */
+    ensureConversation(convId, title, agentId) {
+        const agent = String(agentId || '').trim();
+        const existing = this.conversations.find(c => c.id === convId);
+        if (existing) {
+            if (agent) existing.agentId = agent;
+            this.currentConvId = existing.id;
+            this.save();
+            return existing;
+        }
+
+        // 历史数据兼容：旧版本本地会话用裸 UUID，后端落库时会加单位编码前缀，
+        // 这里按同样规则反查，命中则沿用原会话（避免同一会话出现两条本地记录）。
+        const legacy = this.conversations.find(c => `${normalizeSessionId(this.user?.comCode)}${normalizeSessionId(c.id)}` === convId);
+        if (legacy) {
+            legacy.id = convId; // 统一为后端权威 ID
+            if (agent) legacy.agentId = agent;
+            this.currentConvId = legacy.id;
+            this.save();
+            return legacy;
+        }
+        const conv = {
+            id: String(convId),
+            title: title || '新对话',
+            agentId: agent, // 后端会话绑定的 Agent；为空表示未绑定（交由后端路由）
+            messages: [],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            placeholder: true,
+        };
+        this.conversations.unshift(conv);
+        this.currentConvId = conv.id;
+        this.save();
+        return conv;
+    },
+
+    /** 切换当前会话；返回是否切换成功 */
+    setCurrentConversation(convId) {
+        const conv = this.conversations.find(c => c.id === convId);
+        if (!conv) return false;
+        this.currentConvId = conv.id;
+        this.save();
+        return true;
+    },
+
+    /** 删除指定会话；若删除的是当前会话则切到最近一条（无则新建），返回是否删除成功 */
+    deleteConversation(convId) {
+        const index = this.conversations.findIndex(c => c.id === convId);
+        if (index < 0) return false;
+        this.conversations.splice(index, 1);
+        if (this.currentConvId === convId) {
+            const next = this.conversations[0];
+            if (next) {
+                this.currentConvId = next.id;
+                this.save();
+            } else {
+                this.createConversation('新对话'); // 内部会保存并更新 currentConvId
+            }
+        } else {
+            this.save();
+        }
+        return true;
+    },
+
+    /** 绑定/更新某会话的 Agent（历史会话选定后固定使用它继续对话） */
+    setConversationAgent(convId, agentId) {
+        const conv = this.conversations.find(c => c.id === convId);
+        if (!conv) return null;
+        const agent = String(agentId || '').trim();
+        if (conv.agentId === agent) return conv;
+        conv.agentId = agent;
+        this.save();
+        return conv;
+    },
+
     createConversation(title) {
-        const conv = { id: genId(), title: title || '新对话', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
+        const conv = { id: newSessionId(this.user?.comCode), title: title || '新对话', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
         this.conversations.unshift(conv);
         this.currentConvId = conv.id;
         this.save();
@@ -103,6 +182,7 @@ export const State = {
         if (!conv || (role !== 'user' && role !== 'assistant')) return null;
         const msg = { id: id || genId(), role, content: String(content ?? ''), timestamp: Date.now() };
         conv.messages.push(msg);
+        conv.placeholder = false; // 已有本地消息后不再按占位会话处理
         if (conv.messages.length > CONFIG.MAX_MESSAGES_PER_CONV) {
             conv.messages.splice(0, conv.messages.length - CONFIG.MAX_MESSAGES_PER_CONV);
         }
@@ -210,9 +290,15 @@ export const State = {
         return true;
     },
 
-    login(username, token, { displayName, expiresAt } = {}) {
+    login(username, token, { displayName, expiresAt, comCode } = {}) {
         if (!username || !token) throw new Error('登录响应缺少用户名或令牌');
-        this.user = { username, displayName: displayName || username, token, expiresAt: Number(expiresAt) || null };
+        this.user = {
+            username,
+            displayName: displayName || username,
+            token,
+            expiresAt: Number(expiresAt) || null,
+            comCode: comCode || null,
+        };
         this.saveSession();
         this.loadConversations();
         if (this.conversations.length === 0) this.createConversation('新对话');

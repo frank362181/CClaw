@@ -42,9 +42,10 @@ var shutdownCallAllowlist = []struct {
 
 // shutdownHit 一处命中。
 type shutdownHit struct {
-	File   string
-	Line   int
-	Method string
+	File     string
+	Line     int
+	Method   string
+	OnGlobal bool // 接收者是 GetTaskManager()(进程单例),而非本地实例
 }
 
 // shutdownManagerMethods 进程级终态方法名。
@@ -171,14 +172,16 @@ func findShutdownCalls(file *ast.File, fSet *token.FileSet) []shutdownHit {
 		switch sel.Sel.Name {
 		case "Drain", "CancelScope", "CancelDaemon":
 			hits = append(hits, shutdownHit{
-				Line:   fSet.Position(call.Pos()).Line,
-				Method: sel.Sel.Name,
+				Line:     fSet.Position(call.Pos()).Line,
+				Method:   sel.Sel.Name,
+				OnGlobal: isManagerExpr(sel.X, aliases),
 			})
 		case shutdownManagerMethodClose:
 			if isManagerExpr(sel.X, aliases) {
 				hits = append(hits, shutdownHit{
-					Line:   fSet.Position(call.Pos()).Line,
-					Method: sel.Sel.Name,
+					Line:     fSet.Position(call.Pos()).Line,
+					Method:   sel.Sel.Name,
+					OnGlobal: true,
 				})
 			}
 		}
@@ -253,9 +256,14 @@ func TestShutdownCallsOnlyAtExit(t *testing.T) {
 	var violations []shutdownHit
 
 	for _, hit := range hits {
-		// 测试文件一律禁止:不设任何白名单。
 		if strings.HasSuffix(hit.File, "_test.go") {
-			violations = append(violations, hit)
+			// 测试里唯一的标准是"接收者是不是全局单例":
+			//   - 作用于本地实例(NewTaskManager):安全,允许(用完即弃);
+			//   - 作用于 GetTaskManager():会毒化同进程后续所有用例,禁止。
+			if hit.OnGlobal {
+				violations = append(violations, hit)
+			}
+
 			continue
 		}
 
@@ -280,16 +288,21 @@ func TestShutdownCallsOnlyAtExit(t *testing.T) {
 
 	for _, v := range violations {
 		where := "生产代码"
+		hint := "只能在进程退出路径调用;验证关停行为请在独立实例上调用(见 concurrency.NewTaskManager)"
+
 		if strings.HasSuffix(v.File, "_test.go") {
-			where = "测试文件(绝对禁止)"
+			where = "测试文件(禁止作用于全局单例)"
+			hint = "请改用 concurrency.NewTaskManager(cfg) 创建独立实例(可安全调用这些方法)," +
+				"并用 concurrency.SwapTaskManager(m) 注入与还原"
+		} else if v.OnGlobal {
+			hint = "该调用作用在进程单例上;生产代码中只允许出现在进程退出路径"
 		}
 
 		t.Errorf("%s:%d [%s] 调用了 %s —— 这是进程级终态操作:"+
 			"draining 永久置位、scopeCtx/daemonCtx 一经取消不可复活,"+
 			"且单例无 reset 入口,调用后同进程后续所有用例都会被 ErrTaskManagerClosed 拒绝。"+
-			"只能在进程退出路径调用;验证关停行为请改用 Scope.Wait/Cancel(可重复创建、用完即弃)。"+
-			"若确属退出路径的新出口,请在 archtest.shutdownCallAllowlist 里注明理由",
-			v.File, v.Line, where, v.Method)
+			"%s;若确属退出路径的新出口,请在 archtest.shutdownCallAllowlist 里注明理由",
+			v.File, v.Line, where, v.Method, hint)
 	}
 
 	t.Fatalf("共 %d 处终态操作越界调用", len(violations))
@@ -344,22 +357,32 @@ func TestShutdownGuardMatcherSelfCheck(t *testing.T) {
 		{
 			name: "别名变量上调用 Drain",
 			src:  "package p\nfunc f() { m := c.GetTaskManager(); m.Drain(nil) }",
-			want: []string{"Drain"},
+			want: []string{"Drain@global"},
 		},
 		{
 			name: "包级变量别名上调用 CancelDaemon",
 			src:  "package p\nvar m = c.GetTaskManager()\nfunc f() { m.CancelDaemon() }",
-			want: []string{"CancelDaemon"},
+			want: []string{"CancelDaemon@global"},
 		},
 		{
 			name: "直接链式调用 Close",
 			src:  "package p\nfunc f() { _ = c.GetTaskManager().Close(nil) }",
-			want: []string{"Close"},
+			want: []string{"Close@global"},
 		},
 		{
 			name: "直接链式调用 CancelScope",
 			src:  "package p\nfunc f() { c.GetTaskManager().CancelScope() }",
-			want: []string{"CancelScope"},
+			want: []string{"CancelScope@global"},
+		},
+		{
+			name: "本地实例上的 Close 不参与拦截(只拦全局单例)",
+			src:  "package p\nfunc f() { m := concurrency.NewTaskManager(cfg); m.Close(nil) }",
+			want: nil,
+		},
+		{
+			name: "函数参数上的 Drain 不算全局",
+			src:  "package p\nfunc f(m *concurrency.TaskManager) { m.Drain(ctx) }",
+			want: []string{"Drain"},
 		},
 		{
 			name: "普通资源的 Close 不误伤",
@@ -384,7 +407,12 @@ func TestShutdownGuardMatcherSelfCheck(t *testing.T) {
 
 			var got []string
 			for _, hit := range findShutdownCalls(file, fSet) {
-				got = append(got, hit.Method)
+				s := hit.Method
+				if hit.OnGlobal {
+					s += "@global"
+				}
+
+				got = append(got, s)
 			}
 
 			sort.Strings(got)

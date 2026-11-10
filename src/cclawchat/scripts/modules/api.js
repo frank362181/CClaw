@@ -2,6 +2,17 @@ import { randomDelay,getRandomNonce } from '../utils/helper.js';
 import {HmacSHA256Hex} from '../utils/hasher.js'
 import { CONFIG } from './config.js';
 import { http } from './http.js';
+import { State } from './state.js';
+
+/**
+ * 会话绑定的 Agent（历史会话选定后由 GetSessions 带回并存入本地会话）。
+ * 后端 AgentRouter 的优先级为「显式指定 > 会话绑定 > 关键词 > 默认」，
+ * 因此带上它即可让历史会话续用原 Agent；为空时交由后端路由。
+ */
+function resolveAgentId(convId) {
+    const conv = State.conversations.find(c => c.id === convId);
+    return String(conv?.agentId || '');
+}
 
 const MOCK_REPLIES = {
     greeting: '你好！很高兴见到你 👋 有什么我可以帮你的吗？',
@@ -47,6 +58,7 @@ async function runRealChat(convId, turnId, content, token, signal, onChunk, onCo
         requestMsg: content,
         chatType: 0,    // 私聊
         chatChannel: 1, // WEB 端
+        agentId: resolveAgentId(convId), // 会话绑定的 Agent（未绑定为空串）
     };
     // 签名基于实际发送的 JSON 字符串计算（与 login 一致）
     const TIMESTAMP = String(Math.floor(Date.now() / 1000));
@@ -90,6 +102,7 @@ async function runRealChatStream(convId, turnId, content, token, signal, onChunk
         requestMsg: content,
         chatType: 0,    // 私聊
         chatChannel: 1, // WEB 端
+        agentId: resolveAgentId(convId), // 会话绑定的 Agent（未绑定为空串）
     };
     const TIMESTAMP = String(Math.floor(Date.now() / 1000));
     const NONCE = getRandomNonce();
@@ -261,7 +274,13 @@ export const API = {
             const lifetime = Number(json.data.expiredLength) || 0;
             return {
                 success: true,
-                user: { id: userName, userName, displayName: json.data.displayName || userName },
+                user: {
+                    id: userName,
+                    userName,
+                    displayName: json.data.displayName || userName,
+                    // 单位编码：会话 ID 前缀以此为准（与后端落库格式保持一致）
+                    comCode: json.data.comCode || '',
+                },
                 token: json.data.token,
                 expiresAt: lifetime > 0 ? (generatedAt + lifetime) * 1000 : null,
             };
@@ -270,12 +289,14 @@ export const API = {
         }
     },
 
+    /**
+     * 验证已保存的令牌是否仍然有效（页面刷新恢复会话时调用）。
+     * 后端没有专门的令牌校验接口，这里复用受保护的只读接口 GetSessions：
+     * 令牌失效时后端返回 401/3001，getSessions 会抛错，调用方据此回到登录页。
+     */
     async validateSession(token) {
         if (!token) return false;
-        const json = await http.get(CONFIG.SESSION_CHECK_PATH, { headers: { AUTHORIZATION: token } });
-        if (json && typeof json.respCode === 'number' && json.respCode !== 0) {
-            throw new Error(json.respMsg || '登录会话已失效');
-        }
+        await this.getSessions(token);
         return true;
     },
 
@@ -332,6 +353,64 @@ export const API = {
             throw new Error(json.respMsg || '获取技能列表失败');
         }
         return Array.isArray(json?.data) ? json.data : [];
+    },
+
+    /**
+     * 获取当前登录用户的会话主题列表（对应后端 ChatController.GetSessions）。
+     * - 后端按 beginTimestamp 倒序返回，并限制为最近 15 条。
+     * - 该路由在后端注册为 POST（见 service_main.SetupChatController），
+     *   请求无请求体，签名内容为空串 + TIMESTAMP + NONCE。
+     * @param {string} token 登录令牌（AUTHORIZATION 请求头）
+     * @returns {Promise<Array<object>>} 后端返回的会话（TSession）原始对象数组
+     */
+    async getSessions(token) {
+        if (!token) throw new Error('未登录，无法获取历史会话');
+        // 签名基于「请求内容 + TIMESTAMP + NONCE」；无请求体，内容为空串
+        const TIMESTAMP = String(Math.floor(Date.now() / 1000));
+        const NONCE = getRandomNonce();
+        const SIGNATURE = await HmacSHA256Hex(CONFIG.SIGN_KEY, '' + TIMESTAMP + NONCE);
+
+        const json = await http.post(CONFIG.SESSIONS_PATH, undefined, {
+            params: { TIMESTAMP, NONCE, SIGNATURE },
+            headers: { AUTHORIZATION: token },
+        });
+        // 后端 CommonResponse 字段为 respCode/respMsg（camelCase）
+        if (json && typeof json.respCode === 'number' && json.respCode !== 0) {
+            throw new Error(json.respMsg || '获取历史会话失败');
+        }
+        return Array.isArray(json?.data) ? json.data : [];
+    },
+
+    /**
+     * 获取指定会话最近 N 轮的对话轮次（对应后端 ChatController.GetSessionTurns）。
+     * - 后端按轮次序号升序返回最近 SessionLimitPage(=15) 轮。
+     * - POST + 签名（签名内容为实际发送的 JSON 字符串 + TIMESTAMP + NONCE）。
+     * @param {string} token 登录令牌（AUTHORIZATION 请求头）
+     * @param {string} sessionId 会话标识（后端权威 SessionId）
+     * @returns {Promise<Array<object>>} 轮次（TTurn）原始对象数组
+     */
+    async getSessionTurns(token, sessionId) {
+        if (!token) throw new Error('未登录，无法获取会话记录');
+        if (!sessionId) throw new Error('缺少会话标识');
+
+        const body = JSON.stringify({ sessionId });
+        const TIMESTAMP = String(Math.floor(Date.now() / 1000));
+        const NONCE = getRandomNonce();
+        const SIGNATURE = await HmacSHA256Hex(CONFIG.SIGN_KEY, body + TIMESTAMP + NONCE);
+
+        const json = await http.post(CONFIG.SESSION_TURNS_PATH, body, {
+            params: { TIMESTAMP, NONCE, SIGNATURE },
+            headers: { AUTHORIZATION: token },
+        });
+        if (json && typeof json.respCode === 'number' && json.respCode !== 0) {
+            throw new Error(json.respMsg || '获取会话记录失败');
+        }
+        // 兼容三种返回形态：data 直接是数组 / { turns: [] } / { Turns: [] }
+        const data = json?.data;
+        if (Array.isArray(data)) return data;
+        if (Array.isArray(data?.turns)) return data.turns;
+        if (Array.isArray(data?.Turns)) return data.Turns;
+        return [];
     },
 
     /**

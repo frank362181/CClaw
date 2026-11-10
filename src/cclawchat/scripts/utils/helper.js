@@ -10,6 +10,29 @@ export function genId() {
     return Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 11);
 }
 
+/* 会话业务主键长度上限（与后端 CompactIdLen=40、DDL VARCHAR(40) 对齐） */
+const SESSION_ID_MAX_LEN = 40;
+
+/**
+ * 规整会话 ID（对齐后端 cclawservice/common.NormalizeCompactId）：
+ * 去空白、去连字符、仅保留字母/数字/下划线。
+ */
+export function normalizeSessionId(id) {
+    return String(id ?? '').trim().replace(/-/g, '').replace(/[^0-9a-zA-Z_]/g, '').slice(0, SESSION_ID_MAX_LEN);
+}
+
+/**
+ * 生成与后端落库格式一致的会话 ID（"单位编码 + UUID 去连字符"）。
+ * 后端会把客户端会话 ID 规整为 comCode 前缀形式再落库，若前端直接用裸 UUID，
+ * 本地会话 ID 与 GetSessions 返回的 SessionId 将永远不相等（高亮失效、重复建会话）。
+ * @param {string} comCode 单位编码（登录返回）
+ */
+export function newSessionId(comCode) {
+    const prefix = normalizeSessionId(comCode);
+    const body = normalizeSessionId(genId());
+    return (prefix + body).slice(0, SESSION_ID_MAX_LEN);
+}
+
 /** 格式化时间 (时:分) */
 export function formatTime(ts) {
     const d = new Date(ts);
