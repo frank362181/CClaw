@@ -75,9 +75,9 @@ func (e *ComposedScriptExecutor) Execute(ctx context.Context, req *security.Tool
 	case security.Ask:
 		// Ask决策意味着 InterActiveConfirmHandle 之前就返回了
 		// 在实际系统中,这里应处罚用户确认流程,但 InteractiveConfirmHandle 已经作为链尾处理了Ask情况
-		return nil, exception.PermissionDeniedErrEx2("ask decision not resolved:tool name=%s,reason=%s", req.ToolName, decision.Reason)
+		return nil, exception.PermissionDeniedKind.Newf("ask decision not resolved:tool name=%s,reason=%s", req.ToolName, decision.Reason)
 	case security.Deny:
-		return nil, exception.PermissionDeniedErrEx2("denied by %s,reason:%s", req.ToolName, decision.Reason)
+		return nil, exception.PermissionDeniedKind.Newf("denied by %s,reason:%s", req.ToolName, decision.Reason)
 	default:
 		return nil, pException.RuntimeErr2("unexpected decision %s", decision.Behavior)
 	}

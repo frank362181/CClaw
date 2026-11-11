@@ -97,12 +97,12 @@ func (p *Preparer) Prepare(ctx context.Context, cmd Command) (*TurnState, error)
 	}
 
 	visible := bundle.VisibleTools(gate)
-	var plan IRoundPlanner
+	var tTool IRoundTool
 	if p.functionCalling {
-		plan = NewRoundPlannerAdapter(BuildFirstRoundToolPlan(visible, gate.ForcedTools, GetLlmProviderThinking(llmProvider)),
+		tTool = NewRoundToolAdapter(BuildFirstRoundToolPlan(visible, gate.ForcedTools, GetLlmProviderThinking(llmProvider)),
 			fmt.Sprintf("agent=%s,turn=%s", agent.AgentId, cmd.TurnID))
 	} else {
-		visible, plan = nil, nil
+		visible, tTool = nil, nil
 	}
 
 	reserve := security.EstimateToolReserveTokens(visible)
@@ -120,7 +120,7 @@ func (p *Preparer) Prepare(ctx context.Context, cmd Command) (*TurnState, error)
 		Provider:      Provider{Llm: llmProvider},
 		SystemPrompt:  *sysPrompt,
 		VisibleTools:  visible,
-		Plan:          plan,
+		TurnTool:      tTool,
 		Policy:        policy,
 		ToolsMaxRunes: ctxmgr.TurnToolResultMaxRunes,
 		Scripts:       toolexecutor.GetScriptsResolver(bundle.Specs),

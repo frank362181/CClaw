@@ -69,7 +69,7 @@ func summarizer(provider Provider, transport ITransportClient) ctxmgr.Summarizer
 		// 输出额度按**窗口**收口
 		maxTokens := security.CalcTurnOutputTokens(int(provider.ContextWindow()), hCommon.SummaryMaxTokens, sysPrompt, userPrompt)
 		if maxTokens <= 0 {
-			return pCommon.BlankString, myException.RuntimeClientErrEx2("maintenance calls does not fit the context window,window=%d", provider.ContextWindow())
+			return pCommon.BlankString, myException.RuntimeClientKind.Newf("maintenance calls does not fit the context window,window=%d", provider.ContextWindow())
 		}
 
 		llmReply, err := transport.SimpleComplete(ctx, provider.Llm, sysPrompt, userPrompt, provider.Llm.MaxTokens)
@@ -78,7 +78,7 @@ func summarizer(provider Provider, transport ITransportClient) ctxmgr.Summarizer
 		}
 
 		if llmReply.FinishReason == llmproto.FinishReasonLength {
-			return pCommon.BlankString, myException.RuntimeClientErrEx("summarizer output was truncated by max_tokens (finish_reason=length)")
+			return pCommon.BlankString, myException.RuntimeClientKind.Newf("summarizer output was truncated by max_tokens (finish_reason=length)")
 		}
 
 		return llmReply.Content, nil

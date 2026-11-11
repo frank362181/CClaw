@@ -145,13 +145,13 @@ func BuildFirstRoundToolPlan(all []llmproto.Tool, forcedNames []string, callingT
 	return plan
 }
 
-type RoundPlannerAdapter struct {
+type RoundToolAdapter struct {
 	plan  FirstRoundToolPlan
 	scope string // "agent=<id>,turn=<id>:日志反复用
 }
 
-func NewRoundPlannerAdapter(plan FirstRoundToolPlan, scope string) RoundPlannerAdapter {
-	a := RoundPlannerAdapter{
+func NewRoundToolAdapter(plan FirstRoundToolPlan, scope string) RoundToolAdapter {
+	a := RoundToolAdapter{
 		plan:  plan,
 		scope: strings.TrimSpace(scope),
 	}
@@ -177,7 +177,7 @@ func NewRoundPlannerAdapter(plan FirstRoundToolPlan, scope string) RoundPlannerA
 // 规则收敛在 FirstRoundToolPlan。RoundTools内
 // - round== 0: 计划里的工具 + 计划里的tool_choice(可能是required)
 // - round>0:全量工具 + 空串(等价auto) -- 否则模型调完工具有就再也看不见其他工具,多步会卡死
-func (rpAdapter RoundPlannerAdapter) RoundTools(all []llmproto.Tool, round int) (tools []llmproto.Tool, toolChoice string) {
+func (rpAdapter RoundToolAdapter) RoundTools(all []llmproto.Tool, round int) (tools []llmproto.Tool, toolChoice string) {
 	if len(all) == 0 {
 		return nil, pCommon.BlankString
 	}
@@ -194,7 +194,7 @@ func (rpAdapter RoundPlannerAdapter) RoundTools(all []llmproto.Tool, round int) 
 // - 1.声明了required,却一条tool_call都没返回(供应商将required当作软约束)
 // - 2.有tool_call,但没一个被强制的(协议合法,业务预期落空)
 // - 3.有tool_call,但名字不存在本轮下发的schema里(模型幻觉 / 工具集体认知不一致)
-func (rpAdapter RoundPlannerAdapter) Verify(calls []llmproto.ToolCall, toolChoice string) {
+func (rpAdapter RoundToolAdapter) Verify(calls []llmproto.ToolCall, toolChoice string) {
 	// 只有真正下发了 required,才存在"是否遵守这个问题"
 	if toolChoice != llmproto.ToolChoiceRequired {
 		return
@@ -223,15 +223,15 @@ func (rpAdapter RoundPlannerAdapter) Verify(calls []llmproto.ToolCall, toolChoic
 	}
 }
 
-// NoToolsPlanerAdapter 永不发工具的合法计划
+// NoToolsAdapter 永不发工具的合法计划
 // 存在的意义:让TurnState.Plan永远非 nil 成为不变量
-type NoToolsPlanerAdapter struct{}
+type NoToolsAdapter struct{}
 
-func (NoToolsPlanerAdapter) RoundTools([]llmproto.Tool, int) ([]llmproto.Tool, string) {
+func (NoToolsAdapter) RoundTools([]llmproto.Tool, int) ([]llmproto.Tool, string) {
 	return nil, pCommon.BlankString
 }
 
-func (NoToolsPlanerAdapter) Verify([]llmproto.ToolCall, string) {}
+func (NoToolsAdapter) Verify([]llmproto.ToolCall, string) {}
 
 // 取出一组工具声明的名字(保序)。
 func toolNames(tools []llmproto.Tool) []string {

@@ -15,15 +15,14 @@ import (
 
 // TurnState 一轮对话的状态,生命周期 == 一次service.execute
 type TurnState struct {
-	Cmd   Command
-	Agent dataobject.TAgent
-	//AgentRef AgentReference
+	Cmd      Command
+	Agent    dataobject.TAgent
 	Provider Provider
 
 	SystemPrompt       hCommon.SystemPrompt
 	SystemPromptString string
 	VisibleTools       []llmproto.Tool
-	Plan               IRoundPlanner
+	TurnTool           IRoundTool
 	Policy             hCommon.ContextPolicy // 完整预算策略
 	ToolsMaxRunes      int                   //单条工具结果回填给模型的上限
 

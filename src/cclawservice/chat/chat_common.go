@@ -51,9 +51,9 @@ type ITransportClient interface {
 	Stream(ctx context.Context, p Provider, req llmproto.LlmRequest, ob IStreamObserver) (llmproto.LlmReply, error)
 }
 
-// IRoundPlanner 决定 第 几 round轮实际下发哪些工具、是否强制调用
+// IRoundTool 决定 第 几 round轮实际下发哪些工具、是否强制调用
 // 取代 直接依赖的tool.FirstRoundToolPlan
-type IRoundPlanner interface {
+type IRoundTool interface {
 	// RoundTools 第 round 轮实际下发的工具与tool choice
 	RoundTools(all []llmproto.Tool, round int) (tools []llmproto.Tool, toolChoice string)
 

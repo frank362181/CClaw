@@ -26,6 +26,7 @@ import (
 	"unicode/utf8"
 
 	cCommon "my.favorite/cclawservice/common"
+	"my.favorite/cclawservice/exception"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/model/dataaccessor"
@@ -173,15 +174,6 @@ func (s *MemoryService) Enabled() bool {
 	return s.usable()
 }
 
-// ErrSessionOwnershipConflict 会话已属于另一个 sender:sender 是当前唯一可用的归属凭据,
-// 不一致时不能把本轮问答写进别人的会话与历史文件。
-//
-// 为什么要作为一个可区分的原因返回(而不是只返回 ok=false):
-// 静默丢弃的表现是“每轮都答得出、历史永远为空”,用户与运维都无法定位(见 A2 / M4)。
-// 调用方据此选择“告知用户”而不是默默承受 —— 但它**不是致命错误**,记忆是旁路,
-// 调用方仍应继续聊天流程。
-var ErrSessionOwnershipConflict = errors.New("memory service: session belongs to another sender")
-
 // LoadHistoryTurnRecords 读取历史会话文件,建立"记录序号-->记录"索引
 // 读不到文件(未生成/被清理)时返回空索引,由调用方以空正文降级
 func (s *MemoryService) LoadHistoryTurnRecords(dataFileName string, sessionId string, sender string) map[int]MemoryRecord {
@@ -224,7 +216,7 @@ func (s *MemoryService) LoadHistoryTurnRecords(dataFileName string, sessionId st
 // 返回值:
 //   - ok=true:记录可用,session 有效(新建或复用成功);
 //   - ok=false:记录不可用,调用方应继续聊天流程(记忆是旁路,不阻断对话);
-//   - err 非 nil 时给出**可区分**的不可用原因(目前只有 ErrSessionOwnershipConflict)。
+//   - err 非 nil 时给出**可区分**的不可用原因(目前只有 SessionOwnershipConflictKind)。
 func (s *MemoryService) Begin(sender string, agent dataobject.TAgent, req *request.ChatRequest) (dataobject.TSession, bool, error) {
 	if !s.usable() || req == nil {
 		return dataobject.TSession{}, false, nil
@@ -253,7 +245,7 @@ func (s *MemoryService) Begin(sender string, agent dataobject.TAgent, req *reque
 		if !strings.EqualFold(strings.TrimSpace(sender), strings.TrimSpace(existing.Sender)) {
 			logging.LogErrorF("memory service: session %s belongs to sender %q but the request comes from %q, this turn will not be recorded",
 				existing.SessionId, existing.Sender, strings.TrimSpace(sender))
-			return dataobject.TSession{}, false, ErrSessionOwnershipConflict
+			return dataobject.TSession{}, false, exception.SessionOwnershipConflictKind //ErrSessionOwnershipConflict
 		}
 
 		// 存量会话补齐,因为agentId为空的话会导致整段历史记忆读不进来
@@ -678,18 +670,17 @@ func (s *MemoryService) fileStorageUsable() bool {
 }
 
 func (s *MemoryService) ensureSessionAgent(sessionId string, session dataobject.TSession, agent dataobject.TAgent) dataobject.TSession {
-	agentId := strings.TrimSpace(session.AgentId)
-	if agentId == pCommon.BlankString || strings.TrimSpace(session.AgentId) != pCommon.BlankString {
-		return session // 无可用agent,或已绑定
+	if strings.TrimSpace(session.AgentId) != pCommon.BlankString {
+		return session
 	}
 
-	session.AgentId = agentId // 本轮立即生效
-	if err := s.sessionAccessor.SetSessionAgentId(sessionId, agentId); err != nil {
+	session.AgentId = agent.AgentId // 本轮立即生效
+	if err := s.sessionAccessor.SetSessionAgentId(sessionId, session.AgentId); err != nil {
 		logging.LogWarnF("memory service: backfill agent id of session %s error:%s", sessionId, err.Error())
 		return session
 	}
 
-	logging.LogDebugF("memory service: session %s agent id backfilled to %s", sessionId, agentId)
+	logging.LogDebugF("memory service: session %s agent id backfilled to %s", sessionId, session.AgentId)
 	return session
 }
 

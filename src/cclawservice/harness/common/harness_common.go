@@ -549,5 +549,3 @@ func (t ToolPromptItem) OwnerTag() string {
 }
 
 type ClassifyAgent func(ctx context.Context, llm dataobject.TLlm, system string, user string, maxTokens int) (llmproto.LlmReply, error)
-
-//type ClassifyAgent func(ctx context.Context, llm dataobject.TLlm, req llmproto.LlmRequest) (string, string, error)

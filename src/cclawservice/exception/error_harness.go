@@ -20,6 +20,7 @@ import (
 
 const (
 	codeChatParameter = codeErrorHarnessChatBase + 1 + iota
+	codeSessionOwnershipConflict
 	codeChatAgentNotFound
 	codeChatLLM
 	codeChatCanceled
@@ -53,6 +54,13 @@ var (
 		Code:       codeChatParameter,
 		HTTPStatus: http.StatusBadRequest,
 		Msg:        "聊天参数错误",
+	})
+
+	SessionOwnershipConflictKind = apperr.Register(apperr.Kind{
+		Name:       "session.ownership",
+		Code:       codeSessionOwnershipConflict,
+		HTTPStatus: http.StatusOK,
+		Msg:        "session belongs to another sender",
 	})
 
 	// ChatAgentNotFoundKind 聊天目标 Agent 不存在或已禁用。HTTP 404。

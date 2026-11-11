@@ -65,7 +65,7 @@ func (l *ToolLoop) Run(ctx context.Context, st *TurnState, sink ISink, rules too
 	seq := newSeqSink(sink) // 序号分配
 
 	for round := 0; round < l.maxRounds; round++ {
-		roundTools, choice := st.Plan.RoundTools(st.VisibleTools, round)
+		roundTools, choice := st.TurnTool.RoundTools(st.VisibleTools, round)
 
 		seq.beginRound() //只清本轮映射,next 不清
 		reply, err := l.invoke(ctx, st, roundTools, choice, seq)
@@ -74,7 +74,7 @@ func (l *ToolLoop) Run(ctx context.Context, st *TurnState, sink ISink, rules too
 			return reply, err
 		}
 
-		st.Plan.Verify(reply.ToolCalls, choice)
+		st.TurnTool.Verify(reply.ToolCalls, choice)
 
 		if len(reply.ToolCalls) == 0 {
 			return reply, nil // 唯一正常结束

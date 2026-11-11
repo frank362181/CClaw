@@ -110,7 +110,7 @@ func (s *ChattingService) GetSessionTurns(sessionId string, loginName string, li
 
 	// 越权保护:只允许读取当前登录用户自己的会话
 	if sender := strings.TrimSpace(session.Sender); len(sender) > 0 && sender != loginName {
-		return nil, myException.PermissionDeniedErrEx2("session %s does not belong to current user", sessionId)
+		return nil, myException.PermissionDeniedKind.Newf("session %s does not belong to current user", sessionId)
 	}
 
 	turns, err := s.sessionAccessor.GetTurns(sessionId, limit)
@@ -226,7 +226,7 @@ func (s *ChattingService) execute(ctx context.Context, cmd chat.Command, sink ch
 
 	// 5.会话建档(旁路)
 	sess, jErr := s.journal.Begin(runCtx, turn)
-	if errors.Is(jErr, ctxmgr.ErrSessionOwnershipConflict) {
+	if errors.Is(jErr, myException.SessionOwnershipConflictKind) { //ctxmgr.ErrSessionOwnershipConflict) {
 		sink.OnNotice(cCommon.ChatNoticeNotRecorded, cCommon.ConstChatNoticeNotRecordedMsg)
 	}
 	sink.OnJournal(jErr)
