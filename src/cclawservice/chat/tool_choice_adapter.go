@@ -67,12 +67,12 @@ const (
 	DegradeCapability            // 能力限制:供应商/模型做不到(如思考不可关闭)
 )
 
-// FirstRoundToolPlan 一轮对话**首轮**应发送的工具集与 tool_choice。
+// FirstRoundTool 一轮对话**首轮**应发送的工具集与 tool_choice。
 //
 // 只作用于首轮:第二轮起调用方必须换回全量工具 + 不带 tool_choice
 // (用 RoundTools(all, round) 即可,别手写分支)。否则模型调完强制工具后就再也
 // "看不见"其余工具,多步流程会卡死。
-type FirstRoundToolPlan struct {
+type FirstRoundTool struct {
 	Tools         []llmproto.Tool // 首轮实际发送的工具集(降级时为全量)
 	ToolChoice    string          // 首轮 tool_choice;空串 = 不发该字段(等价 auto)
 	ForcedTools   []string        // 生效的强制工具(与可用工具求交集后的结果)
@@ -81,7 +81,7 @@ type FirstRoundToolPlan struct {
 	DegradeReason string          // 降级原因(便于日志一眼看懂,不靠推测)
 }
 
-// BuildFirstRoundToolPlan 依据"声明层强制工具名"生成本轮首轮策略。
+// BuildFirstRoundTool 依据"声明层强制工具名"生成本轮首轮策略。
 //   - all:         本 Agent 本轮全部可用工具(已解析成功的 schema,顺序即声明顺序)
 //   - forcedNames: CollectForcedToolNames 的结果(声明了 force-call 的工具名)
 //
@@ -106,19 +106,19 @@ type FirstRoundToolPlan struct {
 // 关 thinking 的唯一落点是 chat/request_builder.go,但它救不了"固有思考"的模型
 // (enable_thinking=false 被忽略),只能在**建计划时**就不发 required;
 // 否则每轮工具调用都要白付一次 400 + Degrade 重试(实测 ~500ms + 一条 error 指标)。
-func BuildFirstRoundToolPlan(all []llmproto.Tool, forcedNames []string, callingThinking FunctionCallingThinking) FirstRoundToolPlan {
-	plan := FirstRoundToolPlan{Tools: all}
+func BuildFirstRoundTool(all []llmproto.Tool, forcedNames []string, callingThinking FunctionCallingThinking) FirstRoundTool {
+	firstTool := FirstRoundTool{Tools: all}
 
 	// 无工具可用 -> 绝不发 tool_choice
 	if len(all) == 0 {
-		plan.Degraded, plan.DegradeKind = true, DegradeConfig
-		plan.DegradeReason = "no available tools"
-		return plan
+		firstTool.Degraded, firstTool.DegradeKind = true, DegradeConfig
+		firstTool.DegradeReason = "no available tools"
+		return firstTool
 	}
 
 	forced := pCommon.NormalizeStrings(forcedNames)
 	if len(forced) == 0 {
-		return plan // 没有强制调用:全量工具 + auto
+		return firstTool // 没有强制调用:全量工具 + auto
 	}
 
 	functionNames := toolNames(all)
@@ -126,31 +126,31 @@ func BuildFirstRoundToolPlan(all []llmproto.Tool, forcedNames []string, callingT
 	if len(effective) == 0 {
 		// 声明了强制工具,但一个都不在可用集合里 —— 绝不发 required:
 		// 白名单为空 + required 会给上游一个自相矛盾的请求。
-		plan.Degraded, plan.DegradeKind = true, DegradeConfig
-		plan.DegradeReason = fmt.Sprintf("forced tools %v not present in available tools %v", forced, functionNames)
-		return plan
+		firstTool.Degraded, firstTool.DegradeKind = true, DegradeConfig
+		firstTool.DegradeReason = fmt.Sprintf("forced tools %v not present in available tools %v", forced, functionNames)
+		return firstTool
 	}
 
-	plan.ForcedTools = effective
+	firstTool.ForcedTools = effective
 
 	if callingThinking.ThinkingLocked {
-		plan.Degraded, plan.DegradeKind = true, DegradeCapability
-		plan.DegradeReason = fmt.Sprintf(
+		firstTool.Degraded, firstTool.DegradeKind = true, DegradeCapability
+		firstTool.DegradeReason = fmt.Sprintf(
 			"provider thinking is locked (cannot be disabled), tool_choice=required would be rejected upstream; degrade to auto, forced=%v",
 			effective)
-		return plan
+		return firstTool
 	}
 
-	plan.ToolChoice = llmproto.ToolChoiceRequired
-	return plan
+	firstTool.ToolChoice = llmproto.ToolChoiceRequired
+	return firstTool
 }
 
 type RoundToolAdapter struct {
-	plan  FirstRoundToolPlan
+	plan  FirstRoundTool
 	scope string // "agent=<id>,turn=<id>:日志反复用
 }
 
-func NewRoundToolAdapter(plan FirstRoundToolPlan, scope string) RoundToolAdapter {
+func NewRoundToolAdapter(plan FirstRoundTool, scope string) RoundToolAdapter {
 	a := RoundToolAdapter{
 		plan:  plan,
 		scope: strings.TrimSpace(scope),
@@ -174,7 +174,7 @@ func NewRoundToolAdapter(plan FirstRoundToolPlan, scope string) RoundToolAdapter
 }
 
 // RoundTools 返回实际下发的工具与tool_choice
-// 规则收敛在 FirstRoundToolPlan。RoundTools内
+// 规则收敛在 FirstRoundTool。RoundTools内
 // - round== 0: 计划里的工具 + 计划里的tool_choice(可能是required)
 // - round>0:全量工具 + 空串(等价auto) -- 否则模型调完工具有就再也看不见其他工具,多步会卡死
 func (rpAdapter RoundToolAdapter) RoundTools(all []llmproto.Tool, round int) (tools []llmproto.Tool, toolChoice string) {

@@ -9,35 +9,31 @@
 
 ## 0. 结论先行
 
-现有机制（**显式 > 会话绑定 > 关键词 > 意图分类 > 默认兜底**）**一行不改**。Coordinator 是叠加在这一机制之上的"第三种执行形态"：
+> **已定：采用方案 A（路由内规划）。** 简单问题继续走现有路由，复杂问题在路由的第 ⑤ 段升级为"规划"。简单/复杂的判定见 [简单复杂问题判定设计](./简单复杂问题判定设计.md)。
+
+现有机制（**显式 > 会话绑定 > 关键词 > 意图分类 > 默认兜底**）**一行不改**。Coordinator 只是把第 ⑤ 段"输出一个 AgentId"升级为"输出 single 或 plan"：
 
 ```
-                    现有路由（不动）
-用户消息 ──▶ ① 单Agent短路 → ② 显式 → ③ 会话绑定 → ④ 关键词 → ⑤ 意图分类 → ⑥ 兜底
+                    现有路由（前四段不动）
+用户消息 ──▶ ① 单Agent短路 → ② 显式 → ③ 会话绑定 → ④ 关键词 ─┬─▶ ⑤ 分诊（1 次调用）
+                                                              │      ├─ mode=single → ⑥ 直接执行该 Agent（今天的行为）
+                                                              │      └─ mode=delegate
+                                                              │              │
+                                                              │              ├─ 分层并行派发 Worker
+                                                              │              └─ 汇总（Reporter turn）
                                                               │
-                                        ┌─────────────────────┴──────────────────────┐
-                                        ▼                                            ▼
-                              agent_role = worker                          agent_role = coordinator
-                              （今天的单 Agent 路径，零改动）                    │
-                                                                     ┌───────────┴───────────┐
-                                                                     ▼                       ▼
-                                                              规划：理解意图            direct：自己答
-                                                              + 生成任务 DAG            （无合适 Worker 时）
-                                                                     │
-                                                              delegate：分层并行派发
-                                                                     │
+                                                              └─▶ ⑥ 兜底（default Agent）
                                                                      ▼
-                                                              汇总（Reporter turn）
-                                                                     │
-                                                                     ▼
-                                                     写一条 t_turn（最终答复）
+                                                          写一条 t_turn（最终答复）
 ```
 
 三个不变量：
 
 1. **一次用户提问仍然只产生一条 `t_turn`** —— 历史只有一套，Worker 的执行过程不进会话历史。
-2. **路由的输入输出不变** —— `Resolve` 仍然只回答"这一轮由哪个 Agent 主理"。
+2. **简单问题的路径、成本、延迟与今天完全一致** —— 第 ⑤ 段本来就要调用一次，只是输出协议变了。
 3. **任何新能力都有开关，且关掉后行为逐字节等于今天**。
+
+> 与旧稿（形态 B：coordinator 是一条 `t_agent` 记录）的差别：方案 A 不引入新的 Agent 实体，因此不需要 `agent_role` 列、不需要 coordinator 的启动文档与技能配置、也不会出现"协作轮多一次调用"。代价是 coordinator 在 UI 上没有独立身份（用计划卡片呈现）。
 
 ---
 
@@ -61,7 +57,7 @@
 | 14 | `ConcurrentAdvance` 的 limit 由**该 key 首次调用**决定 | [concurrency_advance.go:29](../src/platformutility/concurrency/concurrency_advance.go:29) |
 | 15 | 闸位等待上限 10s，超时返回错误 | [concurrency_controller.go:22](../src/platformutility/concurrency/concurrency_controller.go:22) |
 | 16 | SSE 由 `emit` 加锁串行写；前端**按 payload 键嗅探** | [sse_presenter.go:243](../src/cclawservice/controller/sse_presenter.go:243)、[api.js](../src/cclawchat/scripts/modules/api.js) |
-| 17 | 已有 `IRoundPlanner` / `TurnState.Plan`，语义是**工具轮次策略** | [chat_common.go:56](../src/cclawservice/chat/chat_common.go:56)、[tool_choice_adapter.go:148](../src/cclawservice/chat/tool_choice_adapter.go:148) |
+| 17 | 工具轮次策略已改名为 `IRoundTool` / `TurnState.TurnTool`（原 `IRoundPlanner`/`Plan`，见 `43a53b0`），**`Plan` 一词已空出** | [chat_common.go:56](../src/cclawservice/chat/chat_common.go:56)、[turn_state.go:25](../src/cclawservice/chat/turn_state.go:25) |
 
 ---
 
@@ -75,7 +71,7 @@
 |---|---|---|
 | 调用次数 | 1 | 1 |
 | 输入 | 用户消息 + 候选 Agent 精简目录 | 同左（+ 能力标签） |
-| 输出 | `agent_001` | `{"mode":"single","agent":"agent_001"}` 或 `{"mode":"plan",...}` |
+| 输出 | `agent_001` | `{"mode":"single","agent":"agent_001"}` 或 `{"mode":"delegate","tasks":[...]}` |
 
 所以**简单问题的成本与延迟完全不变**（都是"1 次分类/规划 + 1 次回答"）。这是本方案能落地的前提：协作能力不是靠"多加一层"，而是靠**复用已有的那次调用**。
 
@@ -89,91 +85,100 @@ type ClassifyAgent func(ctx, llm, system, user string, maxTokens int) (LlmReply,
 
 ---
 
-## 3. 接入形态：三选一
+## 3. 接入形态：已选 A
 
-### 形态 A：路由内规划（不引入 Agent 实体）
+| 形态 | 说明 | 判定 |
+|---|---|---|
+| **A 路由内规划** | 第 ⑤ 段输出 `single \| delegate` | **采用**（见 §0），判定细则见 [简单复杂问题判定设计](./简单复杂问题判定设计.md) |
+| B Coordinator 是一种真实 Agent | `t_agent.agent_role=1`，路由选中它后再规划 | 未采用：协作轮多一次调用、需要新增 Agent 实体与启动文档 |
+| C A+B 双入口 | 自动走 A、显式走 B | 未采用：两套 prompt/解析/降级要同步维护 |
 
-第 ⑤ 段直接输出 `single | plan`。
+### 3.1 A 的三个代价与各自的处置
 
-- ✅ 成本最低（协作轮少一次调用）
-- ❌ coordinator 不可见：没有 UI 卡片、不能作为会话绑定、没有自己的启动文档/规则、无法通过"显式选择"进入
-
-### 形态 B：Coordinator 是一种真实 Agent（**推荐**）
-
-`t_agent` 增加 `agent_role`；coordinator 是普通 Agent 行，路由照旧选它；选中后该轮走"规划 → 派发 → 汇总"。
-
-- ✅ 路由**零改动**（第 ⑤ 段还是输出一个 AgentId）
-- ✅ coordinator 有身份、有启动文档、可被 UI 选中、可被 `t_agent_route_rule` 命中、可被 `t_session.agent_id` 长期绑定
-- ✅ 用户已有能力（"历史会话续用原 Agent"）自动变成"协作会话续用 coordinator"
-- ⚠️ 协作轮多一次 LLM 调用（≈1–2k token 的规划调用）。简单问题不受影响，因为它根本不会路由到 coordinator
-
-### 形态 C：A+B 双入口
-
-自动入口走 A，显式入口走 B。
-
-- ✅ 省掉协作轮的那一次调用
-- ❌ 两套 prompt、两套解析、两套降级路径要同步维护，长期是负担
-
-**采用 B。** 若后续实测"协作轮的规划调用"成本敏感，再补 C 的自动入口（复用同一个 `Planner` 实现，只是换个调用点），不需要重构。
+| 代价 | 处置 |
+|---|---|
+| coordinator 在 UI 上没有"一个人" | 用**计划卡片**呈现（`plan` / `task` 事件），显示意图、任务、每个任务由哪个 Agent 执行 |
+| 无法通过"显式选择某个 Agent"进入协作 | 保留**逃生通道**：UI 提供"深度分析"开关 → `forceMode=delegate`，等价于显式要求协作 |
+| 协作会话的续用语义 | 用 `t_session.routing_mode` 表达"本会话的入口是规划器"（详见判定设计 §7） |
 
 ---
 
-## 4. 执行链（形态 B）
+## 4. 执行链（形态 A）
 
 ```
 ChattingService.execute
-  ├─ 1  Preparer.Prepare                      ← 路由（原样）
+  ├─ 1  Preparer.Prepare
+  │      └─ AgentRouter.ResolveDecision      ★ 唯一改动点
+  │           ├─ L0 硬分流（单Agent/显式/绑定/关键词）→ decision.Mode=single
+  │           ├─ L1 结构强信号                        → decision.Mode=delegate（强制）
+  │           └─ L2 分诊调用（1 次，复用 classifyByLLM 的调用位）→ single | delegate
+  │
   ├─ 2  每 Agent 并发闸（root: agent:<id>）    ← 原样
   ├─ 3  中断登记 / 运行超时                     ← 原样
-  ├─ 4  Journal.Begin（建档）                  ← 原样
+  ├─ 4  Journal.Begin（建档）                  ← 原样（此时决定 routing_mode）
   │
-  ├─ 5  ★ 分支：agent.AgentRole == coordinator ?
-  │      ├─ no  → 6..9 原样（单 Agent 路径，代码一行不动）
-  │      └─ yes → TaskPlanner.MakePlan（1 次调用，§6）
-  │                ├─ mode=direct → 6..9（coordinator 自己答，等价今天的单 Agent）
-  │                ├─ mode=single → 用 plan.Agent 重跑 PrepareFor 后 6..9（不额外调用）
-  │                └─ mode=delegate →
-  │                      PlanExecutor.Run（§7）
-  │                        └─ 每个 Worker = 一次 "无记账 TurnRunner.Run"
-  │                      Reporter turn（§8，流式、写历史）
+  ├─ 5  ★ 分支：decision.Mode
+  │      ├─ single → 6..9 原样（今天的路径，代码一行不动）
+  │      └─ delegate →
+  │             PlanExecutor.Run（§7）
+  │               └─ 每个 Worker = 一次 "无记账 TurnRunner.Run"
+  │             Reporter turn（§8，流式、写历史）
   │
-  └─ 6 Assembler.Assemble → 7 invoke → 8 收尾记账（原样，作用于 Reporter/单 Agent）
+  └─ 6 Assembler.Assemble → 7 invoke → 8 收尾记账（原样，作用于 Reporter）
 ```
 
-`mode=single` 的语义要写清楚：**规划调用已经给出了答案用哪个 Agent**，因此直接用 `plan.Agent` 构造 `TurnState`，**不再走一次路由**，也就没有额外调用。
+要点：
+
+- `ResolveDecision` 里 `mode=single` 的分支**已经选好了 Agent**，因此下游完全不必再判断；
+- `Preparer.Prepare` 保留为 `ResolveDecision` 的薄包装（取 `decision.Agent`），现有调用点与测试不受影响；
+- 因为分诊调用复用了原来分类调用的位置，**简单路径的调用次数不变**（1 次分诊 + 1 次回答）。
 
 ---
 
 ## 5. 契约：`ExecutionPlan`
 
-### 5.1 命名（避免与既有 `Plan` 撞车）
+### 5.1 命名
 
-仓库里 `TurnState.Plan` / `IRoundPlanner` 已经表示"第 N 轮下发哪些工具"。新概念一律带 `Task`/`Execution` 前缀：
+`43a53b0` 已把工具轮次策略改名为 `IRoundTool` / `TurnState.TurnTool`（原 `IRoundPlanner` / `TurnState.Plan`），因此 `Plan` / `Planner` 这两个词**已经空出来了**。但为了避免"任务计划"与"工具轮次"在读代码时再次混淆，本文仍建议：
 
 | 新概念 | 名字 | 不许用 |
 |---|---|---|
-| 执行计划 | `ExecutionPlan` | `Plan` |
+| 路由决策 | `RouteDecision`（放在 `harness/ctxmgr`） | — |
+| 执行计划 | `ExecutionPlan` | 裸 `Plan`（语义太泛） |
 | 计划中的任务 | `PlanTask` | `Task`（`concurrency` 包已有 `RoutineSpec`/`TaskStat` 语境） |
-| 规划器 | `ITaskPlanner` | `Planner` |
+| 分诊（简单/复杂判定） | `ITriager` / `Triage` | `Planner`（易与工具轮次混淆） |
 | 分派执行器 | `IPlanExecutor` | `Executor`（`toolexecutor` 已占用） |
+
+> 方案 A 里"分诊 + 规划"是同一次 LLM 调用，因此只有一个组件 `ITriager`（它负责判定、并在 delegate 时一并产出计划），**不再单独存在 `ITaskPlanner`**。
 
 ### 5.2 结构
 
 ```go
-// cclawservice/chat/agent_role.go
-type AgentRole int
+// harness/ctxmgr/route_decision.go —— 方案 A 不引入 Agent 实体，只在路由层加"模式"
+type RouteMode int
 
 const (
-    AgentRoleWorker      AgentRole = 0 // 默认：今天的单 Agent
-    AgentRoleCoordinator AgentRole = 1 // 可规划 + 可派发
+    RouteModeSingle   RouteMode = iota // 今天的行为
+    RouteModeDelegate                   // 走规划
 )
 
-// cclawservice/chat/execution_plan.go
+type RouteDecision struct {
+    Mode       RouteMode
+    Agent      dataobject.TAgent // Mode=single 时的目标
+    Plan       *ExecutionPlan    // Mode=delegate 时的计划（含 Reporter）
+    Source     RouteSource       // disabled/forced/explicit/binding/keyword/struct/llm/fallback
+    Intent     string
+    Signals    ComplexitySignals
+    Confidence float64
+    ElapseMs   int64
+    Note       string // 降级/偏离原因
+}
+
+// chat/execution_plan.go
 type ExecutionMode int
 
 const (
-    ModeDirect   ExecutionMode = iota // coordinator 自己答（无合适 Worker / 澄清用）
-    ModeSingle                        // 交给一个 Worker 答（不派发 DAG）
+    ModeSingle   ExecutionMode = iota // 交给一个 Worker 答（不派发 DAG）
     ModeDelegate                      // 多 Worker 协作
 )
 
@@ -219,7 +224,10 @@ type TaskResult struct {
 
 ---
 
-## 6. 规划器（`ITaskPlanner`）
+## 6. 分诊与规划（`ITriager`）
+
+> 一次 LLM 调用完成两件事：判定 simple/delegate；delegate 时同时产出任务 DAG。
+> 完整判据、反例、评测集见 [简单复杂问题判定设计](./简单复杂问题判定设计.md)。
 
 ### 6.1 输入
 
@@ -230,7 +238,6 @@ type TaskResult struct {
 ### 6.2 输出协议（严格 JSON）
 
 ```json
-{"mode":"direct","intent":"用户想查昨天的天气","note":"当前没有天气相关的专家，由我直接回答"}
 {"mode":"single","agent":"agent_001","intent":"编制 2026014 处置报告"}
 {"mode":"delegate","intent":"对比 A、B 两个资产包的处置价值",
  "tasks":[
@@ -246,14 +253,14 @@ type TaskResult struct {
 ```
 ① 严格 JSON 解析成功 → 校验（§5.3）→ 使用
 ② JSON 失败 → 整段文本是否精确等于某个 AgentId（= 今天的行为）
-③ 仍失败 / 超时 / 空输出 → coordinator 自己答（ModeDirect），并附一句"未能拆分任务"的说明
+③ 仍失败 / 超时 / 空输出 → defaultAgent 单跑（= 今天的兜底）
 ```
 
-第 ③ 条很重要：**规划失败不能让用户看到错误**，它等价于"今天路由到某个 Agent 但它答得一般"。
+第 ③ 条很重要：**规划失败不能让用户看到错误**，它必须等价于"今天路由到某个 Agent"。方案 A 没有 coordinator 实体，所以不存在"自己答"这一档——所有回落都落到 `defaultAgent`。
 
 ### 6.4 校验失败的回喂（可选，建议 v1 就做）
 
-校验失败不抛错终止，而是把结构化错误作为**同一轮工具循环里的 tool 结果**回喂给模型自纠，最多 2 次：
+校验失败不抛错终止，而是把结构化错误回喂给模型自纠，最多 2 次：
 
 ```json
 {"ok":false,"attempt":1,"error":{"code":"NOT_SELF_CONTAINED","task_id":"t3",
@@ -261,7 +268,7 @@ type TaskResult struct {
  "hint":"依赖写进 depends_on，action 里改为『基于 t1/t2 的科目表』"}}
 ```
 
-> 实现提示：这里**不引入内置工具**。做法是 `ITaskPlanner` 内部做一次"同消息多轮"（`LlmRequest.Messages` 追加 assistant/tool），与 ToolLoop 无关，工具执行器一行不改。若嫌复杂，v1 可先用"失败即 ModeDirect"，把回喂放到 v2。
+> 实现提示：这里**不引入内置工具**。做法是分诊器内部做"同消息多轮"（`LlmRequest.Messages` 追加 assistant/tool），与 ToolLoop 无关，工具执行器一行不改。若嫌复杂，v1 可先用"校验失败即回落 single"。
 
 ### 6.5 规划提示词要点（可直接照抄进 prompt 文件）
 
@@ -270,7 +277,9 @@ type TaskResult struct {
 3. **一个任务 = 一个可独立交付的产物**；同专业的连续步骤必须合并；
 4. 任务书必须自包含：目标、材料、输出格式、约束；
 5. 依赖只能用 `depends_on`；禁止"根据上面的结果"；
-6. `direct` 是合法的：没有合适专家时自己答，不要硬凑计划。
+6. 判不准时选 `single`：宁可慢一轮再纠正，也不要把简单问题拆碎。
+
+> 完整的判据、反例与输出 schema 见 [简单复杂问题判定设计](./简单复杂问题判定设计.md) §3.3。
 
 ---
 
@@ -306,7 +315,6 @@ type TurnRequest struct {
     Sink         ISink             // Worker: 只发状态的 sink；Reporter: 真 SSE
     Recordable   bool              // Worker: false；Reporter: true
     DisableTools bool              // Reporter: true
-    AllowDelegate bool             // 固定 false（见 §7.6）
 }
 ```
 
@@ -355,7 +363,7 @@ type TurnRequest struct {
 
 ### 7.6 深度固定为 1 层
 
-`AllowDelegate` 只在 `depth==0 && role==coordinator` 时为 true；候选目录**永远排除 coordinator**。理由：递归会同时放大成本、延迟与死锁面，而真实业务里"两层专家"已经够用。字段留 `max_depth` 便于将来放开。
+Worker 的 `TurnState` 不带分诊能力（`AllowDelegate=false`），候选目录里也不存在"另一个 coordinator"——因为方案 A 没有 coordinator 实体，**递归在类型上就不可能发生**。这是方案 A 的一个额外好处：不需要额外守卫来防"Worker 又派 Worker"。
 
 ---
 
@@ -420,9 +428,12 @@ CREATE TABLE IF NOT EXISTS t_turn_plan (
     ID          INTEGER PRIMARY KEY AUTOINCREMENT,
     turn_id     VARCHAR(40) NOT NULL UNIQUE,
     session_id  VARCHAR(40) NOT NULL,
-    mode        INTEGER NOT NULL DEFAULT 0,   -- 0 direct / 1 single / 2 delegate
+    mode        INTEGER NOT NULL DEFAULT 0,   -- 0 single / 1 delegate
     intent      VARCHAR(512),
     reporter    VARCHAR(8),
+    source      INTEGER NOT NULL DEFAULT 0,    -- RouteSource（判定来源，便于归因）
+    signals     VARCHAR(64),                   -- "2,2,2,2"（四维计数）
+    confidence  REAL,
     plan_json   TEXT,                          -- 原始决策（审计/回放）
     validate_note VARCHAR(512),                -- 被剔除的任务与原因
     attempts    INTEGER NOT NULL DEFAULT 0,    -- 校验回喂次数
@@ -451,17 +462,22 @@ CREATE TABLE IF NOT EXISTS t_turn_task (
 CREATE INDEX IF NOT EXISTS idx_t_turn_task_turn ON t_turn_task(turn_id, seq);
 ```
 
-`t_agent` 增加：
+`t_agent` 增加（**不需要 `agent_role`** —— 方案 A 没有 coordinator 实体）：
 
 ```sql
-ALTER TABLE t_agent ADD COLUMN agent_role   INTEGER NOT NULL DEFAULT 0; -- 0 worker / 1 coordinator
 ALTER TABLE t_agent ADD COLUMN max_children INTEGER NOT NULL DEFAULT 3; -- 单层最大并行子任务
 ALTER TABLE t_agent ADD COLUMN max_tasks    INTEGER NOT NULL DEFAULT 5; -- 单轮最多任务数
 ```
 
+`t_session` 增加：
+
+```sql
+ALTER TABLE t_session ADD COLUMN routing_mode INTEGER NOT NULL DEFAULT 0; -- 0 绑定Agent（今天）/ 1 规划器
+```
+
 ### 10.2 三条存储纪律
 
-1. **`t_session.agent_id` 永远是"入口 Agent"**：协作会话 = coordinator。这样 UI 的"历史会话续用原 Agent"（事实 7）自动让协作会话每轮都从 coordinator 进入，语义自洽。
+1. **`t_session.routing_mode` 决定"续用语义"**：`0`=绑定 Agent（今天的行为，首轮 single 即写此值）；`1`=规划器（首轮 delegate 时写）。`t_session.agent_id` 填 **Reporter**，这样 UI 的徽标永远有确定值，但 `routing_mode=1` 会让路由器忽略"显式/绑定"短路、每轮重新分诊。详见 [判定设计 §7](./简单复杂问题判定设计.md)。
 2. **`t_turn` 没有 agent 列，也不需要**：参与本轮的具体 Agent 在 `t_turn_task` 里；单 Agent 轮看 `t_session.agent_id` 即可。
 3. **落库时机与今天一致**：轮末随 `Journal.Finish` 一次性写。原因：`t_turn` 行本身是轮末才插入（[memory_service.go:301](../src/cclawservice/harness/ctxmgr/memory_service.go:301)），执行期写 `t_turn_task` 会撞外键；中断轮复用既有 `FinishPartial` 通道。
 
@@ -490,73 +506,75 @@ ALTER TABLE t_agent ADD COLUMN max_tasks    INTEGER NOT NULL DEFAULT 5; -- 单�
 - 子任务**不转发正文**（多路交错会把 SSE 写成乱序）；需要时用 `CoordinatorStreamMode: silent|summary|full` 控制；
 - 任务级事件的发送频率按**状态变化**，不按 token；
 - 复用 `SSEPresenter.emit` 的锁，多 Worker 并发发事件是安全的（事实 16）；
-- 已有 `t_session.agent_id` 徽标（[chat.js](../src/cclawchat/scripts/modules/chat.js) 的 `updateChatAgent`）可直接显示"由 coordinator 主理"。
+- 已有 `t_session.agent_id` 徽标（[chat.js](../src/cclawchat/scripts/modules/chat.js) 的 `updateChatAgent`）可直接显示"本会话由规划器主理"（`routing_mode=1` 时）。
 
 ---
 
 ## 12. 配置
 
 ```json
-"coordinator": {
-  "enabled": true,
-  "maxTasks": 5,
-  "maxParallel": 3,
-  "taskTimeoutSec": 180,
-  "summaryMaxRunes": 800,
-  "planMaxTokens": 1024,
-  "plannerCorrectionRetries": 2,
-  "reporterAgentId": ""
+"routing": {
+  "complexity": {
+    "enabled": true,
+    "dryRun": true,
+    "delegateConfidence": 0.6,
+    "strongSignalOverride": true,
+    "keywordRuleMode": "hint"
+  },
+  "coordinator": {
+    "maxTasks": 5,
+    "maxParallel": 3,
+    "taskTimeoutSec": 180,
+    "summaryMaxRunes": 800,
+    "triageMaxTokens": 1024,
+    "plannerCorrectionRetries": 2,
+    "reporterAgentId": ""
+  }
 }
 ```
 
-`enabled=false` ⇒ 所有 coordinator 的 `agent_role` 被忽略，退化为今天的单 Agent（一行开关，可灰度）。
+- `complexity.enabled=false` ⇒ 完全不判定，退化为今天的路由（一行开关，可灰度）；
+- `complexity.dryRun=true` ⇒ 照常判定并落 `t_route_decision`，但执行永远走单 Agent（**推荐的第一个上线形态**）；
+- `keywordRuleMode` / `delegateConfidence` / `qualityPreset` 的语义见 [判定设计 §10](./简单复杂问题判定设计.md)。
 
 ---
 
 ## 13. 代码改动清单
 
-### 13.1 前置修复（与本方案强相关，建议一起做）
+### 13.1 前置条件（已满足）
 
-`MemoryService.ensureSessionAgent`（[memory_service.go:680](../src/cclawservice/harness/ctxmgr/memory_service.go:680)）目前是**空操作**：
-
-```go
-agentId := strings.TrimSpace(session.AgentId)
-if agentId == pCommon.BlankString || strings.TrimSpace(session.AgentId) != pCommon.BlankString {
-    return session            // 两条分支都返回 → 永远不会回填
-}
-session.AgentId = agentId     // 自赋值
-```
-
-后果：`t_session.agent_id` 为空的历史会话，`Session.HasHistory()` 为 false（事实 9）→ **历史记忆读不进来**。正确写法：
+`MemoryService.ensureSessionAgent` 早前是空操作（两条分支都 return、`session.AgentId = agentId` 自赋值），导致 `t_session.agent_id` 为空的历史会话 `HasHistory()==false` → 历史记忆读不进来。该问题已在 `43a53b0` 修复：
 
 ```go
 if strings.TrimSpace(session.AgentId) != "" { return session } // 已绑定
-session.AgentId = agent.AgentId                                 // 用本轮路由结果回填
-if err := s.sessionAccessor.SetSessionAgentId(sessionId, agent.AgentId); err != nil { ... }
+session.AgentId = agent.AgentId                                // 用本轮路由结果回填
+_ = s.sessionAccessor.SetSessionAgentId(sessionId, session.AgentId)
 ```
 
-这对协作尤其重要：coordinator 会话的绑定值就是它的"入口身份"（§10.2 第 1 条）。
+这对协作是**必要条件**：`routing_mode`/`agent_id` 都要靠这一行才能落到存量会话上（§10.2 第 1 条）。落地前请确认线上版本已包含此修复。
 
 ### 13.2 新增/修改
 
 | # | 文件 | 改动 | 规模 |
 |---|---|---|---|
-| 1 | `chat/agent_role.go` **新增** | `AgentRole` 与 `ExecutionMode` 值对象 | 小 |
-| 2 | `chat/execution_plan.go` **新增** | `ExecutionPlan` / `PlanTask` / `TaskResult` + 校验（§5.3） | 中 |
-| 3 | `harness/ctxmgr/plan_prompt.go` **新增** | 规划提示词、候选目录渲染、任务书模板、汇总模板 | 小 |
-| 4 | `chat/task_planner.go` **新增** | `ITaskPlanner` + LLM 调用 + 三级退化 + 回喂 | 中 |
-| 5 | `chat/plan_executor.go` **新增** | DAG→wave、scope、子闸、超时、失败语义 | 中 |
-| 6 | `chat/turn_runner.go` **新增** | 从 `execute` 剥出 6→8 段，支持 `Recordable/DisableTools` | 中 |
-| 7 | `chat/preparer.go` | 新增 `PrepareFor(ctx, cmd, agent)`；`Prepare` 保留为薄包装 | 小 |
-| 8 | `service/chatting_service.go` | `execute` 改为 `prepare → [plan?] → runner → journal` | 中 |
-| 9 | `model/dataobject/t_agent.go` | 加 `AgentRole/MaxChildren/MaxTasks` | 小 |
-| 10 | `model/dataobject/t_turn_plan.go`、`t_turn_task.go` **新增** | 两表实体 | 小 |
-| 11 | `model/dataaccessor/` | 两表批量写（轮末） | 小 |
-| 12 | `data/ddl_sqlite3.sql` | 两表 + `t_agent` 三列 | 小 |
-| 13 | `controller/sse_presenter.go` | 新增 `OnPlan/OnTask`（复用 `emit`） | 小 |
-| 14 | `chat/chat_common.go` | `TurnTiming` 加 `PlanMs/TasksMs/TaskCount` | 小 |
+| 1 | `harness/ctxmgr/complexity.go` **新增** | `ComplexitySignals` + `DetectSignals`（纯函数，无 IO/无 LLM） | 中 |
+| 2 | `harness/ctxmgr/route_decision.go` **新增** | `RouteMode` / `RouteSource` / `RouteDecision` | 小 |
+| 3 | `harness/ctxmgr/agent_router.go` | 新增 `ResolveDecision`；`Resolve` 改薄包装；L0 顺序按判定表重排 | 中 |
+| 4 | `harness/ctxmgr/triager.go` **新增** | `ITriager`：一次调用完成分诊 + 计划产出；三级退化 + 校验回喂 | 中 |
+| 5 | `harness/ctxmgr/plan_prompt.go` **新增** | 分诊提示词、候选目录渲染、任务书模板、汇总模板 | 小 |
+| 6 | `chat/execution_plan.go` **新增** | `ExecutionPlan` / `PlanTask` / `TaskResult` + 校验（§5.3） | 中 |
+| 7 | `chat/plan_executor.go` **新增** | DAG→wave、scope、子闸、超时、失败语义 | 中 |
+| 8 | `chat/turn_runner.go` **新增** | 从 `execute` 剥出 6→8 段，支持 `Recordable/DisableTools` | 中 |
+| 9 | `chat/preparer.go` | 新增 `PrepareFor(ctx, cmd, agent)`；`Prepare` 保留为薄包装 | 小 |
+| 10 | `service/chatting_service.go` | `execute` 改为 `prepare → [plan?] → runner → journal` | 中 |
+| 11 | `model/dataobject/t_agent.go` | 加 `MaxChildren/MaxTasks`（**不加 `agent_role`**） | 小 |
+| 12 | `model/dataobject/t_chat.go`、`t_turn_plan.go`、`t_turn_task.go` | `TSession.RoutingMode`；两表实体 | 小 |
+| 13 | `model/dataaccessor/` | 两表批量写（轮末）+ `SetSessionRoutingMode` | 小 |
+| 14 | `data/ddl_sqlite3.sql` | 两表 + `t_agent` 两列 + `t_session.routing_mode` + `t_route_decision` | 小 |
+| 15 | `controller/sse_presenter.go` | 新增 `OnPlan/OnTask`（复用 `emit`） | 小 |
+| 16 | `chat/chat_common.go` | `TurnTiming` 加 `TriageMs/TasksMs/TaskCount` | 小 |
 
-**明确不动**：`tool_search.go`、`toolexecutor/*`、`security/*`、`assembler.go`、`memory_service.go`（除 §13.1）、`agent_router.go`、沙箱与权限分级、计费与观测。
+**明确不动**：`tool_search.go`、`toolexecutor/*`、`security/*`、`assembler.go`、`memory_service.go`（除 §13.1 与 `routing_mode` 读写）、`session_agent_mgr.go`（仅扩缓存条目）、沙箱与权限分级、计费与观测。
 
 ---
 
@@ -564,14 +582,14 @@ if err := s.sessionAccessor.SetSessionAgentId(sessionId, agent.AgentId); err != 
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| **P0**（1–2 天） | 剥 `TurnRunner`；`Preparer.PrepareFor`；`execute` 改薄；§13.1 修复 | 现有单测 + `archtest` 全绿；root 行为零变化 |
-| **P1**（2–3 天） | `agent_role` + 规划器（含三级退化）+ 只做 `direct/single` 两种模式 | 简单问题路径不变；`enabled=false` 完全回退 |
-| **P2**（3–5 天） | `ModeDelegate` **串行**执行 + Reporter + 汇总 | 3 任务含依赖跑通；任一失败能产出部分结论 |
-| **P3**（2–3 天） | 分层并行（scope）+ 子闸 + 超时 + 中断级联 | 中断父轮 → Worker 全停；同 Agent 子任务不超 `subagents` |
-| **P4**（2–3 天） | 两表落库 + SSE 计划事件 + UI | 刷新可恢复；中断轮任务仍留痕 |
-| **P5** | 调优（`maxTasks`、摘要长度、两级 reduce）+ 评测 | 简单问题不进入规划的比率 ≥95%；复杂任务完成率 ≥ 单 Agent 基线 |
+| **P0**（1–2 天） | `DetectSignals` 纯函数 + 判定用例集单测 | 12 条用例全绿；`go test ./...`、`archtest` 全绿 |
+| **P1**（2–3 天） | `RouteDecision` + 分诊 prompt + **dryRun 只落库** | 线上只记录不执行；决策分布可查；行为与今天一致 |
+| **P2**（校准后） | 打开 `enabled`（仍只支持 single）+ `t_session.routing_mode` | 简单路径延迟/成本与今天持平；计划率 5%~20% |
+| **P3**（3–5 天） | `ModeDelegate` **串行**执行 + Reporter + 汇总 | 3 任务含依赖跑通；任一失败能产出部分结论 |
+| **P4**（2–3 天） | 分层并行（scope）+ 子闸 + 超时 + 中断级联 | 中断父轮 → Worker 全停；同 Agent 子任务不超 `subagents` |
+| **P5**（2–3 天） | 两表落库 + SSE 计划事件 + UI | 刷新可恢复；中断轮任务仍留痕 |
 
-**P2 必须覆盖的用例**：全并行 3 任务；钻石依赖（t1,t2→t3）跨 2 层；中间任务失败；全部失败降级默认 Agent；环/未知 Agent/指代任务被剔除；用户中途中断；`enabled=false` 时行为与今天一致。
+**P3 必须覆盖的用例**：全并行 3 任务；钻石依赖（t1,t2→t3）跨 2 层；中间任务失败；全部失败降级默认 Agent；环/未知 Agent/指代任务被剔除；用户中途中断；`enabled=false` 时行为与今天一致。
 
 ---
 
@@ -579,24 +597,26 @@ if err := s.sessionAccessor.SetSessionAgentId(sessionId, agent.AgentId); err != 
 
 | 风险 | 表现 | 对策 |
 |---|---|---|
-| 模型过度规划 | 简单问题也拆 3 个任务 | 提示词硬规则 + "有效任务 <2 ⇒ single" + 监控计划率 |
-| 协作轮多一次调用 | 延迟 +1~2s | 仅协作轮发生；如需省掉，补形态 C 的自动入口 |
-| 规划僵化 | 执行中发现假设错误 | v1 用 `direct` 兜底 + 汇总标缺口；v2 才考虑 `revise_plan` |
+| 模型过度规划 | 简单问题也拆 3 个任务 | 提示词硬规则 + "有效任务 <2 ⇒ single" + `confidence` 门槛 + 监控计划率 |
+| 模型欠规划 | 复杂问题判成 simple | L1 强信号（能力越界/材料≥3）硬提升；`keywordRuleMode=hint`；UI"用协作重答" |
+| 判据不可解释 | 用户不知道为什么变慢 | `t_route_decision` 留痕（source/signals/confidence）+ 计划卡片 |
+| 规划僵化 | 执行中发现假设错误 | v1 用汇总标缺口；v2 才考虑 `revise_plan` |
 | 父上下文被摘要撑爆 | 5 份摘要过长 | 硬截断 + 两级 reduce |
 | 并发自锁 | root 与 Worker 抢同一"Agent"闸 | 子闸 key 加 `#task`；闸位超时转 `deferred` |
 | 计划成环 / 死锁 | 任务永远不 ready | Kahn 检测前置（启动前） |
 | 历史污染 | Worker 写进父历史 | `Recordable=false` + 不调 journal |
 | 事件风暴 | 多路正文交错 | 子任务只发状态；`emit` 已串行化 |
 | 与既有绑定冲突 | 协作会话被 Worker 绑定覆盖 | Worker 绕过 `Resolve`，绝不动 `t_session.agent_id` |
-| 递归失控 | Worker 又派 Worker | `AllowDelegate` 仅 `depth==0 && coordinator`；候选目录排除 coordinator |
+| 多轮退化 | 绑定短路让协作只在首轮生效 | `t_session.routing_mode=1` 时每轮重新分诊 |
+| 递归失控 | Worker 又派 Worker | 方案 A 没有 coordinator 实体，类型上不可能递归 |
 
 ---
 
 ## 16. 待确认
 
-1. **coordinator 是新建一条 `t_agent` 记录，还是复用现有某个 Agent 并置 `agent_role=1`？**（关系到 UI 上的呈现与会话绑定）
-2. **Reporter 默认用谁**：`IsDefault` 的 Agent（推荐）还是新建一个"综合报告"专用 Agent？
-3. **子任务是否允许写文件**：v1 建议完全沿用各 Worker 自身的工具配置与权限分级，不额外加限制；若要收紧，需在 `ToolsBundle` 增加过滤步骤。
-4. **`direct` 时是否允许 coordinator 用工具**：建议允许（它就是普通 Agent），只是不派发 DAG。
+1. **`keywordRuleMode` 默认 `hint` 还是 `direct`**？`direct` 完全保持今天的行为，但含关键词的跨领域问题永远进不了协作。
+2. **`t_session.routing_mode` 是否接受**？这是唯一需要"改会话语义"的地方（且只影响被判为复杂的会话）。
+3. **Reporter 默认用谁**：`IsDefault` 的 Agent（推荐）还是新建一个"综合报告"专用 Agent？
+4. **子任务是否允许写文件**：v1 建议完全沿用各 Worker 自身的工具配置与权限分级，不额外加限制；若要收紧，需在 `ToolsBundle` 增加过滤步骤。
 5. **计划是否需要用户确认**：v1 不做（生成即执行，UI 只展示）；`plan_mode: auto|confirm` 留位。
 6. **`plannerCorrectionRetries` 默认 2 是否够**：建议先 2，按线上数据再调。

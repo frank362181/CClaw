@@ -99,7 +99,7 @@ func (p *Preparer) Prepare(ctx context.Context, cmd Command) (*TurnState, error)
 	visible := bundle.VisibleTools(gate)
 	var tTool IRoundTool
 	if p.functionCalling {
-		tTool = NewRoundToolAdapter(BuildFirstRoundToolPlan(visible, gate.ForcedTools, GetLlmProviderThinking(llmProvider)),
+		tTool = NewRoundToolAdapter(BuildFirstRoundTool(visible, gate.ForcedTools, GetLlmProviderThinking(llmProvider)),
 			fmt.Sprintf("agent=%s,turn=%s", agent.AgentId, cmd.TurnID))
 	} else {
 		visible, tTool = nil, nil
