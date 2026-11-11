@@ -1,13 +1,15 @@
 /**
-* 聊天域业务错误 Kind 表(业务码 4601..4624)+ 用户文案取值。
+* 聊天域业务错误 Kind 表(业务码 4601..4625)+ 用户文案取值。
 *
 * HTTPStatus 与既有 controller 行为保持一致(前端契约不变)。
-* 码值布局:4600 为本域基址(ConstErrorMax + 2600),域内自 +1 连续分配 → 4601..4624;
-* harness.runtime_client 独占 4501(见 error_runtime.go) —— 由 exception/error_codes_test.go 的契约测试锁定。
+* 码值布局:4600 为本域基址(ConstErrorMax + 2600),域内自 +1 连续分配 → 4601..4625;
+* harness.runtime_client 独占 4501、harness.permission_denied 占 4502(见 error_runtime.go)
+* —— 由 exception/error_codes_test.go 的契约测试锁定。
 *
 * 注意:iota 按**声明顺序**分配码值,在中间插入新常量会整体后移其后所有码值。
 * 对外可见的码值一旦发布就不应再变动,新错误**必须追加在 const 块末尾**。
-* (v2.1.0 曾在中间插入工具安全相关码值,导致 chat.tool_loop_guard 由 4617 变为 4620。)
+* (v2.1.0 曾在中间插入工具安全相关码值,导致 chat.tool_loop_guard 由 4617 变为 4620;
+*  43a53b0 又把 session.ownership 插到第 2 位,所幸未发布,已移到末尾。)
 **/
 
 package exception
@@ -20,7 +22,6 @@ import (
 
 const (
 	codeChatParameter = codeErrorHarnessChatBase + 1 + iota
-	codeSessionOwnershipConflict
 	codeChatAgentNotFound
 	codeChatLLM
 	codeChatCanceled
@@ -44,6 +45,7 @@ const (
 	codeChatToolExecutionMisMatched
 	codeChatToolExecutionConfig
 	codeChatResponseTooLarge
+	codeSessionOwnershipConflict // 新码一律追加在末尾,避免后移已发布的码值
 )
 
 // 聊天错误的 Kind 表。HTTPStatus 与既有 controller 行为保持一致(前端契约不变)。

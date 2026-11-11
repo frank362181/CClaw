@@ -70,7 +70,6 @@ export const ChatPage = {
             historyDrawer: comp.query('#historyDrawer'),
             historyOverlay: comp.query('#historyOverlay'),
             historyList: comp.query('#historyList'),
-            btnHistoryNew: comp.query('#btnHistoryNew'),
             btnHistoryClose: comp.query('#btnHistoryClose'),
         };
 
@@ -105,10 +104,6 @@ export const ChatPage = {
         this.els.btnHistory.addEventListener('click', () => this.toggleHistory());
         this.els.btnHistoryClose.addEventListener('click', () => this.closeHistory());
         this.els.historyOverlay.addEventListener('click', () => this.closeHistory());
-        this.els.btnHistoryNew.addEventListener('click', () => {
-            this.closeHistory();
-            handlers.onNewChat?.();
-        });
         this.els.historyList.addEventListener('click', (e) => {
             const del = e.target.closest('[data-conv-delete]');
             if (del) {

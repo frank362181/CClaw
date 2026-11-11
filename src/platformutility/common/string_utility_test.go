@@ -27,19 +27,19 @@ func TestTruncateRunesNoTruncation(t *testing.T) {
 	}
 }
 
-// TestTruncateRunesWithMarker 发生截断时追加 marker(结果 = max 个 rune + marker)。
+// TestTruncateRunesWithMarker 发生截断时追加 marker(结果总长 = max 个 rune,含 marker)。
 func TestTruncateRunesWithMarker(t *testing.T) {
 	s := strings.Repeat("a", 100)
 
 	got := TruncateRunes(s, 10, "…")
-	if want := strings.Repeat("a", 10) + "…"; got != want {
+	if want := strings.Repeat("a", 9) + "…"; got != want {
 		t.Errorf("带 marker 截断结果不正确:\n got %q\nwant %q", got, want)
 	}
-	if n := utf8.RuneCountInString(got); n != 11 {
-		t.Errorf("结果应为 max+1 个 rune(marker 占 1), 实际 %d", n)
+	if n := utf8.RuneCountInString(got); n != 10 {
+		t.Errorf("结果应为 max 个 rune(marker 占 1), 实际 %d", n)
 	}
 
-	// 空 marker = 纯截断(调用方的既有语义,如 t_turn_tool.tool_resp 的长度上限)
+	// 空 marker = 纯截断,保留 max 个 rune(调用方的既有语义,如 t_turn_tool.tool_resp 的长度上限)
 	if got := TruncateRunes(s, 10, BlankString); got != strings.Repeat("a", 10) {
 		t.Errorf("空 marker 应为纯截断, 实际 %q", got)
 	}
@@ -55,14 +55,14 @@ func TestTruncateRunesCJK(t *testing.T) {
 	}
 
 	got := TruncateRunes(s, 3, "…")
-	if want := "中文中…"; got != want {
+	if want := "中文…"; got != want {
 		t.Errorf("CJK 截断结果不正确:\n got %q\nwant %q", got, want)
 	}
 	if !utf8.ValidString(got) {
 		t.Errorf("截断结果不是合法 UTF-8(切断了多字节字符): %q", got)
 	}
-	if n := utf8.RuneCountInString(got); n != 4 {
-		t.Errorf("结果应为 3 个 rune + marker, 实际 %d", n)
+	if n := utf8.RuneCountInString(got); n != 3 {
+		t.Errorf("结果应为 3 个 rune(含 marker), 实际 %d", n)
 	}
 }
 
@@ -74,8 +74,8 @@ func TestTruncateRunesBoundary(t *testing.T) {
 	}
 
 	over := "中文中文中" // 5 rune
-	if got := TruncateRunes(over, 4, "…"); got != "中文中文…" {
-		t.Errorf("超出上限应截断到 max + marker: %q", got)
+	if got := TruncateRunes(over, 4, "…"); got != "中文中…" {
+		t.Errorf("超出上限应截断到 max 个 rune(含 marker): %q", got)
 	}
 }
 

@@ -1,5 +1,15 @@
 # golangci-lint v1 配置(golangci-lint v1.64.8)
 #
+# [怎么跑] go.work 只 use ./agentService ./cclawservice,platformutility/tui 不在其中,
+# 因此在 src/ 根执行 `golangci-lint run` 会直接报错:
+#   directory prefix . does not contain modules listed in go.work
+# 必须按模块执行(本文件中所有相对路径都相对"被检查的模块目录"):
+#
+#   cd agentService    && golangci-lint run --config ../.golangci-lint.yml ./...
+#   cd cclawservice    && golangci-lint run --config ../.golangci-lint.yml ./...
+#   cd platformutility && GOWORK=off golangci-lint run --config ../.golangci-lint.yml ./...
+#   cd tui             && GOWORK=off golangci-lint run --config ../.golangci-lint.yml ./...
+#
 # [范围说明] 这份配置只管"确定性缺陷",故意不开 errcheck/revive这类会产生
 # 大量存量噪音的规则 -- 先把基线立起来,再逐步加严。
 #
@@ -9,20 +19,23 @@
 
 run:
   timeout: 10m
-  test: true
-  skip-dir:
-    - bin
-    - tui
-    - platformutility/heaven
-    - cclawchat
+  tests: true
 
-  linters:
-    disable-all: true
-    enable:
-      - govet       # 含printf格式串、结构体标签等
-      - ineffassign # 复制后未使用
+linters:
+  disable-all: true
+  enable:
+    - govet       # 含printf格式串、结构体标签等
+    - ineffassign # 赋值后未使用
 
-  issues:
-    exclude-use-default: false
-    max-issues-per-linter: 0
-    max-same-issues: 0
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  # 依赖/生成物/部署目录/不可达的遗留包。写法兼容"按模块执行"与"从 src/ 根执行"。
+  exclude-dirs:
+    - ^bin/
+    - ^tui/
+    - ^cclawchat/
+    - ^heaven/                 # platformutility/heaven:历史遗留,当前不可达,待删除
+    - ^platformutility/heaven/

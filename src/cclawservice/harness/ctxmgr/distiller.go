@@ -541,7 +541,7 @@ func parseFactLine(line string) (string, bool) {
 
 // autoBlockBounds 定位自动记忆区(返回起始/结束注释行的下标)。
 func autoBlockBounds(lines []string) (begin, end int, ok bool) {
-	begin, end = -1, -1
+	begin = -1 // end 在每条返回路径上都会被赋值,无需初始化
 	for i := range lines {
 		trimmed := strings.TrimSpace(lines[i])
 		if begin < 0 && DistillAutoBeginPattern.MatchString(trimmed) {

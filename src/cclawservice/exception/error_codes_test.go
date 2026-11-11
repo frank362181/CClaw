@@ -53,8 +53,9 @@ func TestErrorCodeContract(t *testing.T) {
 		{"login.invalid_token", InvalidTokenKind, wantUserBase + 5, http.StatusUnauthorized},
 		// database 域:3401
 		{"database.query", DatabaseQueryKind, wantDatabaseBase + 1, http.StatusInternalServerError},
-		// harness 调用侧:4501
+		// harness 调用侧:4501(runtime_client)/4502(permission_denied)
 		{"harness.runtime_client", RuntimeClientKind, wantHarnessBase + 1, http.StatusInternalServerError},
+		{"harness.permission_denied", PermissionDeniedKind, wantHarnessBase + 2, http.StatusOK},
 		// agent 域:4001..4004(业务失败沿用 200 + 业务码的既有约定)
 		{"agent.parameter", AgentParameterKind, wantAgentBase + 1, http.StatusOK},
 		{"agent.not_found", AgentNotFoundKind, wantAgentBase + 2, http.StatusOK},
@@ -62,7 +63,7 @@ func TestErrorCodeContract(t *testing.T) {
 		{"agent.workspace", AgentWorkspaceKind, wantAgentBase + 4, http.StatusOK},
 		// agent.internal 不对外暴露业务码(Code=0),响应由 controller 回退平台通用内部错误码。
 		{"agent.internal", AgentInternalKind, 0, http.StatusInternalServerError},
-		// 聊天域:4601..4624(独立 4600 段,自 +1 起)
+		// 聊天域:4601..4625(独立 4600 段,自 +1 起)
 		{"chat.parameter", ChatParameterKind, wantChatBase + 1, http.StatusBadRequest},
 		{"chat.agent_not_found", ChatAgentNotFoundKind, wantChatBase + 2, http.StatusNotFound},
 		{"chat.llm", ChatLLMKind, wantChatBase + 3, http.StatusBadGateway},
@@ -87,6 +88,7 @@ func TestErrorCodeContract(t *testing.T) {
 		{"harness.tool_execution_mis_matched", ToolExecutionMisMatchedKind, wantChatBase + 22, http.StatusOK},
 		{"harness.tool_execution_config", ToolExecutionConfigKind, wantChatBase + 23, http.StatusOK},
 		{"harness.chat_response_too_large", ChatResponseTooLargeKind, wantChatBase + 24, http.StatusOK},
+		{"session.ownership", SessionOwnershipConflictKind, wantChatBase + 25, http.StatusOK},
 	}
 
 	for _, c := range cases {
@@ -122,7 +124,7 @@ func TestLegacyWrapperStillWorks(t *testing.T) {
 		{"login.user_password_unmatch", UserPasswordUnmatchErr, UserPasswordUnmatchKind, func(s string) error { return UserPasswordUnmatchEx(s) }},
 		{"login.invalid_token", TokenInvalidErr, InvalidTokenKind, func(s string) error { return TokenInvalidErrEx(s) }},
 		{"database.query", DatabaseQueryErr, DatabaseQueryKind, func(s string) error { return DatabaseQueryErrEx(s) }},
-		{"harness.runtime_client", RuntimeClientErr, RuntimeClientKind, func(s string) error { return RuntimeClientErrEx(s) }},
+		{"harness.runtime_client", RuntimeClientErr, RuntimeClientKind, func(s string) error { return RuntimeClientKind.New(s) }},
 	}
 
 	for _, c := range cases {

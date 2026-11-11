@@ -218,6 +218,11 @@ func TruncateRunes(s string, max int, marker string) string {
 		return s
 	}
 
+	// 无 marker 时是"纯截断",应保留 max 个 rune
+	if marker == BlankString {
+		return string(runes[:max])
+	}
+
 	return string(runes[:max-1]) + marker
 }
 

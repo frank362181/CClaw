@@ -178,18 +178,15 @@ func (m *ServiceMain) SetupLoginController() error {
 	err = interceptors.RegistryInterceptor(authInter)
 	if err != nil {
 		logging.LogErrorF("failed to setup logging controller,err:%s", err.Error())
-		urlFunMap = nil
 		return exception.WebServerErrEx2("failed to setup logging controller,error:%s", err.Error())
 	}
 
 	err = m.baseRouter.SetupControllerEx(webbase.HttpMethodGet|webbase.HttpMethodPost, basic.APIGroupRequire, urlFunMap, interceptors)
 	if err != nil {
 		logging.LogErrorF("failed to setup logging controller,err:%s", err.Error())
-		urlFunMap = nil
 		return exception.WebServerErrEx2("failed to setup logging controller,error:%s", err.Error())
 	}
 
-	urlFunMap = nil //释放内存
 	return nil
 }
 
@@ -226,11 +223,9 @@ func (m *ServiceMain) SetupAgentController() error {
 	err = m.baseRouter.SetupControllerEx(webbase.HttpMethodGet|webbase.HttpMethodPost, basic.APIGroupRequire, urlFunMap, interceptors)
 	if err != nil {
 		logging.LogErrorF("failed to setup agent controller,err:%s", err.Error())
-		urlFunMap = nil
 		return exception.WebServerErrEx2("failed to setup agent controller,error:%s", err.Error())
 	}
 
-	urlFunMap = nil //释放内存
 	return nil
 }
 
@@ -260,11 +255,8 @@ func (m *ServiceMain) SetupChatController() error {
 	err := m.baseRouter.SetupControllerEx(webbase.HttpMethodPost, basic.APIGroupRequire, urlFunMap, interceptors)
 	if err != nil {
 		logging.LogErrorF("failed to setup chat controller,err:%s", err.Error())
-		urlFunMap = nil
 		return exception.WebServerErrEx2("failed to setup chat controller,error:%s", err.Error())
 	}
-
-	urlFunMap = nil //释放内存
 
 	return nil
 }

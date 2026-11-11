@@ -75,13 +75,12 @@ func InsertConfigurationHelper(filename string) (*ConfigurationHelper, error) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	helper, err := findHelper(filename)
-	if err != nil {
+	// 先探测是否已存在(只关心 err,helper 本身不参与后续逻辑)
+	if _, err := findHelper(filename); err != nil {
 		return nil, err
 	}
 
-	helper, err = addHelper(filename)
-	return helper, err
+	return addHelper(filename)
 }
 
 func InsertConfigurationHelperEx(helper *ConfigurationHelper) bool {

@@ -200,19 +200,32 @@ func needNoRetryHint(o toolexecutor.ToolOutcome) bool {
 // ForModel 返回回填给模型的文本:截断到 maxRunes(省略号计入总数)
 // 与 ForRecord(写历史,完整原文)相对:两条互相冲突的消息口径收敛在这个函数里,调用方不需要关心如何截断
 func ForModel(o toolexecutor.ToolOutcome, maxRunes int) string {
-	text := o.ForRecord()
+	hint := pCommon.BlankString
 	if needNoRetryHint(o) {
 		// 如果以上原因,可给LLM提示不需要再试了,同一轮内出现以上提示工具不可能执行成功
-		text += noRetryHint
+		hint = noRetryHint
 	}
 
+	body := o.ForRecord()
 	marker := cCommon.TruncatedMarker
 	m := utf8.RuneCountInString(marker)
-	if maxRunes <= 0 || m >= maxRunes {
-		return pCommon.TruncateRunes(o.ForRecord(), maxRunes, marker)
+
+	// maxRunes<=0 表示不限长(与 pCommon.TruncateRunes 的约定一致)
+	if maxRunes <= 0 {
+		return pCommon.TruncateRunes(body, maxRunes, marker) + hint
 	}
 
-	return pCommon.TruncateRunes(o.ForRecord(), maxRunes-m+1, marker)
+	budget := maxRunes - utf8.RuneCountInString(hint)
+	if budget <= 0 {
+		// 额度连提示都放不下:只保留提示(提示可见性优先于正文)
+		return hint
+	}
+
+	if m >= budget {
+		return pCommon.TruncateRunes(body, budget, marker) + hint
+	}
+
+	return pCommon.TruncateRunes(body, budget-m+1, marker) + hint
 }
 
 func buildPartial(content string, calls []llmproto.ToolCall, finish string) llmproto.LlmReply {

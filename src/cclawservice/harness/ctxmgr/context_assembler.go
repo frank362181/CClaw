@@ -527,7 +527,7 @@ func assembleSystemPrompt(agent dataobject.TAgent, scope hCommon.BootstrapScope,
 
 	var missing, truncated []string
 	dynamicMemory := pCommon.BlankString
-	dynamicSkills := pCommon.BlankString
+	var dynamicSkills string // 在技能节区无条件赋值
 	sections := make([]hCommon.SystemPromptSection, 0, len(documents)+1)
 
 	// ---- 启动文档(顺序:AGENTS -> SOUL -> IDENTITY -> USER -> TOOLS -> BOOTSTRAP -> MEMORY) ----
