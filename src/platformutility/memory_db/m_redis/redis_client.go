@@ -40,31 +40,8 @@ var memoryDbClient = common.GetSingleton(func() *RedisClient {
 	}
 }).Instance()
 
-func GetRedisClient(config *config.ConfigurationHelper) redisdb.IMemoryDB {
-	var memoryConfig redisdb.MemoryDbConfig
-	if config == nil {
-		memoryConfig = *redisdb.GetDefaultMemoryDbConfig()
-	} else {
-		memoryConfig.Address, _ = config.GetStringValueDefault("memoryDb", "address", redisdb.DefaultMemoryDbAddress)
-		memoryConfig.Port, _ = config.GetIntValueDefault("memoryDb", "port", redisdb.DefaultMemoryDbPort)
-		memoryConfig.DatabaseName, _ = config.GetIntValueDefault("memoryDb", "databaseName", redisdb.DefaultMemoryDbName)
-		memoryConfig.Username, _ = config.GetStringValueDefault("memoryDb", "username", "")
-		memoryConfig.Password, _ = config.GetStringValueDefault("memoryDb", "password", "")
-
-		memoryConfig.PoolSize, _ = config.GetIntValueDefault("memoryDb", "poolSize", redisdb.DefaultMaxPoolSize)
-		memoryConfig.MinIdleConnections, _ = config.GetIntValueDefault("memoryDb", "minIdleConnections", redisdb.DefaultMinIdleConnection)
-		memoryConfig.MaxRetries, _ = config.GetIntValueDefault("memoryDb", "maxRetries", redisdb.DefaultMaxRetries)
-
-		memoryConfig.DialTimeout, _ = config.GetIntValueDefault("memoryDb", "dialTimeout", redisdb.DefaultDialTimeout)
-		memoryConfig.ReadTimeout, _ = config.GetIntValueDefault("memoryDb", "readTimeout", redisdb.DefaultReadTimeout)
-		memoryConfig.WriteTimeout, _ = config.GetIntValueDefault("memoryDb", "writeTimeout", redisdb.DefaultWriteTimeout)
-
-		memoryConfig.HealthCheckInterval, _ = config.GetIntValueDefault("memoryDb", "healthCheckInterval", redisdb.HealthCheckInterval)
-
-		memoryConfig.ReconnectBaseDelay, _ = config.GetIntValueDefault("memoryDb", "reconnectBaseDelay", redisdb.ReconnectionBaseDelay)
-	}
-
-	memoryDbClient.MConfig = memoryConfig //设置配置信息
+func GetRedisClient(redisCfg config.DataStorageConfig) redisdb.IMemoryDB {
+	memoryDbClient.MConfig = redisCfg //设置配置信息
 	ctx, cancel := context.WithCancel(context.Background())
 	memoryDbClient.Ctx = ctx
 	memoryDbClient.Cancel = cancel
@@ -94,7 +71,7 @@ func GetRedisClient(config *config.ConfigurationHelper) redisdb.IMemoryDB {
 }
 
 func (rdb *RedisClient) HealthCheck(ctx context.Context) {
-	ticker := time.NewTicker(time.Duration(rdb.MConfig.HealthCheckInterval) * time.Second)
+	ticker := time.NewTicker(time.Duration(rdb.MConfig.MemoryDBConfig.HealthCheckInterval) * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -120,7 +97,7 @@ func (rdb *RedisClient) HealthCheck(ctx context.Context) {
 			if err != nil {
 				logging.LogInfoF("[Redis] health check ping failed:%s,starting reconnect...", err.Error())
 				if reconErr := rdb.reconnect(); reconErr != nil {
-					logging.LogInfoF("[redis] reconnect failed:%s:%s", rdb.MConfig.Address, reconErr.Error())
+					logging.LogInfoF("[redis] reconnect failed:%s:%s", rdb.MConfig.MemoryDBConfig.Address, reconErr.Error())
 				}
 			}
 		}
@@ -137,7 +114,7 @@ func (rdb *RedisClient) PingMemoryDb() error {
 		return exception.MemoryDbErrEx("redis client is closed")
 	}
 
-	ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.DialTimeout)*time.Second)
+	ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.MemoryDBConfig.DialTimeout)*time.Second)
 	defer cancel()
 	return client.Ping(ctx).Err()
 }
@@ -158,7 +135,7 @@ func (rdb *RedisClient) Set(key string, value interface{}, expiration time.Durat
 	}
 
 	return rdb.executeWithRetry(func(client *redis.Client) error {
-		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.WriteTimeout)*time.Second)
+		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.MemoryDBConfig.WriteTimeout)*time.Second)
 		defer cancel()
 
 		return client.Set(ctx, key, value, expiration).Err()
@@ -179,7 +156,7 @@ func (rdb *RedisClient) SetNX(key string, value interface{}, expiration time.Dur
 
 	var ok bool
 	err := rdb.executeWithRetry(func(client *redis.Client) error {
-		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.WriteTimeout)*time.Second)
+		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.MemoryDBConfig.WriteTimeout)*time.Second)
 		defer cancel()
 
 		b, err := client.SetNX(ctx, key, value, expiration).Result()
@@ -205,7 +182,7 @@ func (rdb *RedisClient) Get(key string) (string, error) {
 
 	var result string
 	err := rdb.executeWithRetry(func(client *redis.Client) error {
-		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.ReadTimeout)*time.Second)
+		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.MemoryDBConfig.ReadTimeout)*time.Second)
 		defer cancel()
 		val, err := client.Get(ctx, key).Result()
 		if err != nil {
@@ -245,7 +222,7 @@ func (rdb *RedisClient) Increment(key string, inc int64) (int64, error) {
 
 	var val int64
 	err := rdb.executeWithRetry(func(client *redis.Client) error {
-		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.WriteTimeout)*time.Second)
+		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.MemoryDBConfig.WriteTimeout)*time.Second)
 		defer cancel()
 
 		result, err := client.IncrBy(ctx, key, inc).Result()
@@ -272,7 +249,7 @@ func (rdb *RedisClient) IncrementWithExpiration(key string, inc int64, expiratio
 
 	var val int64 //返回的值
 	err := rdb.executeWithRetry(func(client *redis.Client) error {
-		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.WriteTimeout)*time.Second)
+		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.MemoryDBConfig.WriteTimeout)*time.Second)
 		defer cancel()
 
 		v, err := redis.NewScript(LuaIncrementString).Run(ctx, client, []string{key}, inc, int64(expiration/time.Second)).Int64()
@@ -298,7 +275,7 @@ func (rdb *RedisClient) Delete(keys ...string) (int64, error) {
 
 	var deleted int64
 	err := rdb.executeWithRetry(func(client *redis.Client) error {
-		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.WriteTimeout)*time.Second)
+		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.MemoryDBConfig.WriteTimeout)*time.Second)
 		defer cancel()
 		val, err := client.Del(ctx, keys...).Result()
 		if err != nil {
@@ -326,7 +303,7 @@ func (rdb *RedisClient) RunScript(script string, keys []string, args ...interfac
 
 	var result interface{}
 	err := rdb.executeWithRetry(func(client *redis.Client) error {
-		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.WriteTimeout)*time.Second)
+		ctx, cancel := context.WithTimeout(rdb.Ctx, time.Duration(rdb.MConfig.MemoryDBConfig.WriteTimeout)*time.Second)
 		defer cancel()
 
 		val, err := redis.NewScript(script).Run(ctx, client, keys, args...).Result()
@@ -382,7 +359,7 @@ func (rdb *RedisClient) connectMemoryDb() error {
 
 	rClient, err := rdb.connecting(rdb.onConnected)
 	if err != nil {
-		return exception.MemoryDbErrEx2("failed to connect redis db:%s,ERROR=%s", rdb.MConfig.Address, err.Error())
+		return exception.MemoryDbErrEx2("failed to connect redis db:%s,ERROR=%s", rdb.MConfig.MemoryDBConfig.Address, err.Error())
 	}
 
 	// 替换客户端，原子性
@@ -394,7 +371,7 @@ func (rdb *RedisClient) connectMemoryDb() error {
 	rdb.isClosed = false
 	rdb.mu.Unlock()
 
-	logging.LogInfoF("Redis connect success:%s", rdb.MConfig.Address)
+	logging.LogInfoF("Redis connect success:%s", rdb.MConfig.MemoryDBConfig.Address)
 	return nil
 }
 
@@ -402,14 +379,14 @@ func (rdb *RedisClient) connectMemoryDb() error {
 // 注意:不在请求路径调用;退避与拨号期间不持有写锁、不清空 mClient,
 // 旧连接继续服务,避免重连窗口期误伤在线请求。
 func (rdb *RedisClient) reconnect() error {
-	attempts := rdb.MConfig.MaxRetries
+	attempts := rdb.MConfig.MemoryDBConfig.MaxRetries
 	if attempts <= 0 {
 		attempts = 1
 	}
 	// 每次尝试前等待 reconnectBaseDelay(ms) * 2^(i),封顶 30s,再叠加 ±抖动。
 	// 抖动用于避免多实例/多调用方在同一时刻同步重连。
 	policy := common.BackoffPolicy{
-		BaseDelay:   time.Duration(rdb.MConfig.ReconnectBaseDelay) * time.Millisecond,
+		BaseDelay:   time.Duration(rdb.MConfig.MemoryDBConfig.ReconnectBaseDelay) * time.Millisecond,
 		MaxDelay:    30 * time.Second,
 		JitterRatio: common.DefaultJitterRatio,
 	}
@@ -453,15 +430,15 @@ func (rdb *RedisClient) reconnect() error {
 
 func (rdb *RedisClient) connecting(fn func(ctx context.Context, cn *redis.Conn) error) (*redis.Client, error) {
 	opts := &redis.Options{
-		Addr:         fmt.Sprintf("%s:%d", rdb.MConfig.Address, rdb.MConfig.Port),
-		Password:     rdb.MConfig.Password,
-		DB:           rdb.MConfig.DatabaseName,
-		PoolSize:     rdb.MConfig.PoolSize,
-		MinIdleConns: rdb.MConfig.MinIdleConnections,
-		MaxRetries:   rdb.MConfig.MaxRetries,
-		DialTimeout:  time.Duration(rdb.MConfig.DialTimeout) * time.Second,
-		ReadTimeout:  time.Duration(rdb.MConfig.ReadTimeout) * time.Second,
-		WriteTimeout: time.Duration(rdb.MConfig.WriteTimeout) * time.Second,
+		Addr:         fmt.Sprintf("%s:%d", rdb.MConfig.MemoryDBConfig.Address, rdb.MConfig.MemoryDBConfig.Port),
+		Password:     rdb.MConfig.MemoryDBConfig.Password,
+		DB:           rdb.MConfig.MemoryDBConfig.DatabaseName,
+		PoolSize:     rdb.MConfig.MemoryDBConfig.PoolSize,
+		MinIdleConns: rdb.MConfig.MemoryDBConfig.MinIdleConnections,
+		MaxRetries:   rdb.MConfig.MemoryDBConfig.MaxRetries,
+		DialTimeout:  time.Duration(rdb.MConfig.MemoryDBConfig.DialTimeout) * time.Second,
+		ReadTimeout:  time.Duration(rdb.MConfig.MemoryDBConfig.ReadTimeout) * time.Second,
+		WriteTimeout: time.Duration(rdb.MConfig.MemoryDBConfig.WriteTimeout) * time.Second,
 		OnConnect:    fn,
 	}
 
@@ -492,9 +469,9 @@ func (rdb *RedisClient) executeWithRetry(operation func(client *redis.Client) er
 
 	// A1:网络错误时,请求路径只做一次"快速重连"(无指数退避),失败立即返回,
 	// 避免请求被后台式重连的退避阻塞数秒;真正的断线重建由健康检查 goroutine 负责。
-	logging.LogInfoF("[Redis] network error detected:%s,%s,trying fast reconnect.", rdb.MConfig.Address, err.Error())
+	logging.LogInfoF("[Redis] network error detected:%s,%s,trying fast reconnect.", rdb.MConfig.MemoryDBConfig.Address, err.Error())
 	if reconErr := rdb.fastReconnect(); reconErr != nil {
-		logging.LogInfoF("[redis] fast reconnect failed:%s:%s", rdb.MConfig.Address, reconErr.Error())
+		logging.LogInfoF("[redis] fast reconnect failed:%s:%s", rdb.MConfig.MemoryDBConfig.Address, reconErr.Error())
 		return reconErr
 	}
 
@@ -536,6 +513,6 @@ func (rdb *RedisClient) fastReconnect() error {
 }
 
 func (rdb *RedisClient) onConnected(ctx context.Context, cn *redis.Conn) error {
-	logging.LogInfoF("[Redis] connection established:%s", rdb.MConfig.Address)
+	logging.LogInfoF("[Redis] connection established:%s", rdb.MConfig.MemoryDBConfig.Address)
 	return nil
 }

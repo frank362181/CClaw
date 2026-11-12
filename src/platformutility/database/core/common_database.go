@@ -22,8 +22,8 @@ type CommonDatabase struct {
 * 通用数据库操作类
  */
 
-func GetCommonDatabase(config *config.ConfigurationHelper) IBaseDatabase {
-	pool := GetDBPool(config) //根据类型创建
+func GetCommonDatabase(storageCfg config.DataStorageConfig) IBaseDatabase {
+	pool := GetDBPool(storageCfg) //根据类型创建
 	if pool == nil {
 		return nil
 	}
@@ -33,7 +33,7 @@ func GetCommonDatabase(config *config.ConfigurationHelper) IBaseDatabase {
 		rwLock:    sync.RWMutex{},
 
 		BaseDatabase: BaseDatabase{
-			accessorType: DatabaseCommonAccessing, //通过SQLDB来访问数据库
+			accessorType: config.DatabaseCommonAccessing, //通过SQLDB来访问数据库
 		},
 	}
 	db.SetPool(pool)

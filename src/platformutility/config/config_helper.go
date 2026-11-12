@@ -77,6 +77,15 @@ func (c *ConfigurationHelper) GetIntValueDefault(section string, key string, def
 	return intValue, nil
 }
 
+func (c *ConfigurationHelper) GetInt64ValueDefault(section string, key string, defaultValue int) (int64, error) {
+	value, err := c.GetIntValueDefault(section, key, defaultValue)
+	if err != nil {
+		return int64(defaultValue), err
+	}
+
+	return int64(value), nil
+}
+
 func (c *ConfigurationHelper) GetBoolValue(section string, key string) (bool, error) {
 	return c.GetBoolValueDefault(section, key, true)
 }
@@ -113,6 +122,15 @@ func (c *ConfigurationHelper) GetFloatValueDefault(section string, key string, d
 
 	var f32Value = float32(f32)
 	return f32Value, nil
+}
+
+func (c *ConfigurationHelper) GetFloat64ValueDefault(section string, key string, defaultValue float32) (float64, error) {
+	value, err := c.GetFloatValueDefault(section, key, defaultValue)
+	if err != nil {
+		return float64(defaultValue), err
+	}
+
+	return float64(value), nil
 }
 
 func (c *ConfigurationHelper) GetDouble(section string, key string) (float64, error) {

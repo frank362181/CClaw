@@ -11,6 +11,7 @@ import (
 
 	_ "modernc.org/sqlite"
 	"my.favorite/platformutility/common"
+	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
 )
@@ -24,14 +25,14 @@ type SqliteDBPool struct {
 var sqlitePool = common.GetSingleton(func() *SqliteDBPool {
 	return &SqliteDBPool{
 		BaseDBPool: BaseDBPool{
-			DbTypeName: "sqlite",
-			DBConfig:   nil,
+			DbTypeName:    "sqlite",
+			StorageConfig: config.DataStorageConfig{},
 		},
 	}
 }).Instance()
 
-func GetSqliteDBPool(dbConfig *DBConfig) IBaseDBPool {
-	sqlitePool.DBConfig = dbConfig
+func GetSqliteDBPool(config config.DataStorageConfig) IBaseDBPool {
+	sqlitePool.StorageConfig = config
 	return sqlitePool
 }
 
@@ -43,13 +44,13 @@ func (pool *SqliteDBPool) OpenPool() error {
 	pool.ClosePool()
 
 	//读取配置文件
-	dbPath, err1 := common.SafeJoinWithRoot(pool.DBConfig.DataDir, pool.DBConfig.DatabaseName) //包含路径
+	dbPath, err1 := common.SafeJoinWithRoot(pool.StorageConfig.DBConfig.DataDir, pool.StorageConfig.DBConfig.DatabaseName) //包含路径
 	if err1 != nil {
 		return err1
 	}
 
 	//设置链接字符串
-	dsn := fmt.Sprintf("file:%s?cache=shared&_journal_mode=WAL&_busy_timeout=%d", dbPath, pool.DBConfig.MaxRetries*1000)
+	dsn := fmt.Sprintf("file:%s?cache=shared&_journal_mode=WAL&_busy_timeout=%d", dbPath, pool.StorageConfig.DBConfig.MaxRetries*1000)
 	var err error
 	pool.db, err = sql.Open("sqlite", dsn)
 	if err != nil {

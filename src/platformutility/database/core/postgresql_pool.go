@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"my.favorite/platformutility/common"
+	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
 )
@@ -23,16 +24,16 @@ type PostgresqlPool struct {
 var pgPool = common.GetSingleton(func() *PostgresqlPool {
 	return &PostgresqlPool{
 		BaseDBPool: BaseDBPool{
-			DbTypeName: "postgres",
-			DBConfig:   nil,
+			DbTypeName:    "postgres",
+			StorageConfig: config.DataStorageConfig{},
 		},
 
 		pgxPool: nil,
 	}
 }).Instance()
 
-func GetPGPool(dbConfig *DBConfig) IBaseDBPool {
-	pgPool.DBConfig = dbConfig
+func GetPGPool(storageConfig config.DataStorageConfig) IBaseDBPool {
+	pgPool.StorageConfig = storageConfig
 	return pgPool
 }
 
@@ -44,14 +45,14 @@ func (pool *PostgresqlPool) OpenPool() error {
 	pool.ClosePool() //double check,confirm to close the pool
 
 	sslMode := "disable"
-	if pool.DBConfig.SSLMode {
+	if pool.StorageConfig.DBConfig.SSLMode {
 		sslMode = "require"
 	}
 
 	configString := fmt.Sprintf(
 		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		pool.DBConfig.UserName, pool.DBConfig.UserPass, pool.DBConfig.DBHost, pool.DBConfig.DBPort,
-		pool.DBConfig.DatabaseName, sslMode)
+		pool.StorageConfig.DBConfig.UserName, pool.StorageConfig.DBConfig.UserPass, pool.StorageConfig.DBConfig.DBHost, pool.StorageConfig.DBConfig.DBPort,
+		pool.StorageConfig.DBConfig.DatabaseName, sslMode)
 
 	poolCfg, err := pgxpool.ParseConfig(configString)
 	if err != nil {
@@ -59,13 +60,13 @@ func (pool *PostgresqlPool) OpenPool() error {
 	}
 
 	// 连接池配置
-	poolCfg.MaxConns = int32(pool.DBConfig.MaxConnections)
-	poolCfg.MinConns = int32(pool.DBConfig.MinConnections)
-	poolCfg.MaxConnIdleTime = time.Duration(pool.DBConfig.ConnectionIdle) * time.Second
-	poolCfg.MaxConnLifetime = time.Duration(pool.DBConfig.ConnectionTTl) * time.Second
+	poolCfg.MaxConns = int32(pool.StorageConfig.DBConfig.MaxConnections)
+	poolCfg.MinConns = int32(pool.StorageConfig.DBConfig.MinConnections)
+	poolCfg.MaxConnIdleTime = time.Duration(pool.StorageConfig.DBConfig.ConnectionIdle) * time.Second
+	poolCfg.MaxConnLifetime = time.Duration(pool.StorageConfig.DBConfig.ConnectionTTl) * time.Second
 
 	// 链接超时,获取链接等待时间
-	poolCfg.ConnConfig.ConnectTimeout = time.Duration(pool.DBConfig.ConnectionTimeout) * time.Second
+	poolCfg.ConnConfig.ConnectTimeout = time.Duration(pool.StorageConfig.DBConfig.ConnectionTimeout) * time.Second
 
 	// 健康检查时间间隔
 	poolCfg.HealthCheckPeriod = 30 * time.Second
@@ -86,7 +87,7 @@ func (pool *PostgresqlPool) OpenPool() error {
 
 	pool.db = stdlib.OpenDBFromPool(pool.pgxPool)
 
-	logging.LogInfoF("PostgreSQL pool established: " + pool.DBConfig.DBHost + ":" + pool.DBConfig.DatabaseName)
+	logging.LogInfoF("PostgreSQL pool established: " + pool.StorageConfig.DBConfig.DBHost + ":" + pool.StorageConfig.DBConfig.DatabaseName)
 	return nil
 }
 

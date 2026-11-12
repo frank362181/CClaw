@@ -5,15 +5,14 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	selfconfig "my.favorite/cclawservice/config"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/common/hash"
 	"my.favorite/platformutility/concurrency"
-	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
 	"my.favorite/platformutility/webbase/middleware"
@@ -109,64 +108,37 @@ func (router *BaseRouter) SetupControllerEx(httpMethod int16, apiGroup string, u
 }
 
 // SetupServer 设置server
-func (router *BaseRouter) SetupServer(configHelper *config.ConfigurationHelper) error {
-	if configHelper == nil {
-		return exception.ParameterEmptyErrorEx("config for server is empty")
-	}
-
-	// 1. get server config and set them for https
-	serverPort, _ := configHelper.GetStringValue("server", "port")
-	readTimeout, _ := configHelper.GetIntValue("server", "readTimeout")
-	readHeaderTimeout, _ := configHelper.GetIntValue("server", "readHeaderTimeout")
-	writeTimeout, _ := configHelper.GetIntValue("server", "writeTimeout")
-	idleTimeout, _ := configHelper.GetIntValue("server", "idleTimeout")
-	maxHeaderBytes, _ := configHelper.GetIntValue("server", "maxHeaderBytes")
-	certDir, _ := configHelper.GetStringValueDefault("server", "certDir", "")
-	certFile, _ := configHelper.GetStringValue("server", "certFile")
-	certFile = filepath.Join(certDir, certFile)
-	keyFile, _ := configHelper.GetStringValue("server", "keyFile")
-	keyFile = filepath.Join(certDir, keyFile)
-	router.certFile = certFile //设置SSL所需的配置文件
-	router.keyFile = keyFile
+func (router *BaseRouter) SetupServer(serviceConfig selfconfig.ServiceConfig) error {
+	router.certFile = serviceConfig.Server.CertFile //设置SSL所需的配置文件
+	router.keyFile = serviceConfig.Server.KeyFile
 
 	// 设置可信代理,将来将Nginx/HAProxy等地址填入配置文件即可
-	trustedProxies, _ := configHelper.GetStringValueDefault("server", "trustedProxies", "")
-	trustedProxies = strings.TrimSpace(trustedProxies)
-	if len(trustedProxies) == 0 {
+	if len(serviceConfig.Server.TrustedProxies) == 0 {
 		_ = router.GinEngine.SetTrustedProxies(nil)
 	} else {
-		proxies := strings.Split(trustedProxies, ",")
-		cleaned := make([]string, 0, len(proxies))
-		for _, proxy := range proxies {
-			cleaned = append(cleaned, strings.TrimSpace(proxy))
-		}
-
-		if err := router.GinEngine.SetTrustedProxies(cleaned); err != nil {
+		if err := router.GinEngine.SetTrustedProxies(serviceConfig.Server.TrustedProxies); err != nil {
 			logging.LogErrorF(err.Error())
 		}
 	}
 
 	///设置可信代理的转发头
-	trustedForwardedHeaders, _ := configHelper.GetBoolValueDefault("server", "trustedForwardedHeaders", false)
-	basic.GetBaseRequester().SetTrustedForwardedHeaders(trustedForwardedHeaders)
+	basic.GetBaseRequester().SetTrustedForwardedHeaders(serviceConfig.Server.TrustedForwardedHeaderEnabled)
 
 	router.Server = &http.Server{
-		Addr:              ":" + serverPort, // port for listening
+		Addr:              ":" + serviceConfig.Server.Port, // port for listening
 		Handler:           router.GinEngine,
-		ReadTimeout:       time.Duration(readTimeout) * time.Second,
-		ReadHeaderTimeout: time.Duration(readHeaderTimeout) * time.Second,
-		WriteTimeout:      time.Duration(writeTimeout) * time.Second,
-		IdleTimeout:       time.Duration(idleTimeout) * time.Second,
-		MaxHeaderBytes:    maxHeaderBytes,
+		ReadTimeout:       time.Duration(serviceConfig.Server.ReadTimeout) * time.Second,
+		ReadHeaderTimeout: time.Duration(serviceConfig.Server.ReadHeaderTimeout) * time.Second,
+		WriteTimeout:      time.Duration(serviceConfig.Server.WriteTimeout) * time.Second,
+		IdleTimeout:       time.Duration(serviceConfig.Server.IdleTimeout) * time.Second,
+		MaxHeaderBytes:    serviceConfig.Server.MaxHeaderBytes,
 	}
 
 	return nil
 }
 
-// Startup 启动 HTTP/HTTPS 服务。
-// 返回 true 表示监听端口绑定成功并已进入服务状态；false 表示启动失败（证书缺失/无效、端口被占用等）。
-// 说明：原实现在 goroutine 内调用 ListenAndServeTLS，绑定失败只能打日志，进程会「假活」（存活但无监听）。
-// 现改为同步校验证书 + 同步绑定端口，失败可立即感知并返回 false，由调用方决定退出并清理资源。
+// Startup 启动 HTTP/HTTPS 服务
+// 返回 true 表示监听端口绑定成功并已进入服务状态；false 表示启动失败（证书缺失/无效、端口被占用等）
 func (router *BaseRouter) Startup(ssl bool) bool {
 	if router.Server == nil {
 		return false
@@ -284,38 +256,3 @@ func (router *BaseRouter) setupControllerEx_(httpMethod int16, apiGroup string, 
 
 	return nil
 }
-
-//func setupLoginController_(method string, relativeUrl string, i *controller.IController, interceptors *interceptor.Interceptors) error {
-//	typeName := (*i).GetType()
-//	if _, ok := baseRouter.RGroup[typeName]; !ok {
-//		r := baseRouter.GinEngine.Group(typeName)
-//		baseRouter.RGroup[typeName] = r
-//	}
-//
-//	g := baseRouter.RGroup[typeName]
-//	{
-//		iType := *i
-//		switch method {
-//		case webbase.HttpMethodGet:
-//			switch v := iType.(type) {
-//			case *contnroller.LoginController:
-//				hc := *v
-//				g.GET(relativeUrl, hc.Login)
-//			default:
-//				break
-//			}
-//		case webbase.HttpMethodPost:
-//			switch v := iType.(type) {
-//			case *contnroller.LoginController:
-//				hc := *v
-//				g.POST(relativeUrl, hc.Logout)
-//			default:
-//				break
-//			}
-//		default:
-//			break
-//		}
-//	}
-//
-//	return nil
-//}

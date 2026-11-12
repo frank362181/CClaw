@@ -19,12 +19,12 @@ type GormDatabase struct {
 	rwLock sync.RWMutex
 }
 
-func GetGormDatabase(config *config.ConfigurationHelper) IBaseDatabase {
-	pool := GetDBPool(config)
+func GetGormDatabase(storageCfg config.DataStorageConfig) IBaseDatabase {
+	pool := GetDBPool(storageCfg)
 
 	gormDb := &GormDatabase{
 		BaseDatabase: BaseDatabase{
-			accessorType: DatabaseGormAccessing, //通过GORMDB来访问数据
+			accessorType: config.DatabaseGormAccessing, //通过GORMDB来访问数据
 		},
 		rwLock: sync.RWMutex{},
 	}
@@ -86,10 +86,10 @@ func (g *GormDatabase) openGormDatabase() error {
 	}
 
 	var d gorm.Dialector
-	switch g.GetPool().GetDbConfig().DBType {
-	case ConstDbTypePostgresSQL:
+	switch g.GetPool().GetDbConfig().DBConfig.DBType {
+	case config.ConstDbTypePostgresSQL:
 		d = postgres.New(postgres.Config{Conn: sqlDb})
-	case ConstDbTypeSqlite:
+	case config.ConstDbTypeSqlite:
 		d = sqlite.New(sqlite.Config{Conn: sqlDb})
 	default:
 		return exception.DatabaseErrorEx("database type can not be supported")
@@ -99,7 +99,7 @@ func (g *GormDatabase) openGormDatabase() error {
 		NamingStrategy: schema.NamingStrategy{
 			SingularTable: true, //禁止标明复数化
 		},
-		Logger: dblogging.GetDbLogger(g.GetPool().GetDbConfig().LogLevel), //logger.Default.LogMode(logger.Info),
+		Logger: dblogging.GetDbLogger(g.GetPool().GetDbConfig().DBConfig.LogLevel), //logger.Default.LogMode(logger.Info),
 	})
 	if err != nil {
 		return exception.DatabaseErrorEx(err.Error())

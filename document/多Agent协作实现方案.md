@@ -91,6 +91,8 @@
 
 结论：**协调者是角色，不是 Agent turn**。它是确定性的编排器（可测试、可回归），Agent 只在"规划"和"评估"两处被调用。
 
+> 注意：这条结论**不能**推广到评审者。评审者是"**角色（执行形态）+ 独立身份（错误来源）**"两层结构：做成自主 Agent 会丢掉 V1 覆盖与 V3 决定权，只做成角色（自评）则评估失去信息量。两档落地（moderate / strong）见 §7.8。
+
 ---
 
 ## 3. 全链路
@@ -869,6 +871,149 @@ N 个 Worker ──▶ 逐任务机检 ──┬─ blocker ──▶ 就地修�
 
 ---
 
+### 7.8 评审者：角色与身份的两层分离（moderate / strong 落地）
+
+**结论先行**：评审者**不是**一个自主 LLM Agent；也**不能**只是"同一个 Agent 换一段 prompt"。
+它是 **一个单次执行的 `ITurnRunner` 角色（代码形态）+ 一个独立于所有 Worker 的 Agent 身份（错误来源）**。
+
+§2.3 的结论"协调者是角色不是 Agent"**不能**直接搬到评审者身上——两者缺的是不同的东西。
+
+#### 7.8.1 两个轴必须先拆开
+
+| 轴 | 协调者 | 评审者 |
+|---|---|---|
+| **执行形态**：是否自主决策 | 确定性编排器（0 LLM，规划复用已有分类调用位） | **单次 turn 角色**：一次调用、默认不给工具、结构化输出 |
+| **执行身份**：谁来说这段话 | 无所谓，是引擎 | **必须独立于所有 Worker 的 Agent** |
+
+方案原本就是这个结构，只是分散在 §2.1（`Evaluator` 是"承担统一评估的 Agent"）与 §2.2（`IEvaluator` 是 `chat` 组件、经 `ITurnRunner` 执行）两处。
+**D1 争的从来不是"要不要做成 Agent"，而是"要不要有第三个身份"。**
+
+#### 7.8.2 为什么"同 Agent 换 prompt"不成立
+
+评审者要解决的是**错误相关性**，不是代码分层：
+
+| 做法 | 后果 | §7.3 等级 |
+|---|---|---|
+| 同一 Agent、同一模型、换 evaluator prompt | 同一组权重看自己刚写的东西 → 自我确认偏差；prompt 换说法不改权重 | `self` ❌ 只能补格式 |
+| 不同 Agent、同 vendor / 同模型 | 上下文与提示词不同，但**同源幻觉、同口径误读**会原样复现 | `moderate` ✅ |
+| 不同 Agent、不同 vendor / 不同模型 | 错误来源去相关，能抓到"同源模型一起搞错" | `strong` ✅ 推荐 |
+
+> **"独立"指的是身份与错误来源独立，不是"自主决策独立"。**
+
+#### 7.8.3 为什么也不能是"自主 Agent"
+
+| 若做成自主 Agent | 破坏哪条不变量 |
+|---|---|
+| 自己决定抽样看几个产出 | **V1 覆盖**：`tasks[]` 必须一个不缺，只有"单次调用 + 引擎校验返回结构"能强制 |
+| 在计划里自己声明"不用评估 / 指定评审者" | **V3 决定权**：评审者必须由引擎指派 |
+| 带工具回读原文、反复查证 | 成本与延迟不可控（`N+2` 保不住）；且 §7.2 的 L-A 已用 Go 代码把"引文是否真在原文"查掉，**评审者不需要工具** |
+| 自主循环 | 无法回归测试（§13.7 依赖可重放） |
+
+这与 §7.2 的分工一致：L-A / L-B 是 0 LLM 的纯函数，只把"口径一致性、是否答全、推测是否被写成事实"这类**语义判断**留给唯一一次 L-C。
+
+#### 7.8.4 两档落地
+
+两档**执行形态完全相同**（同一个 evaluator mode、同一次调用、同一套输出契约），差别只在**评审者从哪来**。
+
+| | **moderate 档**（2 Agent 单位） | **strong 档**（≥3 Agent 单位） |
+|---|---|---|
+| 前提 | 单位内可用 Agent ≥ 2 | 单位内可用 Agent ≥ 3 |
+| 评审者来源 | 从**非生产者**的现有 Agent 中选（`pickEvaluator` 排除 `producerIDs`） | 专职评审 Agent（`t_agent.agent_role=1`，`verify_agent_id` 指向它） |
+| 生产侧 | 所有任务收敛到**同一个** Worker（因为剩下的那个要当评审者） | 可跨 Agent 生产（≥2 个 Worker + 1 个评审者） |
+| 模型要求 | 无额外要求（与生产者同 vendor 也接受） | `primary_model` 用**不同 vendor**（如 `qwen3.8-flash`），以拿到 `strong` |
+| 落库 | `t_turn_task.independence=1` | `t_turn_task.independence=2` |
+| 达不到时 | `minIndependence=strong` ⇒ `ErrNoVerifier`，**不进入协作**（绝不静默降档） | — |
+
+配置口径（§11）：`[evaluate] minIndependence`
+- `moderate`（默认）：2 Agent 即可协作；
+- `strong`：必须有不同 vendor 的独立评审者，否则退化为单 Agent；
+- **任何情况下都不允许**"配置要求 strong、实际按 moderate 执行却不声明"——`independence` 必须与实跑等级一致地落库并在事件中带出。
+
+#### 7.8.5 代码落地的四条硬约束
+
+**① `ITurnRunner` 增加 evaluator mode**
+
+```
+root | worker | evaluator
+```
+
+evaluator mode 的约束全部由代码保证，不靠提示词祈祷：
+
+| 约束 | 实现 |
+|---|---|
+| 单次调用、无自主循环 | 与 worker 共用 `TurnRunner`，但不进入 tool looper |
+| 默认不给工具 | `TurnState` 的 toolset 为空（L-A/L-B 已覆盖回读类校验） |
+| 输入受控 | 只喂 §7.2 的三样内容，总量 ≤ `evaluate.inputMaxRunes` |
+| 输出受控 | 走 §7.2 的结构化契约校验，缺任务 ID / 缺 `evidence` 即判无效并重试一次 |
+| 不参与派发 | `IPlanExecutor.PickTask` 的候选集**排除** evaluator |
+
+`Preparer.PrepareFor` 的签名相应扩展为 `PrepareFor(agent, mode)`，仍不走路由。
+
+**② `pickEvaluator` 加角色过滤（补 §7.3 的实现）**
+
+```go
+func pickEvaluator(comCode string, producerIDs []string, min Independence) (string, Independence, error) {
+    cands := agentsOf(comCode)
+    cands = onlyRole(cands, AgentRoleEvaluator, AgentRoleBoth) // ① 只有评审者角色才能被选中
+    cands = exclude(cands, producerIDs...)                    // ② 不得是任何 Worker
+    best  := rank(cands, bySkillOverlap(0.6), byVendorDiff(0.3), byLoad(0.1))
+    if best == nil { return "", 0, ErrNoIndependentVerifier }
+    lvl := independenceOf(best, producerIDs)
+    if lvl < min { return "", 0, ErrIndependenceTooLow }      // ③ 不静默降档
+    return best.ID, lvl, nil
+}
+```
+
+**③ `t_agent.agent_role` + 路由池双向排除（当前代码必踩的坑）**
+
+现状 `AgentRouter.availableAgents()` 只过滤 `Deleted` / `Disabled`：
+
+```go
+for _, a := range all {
+    if !a.Deleted && !a.Disabled {   // 没有角色过滤
+        out = append(out, a)
+    }
+}
+```
+
+后果：新增的专职评审者会**自动进入协作/路由候选池**，一旦被选成某个 Worker（技能匹配时尤其容易），V2 就地失效，且**不会报错**——只会悄悄退化成自评。
+
+必须补（§9）：
+- `t_agent.agent_role`：`0 worker`（默认）/ `1 evaluator` / `2 both`；
+- `availableAgents()` 只返回 `worker|both`（路由与 Worker 派发）；
+- `pickEvaluator` 只返回 `evaluator|both`；
+- 评审者**禁止** `is_default=1`（否则所有对话默认落到评审者身上）。
+
+**④ 提示词：rubric 放代码，领域知识放 Agent**
+
+| 内容 | 放哪 | 理由 |
+|---|---|---|
+| rubric 固定表（§7.4）、输出 JSON 契约、V1–V3 约束 | **代码注入的 evaluator mode prompt** | 它们是契约；放进可编辑的 `AGENTS.md` 会被改坏，导致 `tasks[]` 校验大面积失败 |
+| 领域知识（口径、单位、业务约定） | 评审 Agent 自己的启动文档 / skills | §7.3：**域匹配优先于独立性**——不懂业务的 strong 评审者比懂业务的 moderate 更没用 |
+
+组合原则：**与生产者共享同一份领域知识，但用不同的模型**——"能判断"与"不会犯同样的错"两者才能同时成立。
+
+#### 7.8.6 与 V1–V3 的对应（自检表）
+
+| 不变量 | 由什么保证 |
+|---|---|
+| **V1 覆盖** | evaluator 单次调用 + 引擎校验 `tasks[]` 全 ID + 缺即无效重试 |
+| **V2 独立性** | `pickEvaluator` 排除 producers + 角色过滤 + `minIndependence` 不降档 |
+| **V3 决定权** | 评审者只由 `pickEvaluator` 产生；计划里的 `verify` / 评审者字段由 linter 拒绝 |
+
+#### 7.8.7 选择建议（对应当前单位）
+
+| 当前 `100001` 的 Agent 数 | 建议 | 等级 |
+|---|---|---|
+| 2（`agent_001`、`agent_002`，同 vendor） | 生产侧收敛为单一 Worker，另一个扮演 evaluator；`minIndependence=moderate` | `moderate` |
+| 新增第 3 个"复核助手"（`agent_role=1`，`qwen3.8-flash`） | 生产侧可跨 Agent；`minIndependence=strong` | `strong` |
+| 1 | 不协作（§7.6 已强制） | — |
+
+代价说明：新增评审 Agent **不增加 LLM 调用数**（评估那一次本就在 `N+2` 里），用的是它自己的（更便宜的）模型；真正的成本是**多一份配置面**（启动文档、模型、并发）。
+这也是把 rubric 放代码、只让 Agent 携带领域知识的原因——尽量把新增 Agent 需要维护的内容压到最小。
+
+---
+
 ## 8. 阶段五：落库与历史
 
 ### 8.1 历史一致性
@@ -895,6 +1040,9 @@ ALTER TABLE t_session ADD COLUMN routing_mode INTEGER NOT NULL DEFAULT 0; -- 0 �
 ALTER TABLE t_agent ADD COLUMN max_children     INTEGER NOT NULL DEFAULT 3; -- 单波最大并行 Worker
 ALTER TABLE t_agent ADD COLUMN max_tasks        INTEGER NOT NULL DEFAULT 5; -- 单轮最多任务数
 ALTER TABLE t_agent ADD COLUMN verify_agent_id  VARCHAR(8);                 -- 专职评审者（可空）
+-- 角色：0 worker(默认) / 1 evaluator / 2 both。路由与 Worker 派发只取 worker|both，
+-- 评审者指派只取 evaluator|both；详见 §7.8.5（否则专职评审者会被选成 Worker，导致 V2 静默失效）
+ALTER TABLE t_agent ADD COLUMN agent_role       INTEGER NOT NULL DEFAULT 0;
 
 -- 分诊留痕
 CREATE TABLE IF NOT EXISTS t_route_decision (
@@ -1113,6 +1261,8 @@ blockOnBlocker=true
 | **D3** | `blockOnBlocker` 默认值 | 决定"有 blocker 时是否仍出答复" | `true`（降级标注后仍输出，而不是整轮失败） | M5（降级路径）、§14 用例 34 |
 
 > D1 若选"不新增"，请一并接受：本方案在 2-Agent 单位内的实际形态是"1 个 Worker + 1 个评审者"，`maxTasks` 必须降到 2，且 §14 用例 15/19 的部分断言需改为 `no_verifier` 回落。
+>
+> **D1 → 独立性等级**：新增专职评审者 ⇒ `strong`；不新增 ⇒ `moderate`（生产侧收敛为单一 Agent）。两档的代码落地、`agent_role` 字段、不降档规则与失败路径见 **§7.8**。
 
 #### 13.2.2 环境与基线（0.5 人日，属 M0）
 

@@ -51,11 +51,11 @@ func (conn *BaseDatabase) OpenPoolWithRetry() error {
 		return exception.DatabaseErrorEx("database connection pool is nil")
 	}
 
-	cfg := conn.pool.GetDbConfig()
+	cfg := conn.pool.GetDbConfig().DBConfig
 	policy := common.BackoffPolicy{
-		BaseDelay:   common.SecondsToDuration(float64(cfg.RetryBaseDelay)), // 因子 × 1s
-		MaxDelay:    common.SecondsToDuration(float64(cfg.RetryMaxDelay)),  // 单位:秒
-		JitterRatio: float64(cfg.RetryJitter),
+		BaseDelay:   common.SecondsToDuration(cfg.RetryBaseDelay), // 因子 × 1s
+		MaxDelay:    common.SecondsToDuration(cfg.RetryMaxDelay),  // 单位:秒
+		JitterRatio: cfg.RetryJitter,
 	}
 	attempts := cfg.MaxRetries
 	if attempts <= 0 {

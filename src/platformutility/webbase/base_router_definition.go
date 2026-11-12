@@ -4,8 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	selfconfig "my.favorite/cclawservice/config"
 	"my.favorite/platformutility/concurrency"
-	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/webbase/middleware"
 	"my.favorite/platformutility/webbase/middleware/basic"
 )
@@ -34,7 +34,7 @@ type IBaseRouter interface {
 	SetupControllerEx(httpMethod int16, apiGroup string, urlFuncMap map[string]gin.HandlerFunc, interceptors basic.IFilter) error
 
 	// SetupServer config the configuration for the server
-	SetupServer(configHelper *config.ConfigurationHelper) error
+	SetupServer(serviceConfig selfconfig.ServiceConfig) error
 
 	Startup(ssl bool) bool
 	Shutdown() error

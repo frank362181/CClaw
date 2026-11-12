@@ -278,11 +278,6 @@ func SplitStringEx(input string, splitStr string) []string {
 
 	segments := make([]string, 0, 4)
 
-	if len(rawInput) == 0 {
-		segments = append(segments, input)
-		return segments
-	}
-
 	seen := make(map[string]struct{}, 4)
 	lines := strings.Split(rawInput, splitStr)
 	for _, item := range lines {

@@ -15,6 +15,7 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"my.favorite/cclawservice/chat"
+	selfconfig "my.favorite/cclawservice/config"
 	selfController "my.favorite/cclawservice/controller"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
@@ -45,6 +46,8 @@ type ServiceMain struct {
 	//系统配置
 	configFileName string
 	configHelper   *config.ConfigurationHelper
+	serviceConfig  selfconfig.ServiceConfig // 服务本身的配置
+	storageConfig  config.DataStorageConfig // 服务所需的存储配置信息
 
 	//web服务
 	baseRouter *webbase.BaseRouter
@@ -100,18 +103,18 @@ func (m *ServiceMain) Init() error {
 	}
 
 	// 并发闸上限(ini [server],<=0 用默认):全局并发限制 + 流式并发限制
-	//maxStreams, _ := m.configHelper.GetIntValueDefault("server", "maxStreamConcurrency", cCommon.DefaultMaxStreamConcurrency)
-	maxConcurrency, _ := m.configHelper.GetIntValueDefault("server", "maxChatConcurrency", cCommon.DefaultMaxChatConcurrency)
-	m.concurrent = concurrency.GetConcurrentController(maxConcurrency) //serviceCore.GetStreamConcurrencyGate(maxStreams)
+	m.serviceConfig, _ = selfconfig.LoadServiceConfig(m.configHelper)
+	m.storageConfig, _ = config.LoadDataStorageConfig(m.configHelper)
+	m.concurrent = concurrency.GetConcurrentController(m.serviceConfig.Server.MaxChatConcurrency) //serviceCore.GetStreamConcurrencyGate(maxStreams)
 
 	// 3. initialize the app
-	m.memoryDB = memory_db.CreateMemoryDb(m.configHelper)
+	m.memoryDB = memory_db.CreateMemoryDb(m.storageConfig)
 	if m.memoryDB == nil {
 		logging.LogErrorF("[Init] memory db init failed")
 		return exception.MemoryDbErrEx("memory db init failed")
 	}
 
-	m.database = database.GetGormDatabase(m.configHelper)
+	m.database = database.GetGormDatabase(m.storageConfig)
 	err = m.database.Open()
 	if err != nil {
 		logging.LogErrorF("[Init] failed to open database %s", err.Error())
@@ -262,7 +265,7 @@ func (m *ServiceMain) SetupChatController() error {
 }
 
 func (m *ServiceMain) SetupServer() error {
-	err := m.baseRouter.SetupServer(m.configHelper)
+	err := m.baseRouter.SetupServer(m.serviceConfig)
 	if err != nil {
 		logging.LogErrorF("[SetupServer] failed to setup server,err:%s", err.Error())
 		return exception.WebServerErrEx2("failed to setup server,error:%s", err.Error())
@@ -272,9 +275,9 @@ func (m *ServiceMain) SetupServer() error {
 }
 
 func (m *ServiceMain) Startup() error {
-	sslEnabled, _ := m.configHelper.GetBoolValueDefault("server", "ssl", false)
+	//sslEnabled, _ := m.configHelper.GetBoolValueDefault("server", "ssl", false)
 	// 启动失败（如端口被占用）时返回错误，由入口退出并执行 Destroy 清理资源，避免进程「假活」
-	if !m.baseRouter.Startup(sslEnabled) {
+	if !m.baseRouter.Startup(m.serviceConfig.Server.SSLEnabled) {
 		logging.LogErrorF("[Startup] web server failed to start")
 		return exception.WebServerErrEx("web server start failed")
 	}
@@ -349,8 +352,7 @@ func (m *ServiceMain) loadAgentConfigurations() error {
 	}
 
 	// 3.1 agent 配置缓存 TTL(多实例下各实例从 DB 刷新配置;单位秒,<=0 禁用)
-	ttlSec, _ := m.configHelper.GetIntValueDefault("database", "reloadCacheTTL", cCommon.DefaultReloadDatabaseCacheTTLSeconds)
-	agents := m.agentRepo.LoadAllAgents(int64(ttlSec))
+	agents := m.agentRepo.LoadAllAgents(int64(m.storageConfig.DBConfig.ReloadCacheTTL))
 
 	// 4. warm up the prompt repository with the default workspace (best-effort)
 	if m.agentFileRepo == nil {
@@ -373,16 +375,8 @@ func (m *ServiceMain) loadAgentConfigurations() error {
 }
 
 func (m *ServiceMain) setGlobalFilter() {
-	originsStr, _ := m.configHelper.GetStringValueDefault("security", "allowedOrigins", "")
-	var origins []string
-	if len(originsStr) > 0 {
-		splits := strings.Split(originsStr, ",")
-		for _, s := range splits {
-			origins = append(origins, strings.TrimSpace(s))
-		}
-	}
 	corsFilter := filter.GetCorsFilter()
-	corsFilter.SetupAllowedOrigins2(origins)
+	corsFilter.SetupAllowedOrigins2(m.serviceConfig.Security.AllowedOrigins)
 
 	recoveryFilter := filter.GetRecoveryFilter()
 
@@ -393,8 +387,7 @@ func (m *ServiceMain) setGlobalFilter() {
 }
 
 func (m *ServiceMain) setupApiFilters() bool {
-	signKey, _ := m.configHelper.GetStringValueDefault("security", "signKey", "")
-	if len(signKey) == 0 {
+	if len(m.serviceConfig.Security.SignKey) == 0 {
 		logging.LogErrorF("[SetupGlobalFilterAndController] signKey is required,confuse to startup")
 		return false
 	}
@@ -403,20 +396,14 @@ func (m *ServiceMain) setupApiFilters() bool {
 	loggingFilter := filter.GetLoggingFilter()        //NewLoggingFilter(basic.FilterOrderLogging)
 	reqPreprocessFilter := filter.GetRecoveryFilter() //NewRequestPreprocessFilter(basic.FilterOrderReqPre)
 	addressFilter := filter.GetAddressFilter()        //NewAddressFilter(basic.FilterOrderAddress)
-	tempStr, _ := m.configHelper.GetStringValueDefault("security", "allowedUrl", "")
-	urls := strings.Split(tempStr, ",")
-	addressFilter.SetupAllowedUrls(urls)
+	addressFilter.SetupAllowedUrls(m.serviceConfig.Security.AllowedUrl)
 
 	trafficFilter := filter.GetTrafficFilter(m.memoryDB) //NewTrafficFilter(basic.FilterOrderTraffic, m.memoryDB)
 	// 免除流量控制的 URL(如交互式聊天流接口,避免被 IP/IP+API 频率上限在长会话中误伤)
-	tempStr, _ = m.configHelper.GetStringValueDefault("security", "unTrafficUrl", "")
-	urls = strings.Split(tempStr, ",")
-	trafficFilter.SetupUnTrafficUrl(urls)
+	trafficFilter.SetupUnTrafficUrl(m.serviceConfig.Security.UnTrafficUrl)
 
-	securityFilter := filter.GetSecurityFilter(m.memoryDB, signKey) //NewSecurityFilter(basic.FilterOrderSecurity, m.memoryDB, signKey)
-	tempStr, _ = m.configHelper.GetStringValueDefault("security", "deSecurityUrl", "")
-	urls = strings.Split(tempStr, ",")
-	securityFilter.SetupDeSecurityFilter(urls)
+	securityFilter := filter.GetSecurityFilter(m.memoryDB, m.serviceConfig.Security.SignKey) //NewSecurityFilter(basic.FilterOrderSecurity, m.memoryDB, signKey)
+	securityFilter.SetupDeSecurityFilter(m.serviceConfig.Security.DeSecurityUrl)
 
 	err := m.baseRouter.SetupAPIGroupFilter(cCommon.BasePath, loggingFilter, reqPreprocessFilter, addressFilter, trafficFilter, securityFilter)
 	if err != nil {
@@ -428,8 +415,7 @@ func (m *ServiceMain) setupApiFilters() bool {
 }
 
 func (m *ServiceMain) setupSwaggerController() {
-	swaggerEnabled, _ := m.configHelper.GetBoolValueDefault("server", "enableSwagger", false)
-	if swaggerEnabled {
+	if m.serviceConfig.Server.SwaggerEnabled {
 		err := m.baseRouter.SetupController(webbase.HttpMethodGet, "/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 		if err != nil {
 			logging.LogWarnF("[setGlobalFilterAndSwagger], failed to setup swagger controller,err:%s", err.Error())

@@ -6,21 +6,18 @@ import (
 	"my.favorite/platformutility/memory_db/m_redis"
 )
 
-func CreateMemoryDb(config *config.ConfigurationHelper) common.IMemoryDB {
-	var memoryDbType = common.MemoryDbTypeUnknown
-	if config != nil {
-		memoryDbType, _ = config.GetIntValueDefault("memoryDb", "memoryDbType", common.MemoryDbTypeRedis)
-	}
+func CreateMemoryDb(storageCfg config.DataStorageConfig) common.IMemoryDB {
+	//storageConfig, _ := config.LoadDataStorageConfig(helper)
 
-	switch memoryDbType {
-	case common.MemoryDbTypeRedis:
-		return createRedisDb(config)
+	switch storageCfg.MemoryDBConfig.MemoryType {
+	case config.MemoryDbTypeRedis:
+		return createRedisDb(storageCfg)
 	default:
 	}
 	return nil
 }
 
 // ================================ private functions & methods ===============================
-func createRedisDb(config *config.ConfigurationHelper) common.IMemoryDB {
-	return m_redis.GetRedisClient(config)
+func createRedisDb(storageCfg config.DataStorageConfig) common.IMemoryDB {
+	return m_redis.GetRedisClient(storageCfg)
 }
