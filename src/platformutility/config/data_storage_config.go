@@ -5,8 +5,6 @@
 
 package config
 
-import cCommon "my.favorite/cclawservice/common"
-
 type DataStorageConfig struct {
 	DBConfig struct {
 		DBType       int
@@ -84,7 +82,7 @@ func LoadDataStorageConfig(helper *ConfigurationHelper) (DataStorageConfig, erro
 	config.DBConfig.RetryBaseDelay, _ = helper.GetFloat64ValueDefault("database", "retry_base_delay", 1.0)
 	config.DBConfig.RetryMaxDelay, _ = helper.GetFloat64ValueDefault("database", "retry_max_delay", 60.0)
 	config.DBConfig.RetryJitter, _ = helper.GetFloat64ValueDefault("database", "retry_jitter", 0.1)
-	config.DBConfig.ReloadCacheTTL, _ = helper.GetIntValueDefault("database", "reloadCacheTTL", cCommon.DefaultReloadDatabaseCacheTTLSeconds)
+	config.DBConfig.ReloadCacheTTL, _ = helper.GetIntValueDefault("database", "reloadCacheTTL", DefaultReloadDatabaseCacheTTLSeconds)
 
 	config.DBConfig.LogLevel, _ = helper.GetStringValueDefault("database", "log_level", "warn")
 

@@ -32,10 +32,15 @@ definitions:
       AgentName:
         type: string
       BootstrapTotalChars:
-        description: 启动文件最大的大小
+        description: 启动文档注入总上限(rune):0/未配置 → MaxBootstrapTotalChars;负数 → 不限制
         type: integer
       CompactionMode:
         description: 压缩模式
+        type: integer
+      CurrentSize:
+        description: 当前用户输入+工具输出结果占比
+        type: integer
+      CurrentTokens:
         type: integer
       Deleted:
         type: boolean
@@ -57,6 +62,21 @@ definitions:
       MaxConcurrents:
         description: DDL 列为 max_concurrent
         type: integer
+      MaxHistoryTokens:
+        description: |-
+          MaxHistoryTokens 历史回放上限(tokens):0/未配置 → 用 hCommon.DefaultMaxHistoryTokens;负数 → 不限制。
+          只作用于"历史回放"这一项预算,不影响工具循环(FitMessages)—— 想多早开始压缩历史就调它。
+        type: integer
+      MemorySize:
+        description: 历史记忆占比
+        type: integer
+      MemorySummarySize:
+        description: 长期记忆摘要占比
+        type: integer
+      MemorySummaryTokens:
+        type: integer
+      MemoryTokens:
+        type: integer
       OwnerId:
         type: string
       PrimaryModel:
@@ -66,8 +86,15 @@ definitions:
         description: 推理展示的方式 0/1/2:off/生成后附带/2 streaming
         type: integer
       ReverseTokenFloor:
-        description: 压缩时保留的最小token数量
+        description: 为系统提示(7 个启动文档)预留的最小 token 额度;只在该值大于实测系统提示估量时才生效
         type: integer
+      ReverseTokenFloorTokens:
+        type: integer
+      SkillIds:
+        description: 与之关联的skill
+        items:
+          type: string
+        type: array
       SubAgents:
         type: integer
       ToolProgress:
@@ -139,6 +166,9 @@ definitions:
       reasoningEx:
         description: 是否支持推理力度参数
         type: boolean
+      thinkingLocked:
+        description: 思考模式不可关闭:true时禁止下发tool_choice
+        type: boolean
       thinkingNonStreaming:
         description: 非流模式下是否支持思考,false/true=否/是
         type: boolean
@@ -157,14 +187,14 @@ definitions:
       dVersion:
         $ref: '#/definitions/optimisticlock.Version'
       skillDir:
-        description: 指向skill对应的相对路径,定位SKILL.md
+        description: 技能目录名(相对 skills 根的安全相对路径),其下固定为 SKILL.md
         type: string
       skillId:
         type: string
       skillName:
         type: string
       skillScope:
-        description: 指向skill的作用域
+        description: 作用域,见 SkillScope(0系统/1个人/2项目/3插件)
         type: integer
     type: object
   optimisticlock.Version:
@@ -263,6 +293,12 @@ definitions:
       username:
         type: string
     type: object
+  request.SessionTurnsRequest:
+    properties:
+      sessionId:
+        description: 会话标识,对应聊天时使用的 sessionId
+        type: string
+    type: object
   request.SkillIDRequest:
     properties:
       skillId:
@@ -277,6 +313,92 @@ info:
   title: 企业级AI助手操作系统
   version: 1.0.0
 paths:
+  /api/GetSessionTurns:
+    post:
+      consumes:
+      - application/json
+      description: 按 sessionId 返回最近 SessionLimitPage 轮对话:含提问与回复正文
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: salt
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求段请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 请求内容的签名
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      - description: 会话标识
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/request.SessionTurnsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 获取会话轮次明细
+      tags:
+      - 主题列表
+  /api/GetSessions:
+    post:
+      consumes:
+      - application/json
+      description: 根据当前登录用户获取聊天历史列表(按开始时间倒序,最多 SessionLimitPage 条)
+      parameters:
+      - description: Login成功返回后得到的token
+        in: header
+        name: AUTHORIZATION
+        required: true
+        type: string
+      - description: salt
+        in: query
+        name: NONCE
+        required: true
+        type: string
+      - description: 数值,表示请求段请求的时间(秒数)
+        in: query
+        name: TIMESTAMP
+        required: true
+        type: string
+      - description: 请求内容的签名
+        in: query
+        name: SIGNATURE
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/basic.CommonResponse'
+      summary: 获取聊天列表
+      tags:
+      - 主题列表
   /api/agent/add:
     post:
       consumes:
@@ -568,7 +690,7 @@ paths:
         name: TIMESTAMP
         required: true
         type: string
-      - description: 对请求内容的签名秒数
+      - description: 对请求内容的签名
         in: query
         name: SIGNATURE
         required: true

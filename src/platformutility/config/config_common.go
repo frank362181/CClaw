@@ -49,6 +49,12 @@ const (
 	ReconnectionBaseDelay = 500
 )
 
+// default value for database config
+const (
+	// DefaultReloadDatabaseCacheTTLSeconds 配置缓存 TTL(多实例部署时,各实例从 DB 刷新 LLM provider/agent/skill 配置的过期时间)
+	DefaultReloadDatabaseCacheTTLSeconds = 30 // 默认 30 秒;<=0 表示禁用 TTL 刷新(仅启动时加载一次)
+)
+
 // IConfigurationStorage ========================== storage ==========================
 type IConfigurationStorage interface {
 	Get(section string, key string) (string, error)

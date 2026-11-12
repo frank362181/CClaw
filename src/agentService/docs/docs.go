@@ -15,6 +15,133 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/GetSessionTurns": {
+            "post": {
+                "description": "按 sessionId 返回最近 SessionLimitPage 轮对话:含提问与回复正文",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "主题列表"
+                ],
+                "summary": "获取会话轮次明细",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "salt",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求段请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "请求内容的签名",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "会话标识",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/request.SessionTurnsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/GetSessions": {
+            "post": {
+                "description": "根据当前登录用户获取聊天历史列表(按开始时间倒序,最多 SessionLimitPage 条)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "主题列表"
+                ],
+                "summary": "获取聊天列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Login成功返回后得到的token",
+                        "name": "AUTHORIZATION",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "salt",
+                        "name": "NONCE",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "数值,表示请求段请求的时间(秒数)",
+                        "name": "TIMESTAMP",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "请求内容的签名",
+                        "name": "SIGNATURE",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/basic.CommonResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/agent/add": {
             "post": {
                 "description": "新增一个Agent,AgentId 重复时返回409",
@@ -451,7 +578,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "对请求内容的签名秒数",
+                        "description": "对请求内容的签名",
                         "name": "SIGNATURE",
                         "in": "query",
                         "required": true
@@ -1398,11 +1525,18 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "BootstrapTotalChars": {
-                    "description": "启动文件最大的大小",
+                    "description": "启动文档注入总上限(rune):0/未配置 → MaxBootstrapTotalChars;负数 → 不限制",
                     "type": "integer"
                 },
                 "CompactionMode": {
                     "description": "压缩模式",
+                    "type": "integer"
+                },
+                "CurrentSize": {
+                    "description": "当前用户输入+工具输出结果占比",
+                    "type": "integer"
+                },
+                "CurrentTokens": {
                     "type": "integer"
                 },
                 "Deleted": {
@@ -1434,6 +1568,24 @@ const docTemplate = `{
                     "description": "DDL 列为 max_concurrent",
                     "type": "integer"
                 },
+                "MaxHistoryTokens": {
+                    "description": "MaxHistoryTokens 历史回放上限(tokens):0/未配置 → 用 hCommon.DefaultMaxHistoryTokens;负数 → 不限制。\n只作用于\"历史回放\"这一项预算,不影响工具循环(FitMessages)—— 想多早开始压缩历史就调它。",
+                    "type": "integer"
+                },
+                "MemorySize": {
+                    "description": "历史记忆占比",
+                    "type": "integer"
+                },
+                "MemorySummarySize": {
+                    "description": "长期记忆摘要占比",
+                    "type": "integer"
+                },
+                "MemorySummaryTokens": {
+                    "type": "integer"
+                },
+                "MemoryTokens": {
+                    "type": "integer"
+                },
                 "OwnerId": {
                     "type": "string"
                 },
@@ -1446,8 +1598,18 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "ReverseTokenFloor": {
-                    "description": "压缩时保留的最小token数量",
+                    "description": "为系统提示(7 个启动文档)预留的最小 token 额度;只在该值大于实测系统提示估量时才生效",
                     "type": "integer"
+                },
+                "ReverseTokenFloorTokens": {
+                    "type": "integer"
+                },
+                "SkillIds": {
+                    "description": "与之关联的skill",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "SubAgents": {
                     "type": "integer"
@@ -1550,6 +1712,10 @@ const docTemplate = `{
                     "description": "是否支持推理力度参数",
                     "type": "boolean"
                 },
+                "thinkingLocked": {
+                    "description": "思考模式不可关闭:true时禁止下发tool_choice",
+                    "type": "boolean"
+                },
                 "thinkingNonStreaming": {
                     "description": "非流模式下是否支持思考,false/true=否/是",
                     "type": "boolean"
@@ -1576,7 +1742,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/optimisticlock.Version"
                 },
                 "skillDir": {
-                    "description": "指向skill对应的相对路径,定位SKILL.md",
+                    "description": "技能目录名(相对 skills 根的安全相对路径),其下固定为 SKILL.md",
                     "type": "string"
                 },
                 "skillId": {
@@ -1586,7 +1752,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "skillScope": {
-                    "description": "指向skill的作用域",
+                    "description": "作用域,见 SkillScope(0系统/1个人/2项目/3插件)",
                     "type": "integer"
                 }
             }
@@ -1726,6 +1892,15 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "request.SessionTurnsRequest": {
+            "type": "object",
+            "properties": {
+                "sessionId": {
+                    "description": "会话标识,对应聊天时使用的 sessionId",
                     "type": "string"
                 }
             }

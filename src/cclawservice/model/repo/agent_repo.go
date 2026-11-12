@@ -12,10 +12,10 @@ import (
 	"strings"
 	"sync"
 
-	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/platformutility/common"
+	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/database/core"
 	"my.favorite/platformutility/exception"
 	"my.favorite/platformutility/logging"
@@ -46,7 +46,7 @@ type AgentRepository struct {
 var agentRepository = common.GetSingleton(func() *AgentRepository {
 	return &AgentRepository{
 		dataAccessor: nil,
-		configTTL:    cCommon.DefaultReloadDatabaseCacheTTLSeconds,
+		configTTL:    config.DefaultReloadDatabaseCacheTTLSeconds,
 
 		llmProviders: common.NewSafeList[dataobject.TLlm](),
 		agents:       common.NewSafeList[dataobject.TAgent](),
