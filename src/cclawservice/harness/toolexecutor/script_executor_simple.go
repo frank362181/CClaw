@@ -4,13 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -207,70 +205,4 @@ func runScriptWithOnLine(ctx context.Context, scriptPath, argsJSON string, works
 		return "", fmt.Errorf("script tool: %s failed: %s", filepath.Base(scriptPath), detail)
 	}
 	return strings.TrimSpace(sb.String()), nil
-}
-
-// resolveScriptTimeout 返回脚本执行超时:优先取环境变量 CCLAW_SCRIPT_TIMEOUT_SEC(秒,>=1),
-// 未设置/非法时回退默认 scriptRunTimeout。用于给 OCR 等长耗时脚本扩容,避免 15s 硬超时。
-func resolveScriptTimeout() time.Duration {
-	if v := pCommon.GetEnvString("CCLAW_SCRIPT_TIMEOUT_SEC"); v != "" {
-		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
-			return time.Duration(sec) * time.Second
-		}
-	}
-	return scriptRunTimeout
-}
-
-func normalizeScriptPolicy() ScriptPolicy {
-	scriptPolicy := DefaultScriptPolicy
-	if scriptPolicy.ScriptBin == "" {
-		scriptPolicy.ScriptBin = scriptBin
-	}
-	if scriptPolicy.Timeout <= 0 {
-		scriptPolicy.Timeout = scriptRunTimeout
-	}
-	if scriptPolicy.MaxOutputSize <= 0 {
-		scriptPolicy.MaxOutputSize = scriptMaxOutput
-	}
-	if scriptPolicy.MaxInputJSONSize <= 0 {
-		scriptPolicy.MaxInputJSONSize = scriptMaxInputJSON
-	}
-
-	return scriptPolicy
-}
-
-// scriptFailureDetail 提取脚本失败的可读原因。
-// 优先级:stderr 详情 → stdout 的 {"error":"..."} → 执行错误(如 "exit status 1")。
-// 为什么要回退解析 stdout:部分脚本(如 weather.py)把错误 JSON 只写到 stdout,
-// 若仅看 stderr 会退化成 "exit status 1",真实原因(网络/解析/参数)全部丢失、无法诊断。
-func scriptFailureDetail(stderr, stdout string, runErr error) string {
-	if detail := strings.TrimSpace(stderr); detail != "" {
-		return detail
-	}
-	if detail := extractStdoutError(stdout); detail != "" {
-		return detail
-	}
-	return runErr.Error()
-}
-
-// extractStdoutError 从脚本 stdout 中提取 {"error":"..."} 文本。
-// stdout 可能多行(最后一行通常是脚本的最终 JSON 结果),故自后向前找首个可解析且含 error 的 JSON 对象。
-func extractStdoutError(stdout string) string {
-	lines := strings.Split(strings.TrimSpace(stdout), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
-		if len(line) < 2 || line[0] != '{' {
-			continue
-		}
-
-		var payload struct {
-			Error string `json:"error"`
-		}
-		if err := json.Unmarshal([]byte(line), &payload); err != nil {
-			continue
-		}
-		if msg := strings.TrimSpace(payload.Error); msg != "" {
-			return msg
-		}
-	}
-	return ""
 }

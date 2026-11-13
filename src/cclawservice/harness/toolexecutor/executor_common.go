@@ -11,6 +11,7 @@ package toolexecutor
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,6 +31,12 @@ func (s SystemToolName) String() string {
 }
 
 const (
+	EnvToolRoundTimeoutName     = "CCLAW_TOOL_ROUND_TIMEOUT"
+	EnvToolRoundWaitTimeoutName = "CCLAW_TOOL_WAIT_TIMEOUT"
+
+	DefaultToolRoundTimeout = 60 // 工具调用正常收敛时长
+	DefaultToolWaitTimeout  = 5  // 工具调用取消的上限时长
+
 	scriptBin          = "python3"         // 脚本解释器(与 SKILL.md requires.bins 对齐)
 	scriptRunTimeout   = 120 * time.Second // 单次脚本执行默认超时(OCR/大目录耗时,可用 CCLAW_SCRIPT_TIMEOUT_SEC 覆盖)
 	scriptMaxOutput    = 256 * 1024        // stdout/stderr 各 256KB 上限
@@ -64,4 +71,26 @@ type ScriptArgument struct {
 // 只暴露一个 **方法
 type IScriptRunner interface {
 	Run(ctx context.Context, toolArgs ScriptArgument) (string, error)
+}
+
+// 工具调用收敛口径,单次执行脚本必须有序 120s <= 工具轮收敛 <= 回合超时
+
+type ToolRoundTiming struct {
+	RoundTimeout time.Duration // 正常路径上的收敛上限
+	WaitTimeout  time.Duration // 调用方取消的快速收敛
+}
+
+var RoundTimingOverride atomic.Pointer[ToolRoundTiming]
+
+func SetToolRoundTiming(t ToolRoundTiming) {
+	RoundTimingOverride.Store(&t)
+}
+
+func GetToolRoundTiming() ToolRoundTiming {
+	t := ToolRoundTiming{}
+	if o := RoundTimingOverride.Load(); o != nil {
+		t = *o
+	}
+
+	return normalizeToolRoundTiming(t)
 }

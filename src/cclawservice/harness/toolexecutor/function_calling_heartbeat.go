@@ -61,7 +61,12 @@ func (h *functionCallingHeartbeat) Stop() {
 // ========================= private functions =========================
 
 // trySend 非阻塞投递
-func (h *functionCallingHeartbeat) trySend(e ToolEvent) bool {
+func (h *functionCallingHeartbeat) trySend(e ToolEvent) (ok bool) {
+	defer func() {
+		if err := recover(); err != nil {
+			ok = false
+		}
+	}()
 	select {
 	case h.out <- e:
 		return true

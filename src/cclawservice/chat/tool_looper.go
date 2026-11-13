@@ -110,16 +110,19 @@ func (l *ToolLoop) Run(ctx context.Context, st *TurnState, sink ISink, rules too
 		}
 
 		for _, oc := range outcomes {
+			// 回填给模型的文本:截断的副本 + 守卫提示(可能)
+			body := guard.ApplyLoopGuard(oc.Name, oc.Arg, !oc.Failed(), ForModel(oc, l.maxToolResultRunes), sink.OnNotice)
+			if err := st.AppendToolResult(oc.CallID, body); err != nil {
+				st.RecordOutcomes(outcomes)
+				return llmproto.LlmReply{}, err
+			}
+
 			if oc.Failed() {
 				// done/error先发,让UI先看到工具执行结果
 				sink.OnTool(toolexecutor.ToolEvent{Phase: cCommon.ChatToolEventError, Seq: oc.Seq, Name: oc.Name, Detail: oc.Reason.Error()})
 			} else {
 				sink.OnTool(toolexecutor.ToolEvent{Phase: cCommon.ChatToolEventDone, Seq: oc.Seq, Name: oc.Name})
 			}
-
-			// 回填给模型的文本:截断的副本 + 守卫提示(可能)
-			body := guard.ApplyLoopGuard(oc.Name, oc.Arg, !oc.Failed(), ForModel(oc, l.maxToolResultRunes), sink.OnNotice)
-			st.AppendToolResult(oc.CallID, body)
 		}
 
 		st.RecordOutcomes(outcomes)
@@ -164,3 +167,5 @@ func (l *ToolLoop) invoke(ctx context.Context, st *TurnState, tools []llmproto.T
 
 	return reply, nil
 }
+
+var _ IToolLooper = (*ToolLoop)(nil)

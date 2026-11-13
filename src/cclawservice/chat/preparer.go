@@ -64,16 +64,30 @@ func GetChatPreparer(agentRepo *repo.AgentRepository, functionCalling bool, clas
 }
 
 func (p *Preparer) Prepare(ctx context.Context, cmd Command) (*TurnState, error) {
-	timing := &TurnTiming{}
-
-	// 路由
 	t0 := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp
 	agent, err := p.agentRouter.Resolve(ctx, cmd.ComCode, cmd.SessionId, cmd.Message, cmd.AgentID, p.classifier)
 	if err != nil {
 		return nil, err
 	}
-	timing.RouteMs = pCommon.MilliDiff2(t0)
-	timing.AgentId = cmd.AgentID //权威来源是路由结果
+
+	turn, err := p.PrepareFor(ctx, cmd, agent, TurnRoleRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	turn.Timing.RouteMs = pCommon.MilliDiff2(t0)
+	turn.Timing.AgentId = cmd.AgentID //权威来源是路由结果
+
+	return turn, err
+}
+
+// PrepareFor 根据制定的agent构造TurnState(不走路由)
+// worker/evaluator的目标agent由引擎决定,不能再路由一次
+func (p *Preparer) PrepareFor(ctx context.Context, cmd Command, agent dataobject.TAgent, turnRole TurnRole) (*TurnState, error) {
+	_ = ctx
+	_ = turnRole
+
+	timing := &TurnTiming{}
 
 	// provider
 	llmProvider, err := p.resolveProvider(cmd.ComCode, agent)

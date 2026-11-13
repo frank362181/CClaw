@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
+	"sync"
 
 	cCommon "my.favorite/cclawservice/common"
 	pCommon "my.favorite/platformutility/common"
@@ -19,8 +19,6 @@ const defaultProgressBuffer = 16
 // 单轮工具调用扇出的最大上限:限制单轮“同时开跑的工具数”
 // 模型一次8个调用是常态
 const maxToolFanout = 12
-
-const toolDrainGrace = time.Duration(5) * time.Second
 
 // parallelExecutor 流式接口下,同一轮的多个工具调用并行执行并把进度汇集到一个 sink
 type parallelExecutor struct {
@@ -54,6 +52,9 @@ func (pe *parallelExecutor) RunAll(ctx context.Context, env ToolEnv, invocations
 	}
 
 	// 等待事件,必须不同的scope,否则会与工具任务同一个scope,wait会永远不结束
+	timing := GetToolRoundTiming()
+	roundStart := pCommon.GetDatetimeUtilityInstance().GetNow()
+
 	eventScope := concurrency.GetTaskManager().NewScope(scopeName+":events", 0)
 	defer eventScope.Cancel()
 
@@ -85,6 +86,7 @@ func (pe *parallelExecutor) RunAll(ctx context.Context, env ToolEnv, invocations
 	}
 
 	// 按index 写回,保证返回顺序==模型声明顺序
+	var outMu sync.Mutex
 	out := make([]ToolOutcome, len(invocations))
 	dispatched := make([]bool, len(invocations))
 	for i, invocation := range invocations {
@@ -100,7 +102,9 @@ func (pe *parallelExecutor) RunAll(ctx context.Context, env ToolEnv, invocations
 			Name: "tool-" + inv.Name(),
 			Fn: func(runCtx context.Context) error {
 				pe.runOne(runCtx, env, inv, ledger, lines, func(o ToolOutcome) {
+					outMu.Lock()
 					out[idx] = o
+					outMu.Unlock()
 				})
 				return nil
 			},
@@ -114,29 +118,21 @@ func (pe *parallelExecutor) RunAll(ctx context.Context, env ToolEnv, invocations
 	}
 
 	// 收敛:先等工具任务,再关通道装转发协程退出,最后等它把残留事件写完
-	drainCtx, cancelDrain := context.WithTimeout(context.Background(), toolDrainGrace)
-	defer cancelDrain()
-	if err := toolScope.Wait(drainCtx); err != nil {
+	if err := waitScope(ctx, toolScope, timing); err != nil {
 		logging.LogWarnF("tool executor: %s tool tasks not drained within %s: %s",
-			scopeName, toolDrainGrace, err.Error())
+			scopeName, timing.RoundTimeout, err.Error())
 	}
 
 	close(lines)
 
-	if err := eventScope.Wait(drainCtx); err != nil {
+	// 收敛事件转发
+	if err := waitScope(ctx, eventScope, timing); err != nil {
 		logging.LogWarnF("tool executor: %s event forwarder not drained within %s: %s",
-			scopeName, toolDrainGrace, err.Error())
+			scopeName, timing.RoundTimeout, err.Error())
 	}
 
 	// 收敛:按顺序保留真正派发
-	res := make([]ToolOutcome, 0, len(invocations))
-	for i := range out {
-		if dispatched[i] {
-			res = append(res, out[i])
-		}
-	}
-
-	return res
+	return normalizeOutcomes(invocations, dispatched, out, &outMu, roundStart)
 }
 
 // 执行一个工具,并保证"无论怎么都留下一条自洽的outcome"
@@ -179,7 +175,12 @@ func (pe *parallelExecutor) deliver(sink ToolEventSink, event ToolEvent) {
 }
 
 // send 带ctx的阻塞投递
-func send(ctx context.Context, ch chan<- ToolEvent, evt ToolEvent) bool {
+func send(ctx context.Context, ch chan<- ToolEvent, evt ToolEvent) (ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			ok = false
+		}
+	}()
 	select {
 	case ch <- evt:
 		return true

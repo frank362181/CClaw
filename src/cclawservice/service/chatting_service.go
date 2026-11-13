@@ -2,17 +2,12 @@ package service
 
 import (
 	"context"
-	"errors"
 	"strings"
-	"time"
 
 	"my.favorite/cclawservice/chat"
-	cCommon "my.favorite/cclawservice/common"
-	"my.favorite/cclawservice/common/llmproto"
 	myException "my.favorite/cclawservice/exception"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
-	"my.favorite/cclawservice/harness/observatory"
 	"my.favorite/cclawservice/harness/toolexecutor"
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
@@ -45,6 +40,8 @@ type ChattingService struct {
 	turnReporter     chat.ITurnReporter
 
 	toolConfiguredRules toolexecutor.ToolConfigRules
+
+	turnRunner chat.ITurnRunner // 每轮聊天的执行单元
 }
 
 var chattingService = pCommon.GetSingleton(func() *ChattingService {
@@ -80,6 +77,18 @@ func GetChattingService(db core.IBaseDatabase, agentRepo *repo.AgentRepository, 
 	chattingService.turnReporter = chat.GetTurnReporter()
 
 	chattingService.toolConfiguredRules = toolRules
+
+	chattingService.turnRunner = chat.NewTurnRunner(chat.TurnRunnerParams{
+		Assembler:   chattingService.assembler,
+		Journal:     chattingService.journal,
+		Maintainer:  chattingService.memoryMaintainer,
+		ConGate:     chattingService.agentConcurrent,
+		Register:    chattingService.turnRegistrator,
+		Transport:   chattingService.transport,
+		SyncLooper:  chattingService.syncLooper,
+		AsyncLooper: chattingService.asyncLooper,
+		Rules:       chattingService.toolConfiguredRules,
+	})
 
 	return chattingService
 }
@@ -194,112 +203,127 @@ func (s *ChattingService) execute(ctx context.Context, cmd chat.Command, sink ch
 		return chat.Reply{}, err
 	}
 	cmd = turn.Cmd
-	turn.SetStreamed(sink.IsStreamed()) //唯一真相源:sink决定流式与否,写进TurnState
+
 	if pt := turn.Timing; pt != nil {
 		tTiming.RouteMs, tTiming.SkillMs, tTiming.PromptMs = pt.RouteMs, pt.SkillMs, pt.PromptMs
 	}
 	tTiming.AgentId = turn.Agent.AgentId // 路由后的权威值,覆盖 0 步的显式值
 	turn.Timing = tTiming
 
-	// 2. 每Agent 并发闸
-	gateStart := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp
-	release, err := s.agentConcurrent.TryAcquire(tmpCtx, turn.Agent.AgentId, turn.Agent.MaxConcurrents)
-	tTiming.ConcurrencyMs = pCommon.MilliDiff2(gateStart)
-	if err != nil {
-		return chat.Reply{}, err
-	}
-	defer release()
+	// 执行单元:并发控制 -> 中断登记 -> 超时 -> 建档 -> 装配 -> 生成 -> 收尾记账
+	res, err := s.turnRunner.Run(tmpCtx, chat.TurnRequest{
+		Cmd:         cmd,
+		Turn:        turn,
+		Role:        chat.TurnRoleRoot,
+		Sink:        sink,
+		AllowRecord: true,
+		StartAt:     start,
+	})
 
-	// 3. 流式才需要"可被中断"的运行上下文
-	streamCtx := tmpCtx
-	if sink.IsStreamed() {
-		var done func()
-		streamCtx, done = s.turnRegistrator.Register(tmpCtx, cmd)
-		defer done()
-	}
+	firstVisibleMs = res.FirstVisibleMs
+	out = res.TurnReply
 
-	// 4. 应用级运行超时
-	timeout := time.Duration(pCommon.GetEnvIntDefault(hCommon.ChatRunTimeout, hCommon.AgentRunTimeout)) * time.Second
-	runCtx, runCancel := context.WithTimeout(streamCtx, timeout)
-	defer runCancel()
-	runCtx = observatory.WithTurn(runCtx, cmd.TurnID, start)
+	return out, err
 
-	// 5.会话建档(旁路)
-	sess, jErr := s.journal.Begin(runCtx, turn)
-	if errors.Is(jErr, myException.SessionOwnershipConflictKind) { //ctxmgr.ErrSessionOwnershipConflict) {
-		sink.OnNotice(cCommon.ChatNoticeNotRecorded, cCommon.ConstChatNoticeNotRecordedMsg)
-	}
-	sink.OnJournal(jErr)
-	turn.Session = sess
-
-	// 6. 上下文装配
-	asm, err := s.assembler.Assemble(runCtx, turn, cmd.Message)
-	if err != nil {
-		return chat.Reply{}, err
-	}
-	turn.Seed(asm.Messages)
-
-	// 7.生成(有工具走 ToolLoop,无工具一次调用)
-	capSink := chat.NewCapturingSink(sink)
-	llmReply, genErr := s.invoke(runCtx, turn, capSink)
-	firstVisibleMs = capSink.FirstVisibleMs(start) //在defer执行前赋值
-
-	// 8.收尾记账(成功/失败共用一条路径)
-	if genErr != nil {
-		partial := capSink.Streamed()
-		if partial == pCommon.BlankString {
-			partial = llmReply.Content // 同步路径:内容在llmReply里
-		}
-
-		seq := 0
-		if sess.Recordable() {
-			seq = s.journal.FinishPartial(ctx, turn, partial, cCommon.ClassifyInterrupt(ctx, runCtx, streamCtx, genErr))
-			s.memoryMaintainer.Maintain(sess, turn, asm, seq) //中断轮同样进行维护
-		}
-		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-			return chat.Reply{}, myException.ChatRunTimeoutKind.Newf("chatting service: run timeout after %d seconds", int(timeout.Seconds()))
-		}
-
-		return chat.Reply{}, myException.LlmError(genErr, "chatting service:runtime chat error")
-	}
-
-	// finish reason 收尾提示
-	if code, msg := cCommon.FinishReasonNotice(llmReply.FinishReason); code != pCommon.BlankString {
-		if llmReply.Content == pCommon.BlankString && llmReply.FinishReason == llmproto.FinishReasonContentFilter {
-			return chat.Reply{}, myException.ChatLLMContentFilterKind.New("chatting service: output blocked by content filter")
-		}
-		sink.OnNotice(code, msg)
-	}
-
-	seq := 0
-	if sess.Recordable() {
-		seq = s.journal.Finish(ctx, turn, llmReply.Content)
-		s.memoryMaintainer.Maintain(sess, turn, asm, seq)
-	}
-
-	return chat.Reply{
-		SessionID: cmd.SessionId, TurnID: cmd.TurnID,
-		Content: llmReply.Content, FinishReason: llmReply.FinishReason, At: pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,
-	}, nil
+	//// 2. 每Agent 并发闸
+	//gateStart := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp
+	//release, err := s.agentConcurrent.TryAcquire(tmpCtx, turn.Agent.AgentId, turn.Agent.MaxConcurrents)
+	//tTiming.ConcurrencyMs = pCommon.MilliDiff2(gateStart)
+	//if err != nil {
+	//	return chat.Reply{}, err
+	//}
+	//defer release()
+	//
+	//// 3. 流式才需要"可被中断"的运行上下文
+	//streamCtx := tmpCtx
+	//if sink.IsStreamed() {
+	//	var done func()
+	//	streamCtx, done = s.turnRegistrator.Register(tmpCtx, cmd)
+	//	defer done()
+	//}
+	//
+	//// 4. 应用级运行超时
+	//timeout := time.Duration(pCommon.GetEnvIntDefault(hCommon.ChatRunTimeout, hCommon.AgentRunTimeout)) * time.Second
+	//runCtx, runCancel := context.WithTimeout(streamCtx, timeout)
+	//defer runCancel()
+	//runCtx = observatory.WithTurn(runCtx, cmd.TurnID, start)
+	//
+	//// 5.会话建档(旁路)
+	//sess, jErr := s.journal.Begin(runCtx, turn)
+	//if errors.Is(jErr, myException.SessionOwnershipConflictKind) { //ctxmgr.ErrSessionOwnershipConflict) {
+	//	sink.OnNotice(cCommon.ChatNoticeNotRecorded, cCommon.ConstChatNoticeNotRecordedMsg)
+	//}
+	//sink.OnJournal(jErr)
+	//turn.Session = sess
+	//
+	//// 6. 上下文装配
+	//asm, err := s.assembler.Assemble(runCtx, turn, cmd.Message)
+	//if err != nil {
+	//	return chat.Reply{}, err
+	//}
+	//turn.Seed(asm.Messages)
+	//
+	//// 7.生成(有工具走 ToolLoop,无工具一次调用)
+	//capSink := chat.NewCapturingSink(sink)
+	//llmReply, genErr := s.invoke(runCtx, turn, capSink)
+	//firstVisibleMs = capSink.FirstVisibleMs(start) //在defer执行前赋值
+	//
+	//// 8.收尾记账(成功/失败共用一条路径)
+	//if genErr != nil {
+	//	partial := capSink.Streamed()
+	//	if partial == pCommon.BlankString {
+	//		partial = llmReply.Content // 同步路径:内容在llmReply里
+	//	}
+	//
+	//	seq := 0
+	//	if sess.Recordable() {
+	//		seq = s.journal.FinishPartial(ctx, turn, partial, cCommon.ClassifyInterrupt(ctx, runCtx, streamCtx, genErr))
+	//		s.memoryMaintainer.Maintain(sess, turn, asm, seq) //中断轮同样进行维护
+	//	}
+	//	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+	//		return chat.Reply{}, myException.ChatRunTimeoutKind.Newf("chatting service: run timeout after %d seconds", int(timeout.Seconds()))
+	//	}
+	//
+	//	return chat.Reply{}, myException.LlmError(genErr, "chatting service:runtime chat error")
+	//}
+	//
+	//// finish reason 收尾提示
+	//if code, msg := cCommon.FinishReasonNotice(llmReply.FinishReason); code != pCommon.BlankString {
+	//	if llmReply.Content == pCommon.BlankString && llmReply.FinishReason == llmproto.FinishReasonContentFilter {
+	//		return chat.Reply{}, myException.ChatLLMContentFilterKind.New("chatting service: output blocked by content filter")
+	//	}
+	//	sink.OnNotice(code, msg)
+	//}
+	//
+	//seq := 0
+	//if sess.Recordable() {
+	//	seq = s.journal.Finish(ctx, turn, llmReply.Content)
+	//	s.memoryMaintainer.Maintain(sess, turn, asm, seq)
+	//}
+	//
+	//return chat.Reply{
+	//	SessionID: cmd.SessionId, TurnID: cmd.TurnID,
+	//	Content: llmReply.Content, FinishReason: llmReply.FinishReason, At: pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,
+	//}, nil
 }
 
-func (s *ChattingService) invoke(ctx context.Context, turnState *chat.TurnState, sink chat.ISink) (llmproto.LlmReply, error) {
-	if len(turnState.VisibleTools) == 0 {
-		// 无工具调用
-		req := turnState.Request(nil, pCommon.BlankString)
-		req.Messages = s.assembler.Fit(req.Messages, turnState.Policy)
-
-		if turnState.IsStreamed() {
-			return s.transport.Stream(ctx, turnState.Provider, req, sink)
-		}
-
-		return s.transport.Complete(ctx, turnState.Provider, req)
-	}
-
-	// 有工具调用
-	if turnState.IsStreamed() {
-		return s.asyncLooper.Run(ctx, turnState, sink, s.toolConfiguredRules)
-	}
-
-	return s.syncLooper.Run(ctx, turnState, sink, s.toolConfiguredRules)
-}
+//func (s *ChattingService) invoke(ctx context.Context, turnState *chat.TurnState, sink chat.ISink) (llmproto.LlmReply, error) {
+//	if len(turnState.VisibleTools) == 0 {
+//		// 无工具调用
+//		req := turnState.Request(nil, pCommon.BlankString)
+//		req.Messages = s.assembler.Fit(req.Messages, turnState.Policy)
+//
+//		if turnState.IsStreamed() {
+//			return s.transport.Stream(ctx, turnState.Provider, req, sink)
+//		}
+//
+//		return s.transport.Complete(ctx, turnState.Provider, req)
+//	}
+//
+//	// 有工具调用
+//	if turnState.IsStreamed() {
+//		return s.asyncLooper.Run(ctx, turnState, sink, s.toolConfiguredRules)
+//	}
+//
+//	return s.syncLooper.Run(ctx, turnState, sink, s.toolConfiguredRules)
+//}

@@ -13,11 +13,11 @@ package chat
 import (
 	"context"
 	"strings"
-	"time"
 
 	"my.favorite/cclawservice/common/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
+	"my.favorite/cclawservice/harness/toolexecutor"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 )
@@ -51,6 +51,11 @@ type ITransportClient interface {
 	Stream(ctx context.Context, p Provider, req llmproto.LlmRequest, ob IStreamObserver) (llmproto.LlmReply, error)
 }
 
+// IToolLooper 工具循环的可替换点
+type IToolLooper interface {
+	Run(ctx context.Context, st *TurnState, sink ISink, rules toolexecutor.ToolConfigRules) (llmproto.LlmReply, error)
+}
+
 // IRoundTool 决定 第 几 round轮实际下发哪些工具、是否强制调用
 // 取代 直接依赖的tool.FirstRoundToolPlan
 type IRoundTool interface {
@@ -74,18 +79,6 @@ type IMemoryLedger interface {
 	Start(name string, at int64) int
 	Finish(idx int, at int64, result string)
 	Snapshot() []ctxmgr.TurnToolRecord
-}
-
-// Record 一条会话历史记录的值对象
-// 维护流程(compact/merge) 需要 **正文**
-type Record struct {
-	Index      int
-	Kind       string // user / assistant / tool / summary ...
-	Title      string
-	TimeText   string // 历史文件中只有文本类的时间
-	Content    string
-	CoversFrom int // kind = summary时有效;0 表示不覆盖
-	CoversTo   int
 }
 
 // Assembled 一次上下文装配的产物:消息序列 + 预算信息 + 历史条目
@@ -156,43 +149,4 @@ type Command struct {
 type IMemoryMaintainer interface {
 	Maintain(s Session, turnState *TurnState, asm Assembled, turnSeq int)
 	Close(ctx context.Context, s Session, turnState *TurnState, reason int) error
-}
-
-// ITurnRegistrator 中断登记
-// 替换 ctxmgr.GetTurnStreamMgr() 这个全局单例
-// 测试时可注入 内存实现:键的构造规则也收回接口实现内部(不再散落在Service)
-type ITurnRegistrator interface {
-	Register(ctx context.Context, cmd Command) (context.Context, func())
-	Cancel(sender, turnID string) bool
-}
-
-// ITurnPreparer 把Command转换成本轮可执行的TurnState
-// 路由 -> Provider -> 技能 -> system prompt -> 工具/预算 -> Plan
-type ITurnPreparer interface {
-	Prepare(ctx context.Context, cmd Command) (*TurnState, error)
-}
-
-// ITurnReporter 可观测性
-// 原先 WithTurn / OnTurnTiming / MilliDiff等
-type ITurnReporter interface {
-	Begin(ctx context.Context, c Command) (context.Context, *TurnTiming)
-	End(ctx context.Context, t *TurnTiming, firstVisibleMs int64, r Reply, err error, startAt time.Time)
-}
-
-// ----------------------- 计时------------------
-
-// TurnTiming 本轮 **自增**的计数器
-type TurnTiming struct {
-	TurnScope string //归因标识(turnID); 由TurnReporter.Begin填写
-	AgentId   string // 目标Agent;由Preparer.Prepare在路由完成后填写
-
-	ConcurrencyMs int64 // Agent并发闸等待
-	RouteMs       int64 // 路由(会话绑定/ 关键词 / LLM分类)
-	SkillMs       int64 // 技能读盘 + 工具合成
-	PromptMs      int64 // 意图门 + system prompt + 首轮计划
-
-	LlmMs     int64 // 所有上游调用耗时之和
-	ToolsMs   int64 // 所有工具调用之和
-	Rounds    int   // 上游调用轮次
-	ToolCalls int   // 工具调用次数
 }
