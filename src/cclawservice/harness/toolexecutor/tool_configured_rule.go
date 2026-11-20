@@ -64,6 +64,36 @@ func (p Permission) Error(toolName string) error {
 	return exception.ToolExecutionConfigKind.Newf("tool %s denied by configured rules(rule=%s),reason=%s", toolName, p.Rule, p.Reason)
 }
 
+// CheckReadPath 单路径只读准入:解析相对路径 -> deny 规则 -> ReadRoots 白名单
+// 返回解析后的结对路径;
+func (c ToolConfigRules) CheckReadPath(rawPath, workRoot string) (string, error) {
+	resolved, err := pCommon.ResolvePath(rawPath, workRoot)
+	if err != nil {
+		return pCommon.BlankString, exception.ToolExecutionConfigKind.Newf("invalid path,error:%s", err.Error())
+	}
+
+	if hit, pattern := matchDenyRoot([]string{resolved}, c.DenyRoots); hit {
+		return pCommon.BlankString, exception.ToolExecutionConfigKind.Newf("denied by configured rules(rule=%s),reason=%s", pattern, pattern)
+	}
+
+	if len(c.ReadRoots) == 0 {
+		return resolved, nil
+	}
+
+	roots := c.readRoots()
+	if len(roots) == 0 {
+		return pCommon.BlankString, exception.ToolExecutionConfigKind.Newf(
+			"read roots invalid(must be absolute):%s", strings.Join(c.ReadRoots, ","))
+	}
+
+	if !allToolWithinRoots([]string{resolved}, roots) {
+		return pCommon.BlankString, exception.ToolExecutionConfigKind.Newf(
+			"path outside roots:%s(allowed %s)", resolved, strings.Join(c.ReadRoots, ","))
+	}
+
+	return resolved, nil
+}
+
 // AdmitRule 每次工具调用都要检查,纯函数调用,无副作用,幂等
 func (c ToolConfigRules) AdmitRule(env ToolEnv, invocation ToolInvocation) Permission {
 	if !c.PolicyEnabled {
@@ -168,6 +198,20 @@ func (c ToolConfigRules) writeRoots(workRoot string) []string {
 	}
 
 	return pCommon.NormalizeStrings(roots)
+}
+
+func (c ToolConfigRules) readRoots() []string {
+	roots := make([]string, 0, len(c.ReadRoots))
+	for _, root := range c.ReadRoots {
+		root = strings.TrimSpace(root)
+		if root == pCommon.BlankString || !filepath.IsAbs(root) {
+			continue
+		}
+
+		roots = append(roots, root)
+	}
+
+	return roots
 }
 
 // 构造一条拒绝的规则

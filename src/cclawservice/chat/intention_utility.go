@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 
-	"my.favorite/cclawservice/biz/npa"
 	"my.favorite/cclawservice/chat/sop"
 	hCommon "my.favorite/cclawservice/harness/common"
 	pCommon "my.favorite/platformutility/common"
@@ -37,14 +36,6 @@ func GetSOPStepSummary(steps []hCommon.SkillSOPStep) []string {
 	}
 
 	return lines
-}
-
-func BuildReportSpecFromNegotiationArgument(argument NegotiationArgument) npa.ReportSpec {
-	return npa.ReportSpec{
-		ProjectDir: argument.ProjectDir,
-		ReportKind: argument.ReportKind,
-		OCR:        argument.OCR,
-	}
 }
 
 func NeedMoreInfoText(missing []string) string {

@@ -65,7 +65,7 @@ func (n *IntentionNegotiator) Negotiate(ctx context.Context, req NegotiationRequ
 		}
 
 		last := round == maxRounds
-		tools, choice := n.roundTools(req.SkillId, last)
+		tools, choice := n.roundTools(req.SkillId, req.NegSpec, last)
 		reply, err := n.transport.Complete(runCtx, req.Provider, llmproto.LlmRequest{
 			Messages:        messages,
 			Tools:           tools,
@@ -95,7 +95,7 @@ func (n *IntentionNegotiator) Negotiate(ctx context.Context, req NegotiationRequ
 		for _, call := range reply.ToolCalls {
 			toolCalls++
 			if call.Function.Name == IntentionToolStart {
-				parsed, err := parseNegotiationStartArg(call.Function.Arguments)
+				parsed, err := parseNegotiationStartArg(call.Function.Arguments, req.NegSpec)
 				if err != nil {
 					//参数坏了:当成一次失败的探测,回灌错误让模型重试
 					logging.LogWarnF("plan negotiate:invalid %s args,skill=%s,round=%d,error=%s,raw=%s",
@@ -153,8 +153,8 @@ func (n *IntentionNegotiator) buildIntentionSystemPrompt(req NegotiationRequest)
 	builder.WriteString("3. 信息不足时如实说明缺什么,不要用默认值填充。\n")
 	builder.WriteString("4. 本技能的完整说明见其 SKILL.md;下面的【技能判定说明】优先于你的直觉。\n")
 
-	if req.IntentionGuard != pCommon.BlankString {
-		builder.WriteString("\n 【技能判定说明(来自SKILL.md)】" + req.IntentionGuard + "\n")
+	if guard := negotiateGuard(req.NegSpec); guard != pCommon.BlankString {
+		builder.WriteString("\n 【技能判定说明(来自SKILL.md)】" + guard + "\n")
 	}
 
 	if req.Feedback != pCommon.BlankString {
@@ -180,16 +180,16 @@ func (n *IntentionNegotiator) finish(result NegotiationResult, rounds int, toolC
 	return result
 }
 
-func (n *IntentionNegotiator) roundTools(skillId string, last bool) ([]llmproto.Tool, string) {
+func (n *IntentionNegotiator) roundTools(skillId string, spec INegotiationSpec, last bool) ([]llmproto.Tool, string) {
 	if last {
 		// 表示最后一轮终止的工具.
 		// 有些LLM Provider 不支持 ToolChoiceRequire模式
-		return []llmproto.Tool{getIntentionStartToolSchema(skillId)}, llmproto.ToolChoiceAuto
+		return []llmproto.Tool{getIntentionStartToolSchema(skillId, spec)}, llmproto.ToolChoiceAuto
 	}
 
 	tools := make([]llmproto.Tool, 0, 3)
 	tools = append(tools, getProbeToolSchema()...)
-	tools = append(tools, getIntentionStartToolSchema(skillId))
+	tools = append(tools, getIntentionStartToolSchema(skillId, spec))
 
 	return tools, llmproto.ToolChoiceAuto
 }

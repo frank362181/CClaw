@@ -312,7 +312,7 @@ func (s *ChattingService) negotiateArgument(ctx context.Context, turn *chat.Turn
 		return s.forceArgument(ctx, turn, skillId, skillDoc, sink)
 	}
 
-	sink.OnStatus("plan.negotiating:", "正在确认需求...")
+	sink.OnStatus("plan.negotiating", "正在确认需求...")
 	retry := s.chattingConfig.Negotiation.ArgRetry
 	if retry < 0 {
 		retry = 0
@@ -322,16 +322,16 @@ func (s *ChattingService) negotiateArgument(ctx context.Context, turn *chat.Turn
 	intentionNegotiator := chat.NewIntentionNegotiator(s.transport, s.chattingConfig)
 	for attempt := 0; attempt <= retry; attempt++ {
 		result, err := intentionNegotiator.Negotiate(ctx, chat.NegotiationRequest{
-			Provider:       turn.Provider,
-			Question:       turn.Cmd.Message,
-			SkillId:        skillId,
-			SkillName:      skillDoc.FrontMatter.Name,
-			SkillDesc:      skillDoc.FrontMatter.Description,
-			SOPSteps:       chat.GetSOPStepSummary(skillDoc.FrontMatter.SOPOutLines),
-			WorkRoot:       turn.WorkRoot,
-			Rules:          s.toolConfiguredRules,
-			IntentionGuard: npa.IntentionGuard, // 机制常量
-			Feedback:       feedback,
+			Provider:  turn.Provider,
+			Question:  turn.Cmd.Message,
+			SkillId:   skillId,
+			SkillName: skillDoc.FrontMatter.Name,
+			SkillDesc: skillDoc.FrontMatter.Description,
+			SOPSteps:  chat.GetSOPStepSummary(skillDoc.FrontMatter.SOPOutLines),
+			WorkRoot:  turn.WorkRoot,
+			Rules:     s.toolConfiguredRules,
+			NegSpec:   npa.NewReportSpecNegotiation(skillDoc.FrontMatter),
+			Feedback:  feedback,
 		})
 
 		if err != nil {
@@ -340,7 +340,15 @@ func (s *ChattingService) negotiateArgument(ctx context.Context, turn *chat.Turn
 
 		switch result.Decision {
 		case chat.DecisionProceed:
-			candidate := npa.NormalizeReportSpec(chat.BuildReportSpecFromNegotiationArgument(result.Arg), skillDoc.FrontMatter)
+			decoded, ok := result.Arg.(npa.ReportSpec)
+			if !ok {
+				// proceed 却没有可用参数:按协商失败处理,不要带着空 spec 去建计划
+				logging.LogWarnF("plan mode:proceed without spec,turn=%s,attempt=%d,type=%T",
+					turn.Cmd.TurnID, attempt+1, result.Arg)
+				feedback = "已判定为需要执行,但缺少必要参数;请用 " + chat.IntentionToolStart + " 重新提交。"
+				continue
+			}
+			candidate := npa.NormalizeReportSpec(decoded, skillDoc.FrontMatter)
 			issues := npa.ValidateReportSpec(candidate, skillDoc.FrontMatter)
 			if len(issues) == 0 {
 				s.reportDecision(ctx, turn, skillId, string(chat.DecisionProceed), result)

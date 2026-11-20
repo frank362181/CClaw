@@ -10,6 +10,7 @@
 package chat
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,8 +26,7 @@ const (
 	IntentionToolFsStat = "fs_stat"         // 只探测路径
 	IntentionToolStart  = "intention_start" // 表态并提交参数
 
-	maxListEntries  = 200 // 目录列举上限
-	maxExtScanDepth = 2
+	maxListEntries = 200 // 目录列举上限
 )
 
 // =============================== schema ===============================
@@ -65,7 +65,36 @@ func getProbeToolSchema() []llmproto.Tool {
 	}
 }
 
-func getIntentionStartToolSchema(skillId string) llmproto.Tool {
+func getIntentionStartToolSchema(skillId string, spec INegotiationSpec) llmproto.Tool {
+	properties := map[string]any{
+		"decision": map[string]any{
+			"type":        "string",
+			"enum":        []string{"proceed", "need_more_info", "not_applicable"},
+			"description": "proceed=执行流程;need_more_info=信息不足需要追问用户;not_applicable=用户只是在询问用法,不需要执行流程",
+		},
+		"reason": map[string]any{
+			"type":        "string",
+			"description": "为什么这么判断,一句话。必填。",
+		},
+		"missing": map[string]any{
+			"type":        "string",
+			"items":       map[string]any{"type": "string"},
+			"description": "decision=need_more_info 时必填:缺哪些信息",
+		},
+	}
+
+	if params, required := negotiateParams(spec); params != nil {
+		specObject := map[string]any{
+			"type":       "object",
+			"properties": params,
+		}
+
+		if len(required) > 0 {
+			specObject["required"] = required
+		}
+
+		properties["spec"] = specObject
+	}
 	return llmproto.Tool{
 		Type: "function",
 		Function: llmproto.ToolFunction{
@@ -73,33 +102,9 @@ func getIntentionStartToolSchema(skillId string) llmproto.Tool {
 			Description: fmt.Sprintf("表态工具:说明是否执行 %s 的 SOP 流程,并在执行时给出参数。"+
 				"不要用普通文本回答,必须调用本工具。", skillId),
 			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"decision": map[string]any{
-						"type":        "string",
-						"enum":        []string{"proceed", "need_more_info", "not_applicable"},
-						"description": "proceed=执行流程;need_more_info=信息不足需追问用户;not_applicable=用户只是在询问用法,不需要执行流程",
-					},
-					"reason": map[string]any{
-						"type":        "string",
-						"description": "为什么这么判断,一句话。必填。",
-					},
-					"missing": map[string]any{
-						"type":        "array",
-						"items":       map[string]any{"type": "string"},
-						"description": "decision=need_more_info 时必填:缺哪些信息,例如 材料目录、档案号",
-					},
-					"spec": map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"project_dir": map[string]any{"type": "string", "description": "材料目录绝对路径,必须已存在"},
-							"report_kind": map[string]any{"type": "string", "description": "报告类型"},
-							"ocr":         map[string]any{"type": "string", "enum": []string{"auto", "on", "off"}, "description": "OCR 模式,默认 auto"},
-						},
-						"required": []string{"project_dir"},
-					},
-				},
-				"required": []string{"decision", "reason"},
+				"type":       "object",
+				"properties": properties,
+				"required":   []string{"decision", "reason"},
 			},
 		},
 	}
@@ -108,14 +113,14 @@ func getIntentionStartToolSchema(skillId string) llmproto.Tool {
 // ================================ parse intention tool arguments==============================
 
 type negotiationStartArgument struct {
-	Decision string              `json:"decision"`
-	Reason   string              `json:"reason"`
-	Missing  []string            `json:"missing"`
-	Spec     NegotiationArgument `json:"spec"`
+	Decision string          `json:"decision"`
+	Reason   string          `json:"reason"`
+	Missing  []string        `json:"missing"`
+	Spec     json.RawMessage `json:"spec"` // 业务参数,保持原样
 }
 
 // 对intentionNegotiation 的参数进行解析,形成NegotiationResult,校验在biz层进行
-func parseNegotiationStartArg(raw string) (NegotiationResult, error) {
+func parseNegotiationStartArg(raw string, spec INegotiationSpec) (NegotiationResult, error) {
 	var args negotiationStartArgument
 	if err := pCommon.UnmarshalJson(raw, &args); err != nil {
 		return NegotiationResult{}, fmt.Errorf("negotiation: invalid argument: %w", err)
@@ -133,16 +138,15 @@ func parseNegotiationStartArg(raw string) (NegotiationResult, error) {
 		}
 	}
 
+	decoded, err := decodeNegotiationParams(spec, args.Spec)
+	if err != nil {
+		return NegotiationResult{}, err
+	}
 	return NegotiationResult{
 		Decision: decision,
 		Reason:   strings.TrimSpace(args.Reason),
 		Missing:  missing,
-		Arg: NegotiationArgument{
-			ProjectDir: strings.TrimSpace(args.Spec.ProjectDir),
-			// 这里档案号由系统自动生成
-			ReportKind: strings.TrimSpace(args.Spec.ReportKind),
-			OCR:        strings.TrimSpace(args.Spec.OCR),
-		},
+		Arg:      decoded,
 	}, nil
 }
 
@@ -183,7 +187,7 @@ func executeFsList(argsRaw, workRoot string, rules toolexecutor.ToolConfigRules)
 		return pCommon.BlankString, fmt.Errorf("negotiation: invalid argument while fs list,error: %w", err)
 	}
 
-	resolved, err := resolveReadPath(rules, tempArg.Path, workRoot)
+	resolved, err := rules.CheckReadPath(tempArg.Path, workRoot)
 	if err != nil {
 		return pCommon.BlankString, err
 	}
@@ -265,7 +269,7 @@ func executeFsStat(argsRaw, workRoot string, rules toolexecutor.ToolConfigRules)
 		return pCommon.BlankString, fmt.Errorf("negotiation: invalid argument while fs state,error: %w", err)
 	}
 
-	resolved, err := resolveReadPath(rules, tempArg.Path, workRoot)
+	resolved, err := rules.CheckReadPath(tempArg.Path, workRoot)
 	if err != nil {
 		return pCommon.BlankString, err
 	}
@@ -279,59 +283,4 @@ func executeFsStat(argsRaw, workRoot string, rules toolexecutor.ToolConfigRules)
 	}
 
 	return pCommon.MarshalJson(result)
-}
-
-func resolveReadPath(rules toolexecutor.ToolConfigRules, raw, workRoot string) (string, error) {
-	resolved, err := pCommon.ResolvePath(raw, workRoot)
-	if err != nil {
-		return pCommon.BlankString, fmt.Errorf("negotiation: failed to resolve path: %w", err)
-	}
-
-	if hit := matchDenyRoot(resolved, rules.DenyRoots); hit != pCommon.BlankString {
-		return pCommon.BlankString, fmt.Errorf("negotiation: path denied by rule,path: %s", hit)
-	}
-
-	// 只有显式配置了 ReadRoots 才做白名单限制
-	if len(rules.ReadRoots) > 0 && !withRoots(resolved, rules.ReadRoots) {
-		return pCommon.BlankString, fmt.Errorf("negotiation: path outside read roots,path: %s", resolved)
-	}
-
-	return resolved, nil
-}
-
-func matchDenyRoot(path string, denyRoots []string) string {
-	lower := strings.ToLower(path)
-	for _, pattern := range denyRoots {
-		item := strings.TrimSpace(pattern)
-		if item == pCommon.BlankString {
-			continue
-		}
-
-		lowerItem := strings.ToLower(item)
-		if strings.HasPrefix(lower, lowerItem) || strings.HasSuffix(lower, lowerItem) {
-			return item
-		}
-	}
-
-	return pCommon.BlankString
-}
-
-func withRoots(path string, roots []string) bool {
-	for _, root := range roots {
-		item := strings.TrimSpace(root)
-		if item == pCommon.BlankString {
-			continue
-		}
-
-		absRoot, err := filepath.Abs(item)
-		if err != nil {
-			continue
-		}
-
-		if path == absRoot || strings.HasPrefix(path, absRoot+string(os.PathSeparator)) {
-			return true
-		}
-	}
-
-	return false
 }

@@ -35,22 +35,15 @@ func (d NegotiationDecision) Valid() bool {
 	}
 }
 
-// NegotiationArgument 协商产出的参数
-// json tag 必须与 intention_start 工具 schema 的字段名一致(下划线),
-// 否则 Unmarshal 时匹配不上,project_dir 会静默变成空串,
-// 表现为"spec 校验失败:project_dir 未提供材料目录"
-type NegotiationArgument struct {
-	ProjectDir string `json:"project_dir"`
-	ReportKind string `json:"report_kind"`
-	OCR        string `json:"ocr"`
-}
-
 // NegotiationResult 一次协商的结果
 type NegotiationResult struct {
-	Decision  NegotiationDecision
-	Reason    string
-	Missing   []string
-	Arg       NegotiationArgument
+	Decision NegotiationDecision
+	Reason   string
+	Missing  []string
+
+	// 业务参数,有INegotiationSpec.DecodeParams产出
+	Arg any
+
 	Rounds    int
 	ToolCalls int
 	ElapsedMs int64
@@ -84,7 +77,8 @@ type NegotiationRequest struct {
 	WorkRoot string
 	Rules    toolexecutor.ToolConfigRules
 
-	IntentionGuard string //意图的兜底文本,在无法理解意图时
+	// 业务侧实现:参数 schema / 解析 / 判定说明
+	NegSpec INegotiationSpec
 
 	Feedback  string // 上一次校验失败的说明(重试时回灌给模型)
 	MaxRounds int
