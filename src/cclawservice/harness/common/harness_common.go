@@ -364,12 +364,72 @@ type SkillFrontMatter struct {
 	OS                    []string      `json:"os,omitempty" yaml:"os,omitempty"`
 	Version               string        `json:"version,omitempty" yaml:"version,omitempty"`
 	Requires              SkillRequires `json:"requires,omitempty" yaml:"requires,omitempty"`
+	Schema                any           `json:"schema,omitempty" yaml:"schema,omitempty"`
 	AllowedTools          []string      `json:"allowed-tools,omitempty" yaml:"allowed-tools,omitempty"`
 	DisallowedTools       []string      `json:"disallowed-tools,omitempty" yaml:"disallowed-tools,omitempty"`
 
 	TriggerKeywords []string `json:"triggerKeywords,omitempty" yaml:"trigger-keywords,omitempty"`
 
 	Tools []BasicTool `json:"tools,omitempty" yaml:"tools,omitempty"`
+
+	// Outline表示声明式SOP:被用于展开可执行计划
+	// 空表示该技能不走执行计划,退化为"单轮直答+工具循环"
+	SOPOutLines []SkillSOPStep `json:"sopOutLines,omitempty" yaml:"sop-out-lines,omitempty"`
+}
+
+// 定义SOP中每step的KIND
+const (
+	SOPStepKindTool  = "tool"
+	SOPStepKindLLM   = "llm"
+	SOPStepKindCheck = "check"
+)
+
+// SkillSOPStep 表示SKILL.md中SOP的定义部分
+type SkillSOPStep struct {
+	ID   string `json:"id,omitempty" yaml:"id,omitempty"`
+	Kind string `json:"kind,omitempty" yaml:"kind,omitempty"`
+	Tool string `json:"tool,omitempty" yaml:"tool,omitempty"` // kind = tool时必填,须在tools[]中
+	Role string `json:"role,omitempty" yaml:"role,omitempty"` // kind=llm:提示词角色
+
+	// needs依赖**产物名**,决定DAG波次
+	Needs []string `json:"needs,omitempty" yaml:"needs,omitempty"`
+
+	// 本step产出物名;kind=tool必填
+	Produces string `json:"produces,omitempty" yaml:"produces,omitempty"`
+
+	// 条件表达式,仅支持  gate_failed
+	When string `json:"when,omitempty" yaml:"when,omitempty"`
+
+	// SOP工具入参模版;支持${artifact.field}模式
+	Args SOPStepArgs `json:"args,omitempty" yaml:"args,omitempty"`
+
+	Sections []string         `json:"sections,omitempty" yaml:"sections,omitempty"`
+	Contract *SOPStepContract `json:"contract,omitempty" yaml:"contract,omitempty"`
+
+	// kind = check评估项名字集合
+	Checks []string `json:"checks,omitempty" yaml:"checks,omitempty"`
+
+	Gate   string `json:"gate,omitempty" yaml:"gate,omitempty"`     // 本步之后的门禁
+	Policy string `json:"policy,omitempty" yaml:"policy,omitempty"` //工具安全策略名
+
+	MaxTries  int    `json:"maxTries,omitempty" yaml:"max_tries,omitempty"`   // default=2
+	OnFail    string `json:"onFail,omitempty" yaml:"on_fail,omitempty"`       // repair / abort
+	MaxRounds int    `json:"maxRounds,omitempty" yaml:"max_rounds,omitempty"` // 修复轮次，default=2
+}
+
+// SOPStepArgs SOP 工具入参模板
+type SOPStepArgs map[string]string
+
+// SOPStepContract 产出契约,写入提示词并参与评估
+type SOPStepContract struct {
+	// 引用要求:required 表示没出数字必须带(文件,页)
+	Cite string `json:"cite,omitempty" yaml:"cite,omitempty"`
+
+	// 若缺字段必须填写 未见/待补充
+	ForbidInvent bool `json:"forbidInvent,omitempty" yaml:"forbid_invent,omitempty"`
+
+	// 正文字节上限(0表示不限制）
+	MaxChars int `json:"maxChars,omitempty" yaml:"max_chars,omitempty"`
 }
 
 // SkillDocument 表示一个已解析的 SKILL.md 文档

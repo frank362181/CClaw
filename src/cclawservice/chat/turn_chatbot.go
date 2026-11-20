@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"my.favorite/cclawservice/chat/sop"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/common/llmproto"
 	selfException "my.favorite/cclawservice/exception"
@@ -181,6 +182,10 @@ func (t *TurnRunner) Run(ctx context.Context, req TurnRequest) (TurnOutcome, err
 	}
 
 	return out, nil
+}
+
+func (t *TurnRunner) RunPlan(ctx context.Context, req sop.PlanRequest) (TurnOutcome, error) {
+	return TurnOutcome{}, nil
 }
 
 func (t *TurnRunner) invoke(ctx context.Context, turn *TurnState, sink ISink) (llmproto.LlmReply, error) {

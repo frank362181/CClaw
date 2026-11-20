@@ -254,3 +254,108 @@ CREATE TABLE IF NOT EXISTS t_tool (
     deleted      INTEGER NOT NULL DEFAULT 0,            -- 是否删除 0 否 / 1 是
     d_version    INTEGER      NOT NULL DEFAULT 0        -- 乐观锁
 );
+
+-- ============================================================================
+-- 编排/计划落库（5 张表）
+--
+-- 命名与实体严格对齐：
+--   t_plan               ← dataobject.TPlan
+--   t_plan_task          ← dataobject.TPlanTask
+--   t_plan_gap           ← dataobject.TPlanGap
+--   t_artifact           ← dataobject.TArtifact
+--   t_intention_decision ← dataobject.TIntentionDecision
+--
+-- 三处 UNIQUE 是 upsert 的前提：accessor 用 clause.OnConflict 指定这些列，
+-- 缺索引会直接报 "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"。
+-- ============================================================================
+
+PRAGMA foreign_keys = OFF;
+
+BEGIN;
+
+-- 先删子表再删父表（旧表带 FK；即使外键未启用，顺序也保持安全）
+DROP TABLE IF EXISTS t_plan_task;
+DROP TABLE IF EXISTS t_plan_gap;
+DROP TABLE IF EXISTS t_artifact;
+DROP TABLE IF EXISTS t_plan;
+
+CREATE TABLE t_plan (
+                        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                        turn_id        VARCHAR(64)  NOT NULL UNIQUE,
+                        session_id     VARCHAR(40)  NOT NULL,
+                        skill_id       VARCHAR(16)  NOT NULL,
+                        spec_json      TEXT         NOT NULL DEFAULT '',
+                        platter_json   TEXT         NOT NULL DEFAULT '',
+                        json_digest    VARCHAR(64)  NOT NULL DEFAULT '',
+                        waves          INTEGER      NOT NULL DEFAULT 0,
+                        task_count     INTEGER      NOT NULL DEFAULT 0,
+                        est_tokens     INTEGER      NOT NULL DEFAULT 0,
+                        est_latency_ms INTEGER      NOT NULL DEFAULT 0,
+                        lint_ok        INTEGER      NOT NULL DEFAULT 0,
+                        created_at     INTEGER      NOT NULL DEFAULT 0,
+                        updated_at     INTEGER      NOT NULL DEFAULT 0
+);
+
+CREATE TABLE t_plan_task (
+                             id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                             turn_id      VARCHAR(64)   NOT NULL,
+                             task_id      VARCHAR(128)  NOT NULL,
+                             kind         VARCHAR(16)   NOT NULL DEFAULT '',
+                             action       VARCHAR(64)   NOT NULL DEFAULT '',
+                             section      VARCHAR(64)   NOT NULL DEFAULT '',
+                             status       VARCHAR(16)   NOT NULL DEFAULT '',
+                             tries        INTEGER       NOT NULL DEFAULT 0,
+                             started_at   INTEGER       NOT NULL DEFAULT 0,
+                             ended_at     INTEGER       NOT NULL DEFAULT 0,
+                             input_digest VARCHAR(64)   NOT NULL DEFAULT '',
+                             output_name  VARCHAR(64)   NOT NULL DEFAULT '',
+                             gate_pass    INTEGER       NOT NULL DEFAULT 0,
+                             err          VARCHAR(1024) NOT NULL DEFAULT '',
+                             updated_at   INTEGER       NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX uk_t_plan_task_turn_task ON t_plan_task(turn_id, task_id);
+
+CREATE TABLE t_plan_gap (
+                            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                            turn_id    VARCHAR(64)   NOT NULL,
+                            round      INTEGER       NOT NULL DEFAULT 0,
+                            code       VARCHAR(64)   NOT NULL DEFAULT '',
+                            task_id    VARCHAR(128)  NOT NULL DEFAULT '',
+                            section    VARCHAR(64)   NOT NULL DEFAULT '',
+                            severity   VARCHAR(16)   NOT NULL DEFAULT '',
+                            detail     VARCHAR(2048) NOT NULL DEFAULT '',
+                            fixed      INTEGER       NOT NULL DEFAULT 0,
+                            created_at INTEGER       NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX uk_t_plan_gap_round_code ON t_plan_gap(turn_id, round, task_id, code);
+
+CREATE TABLE t_artifact (
+                            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                            turn_id     VARCHAR(64)   NOT NULL,
+                            name        VARCHAR(64)   NOT NULL,
+                            rev         INTEGER       NOT NULL DEFAULT 1,
+                            kind        VARCHAR(16)   NOT NULL DEFAULT '',
+                            ref         VARCHAR(1024) NOT NULL DEFAULT '',
+                            digest      VARCHAR(64)   NOT NULL DEFAULT '',
+                            size        INTEGER       NOT NULL DEFAULT 0,
+                            fields_json TEXT          NOT NULL DEFAULT '',
+                            created_at  INTEGER       NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX uk_t_artifact_rev ON t_artifact(turn_id, name, rev);
+
+CREATE TABLE IF NOT EXISTS t_intention_decision (
+                                                    ID         INTEGER PRIMARY KEY AUTOINCREMENT,
+                                                    turn_id    VARCHAR(64) NOT NULL UNIQUE,
+    skill_id   VARCHAR(16) NOT NULL DEFAULT '',
+    decision   VARCHAR(24) NOT NULL,
+    reason     VARCHAR(512) NOT NULL DEFAULT '',
+    missing    VARCHAR(512) NOT NULL DEFAULT '',
+    rounds     INTEGER     NOT NULL DEFAULT 0,
+    elapsed_ms INTEGER     NOT NULL DEFAULT 0,
+    created_at INTEGER     NOT NULL DEFAULT 0
+);
+
+COMMIT;
+
+-- 关键：把变更强制写入主库文件，避免"只在 -wal 里存在"
+PRAGMA wal_checkpoint(TRUNCATE);

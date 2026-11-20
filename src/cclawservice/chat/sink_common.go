@@ -40,6 +40,18 @@ type ISink interface {
 	OnFinishReason(reason string)
 }
 
+// NopSink 同步路径空对象
+type NopSink struct {
+	NopObserver
+}
+
+func (NopSink) IsStreamed() bool                    { return false }
+func (NopSink) OnStatus(code, text string)          {}
+func (NopSink) OnTool(event toolexecutor.ToolEvent) {}
+func (NopSink) OnNotice(code, message string)       {}
+func (NopSink) OnJournal(err error)                 {}
+func (NopSink) OnFinishReason(reason string)        {}
+
 // IStreamedSink 能读出已经下发给用户的内容的Sink
 // 单独成接口,而不是直接塞入到ISink:同步路径的 NopSink 没有内容可读
 type IStreamedSink interface {

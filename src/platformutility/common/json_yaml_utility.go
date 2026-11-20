@@ -5,7 +5,65 @@
 
 package common
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// =========================== JSON ===============================
+
+func MarshalJson(value any) (string, error) {
+	bytes, err := json.Marshal(value)
+	if err != nil {
+		return BlankString, err
+	}
+
+	return string(bytes), nil
+}
+
+func UnmarshalJson(value string, v any) error {
+	if v == nil {
+		return fmt.Errorf("invalid parameter")
+	}
+
+	return json.Unmarshal([]byte(value), &v)
+}
+
+// FlattenJSON 把嵌套结构压成扁平结构;超长的直接丢弃
+func FlattenJSON(prefix string, value interface{}, maxLength int, out map[string]string) {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		for key, child := range v {
+			FlattenJSON(JoinStr(prefix, key, "."), child, maxLength, out)
+		}
+	case []interface{}:
+		// 标量数组压成逗号串(如files_need_ocr);对象数组只保留计数
+		texts := make([]string, 0, len(v))
+		for _, child := range v {
+			if text, ok := ValueToString(child); ok {
+				texts = append(texts, text)
+			}
+		}
+
+		if len(texts) == len(v) {
+			out[prefix] = strings.Join(texts, ",")
+			out[prefix+".count"] = fmt.Sprintf("%d", len(v))
+			return
+		}
+
+		out[prefix+".count"] = fmt.Sprintf("%d", len(v))
+	case nil:
+	// 空值不落字段:任务执行后的检查器就当"没有",不要塞空串
+	default:
+		if text, ok := ValueToString(v); ok && len(text) <= maxLength {
+			out[prefix] = text
+		}
+	}
+}
+
+/// ========================== YAML ===============================
 
 // YamlToJsonMap 把 yaml 解析出的参数结构递归转换为可被 json.Marshal 的 map[string]any。
 // (yaml.v2 解析嵌套 map 为 map[interface{}]interface{},直接 json.Marshal 会失败。)
@@ -42,6 +100,25 @@ func NormalizeYamlValue(v any) any {
 		return out
 	default:
 		return v
+	}
+}
+
+func YAML2String(value interface{}) (string, bool) {
+	switch t := value.(type) {
+	case nil:
+		return "", true // 空值合法
+	case string:
+		return t, true
+	case bool:
+		return strconv.FormatBool(t), true
+	case int:
+		return strconv.Itoa(t), true
+	case int64:
+		return strconv.FormatInt(t, 10), true
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64), true
+	default:
+		return "", false
 	}
 }
 

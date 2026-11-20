@@ -2,6 +2,8 @@ package common
 
 import (
 	"encoding/json"
+	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -41,6 +43,50 @@ var LineSpace = "- "
 
 func ConcatStringWithLineSpace(s2 string) string {
 	return LineSpace + s2
+}
+
+func JoinStr(prefix, value string, catStr string) string {
+	if prefix == "" {
+		return value
+	}
+
+	return prefix + catStr + value
+}
+
+func JoinStringFromMap(inputs map[string]string) string {
+	if len(inputs) == 0 {
+		return BlankString
+	}
+
+	keys := make([]string, 0, len(inputs))
+	for key := range inputs {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	builder := strings.Builder{}
+	for _, item := range keys {
+		builder.WriteString(item)
+		builder.WriteString("=")
+		builder.WriteString(inputs[item])
+		builder.WriteString(";")
+	}
+
+	return builder.String()
+}
+
+func ReplaceStringWithReplacer(text string, repStr ...string) string {
+	replacer := strings.NewReplacer(repStr...)
+	return replacer.Replace(text)
+}
+
+// TrimFloat 去掉多余小数(2000 不要变成 2000.0000
+func TrimFloat(value float64) string {
+	text := fmt.Sprintf("%.4f", value)
+	text = strings.TrimRight(text, "0")
+	text = strings.TrimRight(text, ".")
+
+	return text
 }
 
 // NormalizeFact 事实的规范化形式:去空白、去标点差异、小写。
@@ -337,9 +383,9 @@ func ValueToString(v interface{}) (string, bool) {
 	case json.Number:
 		return value.String(), true
 	case float64:
-		return strconv.FormatFloat(value, 'f', -1, 64), true
+		return TrimFloat(value), true
 	case float32:
-		return strconv.FormatFloat(float64(value), 'f', -1, 32), true
+		return TrimFloat(float64(value)), true
 	case int:
 		return strconv.Itoa(value), true
 	case int64:

@@ -19,6 +19,48 @@ import (
 	pException "my.favorite/platformutility/exception"
 )
 
+// UnmarshalYAML SOP 工具参数转换
+func (sop *SOPStepArgs) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw map[string]interface{}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+
+	out := make(SOPStepArgs, len(raw))
+	for key, value := range raw {
+		text, ok := pCommon.YAML2String(value)
+		if !ok {
+			return fmt.Errorf("invalid SOPStepArgs value %q for SOPStepArgs", value)
+		}
+
+		out[key] = text
+	}
+
+	*sop = out
+
+	return nil
+}
+
+func ConvertBasicTools2Map(fm SkillFrontMatter) map[string]struct{} {
+	if len(fm.Tools) == 0 {
+		return nil
+	}
+
+	knownTools := make(map[string]struct{}, len(fm.Tools))
+	for _, tool := range fm.Tools {
+		name := strings.TrimSpace(tool.Name)
+		if name != pCommon.BlankString {
+			knownTools[name] = struct{}{}
+		}
+	}
+
+	if len(knownTools) == 0 {
+		return nil
+	}
+
+	return knownTools
+}
+
 // BuildAgentBootstrapRoot 根据agent的信息构建agent的工作目录
 // 安全:agent_dir 必须为合法相对路径,防止工作区根逃出 <exeDir>/workspace。
 func BuildAgentBootstrapRoot(agent dataobject.TAgent) (string, bool) {

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"my.favorite/cclawservice/chat/sop"
+	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/common/llmproto"
 	selfException "my.favorite/cclawservice/exception"
 	hCommon "my.favorite/cclawservice/harness/common"
@@ -96,6 +98,10 @@ type TurnState struct {
 	Streamed bool //本轮是否为流式
 	Scope    string
 
+	SkillDocuments []hCommon.SkillDocument
+	ActiveSkills   []string
+	ActiveFiles    []string
+
 	// 可变:消息序列 + 工具结果
 	messages []llmproto.ChatMessage
 	outcomes []toolexecutor.ToolOutcome
@@ -128,7 +134,7 @@ func (t *TurnState) AppendAssistant(r llmproto.LlmReply) {
 func (t *TurnState) AppendToolResult(callId string, body string) error {
 	if strings.TrimSpace(callId) == pCommon.BlankString {
 		return selfException.ToolExecutionMisMatchedKind.Newf("tool result without call id: scope=%s, tools=%d, body=%s",
-			t.Scoped(), len(t.VisibleTools), pCommon.TruncateRunes(body, 200, "..."),
+			t.Scoped(), len(t.VisibleTools), pCommon.TruncateRunes(body, 200, cCommon.TruncatedMarker),
 		)
 	}
 	t.messages = append(t.messages, buildToolMessage(callId, body))
@@ -194,6 +200,7 @@ type TurnOutcome struct {
 
 type ITurnRunner interface {
 	Run(ctx context.Context, req TurnRequest) (TurnOutcome, error)
+	RunPlan(ctx context.Context, req sop.PlanRequest) (TurnOutcome, error)
 }
 
 // -----------------------每轮聊天计时------------------

@@ -233,16 +233,12 @@ func (m *ServiceMain) SetupAgentController() error {
 }
 
 func (m *ServiceMain) SetupChatController() error {
-	// function-calling 开关来自 ini [toolRule] functionCalling(默认关闭,安全兜底)
-	functionCalling, _ := m.configHelper.GetBoolValueDefault("toolRule", "functionCalling", false)
+	// 获取聊天的配置信息
+	chattingConfig, _ := selfconfig.LoadChatConfig(m.configHelper)
+	// 工具执行的配置规则
+	toolRules := core2.GetToolConfigRules(chattingConfig)
 
-	// 会话记录开关来自 ini [chat] sessionRecord(阶段1双写:只写不读的旁路,默认开启)
-	sessionRecord, _ := m.configHelper.GetBoolValueDefault("chat", "sessionRecord", true)
-
-	// 工具执行的配置规则,从配置文件加载
-	toolRules := core2.LoadToolConfiguredRules(m.configHelper)
-
-	chatService := service.GetChattingService(m.database, m.agentRepo, functionCalling, sessionRecord, toolRules)
+	chatService := service.GetChattingService(m.database, chattingConfig, m.agentRepo, toolRules)
 	chatController := selfController.GetChatController(chatService, m.concurrent)
 
 	urlFunMap := make(map[string]gin.HandlerFunc)

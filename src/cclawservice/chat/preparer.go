@@ -142,6 +142,10 @@ func (p *Preparer) PrepareFor(ctx context.Context, cmd Command, agent dataobject
 		Timing:        timing,
 		Ledger:        NewMemoryLedger(ctxmgr.NewTurnRecorder()), //创建本轮对话所需的账本,两阶段对话
 		Scope:         fmt.Sprintf("agent=%s,turn=%s", agent.AgentId, cmd.TurnID),
+
+		SkillDocuments: skillDocs,
+		ActiveSkills:   gate.ActiveSkills,
+		ActiveFiles:    gate.ActiveFiles,
 	}, nil
 }
 

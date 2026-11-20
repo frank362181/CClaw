@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	config2 "my.favorite/cclawservice/config"
 	"my.favorite/cclawservice/harness/toolexecutor"
 	pCommon "my.favorite/platformutility/common"
-	"my.favorite/platformutility/config"
 	"my.favorite/platformutility/logging"
 )
 
@@ -30,27 +30,18 @@ const (
 	ToolConfiguredRuleKeyDenyRoots       = "denyRoots"
 )
 
-func LoadToolConfiguredRules(helper *config.ConfigurationHelper) toolexecutor.ToolConfigRules {
+func GetToolConfigRules(chattingConfig config2.ChatConfig) toolexecutor.ToolConfigRules {
 	rules := toolexecutor.ToolConfiguredRuleZero
 
-	if helper == nil {
-		logging.LogWarnF("tool rules: empty rules in config file,policy disabled")
-		return rules
-	}
+	rules.PolicyEnabled = chattingConfig.ToolRule.PolicyEnabled
+	rules.AllowShell = chattingConfig.ToolRule.AllowShell
+	rules.SandboxEnabled = chattingConfig.ToolRule.SandboxEnabled
+	rules.SandboxNetwork = chattingConfig.ToolRule.SandboxNetwork
+	rules.AutoAllowBashIfSandboxed = chattingConfig.ToolRule.AutoAllowBashIfSandboxed
 
-	rules.PolicyEnabled, _ = helper.GetBoolValueDefault(ToolConfiguredRuleSection, ToolConfiguredRuleKeyEnabled, false)
-	rules.AllowShell, _ = helper.GetBoolValueDefault(ToolConfiguredRuleSection, ToolConfiguredRuleKeyAllowShell, true)
-	rules.SandboxEnabled, _ = helper.GetBoolValueDefault(ToolConfiguredRuleSection, ToolConfiguredRuleKeySandbox, false)
-	rules.SandboxNetwork, _ = helper.GetBoolValueDefault(ToolConfiguredRuleSection, ToolConfiguredRuleSandboxNetwork, true)
-	rules.AutoAllowBashIfSandboxed, _ = helper.GetBoolValueDefault(ToolConfiguredRuleSection, ToolConfiguredRuleKeyAutoSandboxed, false)
-
-	rawReadRoots, _ := helper.GetStringValueDefault(ToolConfiguredRuleSection, ToolConfiguredRuleKeyReadRoots, pCommon.BlankString)
-	rawWriteRoots, _ := helper.GetStringValueDefault(ToolConfiguredRuleSection, ToolConfiguredRuleKeyWriteRoots, pCommon.BlankString)
-	rawDenyRoots, _ := helper.GetStringValueDefault(ToolConfiguredRuleSection, ToolConfiguredRuleKeyDenyRoots, pCommon.BlankString)
-
-	rules.ReadRoots = normalizeAbsoluteRoots(ToolConfiguredRuleKeyReadRoots, pCommon.SplitStringEx(rawReadRoots, ","))
-	rules.WriteRoots = normalizeAbsoluteRoots(ToolConfiguredRuleKeyWriteRoots, pCommon.SplitStringEx(rawWriteRoots, ","))
-	rules.DenyRoots = normalizeDenyRoots(pCommon.SplitStringEx(rawDenyRoots, ","))
+	rules.ReadRoots = normalizeAbsoluteRoots(ToolConfiguredRuleKeyReadRoots, chattingConfig.ToolRule.ReadRoots)
+	rules.WriteRoots = normalizeAbsoluteRoots(ToolConfiguredRuleKeyWriteRoots, chattingConfig.ToolRule.WriteRoots)
+	rules.DenyRoots = normalizeDenyRoots(chattingConfig.ToolRule.DenyRoots)
 
 	if rules.AutoAllowBashIfSandboxed && (!rules.SandboxEnabled || !toolexecutor.GetSandboxMgr().Available()) {
 		logging.LogWarnF("tool rules: autoAllowBashIfSandboxed=true has NO effect " +

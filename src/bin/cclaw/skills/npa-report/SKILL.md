@@ -33,6 +33,10 @@ os:
 requires:
   bins:
     - python3
+schema:
+  materials: [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".jpg", ".jpeg", ".png", ".tif", ".tiff"]
+  report_kind: ["不良资产尽职调查报告"]
+  archive_no_required: false
 tools:
   - name: npa_ingest
     description: 解析指定目录(可含子目录)或单文件中的 pdf/jpg/jpeg/png/word/excel 等为“按页内容”JSON，并把结果保存为 <bin>/temp/runs/<run_id>/parsed_context.json（同目录另有 manifest.json 材料清单）。返回每文件 {file,type,context,metadata} 与 result_file(已存文件路径)；summary.files_need_ocr 标注无可提取文本、疑为扫描件/图片的文件(需对其单独 ocr:true 补读)。注意成本：整目录 ingest ≈ 1 轮 + 数十秒 + 大上下文，能省则省——大目录请 emit_stdout:false 只回执落盘与概要，需要正文再按文件/子目录小批量回读；整目录只 ingest 一次，不要反复重读。产物按运行隔离：本轮结果落在 <bin>/temp/runs/<run_id>/（parsed_context.json + manifest.json 材料清单），result_file.path / manifest_file 直接用它；summary.files_skipped_generated 列出被跳过的历史报告，summary.pruned_runs 列出被保留策略清理的旧轮次（keep_runs 默认保留最近 20 轮）。超大/超长输出可用 max_pages_per_file、max_chars_per_page、max_chars_per_file 限流，context_style=text 可整段拼接更省上下文。默认**不把本技能自己生成的报告当材料**：路径下的 *.md 与 reports/ 目录会被跳过（见 summary.files_skipped_generated），确需把 markdown 当材料时传 include_markdown:true。
@@ -100,6 +104,73 @@ tools:
       required:
         - filename
         - content
+
+# 声明式 SOP:由服务端展开成计划再执行(见 document/multi-agent协作实现方案.md)。
+#   - tool 必须是上面 tools[] 里已注册的名字;
+#   - needs 引用的是**产物名**,不是任务 id;
+#   - 带 when 的是条件模板:不进初始波次,由门禁失败在运行时插入;
+#   - verify 必须 produces,否则 evaluate 没有依赖锚点(波次会算错)。
+sop-out-lines:
+  - id: ingest
+    kind: tool
+    tool: npa_ingest
+    produces: parsed_context
+    gate: materials_manifest
+    args: { recursive: true, emit_stdout: false }
+    max_tries: 2
+
+  - id: ingest_ocr
+    kind: tool
+    tool: npa_ingest
+    when: gate_failed(materials_manifest)
+    produces: parsed_context
+    args: { ocr: true, path: "${parsed_context.ocr_dirs}" }
+    gate: materials_manifest
+    max_tries: 2
+
+  - id: extract
+    kind: tool
+    tool: npa_extract_metrics
+    needs: [parsed_context]
+    produces: extracted_metrics
+    gate: metrics_reconciled
+    args: { input: "${parsed_context.path}" }
+    max_tries: 2
+
+  - id: compose
+    kind: llm
+    role: analyst
+    needs: [parsed_context, extracted_metrics]
+    produces: draft
+    sections: [basic_info, contracts, collateral, litigation, valuation, risk, conclusion]
+    contract: { cite: required, forbid_invent: true }
+    policy: read_only
+
+  - id: save
+    kind: tool
+    tool: npa_save_report
+    needs: [draft]
+    produces: report_path
+    args:
+      filename: "${spec.archive_no}_个贷不良资产分析报告_${spec.today}.md"
+      dir: "${spec.archive_no}/reports"
+      content: "${draft.text}"
+    max_tries: 2
+
+  - id: verify
+    kind: check
+    needs: [draft, extracted_metrics, parsed_context]
+    produces: verify_report
+    checks: [no_invention, numbers_traceable, derived_recompute, section_complete, citations_exist, materials_consistent]
+
+  - id: evaluate
+    kind: llm
+    role: evaluator
+    needs: [draft, verify_report]
+    contract: { cite: required }
+    policy: no_tools
+    on_fail: repair
+    max_rounds: 2
 ---
 
 # 个贷不良资产数据自动化清洗、结构化抽取与报告生成（personal loan NPA analysis）

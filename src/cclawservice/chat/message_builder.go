@@ -9,6 +9,20 @@ import (
 	hCommon "my.favorite/cclawservice/harness/common"
 )
 
+func buildUserMessage(content string) llmproto.ChatMessage {
+	return llmproto.ChatMessage{
+		Role:    "user",
+		Content: content,
+	}
+}
+
+func buildSimpleAssistantMessage(content string) llmproto.ChatMessage {
+	return llmproto.ChatMessage{
+		Role:    hCommon.RoleAssistant,
+		Content: content,
+	}
+}
+
 func buildAssistantMessage(content string, calls []llmproto.ToolCall) llmproto.ChatMessage {
 	return llmproto.ChatMessage{
 		Role:      hCommon.RoleAssistant,

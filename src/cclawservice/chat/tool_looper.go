@@ -1,5 +1,7 @@
 /*
 * 工具调用循环类,设计策略: template method + strategy
+* 面向单轮次对话所需的工具调用
+*
 **/
 
 package chat

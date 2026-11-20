@@ -208,6 +208,8 @@ type LlmRequest struct {
 	ToolChoice string // llmproto.ToolChoice*;空=auto
 	Streamed   bool
 	MaxTokens  int // <= 0:由ctxmgr按context_window动态推导
+
+	DisableThinking bool // 思考模型专用
 }
 
 // LlmReply 一次上游调用的返回(值对象)

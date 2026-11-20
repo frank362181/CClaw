@@ -43,6 +43,10 @@ func buildChatCompletionRequestWithToolChoice(p Provider, req llmproto.LlmReques
 	if r.ToolChoice == llmproto.ToolChoiceRequired {
 		r.EnableThinking = new(false)
 	}
+	// 显式要求关闭思考
+	if req.DisableThinking {
+		r.EnableThinking = new(false)
+	}
 
 	mt := security.DynamicMaxTokens(p.Llm, req.Messages)
 	if mt == 0 {

@@ -69,6 +69,27 @@ const (
 	RelativeGetSessionTurns = "/GetSessionTurns"
 )
 
+// PlanMode 是单轮聊天,还是plan mode
+type PlanMode string
+
+const (
+	PlanModeOff       PlanMode = "off"       // 永不进入plan mode
+	PlanModeNegotiate          = "negotiate" // 模型协商决定
+	PlanModeForce              = "force"     // 技能激活即计划,不问模型
+)
+
+// ParsePlanMode 解析配置,非法一律按off
+func ParsePlanMode(s string) PlanMode {
+	switch PlanMode(s) {
+	case PlanModeNegotiate:
+		return PlanModeNegotiate
+	case PlanModeForce:
+		return PlanModeForce
+	default:
+		return PlanModeOff
+	}
+}
+
 // ================ chat type ================
 const (
 	ChatTypePrivate = 0 //私聊
