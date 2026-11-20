@@ -21,11 +21,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"my.favorite/cclawservice/chat"
 	cCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	hCommon "my.favorite/cclawservice/harness/common"
-	"my.favorite/cclawservice/harness/toolexecutor"
 	"my.favorite/platformutility/apperr"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/concurrency"
@@ -128,7 +126,7 @@ func (p *SSEPresenter) OnStatus(code, text string) {
 	})
 }
 
-func (p *SSEPresenter) OnTool(evt toolexecutor.ToolEvent) {
+func (p *SSEPresenter) OnTool(evt cCommon.ToolEvent) {
 	p.lock.Lock()
 	p.lastProgressAt = pCommon.GetDatetimeUtilityInstance().GetNow()
 	switch evt.Phase {
@@ -372,4 +370,4 @@ func (p *SSEPresenter) heartbeatLoop(ctx context.Context, interval time.Duration
 }
 
 // compile assert
-var _ chat.ISink = (*SSEPresenter)(nil)
+var _ cCommon.ISink = (*SSEPresenter)(nil)

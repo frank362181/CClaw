@@ -19,7 +19,7 @@ import (
 )
 
 type functionCallingHeartbeat struct {
-	out     chan<- ToolEvent
+	out     chan<- cCommon.ToolEvent
 	seq     int
 	name    string
 	startAt int64 //工具开始执行的时间(Unix 秒),用于计算运行了 N 秒
@@ -46,7 +46,7 @@ func (h *functionCallingHeartbeat) Emit(line string) {
 		return
 	}
 
-	h.trySend(ToolEvent{Phase: cCommon.ChatToolEventProgress, Seq: h.seq, Name: h.name, Detail: line})
+	h.trySend(cCommon.ToolEvent{Phase: cCommon.ChatToolEventProgress, Seq: h.seq, Name: h.name, Detail: line})
 }
 
 func (h *functionCallingHeartbeat) Stop() {
@@ -61,7 +61,7 @@ func (h *functionCallingHeartbeat) Stop() {
 // ========================= private functions =========================
 
 // trySend 非阻塞投递
-func (h *functionCallingHeartbeat) trySend(e ToolEvent) (ok bool) {
+func (h *functionCallingHeartbeat) trySend(e cCommon.ToolEvent) (ok bool) {
 	defer func() {
 		if err := recover(); err != nil {
 			ok = false
@@ -75,7 +75,7 @@ func (h *functionCallingHeartbeat) trySend(e ToolEvent) (ok bool) {
 	}
 }
 
-func startHeartbeat(ctx context.Context, out chan<- ToolEvent, seq int, name string, startAt int64) *functionCallingHeartbeat {
+func startHeartbeat(ctx context.Context, out chan<- cCommon.ToolEvent, seq int, name string, startAt int64) *functionCallingHeartbeat {
 	interval := time.Duration(hCommon.ToolCallingHeartbeatInterval) * time.Second
 
 	if interval <= 0 || out == nil {
@@ -127,7 +127,7 @@ func startHeartbeat(ctx context.Context, out chan<- ToolEvent, seq int, name str
 				}
 				h.lastOut.Store(now.UnixNano())
 
-				if !h.trySend(ToolEvent{
+				if !h.trySend(cCommon.ToolEvent{
 					Phase:  cCommon.ChatToolEventProgress,
 					Seq:    h.seq,
 					Name:   h.name,

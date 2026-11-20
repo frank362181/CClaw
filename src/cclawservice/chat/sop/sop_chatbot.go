@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	cCommon "my.favorite/cclawservice/common"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/common/hash"
 	"my.favorite/platformutility/concurrency"
@@ -51,14 +52,20 @@ func (e *Extractors) Extract(planTask PlanTask, rawData string) (Artifact, error
 }
 
 type PlanChatBotParams struct {
-	ConGate concurrency.ConcurrentController
-	//Sink chat.ISink
+	ConGate concurrency.IConcurrencyController
+	Sink    cCommon.ISink
+
+	Extractors *Extractors
+	Barriers   *BarrierRepository
+	PlanStorge IPlanStorage
 }
 
 type PlanChatBotRunner struct {
-	extractors *Extractors
-	gate       *BarrierRepository
+	conGate concurrency.IConcurrencyController
+	sink    cCommon.ISink
 
+	extractors  *Extractors
+	barriers    *BarrierRepository
 	planStorage IPlanStorage
 
 	maxRoutines int           // 单波并发上限
@@ -66,25 +73,28 @@ type PlanChatBotRunner struct {
 }
 
 // NewPlanChatBotRunner PlanChatBotRunner 每次都新建,避免并发情况下后一次的调用将前一次的给覆盖掉
-func NewPlanChatBotRunner(extractors *Extractors, gates *BarrierRepository, store IPlanStorage) *PlanChatBotRunner {
+func NewPlanChatBotRunner(chatBotParams PlanChatBotParams) *PlanChatBotRunner {
 	planExecutor := &PlanChatBotRunner{
+		conGate: chatBotParams.ConGate,
+		sink:    chatBotParams.Sink,
+
+		extractors:  chatBotParams.Extractors,
+		barriers:    chatBotParams.Barriers,
+		planStorage: chatBotParams.PlanStorge,
+
 		maxRoutines: 8,
 		tasksWait:   time.Duration(180) * time.Second,
 	}
 
-	if extractors == nil {
-		extractors = NewExtractors()
+	if planExecutor.extractors == nil {
+		planExecutor.extractors = NewExtractors()
 	}
-	if gates == nil {
-		gates = NewBarrierRepository()
+	if planExecutor.barriers == nil {
+		planExecutor.barriers = NewBarrierRepository()
 	}
-	if store == nil {
-		store = NewNoPlanStorage() //Plan存储的兜底
+	if planExecutor.planStorage == nil {
+		planExecutor.planStorage = NewNoPlanStorage() //Plan存储的兜底
 	}
-
-	planExecutor.extractors = extractors
-	planExecutor.gate = gates
-	planExecutor.planStorage = store
 
 	return planExecutor
 }
@@ -259,7 +269,7 @@ func (e *PlanChatBotRunner) runToolTask(ctx context.Context, req PlanRequest, pl
 	artifactsRepo.Put(artifact)
 
 	// 任务执行结果检查:每步执行完立即判断(纯函数,可在任务写成内跑)
-	gaps := e.gate.Evaluate(TaskBarrierInput{
+	gaps := e.barriers.Evaluate(TaskBarrierInput{
 		Task:   planTask,
 		Output: artifact,
 		Lookup: artifactsRepo.Get,

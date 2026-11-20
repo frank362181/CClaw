@@ -14,6 +14,7 @@ import (
 	"context"
 	"strings"
 
+	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/common/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
@@ -48,12 +49,12 @@ type Reply struct {
 type ITransportClient interface {
 	SimpleComplete(ctx context.Context, llm dataobject.TLlm, system, user string, maxTokens int) (llmproto.LlmReply, error)
 	Complete(ctx context.Context, p Provider, req llmproto.LlmRequest) (llmproto.LlmReply, error)
-	Stream(ctx context.Context, p Provider, req llmproto.LlmRequest, ob IStreamObserver) (llmproto.LlmReply, error)
+	Stream(ctx context.Context, p Provider, req llmproto.LlmRequest, ob cCommon.IStreamObserver) (llmproto.LlmReply, error)
 }
 
 // IToolLooper 工具循环的可替换点
 type IToolLooper interface {
-	Run(ctx context.Context, st *TurnState, sink ISink, rules toolexecutor.ToolConfigRules) (llmproto.LlmReply, error)
+	Run(ctx context.Context, st *TurnState, sink cCommon.ISink, rules toolexecutor.ToolConfigRules) (llmproto.LlmReply, error)
 }
 
 // IRoundTool 决定 第 几 round轮实际下发哪些工具、是否强制调用

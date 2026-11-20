@@ -36,11 +36,14 @@ func (d NegotiationDecision) Valid() bool {
 }
 
 // NegotiationArgument 协商产出的参数
+// json tag 必须与 intention_start 工具 schema 的字段名一致(下划线),
+// 否则 Unmarshal 时匹配不上,project_dir 会静默变成空串,
+// 表现为"spec 校验失败:project_dir 未提供材料目录"
 type NegotiationArgument struct {
-	ProjectDir string
-	ArchiveNo  string
-	ReportKind string
-	OCR        string
+	ProjectDir string `json:"project_dir"`
+	ArchiveNo  string `json:"archive_no"`
+	ReportKind string `json:"report_kind"`
+	OCR        string `json:"ocr"`
 }
 
 // NegotiationResult 一次协商的结果

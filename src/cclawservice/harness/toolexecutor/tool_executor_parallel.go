@@ -40,7 +40,7 @@ func NewRoundExecutorParallel(runner IScriptRunner) IToolRoundExecutor {
 }
 
 func (pe *parallelExecutor) RunAll(ctx context.Context, env ToolEnv, invocations []ToolInvocation,
-	sink ToolEventSink, ledger ToolLedger) []ToolOutcome {
+	sink cCommon.IToolEventSink, ledger ToolLedger) []ToolOutcome {
 
 	if len(invocations) == 0 {
 		return nil
@@ -66,7 +66,7 @@ func (pe *parallelExecutor) RunAll(ctx context.Context, env ToolEnv, invocations
 		buf = defaultProgressBuffer
 	}
 
-	lines := make(chan ToolEvent, buf)
+	lines := make(chan cCommon.ToolEvent, buf)
 
 	// 1.事件转发,写 SSE 的地方
 	if err := eventScope.Go(ctx, concurrency.RoutineSpec{
@@ -90,7 +90,7 @@ func (pe *parallelExecutor) RunAll(ctx context.Context, env ToolEnv, invocations
 	out := make([]ToolOutcome, len(invocations))
 	dispatched := make([]bool, len(invocations))
 	for i, invocation := range invocations {
-		if !send(ctx, lines, ToolEvent{Phase: cCommon.ChatToolEventRunning, Seq: invocation.Seq, Name: invocation.Name()}) {
+		if !send(ctx, lines, cCommon.ToolEvent{Phase: cCommon.ChatToolEventRunning, Seq: invocation.Seq, Name: invocation.Name()}) {
 			break
 		}
 		dispatched[i] = true
@@ -136,7 +136,7 @@ func (pe *parallelExecutor) RunAll(ctx context.Context, env ToolEnv, invocations
 }
 
 // 执行一个工具,并保证"无论怎么都留下一条自洽的outcome"
-func (pe *parallelExecutor) runOne(ctx context.Context, env ToolEnv, invocation ToolInvocation, ledger ToolLedger, lines chan<- ToolEvent, assign func(outcome ToolOutcome)) {
+func (pe *parallelExecutor) runOne(ctx context.Context, env ToolEnv, invocation ToolInvocation, ledger ToolLedger, lines chan<- cCommon.ToolEvent, assign func(outcome ToolOutcome)) {
 	hb := startHeartbeat(ctx, lines, invocation.Seq, invocation.Name(), pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp)
 	defer hb.Stop()
 
@@ -163,7 +163,7 @@ func (pe *parallelExecutor) runOne(ctx context.Context, env ToolEnv, invocation 
 	}))
 }
 
-func (pe *parallelExecutor) deliver(sink ToolEventSink, event ToolEvent) {
+func (pe *parallelExecutor) deliver(sink cCommon.IToolEventSink, event cCommon.ToolEvent) {
 	defer func() {
 		if r := recover(); r != nil {
 			logging.LogWarnF("tool executor: sink panic on event phase=%s seq=%d: %v",
@@ -175,7 +175,7 @@ func (pe *parallelExecutor) deliver(sink ToolEventSink, event ToolEvent) {
 }
 
 // send 带ctx的阻塞投递
-func send(ctx context.Context, ch chan<- ToolEvent, evt ToolEvent) (ok bool) {
+func send(ctx context.Context, ch chan<- cCommon.ToolEvent, evt cCommon.ToolEvent) (ok bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			ok = false

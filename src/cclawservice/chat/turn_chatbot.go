@@ -5,7 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"my.favorite/cclawservice/chat/sop"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/common/llmproto"
 	selfException "my.favorite/cclawservice/exception"
@@ -61,8 +60,6 @@ func NewTurnRunner(turnParams TurnRunnerParams) *TurnRunner {
 	}
 }
 
-var _ ITurnRunner = (*TurnRunner)(nil)
-
 func (t *TurnRunner) Run(ctx context.Context, req TurnRequest) (TurnOutcome, error) {
 	turn := req.Turn
 	if turn == nil {
@@ -71,7 +68,7 @@ func (t *TurnRunner) Run(ctx context.Context, req TurnRequest) (TurnOutcome, err
 
 	sink := req.Sink
 	if sink == nil {
-		sink = NopSink{}
+		sink = cCommon.NopSink{}
 	}
 
 	// 唯一真相源:sink决定流式与否,写进TurnState
@@ -184,11 +181,7 @@ func (t *TurnRunner) Run(ctx context.Context, req TurnRequest) (TurnOutcome, err
 	return out, nil
 }
 
-func (t *TurnRunner) RunPlan(ctx context.Context, req sop.PlanRequest) (TurnOutcome, error) {
-	return TurnOutcome{}, nil
-}
-
-func (t *TurnRunner) invoke(ctx context.Context, turn *TurnState, sink ISink) (llmproto.LlmReply, error) {
+func (t *TurnRunner) invoke(ctx context.Context, turn *TurnState, sink cCommon.ISink) (llmproto.LlmReply, error) {
 	if len(turn.VisibleTools) == 0 {
 		// 无工具调用
 		req := turn.Request(nil, pCommon.BlankString)

@@ -13,6 +13,8 @@ import (
 	"context"
 	"sync/atomic"
 	"time"
+
+	"my.favorite/cclawservice/common"
 )
 
 type SystemToolName string
@@ -50,7 +52,7 @@ type IToolRoundExecutor interface {
 	// 契约:
 	//   - 返回的 outcome **顺序**必须与 invocations 一致
 	//   - 返回条数 <= len(invocations):只有 ctx 已取消时才能缺条
-	RunAll(ctx context.Context, env ToolEnv, invocations []ToolInvocation, sink ToolEventSink, ledger ToolLedger) []ToolOutcome
+	RunAll(ctx context.Context, env ToolEnv, invocations []ToolInvocation, sink common.IToolEventSink, ledger ToolLedger) []ToolOutcome
 }
 
 // ScriptArgument 工具脚本执行的参数

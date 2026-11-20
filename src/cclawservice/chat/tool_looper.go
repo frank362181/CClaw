@@ -58,9 +58,9 @@ func NewToolLoop(transport ITransportClient, asm IContextAssembler, streaming bo
 }
 
 // Run 执行本轮工具调用;模型不再请求工具时返回结果
-func (l *ToolLoop) Run(ctx context.Context, st *TurnState, sink ISink, rules toolexecutor.ToolConfigRules) (llmproto.LlmReply, error) {
+func (l *ToolLoop) Run(ctx context.Context, st *TurnState, sink cCommon.ISink, rules toolexecutor.ToolConfigRules) (llmproto.LlmReply, error) {
 	if sink == nil {
-		sink = NopSink{}
+		sink = cCommon.NopSink{}
 	}
 
 	guard := l.loopGuardFn()
@@ -121,9 +121,9 @@ func (l *ToolLoop) Run(ctx context.Context, st *TurnState, sink ISink, rules too
 
 			if oc.Failed() {
 				// done/error先发,让UI先看到工具执行结果
-				sink.OnTool(toolexecutor.ToolEvent{Phase: cCommon.ChatToolEventError, Seq: oc.Seq, Name: oc.Name, Detail: oc.Reason.Error()})
+				sink.OnTool(cCommon.ToolEvent{Phase: cCommon.ChatToolEventError, Seq: oc.Seq, Name: oc.Name, Detail: oc.Reason.Error()})
 			} else {
-				sink.OnTool(toolexecutor.ToolEvent{Phase: cCommon.ChatToolEventDone, Seq: oc.Seq, Name: oc.Name})
+				sink.OnTool(cCommon.ToolEvent{Phase: cCommon.ChatToolEventDone, Seq: oc.Seq, Name: oc.Name})
 			}
 		}
 
@@ -134,7 +134,7 @@ func (l *ToolLoop) Run(ctx context.Context, st *TurnState, sink ISink, rules too
 }
 
 // ================================= private  functions & methods ===============================
-func (l *ToolLoop) invoke(ctx context.Context, st *TurnState, tools []llmproto.Tool, choice string, ob IStreamObserver) (llmproto.LlmReply, error) {
+func (l *ToolLoop) invoke(ctx context.Context, st *TurnState, tools []llmproto.Tool, choice string, ob cCommon.IStreamObserver) (llmproto.LlmReply, error) {
 	req := st.Request(tools, choice)
 
 	// 预算贴合:工具结果不断回填会持续挤压窗口,长工具链必须随时裁掉最老的历史

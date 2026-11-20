@@ -24,7 +24,7 @@ func NewRoundExecutorSerial(runner IScriptRunner) IToolRoundExecutor {
 }
 
 func (se *serialExecutor) RunAll(ctx context.Context, env ToolEnv, invocations []ToolInvocation,
-	sink ToolEventSink, ledger ToolLedger) []ToolOutcome {
+	sink cCommon.IToolEventSink, ledger ToolLedger) []ToolOutcome {
 
 	out := make([]ToolOutcome, 0, len(invocations))
 	for _, invocation := range invocations {
@@ -34,7 +34,7 @@ func (se *serialExecutor) RunAll(ctx context.Context, env ToolEnv, invocations [
 		}
 
 		// 同步路径的sink,通知UI工具调用
-		sink.OnTool(ToolEvent{
+		sink.OnTool(cCommon.ToolEvent{
 			Phase: cCommon.ChatToolEventRunning,
 			Seq:   invocation.Seq,
 			Name:  invocation.Name(),

@@ -116,7 +116,9 @@ sop-out-lines:
     tool: npa_ingest
     produces: parsed_context
     gate: materials_manifest
-    args: { recursive: true, emit_stdout: false }
+    # path 是 npa_ingest 的 required 参数(tool_spec.go 会拦),
+    # 由协商阶段确定的材料目录渲染而来
+    args: { path: "${spec.project_dir}", recursive: true, emit_stdout: false }
     max_tries: 2
 
   - id: ingest_ocr

@@ -9,16 +9,17 @@ import (
 )
 
 type SinkIntention struct {
-	sink  ISink
+	sink common.ISink
+
 	total int
 	done  atomic.Int64
 }
 
 var _ sop.IPlanEventSink = (*SinkIntention)(nil)
 
-func NewSinkIntention(sink ISink, total int) *SinkIntention {
+func NewSinkIntention(sink common.ISink, total int) *SinkIntention {
 	if sink == nil {
-		sink = NopSink{}
+		sink = common.NopSink{}
 	}
 
 	return &SinkIntention{

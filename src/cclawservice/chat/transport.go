@@ -114,9 +114,9 @@ func (t *TransportClient) Complete(ctx context.Context, p Provider, req llmproto
 	})
 }
 
-func (t *TransportClient) Stream(ctx context.Context, p Provider, req llmproto.LlmRequest, ob IStreamObserver) (llmproto.LlmReply, error) {
+func (t *TransportClient) Stream(ctx context.Context, p Provider, req llmproto.LlmRequest, ob common.IStreamObserver) (llmproto.LlmReply, error) {
 	if ob == nil {
-		ob = NopObserver{}
+		ob = common.NopObserver{}
 	}
 
 	builtReq := buildChatCompletionRequestWithToolChoice(p, req, true)
@@ -262,7 +262,7 @@ func (t *TransportClient) completeOnce(ctx context.Context, p Provider, req llmp
 }
 
 // 一次流式调用(不含重试)
-func (t *TransportClient) streamOnce(ctx context.Context, p Provider, req llmproto.ChatCompletionRequest, ob IStreamObserver) (reply llmproto.LlmReply, committed bool, outErr error) {
+func (t *TransportClient) streamOnce(ctx context.Context, p Provider, req llmproto.ChatCompletionRequest, ob common.IStreamObserver) (reply llmproto.LlmReply, committed bool, outErr error) {
 	// 空闲超时:上游长时间无任何数据 -> 取消本次流(归类为可重试的传输层错误)
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

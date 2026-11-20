@@ -12,6 +12,7 @@ import (
 	"context"
 	"time"
 
+	"my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/common/llmproto"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging"
@@ -32,7 +33,7 @@ func (tl *TransportLogger) Complete(ctx context.Context, p Provider, req llmprot
 	return reply, err
 }
 
-func (tl *TransportLogger) Stream(ctx context.Context, p Provider, req llmproto.LlmRequest, ob IStreamObserver) (llmproto.LlmReply, error) {
+func (tl *TransportLogger) Stream(ctx context.Context, p Provider, req llmproto.LlmRequest, ob common.IStreamObserver) (llmproto.LlmReply, error) {
 	start := pCommon.GetDatetimeUtilityInstance().GetNow()
 	reply, err := tl.transporter.Stream(ctx, p, req, ob)
 	tl.log(p, true, start, reply, err)

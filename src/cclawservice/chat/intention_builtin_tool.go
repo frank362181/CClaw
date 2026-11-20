@@ -292,7 +292,8 @@ func resolveReadPath(rules toolexecutor.ToolConfigRules, raw, workRoot string) (
 		return pCommon.BlankString, fmt.Errorf("negotiation: path denied by rule,path: %s", hit)
 	}
 
-	if len(rules.DenyRoots) > 0 && !withRoots(resolved, rules.ReadRoots) {
+	// 只有显式配置了 ReadRoots 才做白名单限制
+	if len(rules.ReadRoots) > 0 && !withRoots(resolved, rules.ReadRoots) {
 		return pCommon.BlankString, fmt.Errorf("negotiation: path outside read roots,path: %s", resolved)
 	}
 
@@ -328,7 +329,7 @@ func withRoots(path string, roots []string) bool {
 			continue
 		}
 
-		if path == absRoot || strings.HasPrefix(absRoot, absRoot+string(os.PathSeparator)) {
+		if path == absRoot || strings.HasPrefix(path, absRoot+string(os.PathSeparator)) {
 			return true
 		}
 	}

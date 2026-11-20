@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"my.favorite/cclawservice/chat/sop"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/common/llmproto"
 	selfException "my.favorite/cclawservice/exception"
@@ -176,7 +175,7 @@ type TurnRequest struct {
 	Cmd  Command
 	Turn *TurnState // 必须有Prepare 构造完成
 	Role TurnRole
-	Sink ISink
+	Sink cCommon.ISink
 
 	// 是否允许写历史
 	// 最终以journal.Begin返回的Session.Recordable()为准
@@ -196,11 +195,6 @@ type TurnOutcome struct {
 	ToolCalls      int //工具调用次数
 	ElapseMs       int64
 	FirstVisibleMs int64
-}
-
-type ITurnRunner interface {
-	Run(ctx context.Context, req TurnRequest) (TurnOutcome, error)
-	RunPlan(ctx context.Context, req sop.PlanRequest) (TurnOutcome, error)
 }
 
 // -----------------------每轮聊天计时------------------

@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"my.favorite/cclawservice/chat/sop"
+	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/common/llmproto"
 	"my.favorite/cclawservice/harness/toolexecutor"
 	pCommon "my.favorite/platformutility/common"
@@ -17,7 +18,7 @@ import (
 
 type SopTurnToolInvoker struct {
 	root         *TurnState
-	sink         ISink
+	sink         cCommon.ISink
 	rules        toolexecutor.ToolConfigRules
 	toolExecutor toolexecutor.IToolRoundExecutor
 	seq          atomic.Int64
@@ -25,9 +26,9 @@ type SopTurnToolInvoker struct {
 
 var _ sop.ISopToolInvoker = (*SopTurnToolInvoker)(nil)
 
-func NewSOPTurnToolInvoker(root *TurnState, sink ISink, rules toolexecutor.ToolConfigRules) *SopTurnToolInvoker {
+func NewSOPTurnToolInvoker(root *TurnState, sink cCommon.ISink, rules toolexecutor.ToolConfigRules) *SopTurnToolInvoker {
 	if sink == nil {
-		sink = NopSink{}
+		sink = cCommon.NopSink{}
 	}
 	return &SopTurnToolInvoker{
 		root:         root,

@@ -22,12 +22,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"my.favorite/cclawservice/harness/toolexecutor"
+	cCommon "my.favorite/cclawservice/common"
 	pCommon "my.favorite/platformutility/common"
 )
 
 type CapturingSink struct {
-	ISink
+	cCommon.ISink
 
 	mu sync.Mutex
 	sb strings.Builder
@@ -36,9 +36,9 @@ type CapturingSink struct {
 	firstAt time.Time
 }
 
-func NewCapturingSink(s ISink) *CapturingSink {
+func NewCapturingSink(s cCommon.ISink) *CapturingSink {
 	if s == nil {
-		s = NopSink{}
+		s = cCommon.NopSink{}
 	}
 
 	return &CapturingSink{ISink: s}
@@ -77,7 +77,7 @@ func (c *CapturingSink) OnReasoning(delta string) {
 	c.ISink.OnReasoning(delta)
 }
 
-func (c *CapturingSink) OnTool(event toolexecutor.ToolEvent) {
+func (c *CapturingSink) OnTool(event cCommon.ToolEvent) {
 	c.markVisible()
 	c.ISink.OnTool(event)
 }
@@ -102,4 +102,4 @@ func (c *CapturingSink) FirstVisibleMs(start time.Time) int64 {
 }
 
 // 编译期断言
-var _ IStreamedSink = (*CapturingSink)(nil)
+var _ cCommon.IStreamedSink = (*CapturingSink)(nil)

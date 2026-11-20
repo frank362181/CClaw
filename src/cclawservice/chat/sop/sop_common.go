@@ -120,6 +120,7 @@ type Plan struct {
 
 // PlanRequest 表示一次执行任务的请求
 type PlanRequest struct {
+	AgentId   string
 	TurnID    string
 	SessionID string
 	PlanMem   Plan
@@ -129,6 +130,8 @@ type PlanRequest struct {
 	Tool ISopToolInvoker // 工具执行器
 
 	ResumedState *PlanState // 断点续跑:非空则复用已有任务/产物
+
+	StartAt time.Time
 }
 
 // PlanResult 一次计划执行的结果,与PlanRequest相对应

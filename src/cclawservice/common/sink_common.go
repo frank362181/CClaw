@@ -6,9 +6,7 @@
 *   - ISink          : **业务级**,在增量之上补工具/提示/记账/结束原因(同步路径注入 NopSink)
 **/
 
-package chat
-
-import "my.favorite/cclawservice/harness/toolexecutor"
+package common
 
 // IStreamObserver 上游增量的 **传输级** 出口,同步路径注入 NopObserver
 type IStreamObserver interface {
@@ -34,7 +32,7 @@ type ISink interface {
 	IsStreamed() bool //是否流式
 
 	OnStatus(code, text string)
-	OnTool(event toolexecutor.ToolEvent)
+	OnTool(event ToolEvent)
 	OnNotice(code, message string)
 	OnJournal(err error)
 	OnFinishReason(reason string)
@@ -45,12 +43,12 @@ type NopSink struct {
 	NopObserver
 }
 
-func (NopSink) IsStreamed() bool                    { return false }
-func (NopSink) OnStatus(code, text string)          {}
-func (NopSink) OnTool(event toolexecutor.ToolEvent) {}
-func (NopSink) OnNotice(code, message string)       {}
-func (NopSink) OnJournal(err error)                 {}
-func (NopSink) OnFinishReason(reason string)        {}
+func (NopSink) IsStreamed() bool              { return false }
+func (NopSink) OnStatus(code, text string)    {}
+func (NopSink) OnTool(event ToolEvent)        {}
+func (NopSink) OnNotice(code, message string) {}
+func (NopSink) OnJournal(err error)           {}
+func (NopSink) OnFinishReason(reason string)  {}
 
 // IStreamedSink 能读出已经下发给用户的内容的Sink
 // 单独成接口,而不是直接塞入到ISink:同步路径的 NopSink 没有内容可读

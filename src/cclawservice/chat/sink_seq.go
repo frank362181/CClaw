@@ -12,19 +12,18 @@ package chat
 
 import (
 	cCommon "my.favorite/cclawservice/common"
-	"my.favorite/cclawservice/harness/toolexecutor"
 )
 
 type seqSink struct {
-	ISink // 转发其他事件;nil时由构造函数替换为 NopSink
+	cCommon.ISink // 转发其他事件;nil时由构造函数替换为 NopSink
 
 	next int
 	cur  map[int]int
 }
 
-func newSeqSink(s ISink) *seqSink {
+func newSeqSink(s cCommon.ISink) *seqSink {
 	if s == nil {
-		s = NopSink{}
+		s = cCommon.NopSink{}
 	}
 
 	return &seqSink{ISink: s, cur: make(map[int]int, 4)}
@@ -59,7 +58,7 @@ func (s *seqSink) OnToolIntent(index int, name string) {
 	_, exists := s.cur[index]
 	seq := s.SeqOf(index)
 	if !exists {
-		s.ISink.OnTool(toolexecutor.ToolEvent{
+		s.ISink.OnTool(cCommon.ToolEvent{
 			Phase: cCommon.ChatToolEventIntent,
 			Seq:   seq,
 			Name:  name,
@@ -82,4 +81,4 @@ func (s *seqSink) alloc() int {
 }
 
 // 编译断言:seqSink必须满足完整的Sink
-var _ ISink = (*seqSink)(nil)
+var _ cCommon.ISink = (*seqSink)(nil)

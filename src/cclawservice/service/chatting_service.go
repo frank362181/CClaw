@@ -106,7 +106,6 @@ func GetChattingService(db core.IBaseDatabase, chattingConfig config.ChatConfig,
 	chattingService.extractors = sop.NewExtractors()
 	chattingService.barriers = sop.NewBarrierRepository()
 	biz.RegistryNPABuiltin(chattingService.extractors, chattingService.barriers)
-	//chattingService.sopChatBot = sop.GetSOPChatBot(extractors, barriers, chattingService.orchestratorStorage)
 
 	return chattingService
 }
@@ -187,12 +186,12 @@ func (s *ChattingService) GetSessionTurns(sessionId string, loginName string, li
 }
 
 func (s *ChattingService) Send(ctx context.Context, cmd chat.Command) (chat.Reply, error) {
-	return s.chat(ctx, cmd, chat.NopSink{})
+	return s.chat(ctx, cmd, common.NopSink{})
 }
 
-func (s *ChattingService) Stream(ctx context.Context, cmd chat.Command, sink chat.ISink) (out chat.Reply, err error) {
+func (s *ChattingService) Stream(ctx context.Context, cmd chat.Command, sink common.ISink) (out chat.Reply, err error) {
 	if sink == nil {
-		sink = chat.NopSink{}
+		sink = common.NopSink{}
 	}
 
 	return s.chat(ctx, cmd, sink)
@@ -209,7 +208,7 @@ func (s *ChattingService) Interrupt(sender, turnId string) error {
 // ============================= private functions ===================================
 
 // 编排模版
-func (s *ChattingService) chat(ctx context.Context, cmd chat.Command, sink chat.ISink) (out chat.Reply, err error) {
+func (s *ChattingService) chat(ctx context.Context, cmd chat.Command, sink common.ISink) (out chat.Reply, err error) {
 	start := pCommon.GetDatetimeUtilityInstance().GetNow()
 	tmpCtx, tTiming := s.turnReporter.Begin(ctx, cmd)
 	var firstVisibleMs int64
@@ -238,7 +237,7 @@ func (s *ChattingService) chat(ctx context.Context, cmd chat.Command, sink chat.
 }
 
 // 根据用户的问题判断是否执行plan mode模式:技能激活 -> mode -> 协商 -> spec校验
-func (s *ChattingService) isPlanMode(ctx context.Context, turn *chat.TurnState, sink chat.ISink) (sop.Plan, npa.ReportSpec, bool) {
+func (s *ChattingService) isPlanMode(ctx context.Context, turn *chat.TurnState, sink common.ISink) (sop.Plan, npa.ReportSpec, bool) {
 	if turn == nil || s.chattingConfig.Chat.Mode == common.PlanModeOff {
 		return sop.Plan{}, npa.ReportSpec{}, false
 	}
@@ -287,7 +286,7 @@ func (s *ChattingService) isPlanMode(ctx context.Context, turn *chat.TurnState, 
 }
 
 // 产出并校验ReportSpec
-func (s *ChattingService) negotiateArgument(ctx context.Context, turn *chat.TurnState, skillId string, skillDoc hCommon.SkillDocument, sink chat.ISink) (npa.ReportSpec, bool) {
+func (s *ChattingService) negotiateArgument(ctx context.Context, turn *chat.TurnState, skillId string, skillDoc hCommon.SkillDocument, sink common.ISink) (npa.ReportSpec, bool) {
 	if s.chattingConfig.Chat.Mode == common.PlanModeForce {
 		return s.forceArgument(ctx, turn, skillId, skillDoc, sink)
 	}
@@ -355,7 +354,7 @@ func (s *ChattingService) negotiateArgument(ctx context.Context, turn *chat.Turn
 	return npa.ReportSpec{}, false
 }
 
-func (s *ChattingService) forceArgument(ctx context.Context, turn *chat.TurnState, skillId string, skillDoc hCommon.SkillDocument, sink chat.ISink) (npa.ReportSpec, bool) {
+func (s *ChattingService) forceArgument(ctx context.Context, turn *chat.TurnState, skillId string, skillDoc hCommon.SkillDocument, sink common.ISink) (npa.ReportSpec, bool) {
 	dftProjectDir := s.chattingConfig.Negotiation.ProjectDir
 	candidate := npa.NormalizeReportSpec(npa.ReportSpec{
 		ProjectDir: dftProjectDir,
@@ -418,7 +417,7 @@ func (s *ChattingService) loadResumedState(ctx context.Context, turnID string, p
 	return loaded.State
 }
 
-func (s *ChattingService) runSimpleMode(ctx context.Context, turn *chat.TurnState, sink chat.ISink, start time.Time, firstVisibleMs *int64) (chat.Reply, error) {
+func (s *ChattingService) runSimpleMode(ctx context.Context, turn *chat.TurnState, sink common.ISink, start time.Time, firstVisibleMs *int64) (chat.Reply, error) {
 	// 执行单元:并发控制 -> 中断登记 -> 超时 -> 建档 -> 装配 -> 生成 -> 收尾记账
 	simpleChatBot := chat.NewTurnRunner(chat.TurnRunnerParams{
 		Assembler:   chattingService.assembler,
@@ -448,9 +447,9 @@ func (s *ChattingService) runSimpleMode(ctx context.Context, turn *chat.TurnStat
 
 // 执行计划
 func (s *ChattingService) runPlanMode(ctx context.Context, turn *chat.TurnState, plan sop.Plan, arg npa.ReportSpec,
-	sink chat.ISink, start time.Time, firstVisibleMs *int64) (chat.Reply, error) {
+	sink common.ISink, start time.Time, firstVisibleMs *int64) (chat.Reply, error) {
 	if sink == nil {
-		sink = chat.NopSink{}
+		sink = common.NopSink{}
 	}
 
 	release, err := s.agentConcurrent.TryAcquire(ctx, turn.Agent.AgentId, turn.Agent.MaxConcurrents)
@@ -471,10 +470,18 @@ func (s *ChattingService) runPlanMode(ctx context.Context, turn *chat.TurnState,
 	runCtx, cancel := context.WithTimeout(streamCtx, timeout)
 	defer cancel()
 
+	// 获得暂停掉的State
 	resumedState := s.loadResumedState(runCtx, turn.Cmd.TurnID, plan)
 
-	sopChatBot := sop.NewPlanChatBotRunner(s.extractors, s.barriers, s.orchestratorStorage)
+	sopChatBot := sop.NewPlanChatBotRunner(sop.PlanChatBotParams{
+		ConGate:    chattingService.agentConcurrent,
+		Sink:       sink,
+		Extractors: s.extractors,
+		Barriers:   s.barriers,
+		PlanStorge: s.orchestratorStorage,
+	})
 	result, runErr := sopChatBot.Run(runCtx, sop.PlanRequest{
+		AgentId:      turn.Agent.AgentId,
 		TurnID:       turn.Cmd.TurnID,
 		SessionID:    turn.Cmd.SessionId,
 		PlanMem:      plan,
@@ -482,6 +489,7 @@ func (s *ChattingService) runPlanMode(ctx context.Context, turn *chat.TurnState,
 		Sink:         chat.NewSinkIntention(sink, len(plan.Tasks)),
 		Tool:         chat.NewSOPTurnToolInvoker(turn, sink, s.toolConfiguredRules),
 		ResumedState: resumedState,
+		StartAt:      start,
 	})
 
 	if runErr != nil {
