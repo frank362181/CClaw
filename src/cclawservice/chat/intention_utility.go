@@ -30,7 +30,7 @@ func GetSOPStepSummary(steps []hCommon.SkillSOPStep) []string {
 			line += " (产出 " + step.Produces + ")"
 		}
 		if step.Gate != pCommon.BlankString {
-			line += "门禁 " + step.Gate + ")"
+			line += " (门禁 " + step.Gate + ")"
 		}
 
 		lines = append(lines, line)
@@ -42,7 +42,6 @@ func GetSOPStepSummary(steps []hCommon.SkillSOPStep) []string {
 func BuildReportSpecFromNegotiationArgument(argument NegotiationArgument) npa.ReportSpec {
 	return npa.ReportSpec{
 		ProjectDir: argument.ProjectDir,
-		ArchiveNo:  argument.ArchiveNo,
 		ReportKind: argument.ReportKind,
 		OCR:        argument.OCR,
 	}

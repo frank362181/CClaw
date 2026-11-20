@@ -268,6 +268,8 @@ func (s *ChattingService) isPlanMode(ctx context.Context, turn *chat.TurnState, 
 		return sop.Plan{}, npa.ReportSpec{}, false
 	}
 
+	arg.ArchiveNo = s.resolveArchiveNo(ctx, turn.Cmd.TurnID, arg.ProjectDir, arg.ArchiveNo)
+
 	// 根据协商的结果形成 Plan,即 HOW
 	planArguments := sop.DefaultPlanArguments()
 	planArguments.KnownTools = hCommon.ConvertBasicTools2Map(activeSkillDoc.FrontMatter)
@@ -283,6 +285,25 @@ func (s *ChattingService) isPlanMode(ctx context.Context, turn *chat.TurnState, 
 		"计划就绪:目录=%s,档案号=%s, %d 个步骤 / %d 个波次 / 预计 %d tokens", arg.ProjectDir, common.FallbackText(arg.ArchiveNo, "(空)"), plan.TaskCount, plan.WaveCount, plan.EstTokens))
 
 	return plan, arg, true
+}
+
+func (s *ChattingService) resolveArchiveNo(ctx context.Context, turnID, projectDir, archiveNo string) string {
+	if no := strings.TrimSpace(archiveNo); no != "" {
+		return no
+	}
+
+	if s.orchestratorStorage != nil && strings.TrimSpace(turnID) != pCommon.BlankString {
+		resumer, err := s.orchestratorStorage.Load(ctx, turnID)
+		if err != nil {
+			logging.LogWarnF("plan mode:load resumed spec failed,turn=%s,err=%s", turnID, err.Error())
+		} else if resumer != nil {
+			if no := strings.TrimSpace(resumer.Spec.ArchiveNo); no != pCommon.BlankString {
+				return no
+			}
+		}
+	}
+
+	return npa.GenerateDocumentNo(projectDir, "NPA")
 }
 
 // 产出并校验ReportSpec
@@ -327,8 +348,7 @@ func (s *ChattingService) negotiateArgument(ctx context.Context, turn *chat.Turn
 			}
 
 			feedback = npa.FormatSpecIssues(issues)
-			logging.LogWarnF("plan mode:spec rejected,turn=%s,attempt=%d,issues=%d",
-				turn.Cmd.TurnID, attempt+1, len(issues))
+			logging.LogWarnF("plan mode:spec rejected,turn=%s,attempt=%d,issues=%d", turn.Cmd.TurnID, attempt+1, len(issues))
 			continue
 		case chat.DecisionNeedMoreInfo:
 			s.reportDecision(ctx, turn, skillId, string(chat.DecisionNeedMoreInfo), result)

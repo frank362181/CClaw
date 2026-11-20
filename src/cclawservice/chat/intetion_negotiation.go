@@ -182,13 +182,14 @@ func (n *IntentionNegotiator) finish(result NegotiationResult, rounds int, toolC
 
 func (n *IntentionNegotiator) roundTools(skillId string, last bool) ([]llmproto.Tool, string) {
 	if last {
+		// 表示最后一轮终止的工具.
 		// 有些LLM Provider 不支持 ToolChoiceRequire模式
-		return []llmproto.Tool{intentionStart(skillId)}, llmproto.ToolChoiceAuto
+		return []llmproto.Tool{getIntentionStartToolSchema(skillId)}, llmproto.ToolChoiceAuto
 	}
 
 	tools := make([]llmproto.Tool, 0, 3)
-	tools = append(tools, probeTool()...)
-	tools = append(tools, intentionStart(skillId))
+	tools = append(tools, getProbeToolSchema()...)
+	tools = append(tools, getIntentionStartToolSchema(skillId))
 
 	return tools, llmproto.ToolChoiceAuto
 }
@@ -208,6 +209,8 @@ func (n *IntentionNegotiator) execProbe(req NegotiationRequest, call llmproto.To
 			return `{"error":` + pCommon.ReplaceStringWithReplacer(err.Error(), `\`, `\\`, `"`, `\"`, "\n", `\n`) + `}`
 		}
 		return body
+	case IntentionToolStart:
+		return `{"error":"intention_start must not be dispatched"}`
 	default:
 		logging.LogWarnF("plan negotiator:unknown tool[%s] requested", call.Function.Name)
 		return `{"error":"unknown tool, only fs_list/fs_stat/` + IntentionToolStart + ` are available"}`

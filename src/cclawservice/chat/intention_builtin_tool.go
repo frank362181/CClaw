@@ -31,7 +31,7 @@ const (
 
 // =============================== schema ===============================
 
-func probeTool() []llmproto.Tool {
+func getProbeToolSchema() []llmproto.Tool {
 	return []llmproto.Tool{
 		{
 			Type: "function",
@@ -65,7 +65,7 @@ func probeTool() []llmproto.Tool {
 	}
 }
 
-func intentionStart(skillId string) llmproto.Tool {
+func getIntentionStartToolSchema(skillId string) llmproto.Tool {
 	return llmproto.Tool{
 		Type: "function",
 		Function: llmproto.ToolFunction{
@@ -93,7 +93,6 @@ func intentionStart(skillId string) llmproto.Tool {
 						"type": "object",
 						"properties": map[string]any{
 							"project_dir": map[string]any{"type": "string", "description": "材料目录绝对路径,必须已存在"},
-							"archive_no":  map[string]any{"type": "string", "description": "档案号,可空"},
 							"report_kind": map[string]any{"type": "string", "description": "报告类型"},
 							"ocr":         map[string]any{"type": "string", "enum": []string{"auto", "on", "off"}, "description": "OCR 模式,默认 auto"},
 						},
@@ -140,7 +139,7 @@ func parseNegotiationStartArg(raw string) (NegotiationResult, error) {
 		Missing:  missing,
 		Arg: NegotiationArgument{
 			ProjectDir: strings.TrimSpace(args.Spec.ProjectDir),
-			ArchiveNo:  strings.TrimSpace(args.Spec.ArchiveNo),
+			// 这里档案号由系统自动生成
 			ReportKind: strings.TrimSpace(args.Spec.ReportKind),
 			OCR:        strings.TrimSpace(args.Spec.OCR),
 		},
