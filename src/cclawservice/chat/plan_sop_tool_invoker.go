@@ -7,6 +7,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync/atomic"
 
 	"my.favorite/cclawservice/chat/sop"
@@ -14,6 +15,11 @@ import (
 	"my.favorite/cclawservice/common/llmproto"
 	"my.favorite/cclawservice/harness/toolexecutor"
 	pCommon "my.favorite/platformutility/common"
+)
+
+const (
+	// 错误时返回的最大的错误长度
+	planToolInvokerErrorDetailMaxRunes = 512
 )
 
 type SopTurnToolInvoker struct {
@@ -62,8 +68,21 @@ func (v *SopTurnToolInvoker) Invoke(ctx context.Context, toolName string, args m
 	}
 
 	if outcomes[0].Failed() {
-		return pCommon.BlankString, outcomes[0].Reason
+		return pCommon.BlankString, truncateFailure(outcomes[0])
 	}
 
 	return outcomes[0].Full, nil
+}
+
+func truncateFailure(outcome toolexecutor.ToolOutcome) error {
+	if outcome.Reason == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(outcome.Full)
+	if detail == pCommon.BlankString {
+		return outcome.Reason
+	}
+
+	return fmt.Errorf("%w | script output: %s", outcome.Reason,
+		pCommon.TruncateRunes(detail, planToolInvokerErrorDetailMaxRunes, cCommon.TruncatedMarker))
 }
