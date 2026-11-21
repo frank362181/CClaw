@@ -1,5 +1,6 @@
 /**
-* 协商协议的业务侧扩展点
+* 协商协议的业务侧扩展点,通过将不同业务的protocol参数中解析出来
+* 不同业务的参数是通过INegotiationSpec实现的
 *
 * 职责划分:
 * - chat: 协商循环、轮次、与工具选择、消息拼接 -- 只"认识decision + reason + missing + 业务参数"这个形状
@@ -8,7 +9,7 @@
 * 接口定义必须在使用方所在的包
 **/
 
-package chat
+package plan_mode
 
 import (
 	"encoding/json"
@@ -16,19 +17,6 @@ import (
 
 	pCommon "my.favorite/platformutility/common"
 )
-
-// INegotiationSpec 协商协议的业务侧实现,三件事:参数长什么样、怎么解析、判定说明写什么
-type INegotiationSpec interface {
-	// ParamsSchema 终止工具里spec对象字段
-	ParamsSchema() map[string]any
-
-	// ParamsRequired 必填字段
-	ParamsRequired() []string
-
-	Guard() string // 技能判定说明,写入 system prompt
-
-	DecodeParams(raw json.RawMessage) (any, error)
-}
 
 // 获取业务参数
 func negotiateParams(spec INegotiationSpec) (map[string]any, []string) {

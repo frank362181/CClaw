@@ -28,7 +28,7 @@ type IOrchestratorAccessor interface {
 	RemovePlan(turnId string) error
 
 	UpsertTask(plan *dataobject.TPlanTask) error
-	ListTasks(turnId string) ([]*dataobject.TPlanTask, error)
+	ListTasks(sessionId, turnId string) ([]*dataobject.TPlanTask, error)
 
 	AppendGaps(gaps []dataobject.TPlanGap) error
 	ListGaps(turnId string) ([]*dataobject.TPlanGap, error)
@@ -75,15 +75,22 @@ func (db *OrchestratorAccessor) SavePlan(plan *dataobject.TPlan) error {
 		return exception.ParameterEmptyErrorEx("OrchestratorAccessor: empty turnId")
 	}
 
-	err := db.gormDb.Clauses(clause.OnConflict{
+	result := db.gormDb.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "turn_id"}},
+		Where: clause.Where{Exprs: []clause.Expression{
+			clause.Eq{Column: clause.Column{Name: "session_id"}, Value: plan.SessionId},
+		}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"session_id", "skill_id", "spec_json", "platter_json", "json_digest", "waves",
+			"skill_id", "spec_json", "platter_json", "json_digest", "waves",
 			"task_count", "est_tokens", "est_latency_ms", "lint_ok", "updated_at",
 		}),
-	}).Create(plan).Error
-	if err != nil {
-		return exception2.DatabaseExecErrEx2("OrchestratorAccessor:save plan error:%s", err.Error())
+	}).Create(plan)
+	if result.Error != nil {
+		return exception2.DatabaseExecErrEx2("OrchestratorAccessor:save plan error:%s", result.Error.Error())
+	}
+
+	if result.RowsAffected == 0 {
+		return exception2.DatabaseExecErrEx2("OrchestratorAccessor:turn_id owned by another session,refuse to overwrite,turn=%s,sessionId=%s", plan.TurnId, plan.SessionId)
 	}
 
 	return nil
@@ -152,11 +159,17 @@ func (db *OrchestratorAccessor) UpsertTask(plan *dataobject.TPlanTask) error {
 	return nil
 }
 
-func (db *OrchestratorAccessor) ListTasks(turnId string) ([]*dataobject.TPlanTask, error) {
+func (db *OrchestratorAccessor) ListTasks(sessionId, turnId string) ([]*dataobject.TPlanTask, error) {
 	list := make([]*dataobject.TPlanTask, 0, 16)
 
-	err := db.gormDb.Where("turn_id = ?", turnId).Order("task_id ASC").Find(&list).Error
-	if err != nil {
+	query := db.gormDb.Where("turn_id = ?", turnId)
+	if session := strings.TrimSpace(sessionId); session != pCommon.BlankString {
+		query = query.Where(
+			"EXISTS (SELECT 1 FROM t_plan p WHERE p.turn_id = t_plan_task.turn_id AND p.session_id = ?)",
+			session,
+		)
+	}
+	if err := query.Order("task_id ASC").Find(&list).Error; err != nil {
 		return nil, exception2.DatabaseExecErrEx2("OrchestratorAccessor:ListTasks error:%s", err.Error())
 	}
 	return list, nil

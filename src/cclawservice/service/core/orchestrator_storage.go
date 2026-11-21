@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 
 	"my.favorite/cclawservice/biz/npa"
@@ -48,14 +49,13 @@ func GetOrchestratorStorage(accessor dataaccessor.IOrchestratorAccessor) *Orches
 // 编译期间检查:必须同时满足写端口与读端口
 var (
 	_ plan_mode.IPlanStorage = (*OrchestratorStorage)(nil)
-	_ plan_mode.IPlanResume  = (*OrchestratorStorage)(nil)
 )
 
 func (o *OrchestratorStorage) Ready() bool {
 	return o != nil && o.accessor != nil
 }
 
-func (o *OrchestratorStorage) Load(ctx context.Context, turnId string) (*plan_mode.PlanResumer, error) {
+func (o *OrchestratorStorage) Load(ctx context.Context, sessionId, turnId string) (*plan_mode.PlanResumer, error) {
 	if !o.Ready() {
 		return nil, nil
 	}
@@ -69,6 +69,12 @@ func (o *OrchestratorStorage) Load(ctx context.Context, turnId string) (*plan_mo
 		return nil, nil
 	}
 
+	if session := strings.TrimSpace(sessionId); session != pCommon.BlankString && plan.SessionId != session {
+		logging.LogWarnF("orchestratorStorage: turn belongs to another session,drop,turn=%s,owner=%s,current=%s",
+			turnId, plan.SessionId, session)
+		return nil, nil
+	}
+
 	var spec npa.ReportSpec
 	if e := json.Unmarshal([]byte(plan.SpecJson), &spec); e != nil {
 		logging.LogWarnF("orchestrator storage:broken spec_json,turn=%s,error=%s", turnId, e.Error())
@@ -76,7 +82,7 @@ func (o *OrchestratorStorage) Load(ctx context.Context, turnId string) (*plan_mo
 	}
 
 	state := plan_mode.NewPlanState(turnId, plan.SessionId, plan.SkillId, spec)
-	tasks, err := o.accessor.ListTasks(turnId)
+	tasks, err := o.accessor.ListTasks(plan.SessionId, turnId)
 	if err != nil {
 		return nil, err
 	}

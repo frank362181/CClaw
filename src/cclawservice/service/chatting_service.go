@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -29,15 +28,34 @@ import (
 	baseService "my.favorite/platformutility/webbase/middleware/service"
 )
 
+// negotiation 的三种揭露
+type planModeDecision int
+
+const (
+	// 未进入plan mode:技能未激活 / mode = off/协商判定不适用
+	planModeDecisionSkip planModeDecision = iota
+
+	// 计划就绪,将进入plan mode
+	planModeDecisionRun
+
+	// 已由协商给出结论(追问/参数不可用),答复文本在answer中
+	planModeDecisionHandled
+)
+
+// 用于service的判断
+type planModeResult struct {
+	Decision planModeDecision
+	Plan     plan_mode.Plan // planModeRun时有效
+	Spec     npa.ReportSpec // planModeRun时有效
+	Answer   string         // planModeHandled 时作为本轮文本
+}
+
 // ChattingService 只做编排
 type ChattingService struct {
 	baseService.BaseService
 
-	chattingConfig      config.ChatConfig
-	sessionAccessor     dataaccessor.ISessionAccessor
-	extractors          *plan_mode.Extractors
-	barriers            *plan_mode.BarrierRepository
-	orchestratorStorage *core2.OrchestratorStorage
+	chattingConfig  config.ChatConfig
+	sessionAccessor dataaccessor.ISessionAccessor
 
 	memoryService *ctxmgr.MemoryService
 
@@ -55,6 +73,8 @@ type ChattingService struct {
 	turnReporter     chat.ITurnReporter
 
 	toolConfiguredRules toolexecutor.ToolConfigRules
+
+	planModeEngine *plan_mode.PlanModeEngine
 }
 
 var chattingService = pCommon.GetSingleton(func() *ChattingService {
@@ -77,8 +97,6 @@ func GetChattingService(db core.IBaseDatabase, chattingConfig config.ChatConfig,
 				"plan persistence/audit will fail; run data: %s", schemaErr.Error())
 		}
 	}
-
-	chattingService.orchestratorStorage = core2.GetOrchestratorStorage(orchestratorAccessor)
 
 	chattingService.chattingConfig = chattingConfig // 设置chatting configurations
 
@@ -103,9 +121,18 @@ func GetChattingService(db core.IBaseDatabase, chattingConfig config.ChatConfig,
 	chattingService.toolConfiguredRules = toolRules
 
 	// 创建一个plan mode聊天执行器
-	chattingService.extractors = plan_mode.NewExtractors()
-	chattingService.barriers = plan_mode.NewBarrierRepository()
-	biz.RegistryNPABuiltin(chattingService.extractors, chattingService.barriers)
+	extractors := plan_mode.NewExtractors()
+	barriers := plan_mode.NewBarrierRepository()
+	biz.RegistryNPABuiltin(extractors, barriers)
+
+	chattingService.planModeEngine = plan_mode.NewPlanModeEngine(plan_mode.PlanModeEngineParams{
+		Config:     chattingService.chattingConfig,
+		Negotiator: chat.NewIntentionNegotiator(chattingService.transport, chattingService.chattingConfig),
+		Storage:    core2.GetOrchestratorStorage(orchestratorAccessor),
+		ConGate:    chattingService.agentConcurrent,
+		Extractors: extractors,
+		Barriers:   barriers,
+	})
 
 	return chattingService
 }
@@ -227,19 +254,23 @@ func (s *ChattingService) chat(ctx context.Context, cmd chat.Command, sink commo
 	turn.Timing = tTiming
 
 	// 四道闸门:技能激活 -> mode -> 协商 -> 校验; 任一不通过都落回下面的单轮路径
-	if plan, arg, ok := s.isPlanMode(tmpCtx, turn, sink); ok {
+	switch result := s.isPlanMode(tmpCtx, turn, sink); result.Decision {
+	case planModeDecisionRun:
 		// 执行plan mode模式
-		return s.runPlanMode(tmpCtx, turn, plan, arg, sink, start, &firstVisibleMs)
+		return s.runPlanMode(tmpCtx, turn, result.Plan, result.Spec, sink, start, &firstVisibleMs)
+	case planModeDecisionHandled:
+		// 协商已经给出结论(追问 / 参数不可用):直接作为本轮答复,不再多跑一轮 LLM
+		return s.finishNegotiation(tmpCtx, turn, sink, result.Answer, start, &firstVisibleMs)
+	default:
+		// 执行一轮对话,即简单聊天
+		return s.runSimpleMode(tmpCtx, turn, sink, start, &firstVisibleMs)
 	}
-
-	// 执行一轮对话,即简单聊天
-	return s.runSimpleMode(tmpCtx, turn, sink, start, &firstVisibleMs)
 }
 
 // 根据用户的问题判断是否执行plan mode模式:技能激活 -> mode -> 协商 -> spec校验
-func (s *ChattingService) isPlanMode(ctx context.Context, turn *chat.TurnState, sink common.ISink) (plan_mode.Plan, npa.ReportSpec, bool) {
+func (s *ChattingService) isPlanMode(ctx context.Context, turn *chat.TurnState, sink common.ISink) planModeResult {
 	if turn == nil || s.chattingConfig.Chat.Mode == common.PlanModeOff {
-		return plan_mode.Plan{}, npa.ReportSpec{}, false
+		return planModeResult{Decision: planModeDecisionSkip}
 	}
 
 	// 1. 获取当前活跃且有sop的skill document
@@ -259,192 +290,63 @@ func (s *ChattingService) isPlanMode(ctx context.Context, turn *chat.TurnState, 
 	}
 
 	if activeSkillId == pCommon.BlankString {
-		return plan_mode.Plan{}, npa.ReportSpec{}, false
+		return planModeResult{Decision: planModeDecisionSkip}
 	}
 
-	// 2. plan mode 协商，得到协商的结果,即what
-	arg, ok := s.negotiateArgument(ctx, turn, activeSkillId, activeSkillDoc, sink)
-	if !ok {
-		return plan_mode.Plan{}, npa.ReportSpec{}, false
-	}
-
-	arg.ArchiveNo = s.resolveArchiveNo(ctx, turn.Cmd.TurnID, arg.ProjectDir, arg.ArchiveNo)
-
-	// 根据协商的结果形成 Plan,即 HOW
-	planArguments := plan_mode.DefaultPlanArguments()
-	planArguments.KnownTools = hCommon.ConvertBasicTools2Map(activeSkillDoc.FrontMatter)
-	plan, err := plan_mode.BuildPlanFromSkillSOPOutline(activeSkillId, activeSkillDoc.FrontMatter.SOPOutLines, arg, planArguments)
-	if err != nil {
-		logging.LogWarnF("plan mode:build plan failed,skill=%s,turn=%s,error=%s", activeSkillId, turn.Cmd.TurnID, err.Error())
-		sink.OnNotice(common.ChatNoticeIncomplete, "流程定义有误,已改为直接回答:"+err.Error())
-		return plan_mode.Plan{}, npa.ReportSpec{}, false
-	}
-
-	// plan mode 第4点：计划必须对人可见(),用户才能判断“该不该跑”
-	sink.OnStatus("plan.preview", fmt.Sprintf(
-		"计划就绪:目录=%s,档案号=%s, %d 个步骤 / %d 个波次 / 预计 %d tokens", arg.ProjectDir, common.FallbackText(arg.ArchiveNo, "(空)"), plan.TaskCount, plan.WaveCount, plan.EstTokens))
-
-	return plan, arg, true
-}
-
-func (s *ChattingService) resolveArchiveNo(ctx context.Context, turnID, projectDir, archiveNo string) string {
-	if no := strings.TrimSpace(archiveNo); no != "" {
-		return no
-	}
-
-	if s.orchestratorStorage != nil && strings.TrimSpace(turnID) != pCommon.BlankString {
-		resumer, err := s.orchestratorStorage.Load(ctx, turnID)
-		if err != nil {
-			logging.LogWarnF("plan mode:load resumed spec failed,turn=%s,err=%s", turnID, err.Error())
-		} else if resumer != nil {
-			if no := strings.TrimSpace(resumer.Spec.ArchiveNo); no != pCommon.BlankString {
-				return no
-			}
-		}
-	}
-
-	return npa.GenerateDocumentNo(projectDir, "NPA")
-}
-
-// 产出并校验ReportSpec
-func (s *ChattingService) negotiateArgument(ctx context.Context, turn *chat.TurnState, skillId string, skillDoc hCommon.SkillDocument, sink common.ISink) (npa.ReportSpec, bool) {
-	if s.chattingConfig.Chat.Mode == common.PlanModeForce {
-		return s.forceArgument(ctx, turn, skillId, skillDoc, sink)
-	}
-
-	sink.OnStatus("plan.negotiating", "正在确认需求...")
-	retry := s.chattingConfig.Negotiation.ArgRetry
-	if retry < 0 {
-		retry = 0
-	}
-	feedback := pCommon.BlankString
-
-	intentionNegotiator := chat.NewIntentionNegotiator(s.transport, s.chattingConfig)
-	for attempt := 0; attempt <= retry; attempt++ {
-		result, err := intentionNegotiator.Negotiate(ctx, chat.NegotiationRequest{
-			Provider:  turn.Provider,
-			Question:  turn.Cmd.Message,
-			SkillId:   skillId,
-			SkillName: skillDoc.FrontMatter.Name,
-			SkillDesc: skillDoc.FrontMatter.Description,
-			SOPSteps:  chat.GetSOPStepSummary(skillDoc.FrontMatter.SOPOutLines),
-			WorkRoot:  turn.WorkRoot,
-			Rules:     s.toolConfiguredRules,
-			NegSpec:   npa.NewReportSpecNegotiation(skillDoc.FrontMatter),
-			Feedback:  feedback,
-		})
-
-		if err != nil {
-			result = chat.NegotiationResult{Decision: chat.DecisionFailed, Reason: err.Error()}
-		}
-
-		switch result.Decision {
-		case chat.DecisionProceed:
-			decoded, ok := result.Arg.(npa.ReportSpec)
-			if !ok {
-				// proceed 却没有可用参数:按协商失败处理,不要带着空 spec 去建计划
-				logging.LogWarnF("plan mode:proceed without spec,turn=%s,attempt=%d,type=%T",
-					turn.Cmd.TurnID, attempt+1, result.Arg)
-				feedback = "已判定为需要执行,但缺少必要参数;请用 " + chat.IntentionToolStart + " 重新提交。"
-				continue
-			}
-			candidate := npa.NormalizeReportSpec(decoded, skillDoc.FrontMatter)
-			issues := npa.ValidateReportSpec(candidate, skillDoc.FrontMatter)
-			if len(issues) == 0 {
-				s.reportDecision(ctx, turn, skillId, string(chat.DecisionProceed), result)
-				return candidate, true
-			}
-
-			feedback = npa.FormatSpecIssues(issues)
-			logging.LogWarnF("plan mode:spec rejected,turn=%s,attempt=%d,issues=%d", turn.Cmd.TurnID, attempt+1, len(issues))
-			continue
-		case chat.DecisionNeedMoreInfo:
-			s.reportDecision(ctx, turn, skillId, string(chat.DecisionNeedMoreInfo), result)
-			sink.OnNotice(common.ChatNoticeIncomplete, chat.NeedMoreInfoText(result.Missing))
-
-			return npa.ReportSpec{}, false
-		case chat.DecisionNotApplicable:
-			s.reportDecision(ctx, turn, skillId, string(chat.DecisionNotApplicable), result)
-			logging.LogInfoF("plan mode:not applicable,turn=%s,reason=%s",
-				turn.Cmd.TurnID, result.Reason)
-			return npa.ReportSpec{}, false
-		default:
-			s.reportDecision(ctx, turn, skillId, string(chat.DecisionFailed), result)
-			logging.LogInfoF("plan mode:negotiate failed,turn=%s,reason=%s",
-				turn.Cmd.TurnID, result.Reason)
-			return npa.ReportSpec{}, false
-		}
-	}
-
-	// 重试用尽:明确告诉用户缺了什么,而不是静默退回
-	s.reportDecision(ctx, turn, skillId, string(chat.DecisionValidateFailed), chat.NegotiationResult{Decision: chat.DecisionValidateFailed, Reason: feedback})
-	sink.OnNotice(common.ChatNoticeIncomplete, "材料信息不完善,改为直接回答。\n"+feedback)
-	return npa.ReportSpec{}, false
-}
-
-func (s *ChattingService) forceArgument(ctx context.Context, turn *chat.TurnState, skillId string, skillDoc hCommon.SkillDocument, sink common.ISink) (npa.ReportSpec, bool) {
-	dftProjectDir := s.chattingConfig.Negotiation.ProjectDir
-	candidate := npa.NormalizeReportSpec(npa.ReportSpec{
-		ProjectDir: dftProjectDir,
-		ArchiveNo:  "",
-		ReportKind: npa.DefaultReportKind,
-		OCR:        npa.DefaultOCRMode,
-	}, skillDoc.FrontMatter)
-
-	if issues := npa.ValidateReportSpec(candidate, skillDoc.FrontMatter); len(issues) > 0 {
-		s.reportDecision(ctx, turn, skillId, string(chat.DecisionValidateFailed), chat.NegotiationResult{Reason: npa.FormatSpecIssues(issues)})
-		// force语义:不静默回退,明确报错
-		sink.OnNotice(common.ChatNoticeError, "force模式参数不可用(请检查[negotiation.projectDir]配置项:\n)"+
-			npa.FormatSpecIssuesForUser(issues))
-
-		return npa.ReportSpec{}, false
-	}
-
-	s.reportDecision(ctx, turn, skillId, string(chat.DecisionProceed), chat.NegotiationResult{Decision: "force mode"})
-	return candidate, true
-}
-
-// 记录决策日志,不影响主流程
-func (s *ChattingService) reportDecision(ctx context.Context, turn *chat.TurnState, skillId, decision string, result chat.NegotiationResult) {
-	if turn == nil || s.orchestratorStorage == nil {
-		return
-	}
-
-	s.orchestratorStorage.SaveDecision(ctx, dataobject.TIntentionDecision{
-		TurnId:    turn.Cmd.TurnID,
-		SkillId:   skillId,
-		Decision:  decision,
-		Reason:    pCommon.TruncateRunes(result.Reason, 480, common.TruncatedMarker),
-		Missing:   pCommon.TruncateRunes(strings.Join(result.Missing, ","), 480, common.TruncatedMarker),
-		Rounds:    result.Rounds,
-		ElapsedMs: result.ElapsedMs,
+	// 闸门 3:协商 + spec校验(force 分支、重试、回灌机制在 plan_mode内)
+	outcome := s.planModeEngine.NegotiateArgument(ctx, plan_mode.NegotiationInput{
+		SessionID: turn.Cmd.SessionId,
+		TurnID:    turn.Cmd.TurnID,
+		Message:   turn.Cmd.Message,
+		Provider:  turn.Provider.Llm,
+		WorkRoot:  turn.WorkRoot,
+		SkillID:   activeSkillId,
+		SkillDoc:  activeSkillDoc,
+		Sink:      sink,
+		Rules:     s.toolConfiguredRules,
 	})
+
+	if outcome.End {
+		return planModeResult{Decision: planModeDecisionHandled, Answer: outcome.Answer}
+	}
+
+	if !outcome.Ready {
+		return planModeResult{Decision: planModeDecisionSkip}
+	}
+
+	// 闸门 4:计划展开 + 预览(展开失败降级单轮)
+	plan, ok := s.planModeEngine.PreviewPlan(turn.Cmd.TurnID, activeSkillId, activeSkillDoc, outcome.Spec, sink)
+	if !ok {
+		return planModeResult{Decision: planModeDecisionSkip}
+	}
+
+	return planModeResult{Decision: planModeDecisionRun, Plan: plan, Spec: outcome.Spec}
 }
 
-// 读回落库的状态:指纹不一致则表示作废(失败即从头跑,不阻断)
-func (s *ChattingService) loadResumedState(ctx context.Context, turnID string, plan plan_mode.Plan) *plan_mode.PlanState {
-	if s.orchestratorStorage == nil {
-		return nil
+func (s *ChattingService) finishNegotiation(ctx context.Context, turn *chat.TurnState, sink common.ISink,
+	answer string, start time.Time, firstVisibleMs *int64) (chat.Reply, error) {
+	_ = ctx
+
+	if strings.TrimSpace(answer) == pCommon.BlankString {
+		answer = "需要补充更多信息才能开始..."
 	}
 
-	loaded, err := s.orchestratorStorage.Load(ctx, turnID)
-	if err != nil {
-		logging.LogWarnF("plan mode:load resume state failed,turn=%s,error=%s", turnID, err.Error())
-		return nil
-	}
+	sink.OnDelta(answer)
+	*firstVisibleMs = time.Since(start).Milliseconds()
 
-	if loaded == nil {
-		return nil
-	}
-
-	if loaded.PlanDigest != plan_mode.GetFingerprintOfPlan(plan) {
-		logging.LogWarnF("plan mode: fingerprint changed, turn=%s, drop resume state", turnID)
-		return nil
-	}
-
-	return loaded.State
+	return chat.Reply{
+		SessionID:    turn.Cmd.SessionId,
+		TurnID:       turn.Cmd.TurnID,
+		Content:      answer,
+		FinishReason: "stop",
+		At:           pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,
+	}, nil
 }
 
+// 协商已经给出结论时的收尾:把答复作为本轮正文发出,不再调用LLM
+// 为何用OnDelta 而非 OnNotice:
+//   - OnNotice 是 "收尾提示"(banner),不进入消息正文
+//   - 追问需要作为一条正常回答出现在会话里,前端才会渲染成气泡
 func (s *ChattingService) runSimpleMode(ctx context.Context, turn *chat.TurnState, sink common.ISink, start time.Time, firstVisibleMs *int64) (chat.Reply, error) {
 	// 执行单元:并发控制 -> 中断登记 -> 超时 -> 建档 -> 装配 -> 生成 -> 收尾记账
 	simpleChatBot := chat.NewTurnRunner(chat.TurnRunnerParams{
@@ -498,46 +400,35 @@ func (s *ChattingService) runPlanMode(ctx context.Context, turn *chat.TurnState,
 	runCtx, cancel := context.WithTimeout(streamCtx, timeout)
 	defer cancel()
 
-	// 获得暂停掉的State
-	resumedState := s.loadResumedState(runCtx, turn.Cmd.TurnID, plan)
-
-	sopChatBot := plan_mode.NewPlanChatBotRunner(plan_mode.PlanChatBotParams{
-		ConGate:    chattingService.agentConcurrent,
-		Sink:       sink,
-		Extractors: s.extractors,
-		Barriers:   s.barriers,
-		PlanStorge: s.orchestratorStorage,
+	// 执行
+	outcome, runErr := s.planModeEngine.Run(runCtx, plan_mode.PlanModeEngineInput{
+		AgentID:   turn.Agent.AgentId,
+		TurnID:    turn.Cmd.TurnID,
+		SessionID: turn.Cmd.SessionId,
+		Plan:      plan,
+		Spec:      arg,
+		Sink:      sink,
+		Tool:      chat.NewSOPTurnToolInvoker(turn, sink, s.toolConfiguredRules),
+		StartAt:   start,
 	})
-	result, runErr := sopChatBot.Run(runCtx, plan_mode.PlanRequest{
-		AgentId:      turn.Agent.AgentId,
-		TurnID:       turn.Cmd.TurnID,
-		SessionID:    turn.Cmd.SessionId,
-		PlanMem:      plan,
-		Spec:         arg,
-		Sink:         chat.NewSinkIntention(sink, len(plan.Tasks)),
-		Tool:         chat.NewSOPTurnToolInvoker(turn, sink, s.toolConfiguredRules),
-		ResumedState: resumedState,
-		StartAt:      start,
-	})
-
 	if runErr != nil {
 		return chat.Reply{}, runErr
 	}
 
+	// 收尾 + 结果映射
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		return chat.Reply{}, myException.ChatRunTimeoutKind.Newf("plan executor run after %d seconds", int(timeout.Seconds()))
 	}
 
-	answer := plan_mode.GetSOPChatResultSummary(result)
-	if answer != pCommon.BlankString {
-		sink.OnDelta(answer)
+	if outcome.Answer != pCommon.BlankString {
+		sink.OnDelta(outcome.Answer)
 	}
 
 	*firstVisibleMs = time.Since(start).Milliseconds()
 	return chat.Reply{
 		SessionID:    turn.Cmd.SessionId,
 		TurnID:       turn.Cmd.TurnID,
-		Content:      answer,
+		Content:      outcome.Answer,
 		FinishReason: "stop",
 		At:           pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,
 	}, nil

@@ -1,3 +1,7 @@
+/**
+* 单轮次聊天类
+**/
+
 package chat
 
 import (

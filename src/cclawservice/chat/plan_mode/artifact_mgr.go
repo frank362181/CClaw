@@ -18,7 +18,7 @@ import (
 	"my.favorite/platformutility/common/hash"
 )
 
-var artifactAbsolutePathPattern = regexp.MustCompile(`\$\{([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)}`)
+var artifactAbsolutePathPattern = regexp.MustCompile(`\$\{([a-zA-Z0-9_#\-]+)\.([a-zA-Z0-9_]+)}`)
 
 // IArtifactMgr 从产物名 -> 产物(parsable)
 type IArtifactMgr interface {

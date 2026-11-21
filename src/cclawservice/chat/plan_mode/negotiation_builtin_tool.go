@@ -7,7 +7,7 @@
 * - 路径策略与ToolConfigRules同源
 **/
 
-package chat
+package plan_mode
 
 import (
 	"encoding/json"
@@ -19,6 +19,7 @@ import (
 	"my.favorite/cclawservice/common/llmproto"
 	"my.favorite/cclawservice/harness/toolexecutor"
 	pCommon "my.favorite/platformutility/common"
+	"my.favorite/platformutility/logging"
 )
 
 const (
@@ -28,6 +29,45 @@ const (
 
 	maxListEntries = 200 // 目录列举上限
 )
+
+// GetNegotiationTools 返回内置的协商执行工具schema
+func GetNegotiationTools(skillId string, spec INegotiationSpec, last bool) ([]llmproto.Tool, string) {
+	if last {
+		// 表示最后一轮终止的工具.
+		// 有些LLM Provider 不支持 ToolChoiceRequire模式
+		return []llmproto.Tool{getIntentionStartToolSchema(skillId, spec)}, llmproto.ToolChoiceAuto
+	}
+
+	tools := make([]llmproto.Tool, 0, 3)
+	tools = append(tools, getProbeToolSchema()...)
+	tools = append(tools, getIntentionStartToolSchema(skillId, spec))
+
+	return tools, llmproto.ToolChoiceAuto
+}
+
+// ExecProbe 执行内置的协商工具
+func ExecProbe(req NegotiationRequest, call llmproto.ToolCall) string {
+	switch call.Function.Name {
+	case IntentionToolFsList:
+		body, err := executeFsList(call.Function.Arguments, req.WorkRoot, req.Rules)
+		if err != nil {
+			return `{"error":` + pCommon.ReplaceStringWithReplacer(err.Error(), `\`, `\\`, `"`, `\"`, "\n", `\n`) + `}`
+		}
+
+		return body
+	case IntentionToolFsStat:
+		body, err := executeFsStat(call.Function.Arguments, req.WorkRoot, req.Rules)
+		if err != nil {
+			return `{"error":` + pCommon.ReplaceStringWithReplacer(err.Error(), `\`, `\\`, `"`, `\"`, "\n", `\n`) + `}`
+		}
+		return body
+	case IntentionToolStart:
+		return `{"error":"intention_start must not be dispatched"}`
+	default:
+		logging.LogWarnF("plan negotiator:unknown tool[%s] requested", call.Function.Name)
+		return `{"error":"unknown tool, only fs_list/fs_stat/` + IntentionToolStart + ` are available"}`
+	}
+}
 
 // =============================== schema ===============================
 
@@ -119,8 +159,8 @@ type negotiationStartArgument struct {
 	Spec     json.RawMessage `json:"spec"` // 业务参数,保持原样
 }
 
-// 对intentionNegotiation 的参数进行解析,形成NegotiationResult,校验在biz层进行
-func parseNegotiationStartArg(raw string, spec INegotiationSpec) (NegotiationResult, error) {
+// ParseNegotiationStartArg 对intentionNegotiation 的参数进行解析,形成NegotiationResult,校验在biz层进行
+func ParseNegotiationStartArg(raw string, spec INegotiationSpec) (NegotiationResult, error) {
 	var args negotiationStartArgument
 	if err := pCommon.UnmarshalJson(raw, &args); err != nil {
 		return NegotiationResult{}, fmt.Errorf("negotiation: invalid argument: %w", err)

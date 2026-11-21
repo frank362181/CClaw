@@ -129,13 +129,22 @@ func (e *PlanChatBotRunner) Run(ctx context.Context, req PlanRequest) (PlanResul
 		for _, task := range waveTasks {
 			current := task
 
-			// 上游产物缺失 -> 本步 blocked
+			// 上游产物缺失 -> 本步 blocked,且不在派发(否则依赖约束形同虚设)
 			if missing := missingNeeds(current, artifactRepo); len(missing) > 0 {
 				e.mark(stateMu, state, current, PlanTaskState{
 					TaskID: current.ID,
 					Status: StatusBlocked,
 					Err:    fmt.Sprintf("wait for the outcome from previous:%s", strings.Join(missing, ",")),
 				}, req, artifactRepo)
+
+				e.addGaps(stateMu, state, []Gap{{
+					Code:     CodeTaskGateFailed,
+					TaskID:   current.ID,
+					Section:  current.Section,
+					Detail:   "upstream artifacts missing:" + strings.Join(missing, ","),
+					Severity: SeverityFail,
+				}}, req)
+				continue
 			}
 
 			if err := scope.Go(ctx, concurrency.RoutineSpec{
@@ -189,6 +198,15 @@ func (e *PlanChatBotRunner) runTask(ctx context.Context, req PlanRequest, planTa
 			Status: StatusSkipped,
 			Err:    fmt.Sprintf("unsupported task kind:%s", planTask.Kind.String()),
 		}, req, artifactRepo)
+
+		kind := planTask.Kind.String()
+		e.addGaps(stateMu, planState, []Gap{{
+			Code:     CodeTaskGateUnImplemented,
+			TaskID:   planTask.ID,
+			Section:  planTask.Section,
+			Detail:   fmt.Sprintf("unimplemented task kind:%s", kind),
+			Severity: SeverityFail,
+		}}, req)
 	default:
 		e.mark(stateMu, planState, planTask, PlanTaskState{
 			TaskID: planTask.ID,

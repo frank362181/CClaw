@@ -28,17 +28,17 @@ type negotiationArgument struct {
 	OCR        string `json:"ocr"`
 }
 
-type ReportSpecNegotiation struct {
+type DdNegotiationSpec struct {
 	fm hCommon.SkillFrontMatter
 }
 
-func NewReportSpecNegotiation(fm hCommon.SkillFrontMatter) *ReportSpecNegotiation {
-	return &ReportSpecNegotiation{
+func NewNPANegotiationSpec(fm hCommon.SkillFrontMatter) *DdNegotiationSpec {
+	return &DdNegotiationSpec{
 		fm: fm,
 	}
 }
 
-func (sn *ReportSpecNegotiation) ParamsSchema() map[string]any {
+func (sn *DdNegotiationSpec) ParamsSchema() map[string]any {
 	properties := map[string]any{
 		SpecFieldProjectDir: map[string]any{
 			"type":        "string",
@@ -69,15 +69,15 @@ func (sn *ReportSpecNegotiation) ParamsSchema() map[string]any {
 	return properties
 }
 
-func (sn *ReportSpecNegotiation) ParamsRequired() []string {
+func (sn *DdNegotiationSpec) ParamsRequired() []string {
 	return []string{SpecFieldProjectDir}
 }
 
-func (sn *ReportSpecNegotiation) Guard() string {
+func (sn *DdNegotiationSpec) Guard() string {
 	return IntentionGuard
 }
 
-func (sn *ReportSpecNegotiation) DecodeParams(raw json.RawMessage) (any, error) {
+func (sn *DdNegotiationSpec) DecodeParams(raw json.RawMessage) (any, error) {
 	var arg negotiationArgument
 	if err := pCommon.UnmarshalJson(string(raw), &arg); err != nil {
 		return nil, fmt.Errorf("unmarshal negotiationArgument: %w", err)

@@ -75,13 +75,6 @@ type artifactSpec struct {
 
 var archiveNoPattern = regexp.MustCompile(`^[A-Z0-9][A-Z0-9\-_]{2,31}$`)
 
-// 受认可的OCR模式
-var ocrModes = map[string]bool{
-	"auto": true,
-	"no":   true,
-	"off":  false,
-}
-
 // DefaultOCRModes OCR的默认模式
 var DefaultOCRModes = []string{"auto", "on", "off"}
 

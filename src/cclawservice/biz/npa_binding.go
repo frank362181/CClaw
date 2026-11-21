@@ -15,6 +15,7 @@ import (
 
 	"my.favorite/cclawservice/biz/npa"
 	"my.favorite/cclawservice/chat/plan_mode"
+	pCommon "my.favorite/platformutility/common"
 )
 
 // RegistryNPABuiltin 将NPA业务注册进harness
@@ -39,8 +40,13 @@ func npaExtract(planTask plan_mode.PlanTask, raw string) (plan_mode.Artifact, er
 		return plan_mode.Artifact{}, err
 	}
 
+	name := planTask.Produces
+	if name == pCommon.BlankString {
+		name = extracted.Name
+	}
+
 	return plan_mode.Artifact{
-		Name:         extracted.Name,
+		Name:         name,
 		ArtifactKind: extracted.TAKind,
 		AbsolutePath: extracted.Ref,
 		Fields:       extracted.Fields,

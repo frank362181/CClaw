@@ -1,52 +1,51 @@
-package chat
+package plan_mode
 
 import (
 	"fmt"
 	"sync/atomic"
 
-	"my.favorite/cclawservice/chat/plan_mode"
 	"my.favorite/cclawservice/common"
 )
 
-type SinkIntention struct {
+type NegotiationEventSink struct {
 	sink common.ISink
 
 	total int
 	done  atomic.Int64
 }
 
-var _ plan_mode.IPlanEventSink = (*SinkIntention)(nil)
+var _ IPlanEventSink = (*NegotiationEventSink)(nil)
 
-func NewSinkIntention(sink common.ISink, total int) *SinkIntention {
+func NewNegotiationEventSink(sink common.ISink, total int) *NegotiationEventSink {
 	if sink == nil {
 		sink = common.NopSink{}
 	}
 
-	return &SinkIntention{
+	return &NegotiationEventSink{
 		sink:  sink,
 		total: total,
 	}
 }
 
-func (sink *SinkIntention) OnTask(task plan_mode.PlanTask, state plan_mode.PlanTaskState) {
+func (sink *NegotiationEventSink) OnTask(task PlanTask, state PlanTaskState) {
 	label := GetTaskLabel(task)
 
 	switch state.Status {
-	case plan_mode.StatusRunning:
+	case StatusRunning:
 		sink.sink.OnStatus("plan.running:", label+"执行中...")
-	case plan_mode.StatusSucceeded:
+	case StatusSucceeded:
 		sink.sink.OnStatus("plan done", fmt.Sprintf("%s 完成 (%d / %d)", label, sink.done.Add(1), sink.total))
-	case plan_mode.StatusBlocked, plan_mode.StatusSkipped, plan_mode.StatusCanceled:
+	case StatusBlocked, StatusSkipped, StatusCanceled:
 		sink.sink.OnStatus("plan skipped", label+"跳过")
-	case plan_mode.StatusFailed, plan_mode.StatusTimeout:
+	case StatusFailed, StatusTimeout:
 		sink.sink.OnNotice(common.ChatNoticeError, fmt.Sprintf("%s 失败:%s", label, state.Err))
 	}
 }
 
-func (sink *SinkIntention) OnGate(task plan_mode.PlanTask, gaps []plan_mode.Gap) {
+func (sink *NegotiationEventSink) OnGate(task PlanTask, gaps []Gap) {
 	for _, gap := range gaps {
 		code := common.ChatNoticeIncomplete
-		if gap.Severity == plan_mode.SeverityFail {
+		if gap.Severity == SeverityFail {
 			code = common.ChatNoticeError
 		}
 

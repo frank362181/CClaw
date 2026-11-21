@@ -23,6 +23,7 @@ import (
 
 	"my.favorite/cclawservice/biz/npa"
 	hCommon "my.favorite/cclawservice/harness/common"
+	"my.favorite/cclawservice/model/dataobject"
 )
 
 // 校验规则编号
@@ -271,22 +272,14 @@ type PlanResumer struct {
 	State      *PlanState     // 任务状态 + 产物 + 缺口
 }
 
-type IPlanResume interface {
-	Load(ctx context.Context, turnID string) (*PlanResumer, error)
-}
-
-type NopPlanResumer struct{}
-
-func (NopPlanResumer) Load(ctx context.Context, turnID string) (*PlanResumer, error) {
-	return nil, nil
-}
-
 // IPlanStorage 计划的存储器,可以为空,方便于测试
 type IPlanStorage interface {
 	SavePlan(ctx context.Context, turnID, sessionID string, plan Plan, spec npa.ReportSpec) error
 	SaveTask(ctx context.Context, turnID string, planTask PlanTask, state PlanTaskState, inputDigest string) error
 	SaveGaps(ctx context.Context, turnID string, round int, gaps []Gap) error
 	SaveArtifact(ctx context.Context, turnID string, artifact Artifact) error
+	SaveDecision(ctx context.Context, decision dataobject.TIntentionDecision)
+	Load(ctx context.Context, sessionId, turnID string) (*PlanResumer, error)
 }
 
 type NopPlanStorage struct{}
@@ -309,6 +302,12 @@ func (NopPlanStorage) SaveGaps(ctx context.Context, turnID string, round int, ga
 
 func (NopPlanStorage) SaveArtifact(ctx context.Context, turnID string, artifact Artifact) error {
 	return nil
+}
+
+func (NopPlanStorage) SaveDecision(ctx context.Context, decision dataobject.TIntentionDecision) {}
+
+func (NopPlanStorage) Load(ctx context.Context, sessionId, turnID string) (*PlanResumer, error) {
+	return nil, nil
 }
 
 // IPlanEventSink 执行事件,与chat.ISink适配

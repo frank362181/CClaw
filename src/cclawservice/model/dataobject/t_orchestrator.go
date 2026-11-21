@@ -64,7 +64,7 @@ type TPlanGap struct {
 	CreatedAt int64  `gorm:"column:created_at" json:"CreatedAt"`
 }
 
-func (TPlanGap) TableName() string { return "t_gap" }
+func (TPlanGap) TableName() string { return "t_plan_gap" }
 
 // TArtifact 产物(只增;同名多 rev)
 type TArtifact struct {

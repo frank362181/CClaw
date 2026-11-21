@@ -7,13 +7,15 @@
 *	- 本文见只是描述"协商的结果长什么样",不含任何决策
 **/
 
-package chat
+package plan_mode
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"my.favorite/cclawservice/harness/toolexecutor"
+	"my.favorite/cclawservice/model/dataobject"
 )
 
 type NegotiationDecision string // 协商结论
@@ -35,6 +37,41 @@ func (d NegotiationDecision) Valid() bool {
 	}
 }
 
+// INegotiationSpec 协商协议的业务侧实现,三件事:参数长什么样、怎么解析、判定说明写什么
+// 若有其他业务,则实现该接口即可
+type INegotiationSpec interface {
+	// ParamsSchema 终止工具里spec对象字段
+	ParamsSchema() map[string]any
+
+	// ParamsRequired 必填字段
+	ParamsRequired() []string
+
+	Guard() string // 技能判定说明,写入 system prompt
+
+	DecodeParams(raw json.RawMessage) (any, error)
+}
+
+// NegotiationRequest 协商请求
+type NegotiationRequest struct {
+	Provider  dataobject.TLlm // LLM Provider
+	Question  string
+	SkillId   string
+	SkillName string
+	SkillDesc string
+
+	SOPSteps []string // 计划骨架摘要(每行一个步骤),只用于让模型理解"这套流程要做什么"
+
+	WorkRoot string
+	Rules    toolexecutor.ToolConfigRules
+
+	// 业务侧实现:参数 schema / 解析 / 判定说明
+	NegSpec INegotiationSpec
+
+	Feedback  string // 上一次校验失败的说明(重试时回灌给模型)
+	MaxRounds int
+	Timeout   time.Duration
+}
+
 // NegotiationResult 一次协商的结果
 type NegotiationResult struct {
 	Decision NegotiationDecision
@@ -52,37 +89,6 @@ type NegotiationResult struct {
 // Planned 是否应当进入plan mode模式
 func (n NegotiationResult) Planned() bool {
 	return n.Decision == DecisionProceed
-}
-
-// NegotiationEvent 协商结论的SSE载荷
-type NegotiationEvent struct {
-	Decision  string   `json:"decision"`
-	Reason    string   `json:"reason,omitempty"`
-	Missing   []string `json:"missing,omitempty"`
-	Rounds    int      `json:"rounds"`
-	ToolCalls int      `json:"toolCalls"`
-	ElapsedMs int      `json:"elapsedMs"`
-}
-
-// NegotiationRequest 协商请求
-type NegotiationRequest struct {
-	Provider  Provider
-	Question  string
-	SkillId   string
-	SkillName string
-	SkillDesc string
-
-	SOPSteps []string // 计划骨架摘要(每行一个步骤),只用于让模型理解"这套流程要做什么"
-
-	WorkRoot string
-	Rules    toolexecutor.ToolConfigRules
-
-	// 业务侧实现:参数 schema / 解析 / 判定说明
-	NegSpec INegotiationSpec
-
-	Feedback  string // 上一次校验失败的说明(重试时回灌给模型)
-	MaxRounds int
-	Timeout   time.Duration
 }
 
 // INegotiator 协商接口
