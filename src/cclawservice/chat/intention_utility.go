@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"my.favorite/cclawservice/chat/sop"
+	"my.favorite/cclawservice/chat/plan_mode"
 	hCommon "my.favorite/cclawservice/harness/common"
 	pCommon "my.favorite/platformutility/common"
 )
@@ -46,7 +46,7 @@ func NeedMoreInfoText(missing []string) string {
 	return "需要补充:" + strings.Join(missing, "、")
 }
 
-func GetTaskLabel(task sop.PlanTask) string {
+func GetTaskLabel(task plan_mode.PlanTask) string {
 	if task.Section != pCommon.BlankString {
 		return task.Section
 	}

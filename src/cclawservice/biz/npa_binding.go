@@ -14,11 +14,11 @@ import (
 	"strings"
 
 	"my.favorite/cclawservice/biz/npa"
-	"my.favorite/cclawservice/chat/sop"
+	"my.favorite/cclawservice/chat/plan_mode"
 )
 
 // RegistryNPABuiltin 将NPA业务注册进harness
-func RegistryNPABuiltin(extractors *sop.Extractors, barriers *sop.BarrierRepository) {
+func RegistryNPABuiltin(extractors *plan_mode.Extractors, barriers *plan_mode.BarrierRepository) {
 	if extractors == nil || barriers == nil {
 		return
 	}
@@ -33,13 +33,13 @@ func RegistryNPABuiltin(extractors *sop.Extractors, barriers *sop.BarrierReposit
 }
 
 // 工具输出 -> Artifact
-func npaExtract(planTask sop.PlanTask, raw string) (sop.Artifact, error) {
+func npaExtract(planTask plan_mode.PlanTask, raw string) (plan_mode.Artifact, error) {
 	extracted, err := npa.ExtractToolArtifact(planTask.Action, raw)
 	if err != nil {
-		return sop.Artifact{}, err
+		return plan_mode.Artifact{}, err
 	}
 
-	return sop.Artifact{
+	return plan_mode.Artifact{
 		Name:         extracted.Name,
 		ArtifactKind: extracted.TAKind,
 		AbsolutePath: extracted.Ref,
@@ -47,25 +47,25 @@ func npaExtract(planTask sop.PlanTask, raw string) (sop.Artifact, error) {
 	}, nil
 }
 
-func npaBarrie(barrie func(fields map[string]string) []npa.Finding) sop.Barrie {
-	return func(in sop.TaskBarrierInput) []sop.Gap {
+func npaBarrie(barrie func(fields map[string]string) []npa.Finding) plan_mode.Barrie {
+	return func(in plan_mode.TaskBarrierInput) []plan_mode.Gap {
 		findings := barrie(in.Output.Fields)
 		if len(findings) == 0 {
 			return nil
 		}
 
-		gaps := make([]sop.Gap, 0, len(findings))
+		gaps := make([]plan_mode.Gap, 0, len(findings))
 		for _, finding := range findings {
-			severity := sop.SeverityWarning
+			severity := plan_mode.SeverityWarning
 			if finding.Fatal {
-				severity = sop.SeverityFail
+				severity = plan_mode.SeverityFail
 			}
 
-			gaps = append(gaps, sop.Gap{
+			gaps = append(gaps, plan_mode.Gap{
 				Code:     strings.TrimSpace(finding.Code),
 				TaskID:   in.Task.ID,
 				Section:  in.Task.Section,
-				Detail:   sop.StatusBlocked,
+				Detail:   plan_mode.StatusBlocked,
 				Severity: severity,
 			})
 		}

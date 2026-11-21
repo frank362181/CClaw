@@ -17,7 +17,7 @@ import (
 	"sync"
 
 	"my.favorite/cclawservice/biz/npa"
-	"my.favorite/cclawservice/chat/sop"
+	"my.favorite/cclawservice/chat/plan_mode"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
@@ -47,15 +47,15 @@ func GetOrchestratorStorage(accessor dataaccessor.IOrchestratorAccessor) *Orches
 
 // 编译期间检查:必须同时满足写端口与读端口
 var (
-	_ sop.IPlanStorage = (*OrchestratorStorage)(nil)
-	_ sop.IPlanResume  = (*OrchestratorStorage)(nil)
+	_ plan_mode.IPlanStorage = (*OrchestratorStorage)(nil)
+	_ plan_mode.IPlanResume  = (*OrchestratorStorage)(nil)
 )
 
 func (o *OrchestratorStorage) Ready() bool {
 	return o != nil && o.accessor != nil
 }
 
-func (o *OrchestratorStorage) Load(ctx context.Context, turnId string) (*sop.PlanResumer, error) {
+func (o *OrchestratorStorage) Load(ctx context.Context, turnId string) (*plan_mode.PlanResumer, error) {
 	if !o.Ready() {
 		return nil, nil
 	}
@@ -75,14 +75,14 @@ func (o *OrchestratorStorage) Load(ctx context.Context, turnId string) (*sop.Pla
 		return nil, nil
 	}
 
-	state := sop.NewPlanState(turnId, plan.SessionId, plan.SkillId, spec)
+	state := plan_mode.NewPlanState(turnId, plan.SessionId, plan.SkillId, spec)
 	tasks, err := o.accessor.ListTasks(turnId)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, task := range tasks {
-		state.TaskStates[task.TaskId] = sop.PlanTaskState{
+		state.TaskStates[task.TaskId] = plan_mode.PlanTaskState{
 			TaskID:   task.TaskId,
 			Status:   task.Status,
 			Tries:    task.Tries,
@@ -108,7 +108,7 @@ func (o *OrchestratorStorage) Load(ctx context.Context, turnId string) (*sop.Pla
 		}
 
 		// 同名多 version:按 version生序覆盖,最终留下最新版本
-		state.Artifacts[artifact.Name] = sop.Artifact{
+		state.Artifacts[artifact.Name] = plan_mode.Artifact{
 			Name:         artifact.Name,
 			ArtifactKind: artifact.Kind,
 			AbsolutePath: artifact.Ref,
@@ -123,19 +123,19 @@ func (o *OrchestratorStorage) Load(ctx context.Context, turnId string) (*sop.Pla
 	}
 
 	for _, gap := range gaps {
-		state.Gaps = append(state.Gaps, sop.Gap{
+		state.Gaps = append(state.Gaps, plan_mode.Gap{
 			Code:     gap.Code,
 			TaskID:   gap.TaskId,
 			Section:  gap.Section,
 			Detail:   gap.Detail,
-			Severity: sop.ParseSeverity(gap.Severity),
+			Severity: plan_mode.ParseSeverity(gap.Severity),
 		})
 		if gap.Round > state.Round {
 			state.Round = gap.Round
 		}
 	}
 
-	return &sop.PlanResumer{
+	return &plan_mode.PlanResumer{
 		PlanDigest: plan.JsonDigest,
 		PlanJson:   plan.PlattenJson,
 		Spec:       spec,
@@ -143,12 +143,12 @@ func (o *OrchestratorStorage) Load(ctx context.Context, turnId string) (*sop.Pla
 	}, nil
 }
 
-func (o *OrchestratorStorage) SavePlan(ctx context.Context, turnID, sessionID string, plan sop.Plan, spec npa.ReportSpec) error {
+func (o *OrchestratorStorage) SavePlan(ctx context.Context, turnID, sessionID string, plan plan_mode.Plan, spec npa.ReportSpec) error {
 	if !o.Ready() {
 		return nil
 	}
 
-	planJson, err := sop.MarshalPlanToJson(plan)
+	planJson, err := plan_mode.MarshalPlanToJson(plan)
 	if err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func (o *OrchestratorStorage) SavePlan(ctx context.Context, turnID, sessionID st
 		SkillId:      plan.SkillID,
 		SpecJson:     string(specJson),
 		PlattenJson:  planJson,
-		JsonDigest:   sop.GetFingerprintOfPlan(plan),
+		JsonDigest:   plan_mode.GetFingerprintOfPlan(plan),
 		Waves:        plan.Waves,
 		TaskCount:    plan.TaskCount,
 		EstTokens:    plan.EstTokens,
@@ -180,7 +180,7 @@ func (o *OrchestratorStorage) SavePlan(ctx context.Context, turnID, sessionID st
 	})
 }
 
-func (o *OrchestratorStorage) SaveTask(ctx context.Context, turnID string, planTask sop.PlanTask, state sop.PlanTaskState, inputDigest string) error {
+func (o *OrchestratorStorage) SaveTask(ctx context.Context, turnID string, planTask plan_mode.PlanTask, state plan_mode.PlanTaskState, inputDigest string) error {
 	if !o.Ready() {
 		return nil
 	}
@@ -196,7 +196,7 @@ func (o *OrchestratorStorage) SaveTask(ctx context.Context, turnID string, planT
 	o.lock.Unlock()
 
 	endedAt := int64(0)
-	if sop.IsTerminal(state.Status) {
+	if plan_mode.IsTerminal(state.Status) {
 		endedAt = now
 	}
 
@@ -224,7 +224,7 @@ func (o *OrchestratorStorage) SaveTask(ctx context.Context, turnID string, planT
 	return nil
 }
 
-func (o *OrchestratorStorage) SaveGaps(ctx context.Context, turnID string, round int, gaps []sop.Gap) error {
+func (o *OrchestratorStorage) SaveGaps(ctx context.Context, turnID string, round int, gaps []plan_mode.Gap) error {
 	if !o.Ready() || len(gaps) == 0 {
 		return nil
 	}
@@ -252,7 +252,7 @@ func (o *OrchestratorStorage) SaveGaps(ctx context.Context, turnID string, round
 	return nil
 }
 
-func (o *OrchestratorStorage) SaveArtifact(ctx context.Context, turnID string, artifact sop.Artifact) error {
+func (o *OrchestratorStorage) SaveArtifact(ctx context.Context, turnID string, artifact plan_mode.Artifact) error {
 	if !o.Ready() || artifact.Name == pCommon.BlankString {
 		return nil
 	}

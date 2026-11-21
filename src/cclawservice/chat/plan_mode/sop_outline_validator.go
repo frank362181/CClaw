@@ -8,7 +8,7 @@
 * 绝不能因为SOP写坏而让聊天不可用
 **/
 
-package sop
+package plan_mode
 
 import (
 	"fmt"

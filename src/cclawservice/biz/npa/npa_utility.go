@@ -13,6 +13,7 @@ import (
 	pCommon "my.favorite/platformutility/common"
 )
 
+// GenerateDocumentNo 根据项目的目录产生档案编号的同时,创建报告存放的目录
 func GenerateDocumentNo(projectDir string, prefix string) string {
 	datePart := time.Now().Format("20060102") // 日期格式化
 	projectDir = pCommon.ResolveRealPath(projectDir)

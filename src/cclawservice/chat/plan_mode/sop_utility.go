@@ -2,7 +2,7 @@
 * 编排层所需的工具函数
 **/
 
-package sop
+package plan_mode
 
 import (
 	"fmt"

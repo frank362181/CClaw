@@ -6,7 +6,7 @@
 *	拼错一次就会整轮失败且难以定位
 **/
 
-package sop
+package plan_mode
 
 import (
 	"fmt"

@@ -9,7 +9,7 @@
 *	  0 LLM < 1 ms
 **/
 
-package sop
+package plan_mode
 
 import (
 	"fmt"

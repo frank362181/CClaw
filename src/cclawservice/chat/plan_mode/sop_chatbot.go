@@ -7,7 +7,7 @@
 * - 调用时在service层 实现 ToolInvoker(内部用 TurnState.NewToolEnv)即可
 **/
 
-package sop
+package plan_mode
 
 import (
 	"context"

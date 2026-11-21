@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"my.favorite/cclawservice/chat/sop"
+	"my.favorite/cclawservice/chat/plan_mode"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/common/llmproto"
 	"my.favorite/cclawservice/harness/toolexecutor"
@@ -30,7 +30,7 @@ type SopTurnToolInvoker struct {
 	seq          atomic.Int64
 }
 
-var _ sop.ISopToolInvoker = (*SopTurnToolInvoker)(nil)
+var _ plan_mode.ISopToolInvoker = (*SopTurnToolInvoker)(nil)
 
 func NewSOPTurnToolInvoker(root *TurnState, sink cCommon.ISink, rules toolexecutor.ToolConfigRules) *SopTurnToolInvoker {
 	if sink == nil {

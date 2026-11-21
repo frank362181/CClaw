@@ -13,7 +13,7 @@
 * 3.ReportSpec.Fields() 提供 ${spec.*} 的渲染源，避免到处 switch
 **/
 
-package sop
+package plan_mode
 
 import (
 	"context"

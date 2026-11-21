@@ -4,7 +4,7 @@
 *	而且仅仅看这一步执行后的结果是否准确
 **/
 
-package sop
+package plan_mode
 
 import (
 	"my.favorite/cclawservice/biz/npa"

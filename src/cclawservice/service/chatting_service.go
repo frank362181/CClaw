@@ -10,7 +10,7 @@ import (
 	"my.favorite/cclawservice/biz"
 	"my.favorite/cclawservice/biz/npa"
 	"my.favorite/cclawservice/chat"
-	"my.favorite/cclawservice/chat/sop"
+	"my.favorite/cclawservice/chat/plan_mode"
 	"my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/config"
 	myException "my.favorite/cclawservice/exception"
@@ -35,8 +35,8 @@ type ChattingService struct {
 
 	chattingConfig      config.ChatConfig
 	sessionAccessor     dataaccessor.ISessionAccessor
-	extractors          *sop.Extractors
-	barriers            *sop.BarrierRepository
+	extractors          *plan_mode.Extractors
+	barriers            *plan_mode.BarrierRepository
 	orchestratorStorage *core2.OrchestratorStorage
 
 	memoryService *ctxmgr.MemoryService
@@ -103,8 +103,8 @@ func GetChattingService(db core.IBaseDatabase, chattingConfig config.ChatConfig,
 	chattingService.toolConfiguredRules = toolRules
 
 	// 创建一个plan mode聊天执行器
-	chattingService.extractors = sop.NewExtractors()
-	chattingService.barriers = sop.NewBarrierRepository()
+	chattingService.extractors = plan_mode.NewExtractors()
+	chattingService.barriers = plan_mode.NewBarrierRepository()
 	biz.RegistryNPABuiltin(chattingService.extractors, chattingService.barriers)
 
 	return chattingService
@@ -237,9 +237,9 @@ func (s *ChattingService) chat(ctx context.Context, cmd chat.Command, sink commo
 }
 
 // 根据用户的问题判断是否执行plan mode模式:技能激活 -> mode -> 协商 -> spec校验
-func (s *ChattingService) isPlanMode(ctx context.Context, turn *chat.TurnState, sink common.ISink) (sop.Plan, npa.ReportSpec, bool) {
+func (s *ChattingService) isPlanMode(ctx context.Context, turn *chat.TurnState, sink common.ISink) (plan_mode.Plan, npa.ReportSpec, bool) {
 	if turn == nil || s.chattingConfig.Chat.Mode == common.PlanModeOff {
-		return sop.Plan{}, npa.ReportSpec{}, false
+		return plan_mode.Plan{}, npa.ReportSpec{}, false
 	}
 
 	// 1. 获取当前活跃且有sop的skill document
@@ -259,25 +259,25 @@ func (s *ChattingService) isPlanMode(ctx context.Context, turn *chat.TurnState, 
 	}
 
 	if activeSkillId == pCommon.BlankString {
-		return sop.Plan{}, npa.ReportSpec{}, false
+		return plan_mode.Plan{}, npa.ReportSpec{}, false
 	}
 
 	// 2. plan mode 协商，得到协商的结果,即what
 	arg, ok := s.negotiateArgument(ctx, turn, activeSkillId, activeSkillDoc, sink)
 	if !ok {
-		return sop.Plan{}, npa.ReportSpec{}, false
+		return plan_mode.Plan{}, npa.ReportSpec{}, false
 	}
 
 	arg.ArchiveNo = s.resolveArchiveNo(ctx, turn.Cmd.TurnID, arg.ProjectDir, arg.ArchiveNo)
 
 	// 根据协商的结果形成 Plan,即 HOW
-	planArguments := sop.DefaultPlanArguments()
+	planArguments := plan_mode.DefaultPlanArguments()
 	planArguments.KnownTools = hCommon.ConvertBasicTools2Map(activeSkillDoc.FrontMatter)
-	plan, err := sop.BuildPlanFromSkillSOPOutline(activeSkillId, activeSkillDoc.FrontMatter.SOPOutLines, arg, planArguments)
+	plan, err := plan_mode.BuildPlanFromSkillSOPOutline(activeSkillId, activeSkillDoc.FrontMatter.SOPOutLines, arg, planArguments)
 	if err != nil {
 		logging.LogWarnF("plan mode:build plan failed,skill=%s,turn=%s,error=%s", activeSkillId, turn.Cmd.TurnID, err.Error())
 		sink.OnNotice(common.ChatNoticeIncomplete, "流程定义有误,已改为直接回答:"+err.Error())
-		return sop.Plan{}, npa.ReportSpec{}, false
+		return plan_mode.Plan{}, npa.ReportSpec{}, false
 	}
 
 	// plan mode 第4点：计划必须对人可见(),用户才能判断“该不该跑”
@@ -422,7 +422,7 @@ func (s *ChattingService) reportDecision(ctx context.Context, turn *chat.TurnSta
 }
 
 // 读回落库的状态:指纹不一致则表示作废(失败即从头跑,不阻断)
-func (s *ChattingService) loadResumedState(ctx context.Context, turnID string, plan sop.Plan) *sop.PlanState {
+func (s *ChattingService) loadResumedState(ctx context.Context, turnID string, plan plan_mode.Plan) *plan_mode.PlanState {
 	if s.orchestratorStorage == nil {
 		return nil
 	}
@@ -437,7 +437,7 @@ func (s *ChattingService) loadResumedState(ctx context.Context, turnID string, p
 		return nil
 	}
 
-	if loaded.PlanDigest != sop.GetFingerprintOfPlan(plan) {
+	if loaded.PlanDigest != plan_mode.GetFingerprintOfPlan(plan) {
 		logging.LogWarnF("plan mode: fingerprint changed, turn=%s, drop resume state", turnID)
 		return nil
 	}
@@ -474,7 +474,7 @@ func (s *ChattingService) runSimpleMode(ctx context.Context, turn *chat.TurnStat
 }
 
 // 执行计划
-func (s *ChattingService) runPlanMode(ctx context.Context, turn *chat.TurnState, plan sop.Plan, arg npa.ReportSpec,
+func (s *ChattingService) runPlanMode(ctx context.Context, turn *chat.TurnState, plan plan_mode.Plan, arg npa.ReportSpec,
 	sink common.ISink, start time.Time, firstVisibleMs *int64) (chat.Reply, error) {
 	if sink == nil {
 		sink = common.NopSink{}
@@ -501,14 +501,14 @@ func (s *ChattingService) runPlanMode(ctx context.Context, turn *chat.TurnState,
 	// 获得暂停掉的State
 	resumedState := s.loadResumedState(runCtx, turn.Cmd.TurnID, plan)
 
-	sopChatBot := sop.NewPlanChatBotRunner(sop.PlanChatBotParams{
+	sopChatBot := plan_mode.NewPlanChatBotRunner(plan_mode.PlanChatBotParams{
 		ConGate:    chattingService.agentConcurrent,
 		Sink:       sink,
 		Extractors: s.extractors,
 		Barriers:   s.barriers,
 		PlanStorge: s.orchestratorStorage,
 	})
-	result, runErr := sopChatBot.Run(runCtx, sop.PlanRequest{
+	result, runErr := sopChatBot.Run(runCtx, plan_mode.PlanRequest{
 		AgentId:      turn.Agent.AgentId,
 		TurnID:       turn.Cmd.TurnID,
 		SessionID:    turn.Cmd.SessionId,
@@ -528,7 +528,7 @@ func (s *ChattingService) runPlanMode(ctx context.Context, turn *chat.TurnState,
 		return chat.Reply{}, myException.ChatRunTimeoutKind.Newf("plan executor run after %d seconds", int(timeout.Seconds()))
 	}
 
-	answer := sop.GetSOPChatResultSummary(result)
+	answer := plan_mode.GetSOPChatResultSummary(result)
 	if answer != pCommon.BlankString {
 		sink.OnDelta(answer)
 	}

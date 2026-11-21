@@ -1,4 +1,4 @@
-package sop
+package plan_mode
 
 import (
 	"testing"
