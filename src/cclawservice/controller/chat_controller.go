@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"my.favorite/cclawservice/chat"
+	chatCommon "my.favorite/cclawservice/chat/common"
 	cCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/request"
@@ -293,7 +294,7 @@ func (cc *ChatController) InterruptChat(c *gin.Context) {
 // ================================ private functions & methods ===============================
 
 // 将一次HTTP请求转换为chat.Command
-func (cc *ChatController) bind(c *gin.Context) (*chat.Command, bool) {
+func (cc *ChatController) bind(c *gin.Context) (*chatCommon.Command, bool) {
 	login, ok := getAuthentication(c)
 	if !ok {
 		return nil, false

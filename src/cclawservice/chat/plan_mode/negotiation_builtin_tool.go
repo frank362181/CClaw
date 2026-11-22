@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	chatCommon "my.favorite/cclawservice/chat/common"
 	"my.favorite/cclawservice/common/llmproto"
 	"my.favorite/cclawservice/harness/toolexecutor"
 	pCommon "my.favorite/platformutility/common"
@@ -31,7 +32,7 @@ const (
 )
 
 // GetNegotiationTools 返回内置的协商执行工具schema
-func GetNegotiationTools(skillId string, spec INegotiationSpec, last bool) ([]llmproto.Tool, string) {
+func GetNegotiationTools(skillId string, spec chatCommon.INegotiationSpec, last bool) ([]llmproto.Tool, string) {
 	if last {
 		// 表示最后一轮终止的工具.
 		// 有些LLM Provider 不支持 ToolChoiceRequire模式
@@ -105,7 +106,7 @@ func getProbeToolSchema() []llmproto.Tool {
 	}
 }
 
-func getIntentionStartToolSchema(skillId string, spec INegotiationSpec) llmproto.Tool {
+func getIntentionStartToolSchema(skillId string, spec chatCommon.INegotiationSpec) llmproto.Tool {
 	properties := map[string]any{
 		"decision": map[string]any{
 			"type":        "string",
@@ -160,7 +161,7 @@ type negotiationStartArgument struct {
 }
 
 // ParseNegotiationStartArg 对intentionNegotiation 的参数进行解析,形成NegotiationResult,校验在biz层进行
-func ParseNegotiationStartArg(raw string, spec INegotiationSpec) (NegotiationResult, error) {
+func ParseNegotiationStartArg(raw string, spec chatCommon.INegotiationSpec) (NegotiationResult, error) {
 	var args negotiationStartArgument
 	if err := pCommon.UnmarshalJson(raw, &args); err != nil {
 		return NegotiationResult{}, fmt.Errorf("negotiation: invalid argument: %w", err)
@@ -262,7 +263,7 @@ func executeFsList(argsRaw, workRoot string, rules toolexecutor.ToolConfigRules)
 			result.ExtCount[ext]++
 		}
 		if len(result.Entries) < maxListEntries {
-			result.Entries = append(result.Entries, fsDirEntry{Name: item.Name() + "/", Size: info.Size(), Type: "file"})
+			result.Entries = append(result.Entries, fsDirEntry{Name: item.Name(), Size: info.Size(), Type: "file"})
 		} else {
 			result.Truncated = true
 		}
@@ -286,10 +287,19 @@ func executeFsList(argsRaw, workRoot string, rules toolexecutor.ToolConfigRules)
 					break
 				}
 
+				entryName := item.Name() + "/" + subEntry.Name()
+				// 子目录必须独立判断
+				if subEntry.IsDir() {
+					result.DirCount++
+					result.Entries = append(result.Entries, fsDirEntry{Name: entryName + "/", Type: "dir"})
+					continue
+				}
+
+				result.FileCount++ // 递归也要统计,与extCount 保持同一口径
 				if ext := strings.ToLower(filepath.Ext(subEntry.Name())); ext != pCommon.BlankString {
 					result.ExtCount[ext]++
 				}
-				result.Entries = append(result.Entries, fsDirEntry{Name: item.Name() + "/" + subEntry.Name(), Type: "file"})
+				result.Entries = append(result.Entries, fsDirEntry{Name: entryName, Type: "file"})
 			}
 		}
 	}

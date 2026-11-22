@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"my.favorite/cclawservice/biz/npa"
+	chatCommon "my.favorite/cclawservice/chat/common"
 	hCommon "my.favorite/cclawservice/harness/common"
 	pCommon "my.favorite/platformutility/common"
 )
@@ -65,7 +65,7 @@ func (args PlanArguments) normalize() PlanArguments {
 }
 
 // BuildPlanFromSkillSOPOutline 把SKILL.md的SOP outline展开成可执行的计划
-func BuildPlanFromSkillSOPOutline(skillId string, sopSteps []hCommon.SkillSOPStep, spec npa.ReportSpec, args PlanArguments) (Plan, error) {
+func BuildPlanFromSkillSOPOutline(skillId string, sopSteps []hCommon.SkillSOPStep, spec chatCommon.Spec, args PlanArguments) (Plan, error) {
 	args = args.normalize()
 
 	// 0.工具集是L3的唯一依据;没有传的话就返回错误
@@ -109,6 +109,8 @@ func BuildPlanFromSkillSOPOutline(skillId string, sopSteps []hCommon.SkillSOPSte
 			When:        when,
 			Conditional: when != pCommon.BlankString,
 			MaxTries:    getMaxTries(kind, step.MaxTries),
+			OnFail:      normalizeOnFail(step.OnFail),
+			MaxRounds:   normalizeRepairRounds(kind, step.MaxRounds),
 		}
 
 		if planTask.Conditional {
@@ -205,10 +207,7 @@ func getMaxTries(kind PlanTaskKind, maxTries int) int {
 func getWaves(tasks []PlanTask) int {
 	waves := 0
 	for _, task := range tasks {
-		if task.Conditional {
-			continue
-		}
-
+		// 条件任务占也占一个波次:它可能在运行期被激活
 		if task.Depth+1 > waves {
 			waves = task.Depth + 1
 		}
@@ -217,7 +216,7 @@ func getWaves(tasks []PlanTask) int {
 }
 
 // 构建已知的 ${spec.*};${artifact.field}留给运行期
-func buildArgs(args hCommon.SOPStepArgs, spec npa.ReportSpec) map[string]string {
+func buildArgs(args hCommon.SOPStepArgs, spec chatCommon.Spec) map[string]string {
 	if len(args) == 0 {
 		return nil
 	}
@@ -279,6 +278,8 @@ func buildMergeTasks(step hCommon.SkillSOPStep) (PlanTask, bool) {
 	// 继承原来步骤的门禁策略
 	merged.Gate = strings.TrimSpace(step.Gate)
 	merged.Policy = strings.TrimSpace(step.Policy)
+	merged.OnFail = normalizeOnFail(step.OnFail)
+	merged.MaxRounds = normalizeRepairRounds(PlanTaskMerge, step.MaxRounds)
 
 	return merged, true
 }
@@ -327,7 +328,7 @@ func assignDepth(tasks []PlanTask) error {
 	producers := make(map[string]int, len(tasks))
 	for idx := range tasks {
 		if tasks[idx].Conditional {
-			continue
+			continue // 条件任务不参与拓扑
 		}
 
 		if name := strings.TrimSpace(tasks[idx].Produces); name != pCommon.BlankString {
@@ -384,7 +385,38 @@ func assignDepth(tasks []PlanTask) error {
 		tasks[idx].Depth = depths[idx]
 	}
 
+	// 第二阶段:条件任务的深度 = 它依赖的门禁所需任务的深度 + 1
+	// when:gate_failed(x)的语义是"X"这个门禁失败后才轮到它
+	for idx := range tasks {
+		if !tasks[idx].Conditional {
+			continue
+		}
+
+		gate := parseGateFailedOf(tasks[idx].When)
+		base := 0
+		for j := range tasks {
+			if tasks[j].Conditional || tasks[j].Gate != gate {
+				continue
+			}
+
+			if tasks[j].Depth+1 > base {
+				base = tasks[j].Depth + 1
+			}
+		}
+
+		tasks[idx].Depth = base
+	}
+
 	return nil
+}
+
+func parseGateFailedOf(when string) string {
+	expr := strings.TrimSpace(when)
+	if !strings.HasPrefix(expr, "gate_failed(") || !strings.HasSuffix(expr, ")") {
+		return pCommon.BlankString
+	}
+
+	return strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(expr, "gate_failed("), ")"))
 }
 
 // 校验剩余的${artifact.field}引用都能被本计划产出
@@ -440,4 +472,32 @@ func estimatePlanPayload(planTasks []PlanTask, waves int, planArgs PlanArguments
 	workPayload.EstLatency = time.Duration(waves) * planArgs.RoundP95
 
 	return workPayload
+}
+
+func normalizeOnFail(onFail string) string {
+	switch strings.ToLower(strings.TrimSpace(onFail)) {
+	case "abort":
+		return "abort"
+	case "repair", pCommon.BlankString:
+		return "repair"
+	default:
+		return "repair"
+	}
+}
+
+// 上限次数为 3，防止烧钱
+func normalizeRepairRounds(kind PlanTaskKind, rounds int) int {
+	if kind != PlanTaskLLM && kind != PlanTaskCheck {
+		return 0
+	}
+
+	if rounds <= 0 {
+		return 2
+	}
+
+	if rounds > 3 {
+		return 3
+	}
+
+	return rounds
 }

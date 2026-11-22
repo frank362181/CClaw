@@ -9,6 +9,7 @@ import (
 	"errors"
 	"time"
 
+	chatCommon "my.favorite/cclawservice/chat/common"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/common/llmproto"
 	selfException "my.favorite/cclawservice/exception"
@@ -21,29 +22,29 @@ import (
 
 // TurnRunnerParams 执行单元所需的参数依赖,全部有调用方注入
 type TurnRunnerParams struct {
-	Assembler  IContextAssembler
-	Journal    IMemoryJournal
-	Maintainer IMemoryMaintainer
+	Assembler  chatCommon.IContextAssembler
+	Journal    chatCommon.IMemoryJournal
+	Maintainer chatCommon.IMemoryMaintainer
 	ConGate    concurrency.IConcurrencyController
-	Register   ITurnRegistrator
-	Transport  ITransportClient
+	Register   chatCommon.ITurnRegistrator
+	Transport  chatCommon.ITransportClient
 
-	SyncLooper  IToolLooper
-	AsyncLooper IToolLooper
+	SyncLooper  chatCommon.IToolLooper
+	AsyncLooper chatCommon.IToolLooper
 
 	Rules toolexecutor.ToolConfigRules
 }
 
 type TurnRunner struct {
-	assembler       IContextAssembler
-	journal         IMemoryJournal
-	maintainer      IMemoryMaintainer
+	assembler       chatCommon.IContextAssembler
+	journal         chatCommon.IMemoryJournal
+	maintainer      chatCommon.IMemoryMaintainer
 	conGate         concurrency.IConcurrencyController
-	turnRegistrator ITurnRegistrator
-	transport       ITransportClient
+	turnRegistrator chatCommon.ITurnRegistrator
+	transport       chatCommon.ITransportClient
 
-	syncLooper  IToolLooper
-	asyncLooper IToolLooper
+	syncLooper  chatCommon.IToolLooper
+	asyncLooper chatCommon.IToolLooper
 
 	rules toolexecutor.ToolConfigRules
 }
@@ -64,10 +65,10 @@ func NewTurnRunner(turnParams TurnRunnerParams) *TurnRunner {
 	}
 }
 
-func (t *TurnRunner) Run(ctx context.Context, req TurnRequest) (TurnOutcome, error) {
+func (t *TurnRunner) Run(ctx context.Context, req chatCommon.TurnRequest) (chatCommon.TurnOutcome, error) {
 	turn := req.Turn
 	if turn == nil {
-		return TurnOutcome{}, selfException.ChatParameterKind.Newf("turn runner:nil turn state")
+		return chatCommon.TurnOutcome{}, selfException.ChatParameterKind.Newf("turn runner:nil turn state")
 	}
 
 	sink := req.Sink
@@ -91,7 +92,7 @@ func (t *TurnRunner) Run(ctx context.Context, req TurnRequest) (TurnOutcome, err
 		turn.Timing.ConcurrencyMs = pCommon.MilliDiff2(gateStart)
 	}
 	if err != nil {
-		return TurnOutcome{}, err
+		return chatCommon.TurnOutcome{}, err
 	}
 	defer release()
 
@@ -121,14 +122,14 @@ func (t *TurnRunner) Run(ctx context.Context, req TurnRequest) (TurnOutcome, err
 	// 6 装配上下文
 	asm, err := t.assembler.Assemble(runCtx, turn, turn.Cmd.Message)
 	if err != nil {
-		return TurnOutcome{}, err
+		return chatCommon.TurnOutcome{}, err
 	}
 	turn.Seed(asm.Messages)
 
 	// 7. 生成(有工具走ToolLoop,无工具则一次调用)
 	capSink := NewCapturingSink(sink)
 	llmReply, genErr := t.invoke(runCtx, turn, capSink)
-	out := TurnOutcome{
+	out := chatCommon.TurnOutcome{
 		Llm:            llmReply,
 		FirstVisibleMs: capSink.FirstVisibleMs(req.StartAt),
 		ElapseMs:       time.Since(req.StartAt).Milliseconds(),
@@ -174,7 +175,7 @@ func (t *TurnRunner) Run(ctx context.Context, req TurnRequest) (TurnOutcome, err
 		t.maintainer.Maintain(sess, turn, asm, seq)
 	}
 
-	out.TurnReply = Reply{
+	out.TurnReply = chatCommon.Reply{
 		SessionID:    turn.Cmd.SessionId,
 		TurnID:       turn.Cmd.TurnID,
 		Content:      llmReply.Content,
@@ -185,7 +186,7 @@ func (t *TurnRunner) Run(ctx context.Context, req TurnRequest) (TurnOutcome, err
 	return out, nil
 }
 
-func (t *TurnRunner) invoke(ctx context.Context, turn *TurnState, sink cCommon.ISink) (llmproto.LlmReply, error) {
+func (t *TurnRunner) invoke(ctx context.Context, turn *chatCommon.TurnState, sink cCommon.ISink) (llmproto.LlmReply, error) {
 	if len(turn.VisibleTools) == 0 {
 		// 无工具调用
 		req := turn.Request(nil, pCommon.BlankString)

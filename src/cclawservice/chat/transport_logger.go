@@ -12,6 +12,7 @@ import (
 	"context"
 	"time"
 
+	chatCommon "my.favorite/cclawservice/chat/common"
 	"my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/common/llmproto"
 	pCommon "my.favorite/platformutility/common"
@@ -19,28 +20,28 @@ import (
 )
 
 type TransportLogger struct {
-	transporter ITransportClient
+	transporter chatCommon.ITransportClient
 }
 
-func NewTransportLogger(transporter ITransportClient) *TransportLogger {
+func NewTransportLogger(transporter chatCommon.ITransportClient) *TransportLogger {
 	return &TransportLogger{transporter: transporter}
 }
 
-func (tl *TransportLogger) Complete(ctx context.Context, p Provider, req llmproto.LlmRequest) (llmproto.LlmReply, error) {
+func (tl *TransportLogger) Complete(ctx context.Context, p chatCommon.Provider, req llmproto.LlmRequest) (llmproto.LlmReply, error) {
 	start := pCommon.GetDatetimeUtilityInstance().GetNow()
 	reply, err := tl.transporter.Complete(ctx, p, req)
 	tl.log(p, false, start, reply, err)
 	return reply, err
 }
 
-func (tl *TransportLogger) Stream(ctx context.Context, p Provider, req llmproto.LlmRequest, ob common.IStreamObserver) (llmproto.LlmReply, error) {
+func (tl *TransportLogger) Stream(ctx context.Context, p chatCommon.Provider, req llmproto.LlmRequest, ob common.IStreamObserver) (llmproto.LlmReply, error) {
 	start := pCommon.GetDatetimeUtilityInstance().GetNow()
 	reply, err := tl.transporter.Stream(ctx, p, req, ob)
 	tl.log(p, true, start, reply, err)
 	return reply, err
 }
 
-func (tl *TransportLogger) log(p Provider, stream bool, start time.Time, reply llmproto.LlmReply, err error) {
+func (tl *TransportLogger) log(p chatCommon.Provider, stream bool, start time.Time, reply llmproto.LlmReply, err error) {
 	elapsed := pCommon.MilliDiff(start)
 	if err != nil {
 		logging.LogWarnF("llm gateway: provider=%s stream=%v elapsed=%dms tools=%d err=%v",

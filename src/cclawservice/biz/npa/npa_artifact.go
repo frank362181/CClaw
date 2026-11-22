@@ -27,8 +27,10 @@ const (
 	ToolNameExtractMetrics = "npa_extract_metrics"
 	ToolNameSaveOK         = "npa_save_report"
 
+	// ArtifactParsedContext 必须与SKILL.md里的npa_extract_metrics步骤的produces完全一致;
+	// 若写成不同的名字会让下游 needs 永远查不到
 	ArtifactParsedContext  = "parsed_context"
-	ArtifactExtractMetrics = "extract_metrics"
+	ArtifactExtractMetrics = "extracted_metrics"
 	ArtifactReportPath     = "report_path"
 )
 

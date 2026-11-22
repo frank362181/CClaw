@@ -1,5 +1,5 @@
 /**
-* 计划模型:声明式 SOP 展开后的可执行对象
+* 计划模型:声明式 SOP 展开后的可执行计划
 *
 * 与chat.TurnState的区别是:
 * - TurnState 描述"一轮怎么答"(单轮执行单元的状态)
@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"my.favorite/cclawservice/biz/npa"
+	chatCommon "my.favorite/cclawservice/chat/common"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
 )
@@ -96,6 +96,13 @@ type PlanTask struct {
 	Tries    int `json:"-"`
 	MaxTries int `json:"maxTries,omitempty"`
 	Depth    int `json:"depth"`
+
+	// 失败后的处理策略:repair(default) / ABORT
+	// 来自SKILL.md 的on_fail；修复回路据此决定"返工"还是"终止"
+	OnFail string `json:"onFail,omitempty"`
+
+	// MaxRounds 修复轮次上线(仅 kind = llm/check有意义);0 表示默认值 2
+	MaxRounds int `json:"maxRounds,omitempty"`
 }
 
 // PlanTaskState 单任务运行状态
@@ -125,7 +132,7 @@ type PlanRequest struct {
 	TurnID    string
 	SessionID string
 	PlanMem   Plan
-	Spec      npa.ReportSpec
+	Spec      chatCommon.Spec //npa.ReportSpec
 	Sink      IPlanEventSink
 
 	Tool ISopToolInvoker // 工具执行器
@@ -203,6 +210,15 @@ const (
 	CodeTaskGateUnImplemented = "not_implemented"
 )
 
+const (
+	ArtifactKindText = "text"
+	ArtifactKindFile = "file"
+	ArtifactKindDir  = "dir"
+	ArtifactKindJson = "json"
+
+	ArtifactContentField = "__content__"
+)
+
 // Gap 每步task执行完成后校验发现的缺口,
 // 能自动补的带Fix,不能自动补的进报告标注
 type Gap struct {
@@ -219,6 +235,7 @@ type Artifact struct {
 	Name         string            // 产物名
 	ArtifactKind string            // file | dir | json | text
 	AbsolutePath string            // 绝对路径
+	Context      string            // 文本正文(text有效,如 merge产物)
 	Digest       string            // 内容指纹
 	Fields       map[string]string // 常用字段预取(path|file|pages|files_need_ocr...)
 }
@@ -229,7 +246,7 @@ type PlanState struct {
 	SessionID string
 	SkillID   string
 
-	Spec npa.ReportSpec
+	Spec chatCommon.Spec
 
 	Wave       int
 	Round      int
@@ -238,7 +255,7 @@ type PlanState struct {
 	Gaps       []Gap
 }
 
-func NewPlanState(turnID, sessionId, skillId string, spec npa.ReportSpec) *PlanState {
+func NewPlanState(turnID, sessionId, skillId string, spec chatCommon.Spec) *PlanState {
 	return &PlanState{
 		TurnID:     turnID,
 		SessionID:  sessionId,
@@ -266,15 +283,17 @@ type ISopToolInvoker interface {
 
 // PlanResumer 从库里读回一轮计划
 type PlanResumer struct {
-	PlanDigest string         // 落库时的计划指纹,与重新展开时的结果对比
-	PlanJson   string         // 落库时的plan_json,指纹不匹配时用于输出差异
-	Spec       npa.ReportSpec //落库时的需求规格
-	State      *PlanState     // 任务状态 + 产物 + 缺口
+	PlanDigest string            // 落库时的计划指纹,与重新展开时的结果对比
+	PlanJson   string            // 落库时的plan_json,指纹不匹配时用于输出差异
+	SpecJson   string            // 落库原文
+	SpecFields map[string]string // 已归一化的 ${spec.*}
+	//Spec       npa.ReportSpec //落库时的需求规格
+	State *PlanState // 任务状态 + 产物 + 缺口
 }
 
 // IPlanStorage 计划的存储器,可以为空,方便于测试
 type IPlanStorage interface {
-	SavePlan(ctx context.Context, turnID, sessionID string, plan Plan, spec npa.ReportSpec) error
+	SavePlan(ctx context.Context, turnID, sessionID string, plan Plan, spec chatCommon.Spec) error
 	SaveTask(ctx context.Context, turnID string, planTask PlanTask, state PlanTaskState, inputDigest string) error
 	SaveGaps(ctx context.Context, turnID string, round int, gaps []Gap) error
 	SaveArtifact(ctx context.Context, turnID string, artifact Artifact) error
@@ -288,7 +307,7 @@ func NewNoPlanStorage() *NopPlanStorage {
 	return &NopPlanStorage{}
 }
 
-func (NopPlanStorage) SavePlan(ctx context.Context, turnID, sessionID string, plan Plan, spec npa.ReportSpec) error {
+func (NopPlanStorage) SavePlan(ctx context.Context, turnID, sessionID string, plan Plan, spec chatCommon.Spec) error {
 	return nil
 }
 

@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 
+	chatCommon "my.favorite/cclawservice/chat/common"
 	"my.favorite/cclawservice/common/llmproto"
 	myException "my.favorite/cclawservice/exception"
 	hCommon "my.favorite/cclawservice/harness/common"
@@ -14,14 +15,14 @@ import (
 
 type MemoryMaintainer struct {
 	memory    *ctxmgr.MemoryService
-	transport ITransportClient
+	transport chatCommon.ITransportClient
 }
 
 var memoryMaintainer = pCommon.GetSingleton(func() *MemoryMaintainer {
 	return &MemoryMaintainer{}
 }).Instance()
 
-func GetMemoryMaintainer(memory *ctxmgr.MemoryService, transport ITransportClient) IMemoryMaintainer {
+func GetMemoryMaintainer(memory *ctxmgr.MemoryService, transport chatCommon.ITransportClient) chatCommon.IMemoryMaintainer {
 	if memory == nil || transport == nil {
 		panic("memory service or transport is nil")
 	}
@@ -31,7 +32,7 @@ func GetMemoryMaintainer(memory *ctxmgr.MemoryService, transport ITransportClien
 	return memoryMaintainer
 }
 
-func (m *MemoryMaintainer) Maintain(s Session, turnState *TurnState, asm Assembled, turnSeq int) {
+func (m *MemoryMaintainer) Maintain(s chatCommon.Session, turnState *chatCommon.TurnState, asm chatCommon.Assembled, turnSeq int) {
 	m.memory.TriggerMemoryMaintenance(ctxmgr.MaintenanceRequest{
 		Session:       ToTSessionPtr(s),
 		Agent:         &turnState.Agent,
@@ -42,7 +43,7 @@ func (m *MemoryMaintainer) Maintain(s Session, turnState *TurnState, asm Assembl
 	}, summarizer(turnState.Provider, m.transport))
 }
 
-func (m *MemoryMaintainer) Close(ctx context.Context, s Session, turnState *TurnState, reason int) error {
+func (m *MemoryMaintainer) Close(ctx context.Context, s chatCommon.Session, turnState *chatCommon.TurnState, reason int) error {
 	if err := m.memory.EndSession(s.ID, reason); err != nil {
 		return err
 	}
@@ -64,7 +65,7 @@ func (m *MemoryMaintainer) Close(ctx context.Context, s Session, turnState *Turn
 }
 
 // ============================================= 对历史对话进行摘要================================================
-func summarizer(provider Provider, transport ITransportClient) ctxmgr.Summarizer {
+func summarizer(provider chatCommon.Provider, transport chatCommon.ITransportClient) ctxmgr.Summarizer {
 	return func(ctx context.Context, sysPrompt, userPrompt string) (string, error) {
 		// 输出额度按**窗口**收口
 		maxTokens := security.CalcTurnOutputTokens(int(provider.ContextWindow()), hCommon.SummaryMaxTokens, sysPrompt, userPrompt)

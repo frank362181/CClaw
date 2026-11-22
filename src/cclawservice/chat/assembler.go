@@ -8,6 +8,7 @@ package chat
 import (
 	"context"
 
+	chatCommon "my.favorite/cclawservice/chat/common"
 	"my.favorite/cclawservice/common/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
@@ -23,12 +24,12 @@ var assembler = pCommon.GetSingleton(func() *Assembler {
 	return &Assembler{}
 }).Instance()
 
-func GetAssembler(memory *ctxmgr.MemoryService) IContextAssembler {
+func GetAssembler(memory *ctxmgr.MemoryService) chatCommon.IContextAssembler {
 	assembler.memory = memory
 	return assembler
 }
 
-func (a *Assembler) Assemble(_ context.Context, turnState *TurnState, userMsg string) (Assembled, error) {
+func (a *Assembler) Assemble(_ context.Context, turnState *chatCommon.TurnState, userMsg string) (chatCommon.Assembled, error) {
 	var historicalRecords []ctxmgr.MemoryRecord
 
 	// 未记账/无历史文件的直接跳过读磁盘
@@ -50,7 +51,7 @@ func (a *Assembler) Assemble(_ context.Context, turnState *TurnState, userMsg st
 
 	result := ctxmgr.AssembleContext(turnState.SystemPrompt.Prompt, historicalRecords, userMsg, turnCtx, turnState.Policy)
 
-	return Assembled{
+	return chatCommon.Assembled{
 		Messages:       result.Messages,
 		AssembleResult: result,
 		Records:        ToChatRecords(historicalRecords),

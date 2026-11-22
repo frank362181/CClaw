@@ -15,11 +15,12 @@ import (
 	"encoding/json"
 	"strings"
 
+	chatCommon "my.favorite/cclawservice/chat/common"
 	pCommon "my.favorite/platformutility/common"
 )
 
 // 获取业务参数
-func negotiateParams(spec INegotiationSpec) (map[string]any, []string) {
+func negotiateParams(spec chatCommon.INegotiationSpec) (map[string]any, []string) {
 	if spec == nil {
 		return nil, nil
 	}
@@ -39,7 +40,7 @@ func negotiateParams(spec INegotiationSpec) (map[string]any, []string) {
 	return properties, required
 }
 
-func negotiateGuard(spec INegotiationSpec) string {
+func negotiateGuard(spec chatCommon.INegotiationSpec) string {
 	if spec == nil {
 		return pCommon.BlankString
 	}
@@ -47,7 +48,7 @@ func negotiateGuard(spec INegotiationSpec) string {
 	return spec.Guard()
 }
 
-func decodeNegotiationParams(spec INegotiationSpec, raw json.RawMessage) (any, error) {
+func decodeNegotiationParams(spec chatCommon.INegotiationSpec, raw json.RawMessage) (any, error) {
 	if spec == nil || len(raw) == 0 {
 		return nil, nil
 	}

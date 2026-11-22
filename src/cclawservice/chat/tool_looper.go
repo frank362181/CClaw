@@ -9,6 +9,7 @@ package chat
 import (
 	"context"
 
+	chatCommon "my.favorite/cclawservice/chat/common"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/common/llmproto"
 	myException "my.favorite/cclawservice/exception"
@@ -26,18 +27,18 @@ import (
 //
 // 变体全部外置依赖:LlmGateway(同步/异步)、ToolExecutor(串行/并行)、Sink(空/SSE)
 type ToolLoop struct {
-	transport ITransportClient
+	transport chatCommon.ITransportClient
 
 	toolExecutor toolexecutor.IToolRoundExecutor
-	assembler    IContextAssembler //上下文组装器
+	assembler    chatCommon.IContextAssembler //上下文组装器
 
-	loopGuardFn func() ILoopGuard
+	loopGuardFn func() chatCommon.ILoopGuard
 
 	maxRounds          int
 	maxToolResultRunes int //工具调用结果回填给模型的最大runes上限
 }
 
-func NewToolLoop(transport ITransportClient, asm IContextAssembler, streaming bool) *ToolLoop {
+func NewToolLoop(transport chatCommon.ITransportClient, asm chatCommon.IContextAssembler, streaming bool) *ToolLoop {
 	var exec toolexecutor.IToolRoundExecutor
 	if streaming {
 		//并行
@@ -51,14 +52,14 @@ func NewToolLoop(transport ITransportClient, asm IContextAssembler, streaming bo
 		transport:          transport,
 		toolExecutor:       exec,
 		assembler:          asm,
-		loopGuardFn:        func() ILoopGuard { return security.NewTurnLoopGuard() },
+		loopGuardFn:        func() chatCommon.ILoopGuard { return security.NewTurnLoopGuard() },
 		maxRounds:          hCommon.AgentToolLoopMax,
 		maxToolResultRunes: ctxmgr.TurnToolResultMaxRunes,
 	}
 }
 
 // Run 执行本轮工具调用;模型不再请求工具时返回结果
-func (l *ToolLoop) Run(ctx context.Context, st *TurnState, sink cCommon.ISink, rules toolexecutor.ToolConfigRules) (llmproto.LlmReply, error) {
+func (l *ToolLoop) Run(ctx context.Context, st *chatCommon.TurnState, sink cCommon.ISink, rules toolexecutor.ToolConfigRules) (llmproto.LlmReply, error) {
 	if sink == nil {
 		sink = cCommon.NopSink{}
 	}
@@ -134,7 +135,7 @@ func (l *ToolLoop) Run(ctx context.Context, st *TurnState, sink cCommon.ISink, r
 }
 
 // ================================= private  functions & methods ===============================
-func (l *ToolLoop) invoke(ctx context.Context, st *TurnState, tools []llmproto.Tool, choice string, ob cCommon.IStreamObserver) (llmproto.LlmReply, error) {
+func (l *ToolLoop) invoke(ctx context.Context, st *chatCommon.TurnState, tools []llmproto.Tool, choice string, ob cCommon.IStreamObserver) (llmproto.LlmReply, error) {
 	req := st.Request(tools, choice)
 
 	// 预算贴合:工具结果不断回填会持续挤压窗口,长工具链必须随时裁掉最老的历史
@@ -170,4 +171,4 @@ func (l *ToolLoop) invoke(ctx context.Context, st *TurnState, tools []llmproto.T
 	return reply, nil
 }
 
-var _ IToolLooper = (*ToolLoop)(nil)
+var _ chatCommon.IToolLooper = (*ToolLoop)(nil)

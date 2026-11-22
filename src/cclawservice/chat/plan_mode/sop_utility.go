@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	chatCommon "my.favorite/cclawservice/chat/common"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/common/hash"
 )
@@ -69,24 +70,27 @@ func IsTerminal(status string) bool {
 	}
 }
 
-func GetSOPChatResultSummary(result PlanResult) string {
+// GetSOPChatResultSummary 面向用户的执行摘要
+// 分母"计划任务总数"而不是"已进 TaskStates的数量"
+// 否则波次中断会把共N步报成只执行 n 步
+func GetSOPChatResultSummary(result PlanResult, total int) string {
 	if result.State == nil {
 		return pCommon.BlankString
 	}
 
-	succeeded, failed := 0, 0
-	for _, state := range result.State.TaskStates {
-		switch state.Status {
-		case StatusSucceeded:
-			succeeded++
-		case StatusFailed, StatusTimeout:
-			failed++
-		}
+	count := make(map[string]int, 8)
+	for _, st := range result.State.TaskStates {
+		count[st.Status]++
 	}
-
-	lines := make([]string, 0, 4)
-	lines = append(lines, fmt.Sprintf("已执行 %d 个步骤(成功 %d,失败 %d)。", len(result.State.TaskStates), succeeded, failed))
-
+	lines := make([]string, 0, 6)
+	lines = append(lines, fmt.Sprintf("计划 %d 个步骤(成功 %d,失败 %d,阻塞 %d,跳过 %d,取消 %d)。",
+		total,
+		count[StatusSucceeded],
+		count[StatusFailed]+count[StatusTimeout],
+		count[StatusBlocked],
+		count[StatusSkipped],
+		count[StatusCanceled],
+	))
 	if names := result.State.SortedArtifacts(); len(names) > 0 {
 		lines = append(lines, "产出:"+strings.Join(names, "、"))
 	}
@@ -103,4 +107,23 @@ func GetSOPChatResultSummary(result PlanResult) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func SpecFieldsChanged(before, after chatCommon.Spec) bool {
+	if before == nil || after == nil {
+		return (before == nil) != (after == nil)
+	}
+
+	beforeFields, afterFields := before.Fields(), after.Fields()
+	if len(beforeFields) != len(afterFields) {
+		return true
+	}
+
+	for key, value := range beforeFields {
+		if afterFields[key] != value {
+			return true
+		}
+	}
+
+	return false
 }

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	chatCommon "my.favorite/cclawservice/chat/common"
 	"my.favorite/cclawservice/common/llmproto"
 	myException "my.favorite/cclawservice/exception"
 	hCommon "my.favorite/cclawservice/harness/common"
@@ -49,7 +50,7 @@ var chatPreparer = pCommon.GetSingleton(func() *Preparer {
 	}
 }).Instance()
 
-func GetChatPreparer(agentRepo *repo.AgentRepository, functionCalling bool, classifier hCommon.ClassifyAgent) ITurnPreparer {
+func GetChatPreparer(agentRepo *repo.AgentRepository, functionCalling bool, classifier hCommon.ClassifyAgent) chatCommon.ITurnPreparer {
 	if agentRepo == nil {
 		panic("GetChatPreparer called with nil agentRepo or router")
 	}
@@ -63,14 +64,14 @@ func GetChatPreparer(agentRepo *repo.AgentRepository, functionCalling bool, clas
 	return chatPreparer
 }
 
-func (p *Preparer) Prepare(ctx context.Context, cmd Command) (*TurnState, error) {
+func (p *Preparer) Prepare(ctx context.Context, cmd chatCommon.Command) (*chatCommon.TurnState, error) {
 	t0 := pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().MilliTimestamp
 	agent, err := p.agentRouter.Resolve(ctx, cmd.ComCode, cmd.SessionId, cmd.Message, cmd.AgentID, p.classifier)
 	if err != nil {
 		return nil, err
 	}
 
-	turn, err := p.PrepareFor(ctx, cmd, agent, TurnRoleRoot)
+	turn, err := p.PrepareFor(ctx, cmd, agent, chatCommon.TurnRoleRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -83,11 +84,11 @@ func (p *Preparer) Prepare(ctx context.Context, cmd Command) (*TurnState, error)
 
 // PrepareFor 根据制定的agent构造TurnState(不走路由)
 // worker/evaluator的目标agent由引擎决定,不能再路由一次
-func (p *Preparer) PrepareFor(ctx context.Context, cmd Command, agent dataobject.TAgent, turnRole TurnRole) (*TurnState, error) {
+func (p *Preparer) PrepareFor(ctx context.Context, cmd chatCommon.Command, agent dataobject.TAgent, turnRole chatCommon.TurnRole) (*chatCommon.TurnState, error) {
 	_ = ctx
 	_ = turnRole
 
-	timing := &TurnTiming{}
+	timing := &chatCommon.TurnTiming{}
 
 	// provider
 	llmProvider, err := p.resolveProvider(cmd.ComCode, agent)
@@ -111,7 +112,7 @@ func (p *Preparer) PrepareFor(ctx context.Context, cmd Command, agent dataobject
 	}
 
 	visible := bundle.VisibleTools(gate)
-	var tTool IRoundTool
+	var tTool chatCommon.IRoundTool
 	if p.functionCalling {
 		tTool = NewRoundToolAdapter(BuildFirstRoundTool(visible, gate.ForcedTools, GetLlmProviderThinking(llmProvider)),
 			fmt.Sprintf("agent=%s,turn=%s", agent.AgentId, cmd.TurnID))
@@ -128,10 +129,10 @@ func (p *Preparer) PrepareFor(ctx context.Context, cmd Command, agent dataobject
 
 	workRoot, _ := hCommon.BuildAgentBootstrapRoot(agent)
 
-	return &TurnState{
+	return &chatCommon.TurnState{
 		Cmd:           cmd,
 		Agent:         agent,
-		Provider:      Provider{Llm: llmProvider},
+		Provider:      chatCommon.Provider{Llm: llmProvider},
 		SystemPrompt:  *sysPrompt,
 		VisibleTools:  visible,
 		TurnTool:      tTool,
@@ -217,4 +218,4 @@ func (p *Preparer) warnPolicyIssues(agent dataobject.TAgent, llmProvider dataobj
 	p.warned.Store(agent.AgentId, struct{}{})
 }
 
-var _ ITurnPreparer = (*Preparer)(nil)
+var _ chatCommon.ITurnPreparer = (*Preparer)(nil)

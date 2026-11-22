@@ -14,16 +14,23 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 
 	"my.favorite/cclawservice/biz/npa"
+	chatCommon "my.favorite/cclawservice/chat/common"
 	"my.favorite/cclawservice/chat/plan_mode"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging"
+)
+
+const (
+	// 单条 gap 明细的落库长度上限,
+	planGapDetailMaxRunes = 1024
 )
 
 type OrchestratorStorage struct {
@@ -76,7 +83,7 @@ func (o *OrchestratorStorage) Load(ctx context.Context, sessionId, turnId string
 	}
 
 	var spec npa.ReportSpec
-	if e := json.Unmarshal([]byte(plan.SpecJson), &spec); e != nil {
+	if e := pCommon.UnmarshalJson(plan.SpecJson, &spec); e != nil {
 		logging.LogWarnF("orchestrator storage:broken spec_json,turn=%s,error=%s", turnId, e.Error())
 		return nil, nil
 	}
@@ -106,11 +113,17 @@ func (o *OrchestratorStorage) Load(ctx context.Context, sessionId, turnId string
 	for _, artifact := range artifacts {
 		fields := make(map[string]string, 4)
 		if artifact.FieldsJson != pCommon.BlankString {
-			if e := json.Unmarshal([]byte(artifact.FieldsJson), &fields); e != nil {
+			if e := pCommon.UnmarshalJson(artifact.FieldsJson, &fields); e != nil {
 				logging.LogWarnF("orchestrator storage:broken fields_json,turn=%s,name=%s,error=%s",
 					turnId, artifact.Name, e.Error())
 				fields = make(map[string]string, 1)
 			}
+		}
+
+		content := pCommon.BlankString
+		if value, hit := fields[plan_mode.ArtifactContentField]; hit {
+			content = value
+			delete(fields, plan_mode.ArtifactContentField)
 		}
 
 		// 同名多 version:按 version生序覆盖,最终留下最新版本
@@ -118,6 +131,7 @@ func (o *OrchestratorStorage) Load(ctx context.Context, sessionId, turnId string
 			Name:         artifact.Name,
 			ArtifactKind: artifact.Kind,
 			AbsolutePath: artifact.Ref,
+			Context:      content,
 			Digest:       artifact.Digest,
 			Fields:       fields,
 		}
@@ -144,12 +158,13 @@ func (o *OrchestratorStorage) Load(ctx context.Context, sessionId, turnId string
 	return &plan_mode.PlanResumer{
 		PlanDigest: plan.JsonDigest,
 		PlanJson:   plan.PlattenJson,
-		Spec:       spec,
+		SpecJson:   plan.SpecJson,
+		SpecFields: spec.Fields(),
 		State:      state,
 	}, nil
 }
 
-func (o *OrchestratorStorage) SavePlan(ctx context.Context, turnID, sessionID string, plan plan_mode.Plan, spec npa.ReportSpec) error {
+func (o *OrchestratorStorage) SavePlan(ctx context.Context, turnID, sessionID string, plan plan_mode.Plan, spec chatCommon.Spec) error {
 	if !o.Ready() {
 		return nil
 	}
@@ -219,7 +234,7 @@ func (o *OrchestratorStorage) SaveTask(ctx context.Context, turnID string, planT
 		InputDigest: inputDigest,
 		OutputName:  state.Artifact,
 		GatePass:    state.GatePass,
-		Err:         pCommon.TruncateRunes(state.Err, 1024, cCommon.TruncatedMarker),
+		Err:         pCommon.TruncateRunes(state.Err, planGapDetailMaxRunes, cCommon.TruncatedMarker),
 	})
 
 	if err != nil {
@@ -245,7 +260,7 @@ func (o *OrchestratorStorage) SaveGaps(ctx context.Context, turnID string, round
 			TaskId:    gap.TaskID,
 			Section:   gap.Section,
 			Severity:  gap.Severity.String(),
-			Detail:    pCommon.TruncateRunes(gap.Detail, 1, cCommon.TruncatedMarker),
+			Detail:    pCommon.TruncateRunes(gap.Detail, planGapDetailMaxRunes, cCommon.TruncatedMarker),
 			CreatedAt: now,
 		})
 	}
@@ -263,13 +278,43 @@ func (o *OrchestratorStorage) SaveArtifact(ctx context.Context, turnID string, a
 		return nil
 	}
 
-	fieldsJson := pCommon.BlankString
-	if len(artifact.Fields) > 0 {
-		if data, err := json.Marshal(artifact.Fields); err != nil {
-			fieldsJson = string(data)
+	ref := artifact.AbsolutePath
+	size := int64(0)
+	fields := make(map[string]string, len(artifact.Fields)+1)
+	for key, value := range artifact.Fields {
+		fields[key] = value
+	}
+
+	if artifact.ArtifactKind == plan_mode.ArtifactKindText {
+		ref = pCommon.BlankString
+		size = int64(len(artifact.Context))
+		if artifact.Context != pCommon.BlankString {
+			fields[plan_mode.ArtifactContentField] = artifact.Context
+		}
+	} else if artifact.AbsolutePath != pCommon.BlankString {
+
+		info, statErr := os.Stat(artifact.AbsolutePath)
+		switch {
+		case statErr != nil:
+			logging.LogWarnF("orchestrator storage:stat artifact failed,turn=%s,name=%s,path=%s,error=%s",
+				turnID, artifact.Name, artifact.AbsolutePath, statErr.Error())
+		case info.IsDir():
+			logging.LogWarnF("orchestrator storage:artifact path is a directory,turn=%s,name=%s,path=%s",
+				turnID, artifact.Name, artifact.AbsolutePath)
+		default:
+			size = info.Size()
 		}
 	}
 
+	fieldsJson := pCommon.BlankString
+	if len(fields) > 0 {
+		if data, err := pCommon.MarshalJson(fields); err == nil {
+			fieldsJson = data
+		} else {
+			logging.LogWarnF("orchestrator storage:marshal artifact fields failed,turn=%s,name=%s,error=%s",
+				turnID, artifact.Name, err.Error())
+		}
+	}
 	for attempt := 0; attempt < 2; attempt++ {
 		nextVer, err := o.nextVersion(turnID, artifact.Name, attempt > 0)
 		if err != nil {
@@ -283,9 +328,9 @@ func (o *OrchestratorStorage) SaveArtifact(ctx context.Context, turnID string, a
 			Name:       artifact.Name,
 			Rev:        nextVer,
 			Kind:       artifact.ArtifactKind,
-			Ref:        artifact.AbsolutePath,
+			Ref:        ref,
 			Digest:     artifact.Digest,
-			Size:       int64(len(artifact.AbsolutePath)),
+			Size:       size,
 			FieldsJson: fieldsJson,
 			CreatedAt:  pCommon.GetDatetimeUtilityInstance().GetNow().Unix(),
 		}})

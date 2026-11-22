@@ -48,7 +48,11 @@ func (r *ArtifactMgr) Put(a Artifact) {
 	}
 
 	if a.Digest == pCommon.BlankString {
-		a.Digest, _ = hash.SHA256(a.AbsolutePath)
+		payload := a.AbsolutePath
+		if a.Context != pCommon.BlankString {
+			payload = a.Context
+		}
+		a.Digest, _ = hash.SHA256(payload)
 	}
 
 	r.lock.Lock()
@@ -87,7 +91,19 @@ func (r *ArtifactMgr) RenderArg(template string) (string, error) {
 		}
 
 		switch field {
-		case "text", "path", "ref":
+		case "text":
+			// 文本类产物优先取content;文件类回退到路径
+			if artifact.Context != pCommon.BlankString {
+				return artifact.Context
+			}
+
+			if artifact.AbsolutePath == pCommon.BlankString {
+				resolveErr = fmt.Errorf("artifact resolve:text of artifact %s is empty", name)
+				return s
+			}
+
+			return artifact.AbsolutePath
+		case "path", "ref":
 			if artifact.AbsolutePath == pCommon.BlankString {
 				resolveErr = fmt.Errorf("artifact resolve:ref %s of artifact %s is nil", field, name)
 				return s

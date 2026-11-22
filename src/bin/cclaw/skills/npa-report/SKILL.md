@@ -36,7 +36,6 @@ requires:
 schema:
   materials: [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".jpg", ".jpeg", ".png", ".tif", ".tiff"]
   report_kind: ["不良资产尽职调查报告"]
-  archive_no_required: false
 tools:
   - name: npa_ingest
     description: 解析指定目录(可含子目录)或单文件中的 pdf/jpg/jpeg/png/word/excel 等为“按页内容”JSON，并把结果保存为 <bin>/temp/runs/<run_id>/parsed_context.json（同目录另有 manifest.json 材料清单）。返回每文件 {file,type,context,metadata} 与 result_file(已存文件路径)；summary.files_need_ocr 标注无可提取文本、疑为扫描件/图片的文件(需对其单独 ocr:true 补读)。注意成本：整目录 ingest ≈ 1 轮 + 数十秒 + 大上下文，能省则省——大目录请 emit_stdout:false 只回执落盘与概要，需要正文再按文件/子目录小批量回读；整目录只 ingest 一次，不要反复重读。产物按运行隔离：本轮结果落在 <bin>/temp/runs/<run_id>/（parsed_context.json + manifest.json 材料清单），result_file.path / manifest_file 直接用它；summary.files_skipped_generated 列出被跳过的历史报告，summary.pruned_runs 列出被保留策略清理的旧轮次（keep_runs 默认保留最近 20 轮）。超大/超长输出可用 max_pages_per_file、max_chars_per_page、max_chars_per_file 限流，context_style=text 可整段拼接更省上下文。默认**不把本技能自己生成的报告当材料**：路径下的 *.md 与 reports/ 目录会被跳过（见 summary.files_skipped_generated），确需把 markdown 当材料时传 include_markdown:true。

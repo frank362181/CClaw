@@ -8,6 +8,7 @@ package chat
 import (
 	"context"
 
+	chatCommon "my.favorite/cclawservice/chat/common"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
 	pCommon "my.favorite/platformutility/common"
@@ -19,11 +20,11 @@ var chatTurnRegistrator = pCommon.GetSingleton(func() *TurnRegistrator {
 	return &TurnRegistrator{}
 }).Instance()
 
-func GetChatTurnRegistrator() ITurnRegistrator {
+func GetChatTurnRegistrator() chatCommon.ITurnRegistrator {
 	return chatTurnRegistrator
 }
 
-func (TurnRegistrator) Register(ctx context.Context, cmd Command) (context.Context, func()) {
+func (TurnRegistrator) Register(ctx context.Context, cmd chatCommon.Command) (context.Context, func()) {
 	runCtx, cancel := context.WithCancel(ctx)
 	key := ctxmgr.BuildTurnStreamKey(cmd.Sender, cCommon.NormalizeCompactId(cmd.TurnID))
 

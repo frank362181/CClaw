@@ -194,7 +194,7 @@ func (db *OrchestratorAccessor) AppendGaps(gaps []dataobject.TPlanGap) error {
 func (db *OrchestratorAccessor) ListGaps(turnId string) ([]*dataobject.TPlanGap, error) {
 	list := make([]*dataobject.TPlanGap, 0, 16)
 
-	err := db.gormDb.Where("turn_id = ?", turnId).Order("id ASX").Find(&list).Error
+	err := db.gormDb.Where("turn_id = ?", turnId).Order("id ASC").Find(&list).Error
 	if err != nil {
 		return nil, exception2.DatabaseExecErrEx2("OrchestratorAccess:list gaps error:%s", err.Error())
 	}
@@ -228,7 +228,7 @@ func (db *OrchestratorAccessor) GetNewestArtifact(turnId, name string) (int, err
 	var maxVersion int
 	row := db.gormDb.Model(&dataobject.TArtifact{}).
 		Where("turn_id = ? AND name = ?", turnId, name).
-		Select("COALESCE(MAX(rev),0").Row()
+		Select("COALESCE(MAX(rev),0) AS max_rev").Row()
 	if err := row.Scan(&maxVersion); err != nil {
 		return 0, exception2.DatabaseExecErrEx2("OrchestratorAccessor:GetNewestArtifact error:%s", err.Error())
 	}

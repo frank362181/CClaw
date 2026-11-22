@@ -8,7 +8,7 @@
 * 与 model.go 的分工:model.go 描述 LLM 厂家协议,本文件描述本进程内的业务契约。
 **/
 
-package chat
+package common
 
 import (
 	"context"

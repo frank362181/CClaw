@@ -7,7 +7,7 @@ package plan_mode
 import (
 	"time"
 
-	"my.favorite/cclawservice/biz/npa"
+	chatCommon "my.favorite/cclawservice/chat/common"
 	cCommon "my.favorite/cclawservice/common"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/toolexecutor"
@@ -25,6 +25,8 @@ type NegotiationInput struct {
 	SkillID  string
 	SkillDoc hCommon.SkillDocument
 
+	NegSpec chatCommon.INegotiationSpec // 由service层注入
+
 	Sink  cCommon.ISink
 	Rules toolexecutor.ToolConfigRules
 }
@@ -36,7 +38,7 @@ type NegotiationInput struct {
 //	两者都是false -> 未进入 / 不适用 / 协商失败,调用方落回单轮直聊
 type NegotiationOutput struct {
 	Ready bool
-	Spec  npa.ReportSpec
+	Spec  chatCommon.Spec
 
 	End    bool   //表示协商是否终结
 	Answer string // End = true 时作为本轮正文
@@ -50,7 +52,7 @@ type PlanModeEngineInput struct {
 	SessionID string
 
 	Plan Plan
-	Spec npa.ReportSpec
+	Spec chatCommon.Spec
 
 	Sink cCommon.ISink
 	Tool ISopToolInvoker // 由service层的NewSOPTurnToolInvoker创建注入

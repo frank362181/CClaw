@@ -14,9 +14,28 @@ import (
 	"strings"
 
 	"my.favorite/cclawservice/biz/npa"
+	chatCommon "my.favorite/cclawservice/chat/common"
 	"my.favorite/cclawservice/chat/plan_mode"
+	"my.favorite/cclawservice/config"
+	hCommon "my.favorite/cclawservice/harness/common"
 	pCommon "my.favorite/platformutility/common"
 )
+
+// TypeName 定义业务的名称
+type TypeName string
+
+const (
+	TypeNameNPA TypeName = "nap-report"
+)
+
+func GetNegotiationSpec(skillId string, fm hCommon.SkillFrontMatter, chattingConfig config.ChatConfig) chatCommon.INegotiationSpec {
+	switch strings.ToLower(strings.TrimSpace(skillId)) {
+	case string(TypeNameNPA):
+		return npa.NewNPANegotiationSpec(fm, chattingConfig.Negotiation.ProjectDir)
+	default:
+		return nil
+	}
+}
 
 // RegistryNPABuiltin 将NPA业务注册进harness
 func RegistryNPABuiltin(extractors *plan_mode.Extractors, barriers *plan_mode.BarrierRepository) {
@@ -71,7 +90,7 @@ func npaBarrie(barrie func(fields map[string]string) []npa.Finding) plan_mode.Ba
 				Code:     strings.TrimSpace(finding.Code),
 				TaskID:   in.Task.ID,
 				Section:  in.Task.Section,
-				Detail:   plan_mode.StatusBlocked,
+				Detail:   finding.Detail,
 				Severity: severity,
 			})
 		}

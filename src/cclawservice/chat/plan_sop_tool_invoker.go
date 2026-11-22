@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	chatCommon "my.favorite/cclawservice/chat/common"
 	"my.favorite/cclawservice/chat/plan_mode"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/common/llmproto"
@@ -23,7 +24,7 @@ const (
 )
 
 type SopTurnToolInvoker struct {
-	root         *TurnState
+	root         *chatCommon.TurnState
 	sink         cCommon.ISink
 	rules        toolexecutor.ToolConfigRules
 	toolExecutor toolexecutor.IToolRoundExecutor
@@ -32,7 +33,7 @@ type SopTurnToolInvoker struct {
 
 var _ plan_mode.ISopToolInvoker = (*SopTurnToolInvoker)(nil)
 
-func NewSOPTurnToolInvoker(root *TurnState, sink cCommon.ISink, rules toolexecutor.ToolConfigRules) *SopTurnToolInvoker {
+func NewSOPTurnToolInvoker(root *chatCommon.TurnState, sink cCommon.ISink, rules toolexecutor.ToolConfigRules) *SopTurnToolInvoker {
 	if sink == nil {
 		sink = cCommon.NopSink{}
 	}

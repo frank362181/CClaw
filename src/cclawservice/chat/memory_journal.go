@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	chatCommon "my.favorite/cclawservice/chat/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
@@ -52,7 +53,7 @@ var memoryJournal = pCommon.GetSingleton(func() *MemoryJournal {
 	return &MemoryJournal{}
 }).Instance()
 
-func GetMemoryJournal(memory *ctxmgr.MemoryService) IMemoryJournal {
+func GetMemoryJournal(memory *ctxmgr.MemoryService) chatCommon.IMemoryJournal {
 	if memory == nil {
 		panic("memory service is nil")
 	}
@@ -63,10 +64,10 @@ func GetMemoryJournal(memory *ctxmgr.MemoryService) IMemoryJournal {
 	return memoryJournal
 }
 
-func (j *MemoryJournal) Begin(_ context.Context, turnState *TurnState) (Session, error) {
+func (j *MemoryJournal) Begin(_ context.Context, turnState *chatCommon.TurnState) (chatCommon.Session, error) {
 	sess, recorded, err := j.memory.Begin(turnState.Cmd.Sender, turnState.Agent, ToChatRequest(turnState.Cmd))
 
-	session := Session{
+	session := chatCommon.Session{
 		ID:         pCommon.FirstNotBlank(sess.SessionId, turnState.Cmd.SessionId),
 		AgentID:    pCommon.FirstNotBlank(sess.AgentId, turnState.Cmd.AgentID),
 		Sender:     pCommon.FirstNotBlank(sess.Sender, turnState.Cmd.Sender),
@@ -89,7 +90,7 @@ func (j *MemoryJournal) Begin(_ context.Context, turnState *TurnState) (Session,
 	return session, err
 }
 
-func (j *MemoryJournal) Finish(_ context.Context, turnState *TurnState, context string) int {
+func (j *MemoryJournal) Finish(_ context.Context, turnState *chatCommon.TurnState, context string) int {
 	return j.memory.AppendTurn(
 		ToTSession(turnState.Session),
 		ToChatRequest(turnState.Cmd),
@@ -98,7 +99,7 @@ func (j *MemoryJournal) Finish(_ context.Context, turnState *TurnState, context 
 	)
 }
 
-func (j *MemoryJournal) FinishPartial(_ context.Context, turnState *TurnState, partial string, reason dataobject.InterruptReason) int {
+func (j *MemoryJournal) FinishPartial(_ context.Context, turnState *chatCommon.TurnState, partial string, reason dataobject.InterruptReason) int {
 	return j.memory.AppendInterruptedTurn(ToTSession(turnState.Session),
 		ToChatRequest(turnState.Cmd),
 		partial,

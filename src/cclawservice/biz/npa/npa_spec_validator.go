@@ -23,9 +23,8 @@ import (
 )
 
 type SpecSchema struct {
-	Materials         []string `json:"materials" yaml:"materials"`                 // 受认可的材料类型
-	ReportKind        []string `json:"reportKind" yaml:"reportKind"`               // 受认可的报告类型
-	ArchiveNoRequired bool     `json:"archiveNoRequired" yaml:"archiveNoRequired"` // 档案号是否必须
+	Materials  []string `json:"materials" yaml:"materials"`   // 受认可的材料类型
+	ReportKind []string `json:"reportKind" yaml:"reportKind"` // 受认可的报告类型
 }
 
 func NormalizeReportSpec(spec ReportSpec, fm hCommon.SkillFrontMatter) ReportSpec {
@@ -65,36 +64,6 @@ func ValidateReportSpec(spec ReportSpec, fm hCommon.SkillFrontMatter) []SpecIssu
 	return issues
 }
 
-// FormatSpecIssues  回灌给模型的校验错误文本
-func FormatSpecIssues(issues []SpecIssue) string {
-	if len(issues) == 0 {
-		return pCommon.BlankString
-	}
-
-	lines := make([]string, 0, len(issues)+2)
-	lines = append(lines, "spec 校验失败:")
-	for _, issue := range issues {
-		lines = append(lines, " -"+issue.String())
-	}
-	lines = append(lines, "请用 fs_list 确认后重新表态;若用户尚未提供材料位置,改用need_more_info 说明缺什么。")
-
-	return strings.Join(lines, "\n")
-}
-
-// FormatSpecIssuesForUser 校验错误信息 -> 给用户的说明
-func FormatSpecIssuesForUser(issues []SpecIssue) string {
-	if len(issues) == 0 {
-		return pCommon.BlankString
-	}
-
-	lines := make([]string, 0, len(issues)+1)
-	lines = append(lines, "需要补充以下信息才能开始:")
-	for _, issue := range issues {
-		lines = append(lines, ". "+issue.String())
-	}
-	return strings.Join(lines, "\n")
-}
-
 // WalkMaterial 供测试/调试使用
 func WalkMaterial(dir string, materials []string, limit int) []string {
 	found := make([]string, 0, limit)
@@ -132,9 +101,8 @@ func parseSpecSchema(raw any) SpecSchema {
 	}
 
 	return SpecSchema{
-		Materials:         specSchemaStringList(blocks["materials"]), // materials字段来自SKILL.md
-		ReportKind:        specSchemaStringList(blocks["report_kind"]),
-		ArchiveNoRequired: specSchemaBool(blocks["archive_no_required"]),
+		Materials:  specSchemaStringList(blocks["materials"]), // materials字段来自SKILL.md
+		ReportKind: specSchemaStringList(blocks["report_kind"]),
 	}
 }
 
@@ -245,13 +213,9 @@ func validateProjectDir(dir string, skillSchema SpecSchema) []SpecIssue {
 	return nil
 }
 
-func validateArchiveNo(archiveNo string, skillSchema SpecSchema) []SpecIssue {
-	if archiveNo == pCommon.BlankString {
-		if !skillSchema.ArchiveNoRequired {
-			return nil
-		}
-
-		return []SpecIssue{{Field: SpecFieldArchiveNo, Detail: "未提供档案号"}}
+func validateArchiveNo(archiveNo string, _ SpecSchema) []SpecIssue {
+	if strings.TrimSpace(archiveNo) == pCommon.BlankString {
+		return nil
 	}
 
 	if !archiveNoPattern.MatchString(archiveNo) {

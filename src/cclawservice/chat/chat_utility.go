@@ -4,6 +4,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	chatCommon "my.favorite/cclawservice/chat/common"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/common/llmproto"
 	"my.favorite/cclawservice/harness/ctxmgr"
@@ -15,7 +16,7 @@ import (
 	pException "my.favorite/platformutility/exception"
 )
 
-func NewCommand(comCode, sender string, chatReq *request.ChatRequest) (*Command, error) {
+func NewCommand(comCode, sender string, chatReq *request.ChatRequest) (*chatCommon.Command, error) {
 	msg := strings.TrimSpace(chatReq.ReqMsg)
 	if len(msg) == 0 {
 		return nil, pException.ParameterEmptyErrorEx("chatting message is empty")
@@ -52,7 +53,7 @@ func NewCommand(comCode, sender string, chatReq *request.ChatRequest) (*Command,
 		channel = cCommon.ChatChannelWeb
 	}
 
-	return &Command{
+	return &chatCommon.Command{
 		Sender: sender, ComCode: comCode,
 		SessionId: sessionId, TurnID: turnId,
 		Message: msg,
@@ -61,15 +62,15 @@ func NewCommand(comCode, sender string, chatReq *request.ChatRequest) (*Command,
 }
 
 // ToChatRecords 将记忆文件读取出来的MemoryRecord翻译成Record,用在装配时使用
-func ToChatRecords(memoryRecord []ctxmgr.MemoryRecord) []Record {
+func ToChatRecords(memoryRecord []ctxmgr.MemoryRecord) []chatCommon.Record {
 	if len(memoryRecord) == 0 {
 		return nil
 	}
 
-	out := make([]Record, len(memoryRecord)) // 按长度分配而非append;顺序即下标,0增长
+	out := make([]chatCommon.Record, len(memoryRecord)) // 按长度分配而非append;顺序即下标,0增长
 	for i := range memoryRecord {
 		r := memoryRecord[i]
-		out[i] = Record{
+		out[i] = chatCommon.Record{
 			Index:      r.Index,
 			Kind:       r.RecordType,
 			Title:      r.Title,
@@ -84,7 +85,7 @@ func ToChatRecords(memoryRecord []ctxmgr.MemoryRecord) []Record {
 }
 
 // ToMemoryRecords ToChatRecords的反向操作
-func ToMemoryRecords(records []Record) []ctxmgr.MemoryRecord {
+func ToMemoryRecords(records []chatCommon.Record) []ctxmgr.MemoryRecord {
 	if len(records) == 0 {
 		return nil
 	}
@@ -105,7 +106,7 @@ func ToMemoryRecords(records []Record) []ctxmgr.MemoryRecord {
 	return out
 }
 
-func ToTSession(s Session) dataobject.TSession {
+func ToTSession(s chatCommon.Session) dataobject.TSession {
 	return dataobject.TSession{
 		SessionId: s.ID,
 		AgentId:   s.AgentID,
@@ -114,11 +115,11 @@ func ToTSession(s Session) dataobject.TSession {
 	}
 }
 
-func ToTSessionPtr(s Session) *dataobject.TSession {
+func ToTSessionPtr(s chatCommon.Session) *dataobject.TSession {
 	return new(ToTSession(s))
 }
 
-func ToChatRequest(cmd Command) *request.ChatRequest {
+func ToChatRequest(cmd chatCommon.Command) *request.ChatRequest {
 	return &request.ChatRequest{
 		SenderId:    cmd.Sender,
 		SessionId:   cmd.SessionId,
@@ -149,7 +150,7 @@ func BindToolInvocation(calls []llmproto.ToolCall, seq *seqSink) []toolexecutor.
 	return out
 }
 
-func ToTurnTiming(t *TurnTiming) observatory.TurnTiming {
+func ToTurnTiming(t *chatCommon.TurnTiming) observatory.TurnTiming {
 	if t == nil {
 		return observatory.TurnTiming{}
 	}

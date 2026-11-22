@@ -25,7 +25,13 @@ func extractToolPath(spec ToolSpec, input map[string]any) []string {
 			continue
 		}
 
-		out = append(out, s)
+		// 一个参数可能承载多个路径:脚本约定用逗号连接
+		// 必须逐个校验,否则 /a,/b 会被当成一个不存在路径而看似不通
+		for _, part := range pCommon.SplitStringEx(s, ",") {
+			if item := strings.TrimSpace(part); item != pCommon.BlankString {
+				out = append(out, item)
+			}
+		}
 	}
 
 	if len(out) == 0 {

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	chatCommon "my.favorite/cclawservice/chat/common"
 	"my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/common/llmproto"
 	"my.favorite/cclawservice/exception"
@@ -76,7 +77,7 @@ type TransportClient struct {
 	retryPolicy RetryPolicy
 }
 
-func NewTransportClient(responseTimeout int) ITransportClient {
+func NewTransportClient(responseTimeout int) chatCommon.ITransportClient {
 	if responseTimeout <= 0 {
 		responseTimeout = hCommon.NonStreamResponseTimeout
 	}
@@ -95,31 +96,31 @@ func NewTransportClient(responseTimeout int) ITransportClient {
 
 // SimpleComplete 在多agent、多skill等场景下,专门用来支持通过LLM来实现选取合适的agent或skill
 func (t *TransportClient) SimpleComplete(ctx context.Context, llm dataobject.TLlm, system, user string, maxTokens int) (llmproto.LlmReply, error) {
-	messages := buildSimpleChatMessage(system, user)
-	builtReq := buildChatCompletionRequestWithString(llm, messages, maxTokens, false)
+	messages := chatCommon.BuildSimpleChatMessage(system, user)
+	builtReq := chatCommon.BuildChatCompletionRequestWithString(llm, messages, maxTokens, false)
 
 	reply, err := t.retryAndDegrade(ctx, &builtReq, NewDegrader(), func(ctx context.Context) (llmproto.LlmReply, bool, error) {
-		return t.completeOnce(ctx, Provider{Llm: llm}, builtReq)
+		return t.completeOnce(ctx, chatCommon.Provider{Llm: llm}, builtReq)
 	})
 
 	return reply, err
 }
 
 // Complete non-stream的聊天函数,等待LLM全部完成再返回
-func (t *TransportClient) Complete(ctx context.Context, p Provider, req llmproto.LlmRequest) (llmproto.LlmReply, error) {
-	builtReq := buildChatCompletionRequestWithToolChoice(p, req, false)
+func (t *TransportClient) Complete(ctx context.Context, p chatCommon.Provider, req llmproto.LlmRequest) (llmproto.LlmReply, error) {
+	builtReq := chatCommon.BuildChatCompletionRequestWithToolChoice(p, req, false)
 
 	return t.retryAndDegrade(ctx, &builtReq, NewDegrader(), func(ctx context.Context) (llmproto.LlmReply, bool, error) {
 		return t.completeOnce(ctx, p, builtReq)
 	})
 }
 
-func (t *TransportClient) Stream(ctx context.Context, p Provider, req llmproto.LlmRequest, ob common.IStreamObserver) (llmproto.LlmReply, error) {
+func (t *TransportClient) Stream(ctx context.Context, p chatCommon.Provider, req llmproto.LlmRequest, ob common.IStreamObserver) (llmproto.LlmReply, error) {
 	if ob == nil {
 		ob = common.NopObserver{}
 	}
 
-	builtReq := buildChatCompletionRequestWithToolChoice(p, req, true)
+	builtReq := chatCommon.BuildChatCompletionRequestWithToolChoice(p, req, true)
 
 	return t.retryAndDegrade(ctx, &builtReq, NewDegrader(), func(ctx context.Context) (llmproto.LlmReply, bool, error) {
 		return t.streamOnce(ctx, p, builtReq, ob)
@@ -164,8 +165,8 @@ func (t *TransportClient) retryAndDegrade(ctx context.Context, builtReq *llmprot
 }
 
 // 发出请求并校验状态码,返回的resp由调用方负责close
-func (t *TransportClient) doRequest(ctx context.Context, c *http.Client, p Provider, req llmproto.ChatCompletionRequest) (*http.Response, error) {
-	httpReq, err := buildHttpRequest(ctx, p, req)
+func (t *TransportClient) doRequest(ctx context.Context, c *http.Client, p chatCommon.Provider, req llmproto.ChatCompletionRequest) (*http.Response, error) {
+	httpReq, err := chatCommon.BuildHttpRequest(ctx, p, req)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +190,7 @@ func (t *TransportClient) doRequest(ctx context.Context, c *http.Client, p Provi
 	return resp, nil
 }
 
-func (t *TransportClient) completeOnce(ctx context.Context, p Provider, req llmproto.ChatCompletionRequest) (reply llmproto.LlmReply, emitted bool, outErr error) {
+func (t *TransportClient) completeOnce(ctx context.Context, p chatCommon.Provider, req llmproto.ChatCompletionRequest) (reply llmproto.LlmReply, emitted bool, outErr error) {
 	start := pCommon.GetDatetimeUtilityInstance().GetNow()
 
 	var (
@@ -262,7 +263,7 @@ func (t *TransportClient) completeOnce(ctx context.Context, p Provider, req llmp
 }
 
 // 一次流式调用(不含重试)
-func (t *TransportClient) streamOnce(ctx context.Context, p Provider, req llmproto.ChatCompletionRequest, ob common.IStreamObserver) (reply llmproto.LlmReply, committed bool, outErr error) {
+func (t *TransportClient) streamOnce(ctx context.Context, p chatCommon.Provider, req llmproto.ChatCompletionRequest, ob common.IStreamObserver) (reply llmproto.LlmReply, committed bool, outErr error) {
 	// 空闲超时:上游长时间无任何数据 -> 取消本次流(归类为可重试的传输层错误)
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -382,4 +383,4 @@ func (t *TransportClient) streamOnce(ctx context.Context, p Provider, req llmpro
 }
 
 // 编译器断言,实现接口
-var _ ITransportClient = (*TransportClient)(nil)
+var _ chatCommon.ITransportClient = (*TransportClient)(nil)

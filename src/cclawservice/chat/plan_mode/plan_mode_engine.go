@@ -11,10 +11,11 @@ import (
 	"fmt"
 	"strings"
 
-	"my.favorite/cclawservice/biz/npa"
+	chatCommon "my.favorite/cclawservice/chat/common"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/config"
 	hCommon "my.favorite/cclawservice/harness/common"
+	"my.favorite/cclawservice/harness/toolexecutor"
 	"my.favorite/cclawservice/model/dataobject"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/concurrency"
@@ -75,6 +76,12 @@ func (engine *PlanModeEngine) NegotiateArgument(ctx context.Context, input Negot
 		input.Sink = cCommon.NopSink{}
 	}
 
+	if input.NegSpec == nil {
+		// 无业务规约,该技能不支持plan mode
+		logging.LogWarnF("plan mode:no negotiation spec,skill=%s,turn=%s", input.SkillID, input.TurnID)
+		return NegotiationOutput{}
+	}
+
 	var outcome NegotiationOutput
 	if engine.chatConfig.Chat.Mode == cCommon.PlanModeForce {
 		outcome = engine.forceSpec(ctx, input)
@@ -86,7 +93,17 @@ func (engine *PlanModeEngine) NegotiateArgument(ctx context.Context, input Negot
 		return outcome
 	}
 
-	outcome.Spec.ArchiveNo = engine.getArchiveNo(ctx, input.SessionID, input.TurnID, outcome.Spec.ProjectDir, outcome.Spec.ArchiveNo)
+	persisted := engine.loadSpecFields(ctx, input.SessionID, input.TurnID)
+	ensuedID := input.NegSpec.EnsureID(outcome.Spec, persisted)
+	if SpecFieldsChanged(outcome.Spec, ensuedID) {
+		if issues := input.NegSpec.Validate(ensuedID, input.SkillDoc.FrontMatter); len(issues) > 0 {
+			logging.LogWarnF("plan mode: spec still invalid after system fields filled,"+
+				"turn=%s,skill=%s,issues=%v; Validate must NOT require system-generated fields",
+				input.TurnID, input.SkillID, issues)
+		}
+	}
+
+	outcome.Spec = ensuedID
 	return outcome
 }
 
@@ -121,7 +138,7 @@ func (engine *PlanModeEngine) Run(ctx context.Context, engineInput PlanModeEngin
 	}
 
 	return PlanModeEngineOutput{
-		Answer: GetSOPChatResultSummary(planResult),
+		Answer: GetSOPChatResultSummary(planResult, len(engineInput.Plan.Tasks)),
 		State:  planResult.State,
 		Gaps:   planResult.Gaps,
 		Waves:  planResult.Waves,
@@ -130,7 +147,7 @@ func (engine *PlanModeEngine) Run(ctx context.Context, engineInput PlanModeEngin
 
 // PreviewPlan 把SOP大纲展开成计划,并向用户播报预览
 // 展开失败不会回退为错误,而是降级为单轮(返回 ok = false)
-func (engine *PlanModeEngine) PreviewPlan(turnID, skillID string, doc hCommon.SkillDocument, spec npa.ReportSpec, sink cCommon.ISink) (Plan, bool) {
+func (engine *PlanModeEngine) PreviewPlan(turnID, skillID string, doc hCommon.SkillDocument, spec chatCommon.Spec, sink cCommon.ISink) (Plan, bool) {
 	if sink == nil {
 		sink = cCommon.NopSink{}
 	}
@@ -147,8 +164,7 @@ func (engine *PlanModeEngine) PreviewPlan(turnID, skillID string, doc hCommon.Sk
 
 	// 计划必须对人可见,用户才能判断"是否该跑"
 	sink.OnStatus("plan.preview", fmt.Sprintf(
-		"计划就绪:目录=%s,档案号=%s, %d 个步骤 / %d 个波次 / 预计 %d tokens",
-		spec.ProjectDir, cCommon.FallbackText(spec.ArchiveNo, "(空)"), plan.TaskCount, plan.WaveCount, plan.EstTokens))
+		"计划就绪:%s, %d 个步骤 / %d 个波次 / 预计 %d tokens", spec.Brief(), plan.TaskCount, plan.WaveCount, plan.EstTokens))
 
 	return plan, true
 }
@@ -200,7 +216,7 @@ func (engine *PlanModeEngine) negotiateSpec(ctx context.Context, input Negotiati
 			SOPSteps:  GetSOPStepSummary(input.SkillDoc.FrontMatter.SOPOutLines),
 			WorkRoot:  input.WorkRoot,
 			Rules:     input.Rules,
-			NegSpec:   npa.NewNPANegotiationSpec(input.SkillDoc.FrontMatter),
+			NegSpec:   input.NegSpec, //npa.NewNPANegotiationSpec(input.SkillDoc.FrontMatter),
 			Feedback:  feedback,
 		})
 
@@ -210,21 +226,29 @@ func (engine *PlanModeEngine) negotiateSpec(ctx context.Context, input Negotiati
 
 		switch result.Decision {
 		case DecisionProceed:
-			decoded, ok := result.Arg.(npa.ReportSpec)
+			decoded, ok := input.NegSpec.ToSpec(result.Arg, input.SkillDoc.FrontMatter)
 			if !ok {
 				// proceed 却没有可用参数:按协商失败处理,不要带着空 spec 去建计划
 				logging.LogWarnF("plan mode:proceed without spec,turn=%s,attempt=%d,type=%T", input.TurnID, attempt+1, result.Arg)
 				feedback = "已判定为需要执行,但缺少必要参数;请用 " + IntentionToolStart + " 重新提交。"
 				continue
 			}
-			candidate := npa.NormalizeReportSpec(decoded, input.SkillDoc.FrontMatter)
-			issues := npa.ValidateReportSpec(candidate, input.SkillDoc.FrontMatter)
+			issues := input.NegSpec.Validate(decoded, input.SkillDoc.FrontMatter)
 			if len(issues) == 0 {
+				projectDir := decoded.Fields()["project_dir"]
+				if deniedPath, deniedErr := engine.checkReadPaths(input.NegSpec, decoded, input.Rules, input.WorkRoot); deniedErr != nil {
+					feedback = "材料目录不可用:" + deniedErr.Error() + "\n请向用户确认目录,或改用可访问的路径。"
+					logging.LogWarnF("plan mode: path denied,path=%s,turn=%s,dir=%s,error=%s", deniedPath, input.TurnID, projectDir, deniedErr.Error())
+					continue
+				}
 				engine.reportDecision(ctx, input.TurnID, input.SkillID, string(DecisionProceed), result)
-				return NegotiationOutput{Ready: true, Spec: candidate}
+				return NegotiationOutput{Ready: true, Spec: decoded}
 			}
 
-			feedback = npa.FormatSpecIssues(issues)
+			feedback = input.NegSpec.FormatIssues(issues)
+			if strings.TrimSpace(feedback) == pCommon.BlankString {
+				feedback = "参数不满足要求:" + strings.Join(issues, ",")
+			}
 			logging.LogWarnF("plan mode:spec rejected,turn=%s,attempt=%d,issues=%d", input.TurnID, attempt+1, len(issues))
 			continue
 		case DecisionNeedMoreInfo:
@@ -247,21 +271,18 @@ func (engine *PlanModeEngine) negotiateSpec(ctx context.Context, input Negotiati
 }
 
 func (engine *PlanModeEngine) forceSpec(ctx context.Context, input NegotiationInput) NegotiationOutput {
-	dftProjectDir := engine.chatConfig.Negotiation.ProjectDir
-	candidate := npa.NormalizeReportSpec(npa.ReportSpec{
-		ProjectDir: dftProjectDir,
-		ArchiveNo:  "",
-		ReportKind: npa.DefaultReportKind,
-		OCR:        npa.DefaultOCRMode,
-	}, input.SkillDoc.FrontMatter)
+	candidate, issues := input.NegSpec.Default(input.SkillDoc.FrontMatter)
+	if len(issues) > 0 {
+		reason := input.NegSpec.FormatIssues(issues)
+		engine.reportDecision(ctx, input.TurnID, input.SkillID, string(DecisionValidateFailed), NegotiationResult{Reason: reason})
 
-	if issues := npa.ValidateReportSpec(candidate, input.SkillDoc.FrontMatter); len(issues) > 0 {
-		engine.reportDecision(ctx, input.TurnID, input.SkillID, string(DecisionValidateFailed), NegotiationResult{Reason: npa.FormatSpecIssues(issues)})
 		// force语义:不静默回退,明确报错
-		input.Sink.OnNotice(cCommon.ChatNoticeError, "force模式参数不可用(请检查[negotiation.projectDir]配置项:\n)"+
-			npa.FormatSpecIssuesForUser(issues))
-
-		return NegotiationOutput{End: true, Answer: "force模式参数不可用(请检查[negotiation.projectDir]配置项):\n" + npa.FormatSpecIssuesForUser(issues)}
+		userText := input.NegSpec.FormatIssuesForUser(issues)
+		if strings.TrimSpace(userText) == pCommon.BlankString {
+			userText = strings.Join(issues, "\n")
+		}
+		input.Sink.OnNotice(cCommon.ChatNoticeError, "force模式参数不可用(请检查[negotiation.projectDir]配置项:\n)"+userText)
+		return NegotiationOutput{End: true, Answer: "force模式参数不可用(请检查[negotiation.projectDir]配置项):\n" + userText}
 	}
 
 	engine.reportDecision(ctx, input.TurnID, input.SkillID, string(DecisionProceed), NegotiationResult{Decision: "force mode"})
@@ -284,22 +305,34 @@ func (engine *PlanModeEngine) reportDecision(ctx context.Context, turnID, skillI
 	})
 }
 
-// 产生一个新的ArchiveNo
-func (engine *PlanModeEngine) getArchiveNo(ctx context.Context, sessionId, turnID string, projectDir string, archiveNo string) string {
-	if no := strings.TrimSpace(archiveNo); no != "" {
-		return no
+func (engine *PlanModeEngine) loadSpecFields(ctx context.Context, sessionId, turnId string) map[string]string {
+	if engine.storage == nil || strings.TrimSpace(turnId) == pCommon.BlankString {
+		return nil
 	}
 
-	if strings.TrimSpace(turnID) != pCommon.BlankString {
-		resumer, err := engine.storage.Load(ctx, sessionId, turnID)
-		if err != nil {
-			logging.LogWarnF("plan mode:load resumed spec failed,turn=%s,err=%s", turnID, err.Error())
-		} else if resumer != nil {
-			if no := strings.TrimSpace(resumer.Spec.ArchiveNo); no != pCommon.BlankString {
-				return no
-			}
+	resumer, err := engine.storage.Load(ctx, sessionId, turnId)
+	if err != nil {
+		logging.LogWarnF("plan mode: load resumed spec failed,turn=%s,error=%s", turnId, err.Error())
+		return nil
+	}
+
+	if resumer == nil {
+		return nil
+	}
+
+	return resumer.SpecFields
+}
+
+func (engine *PlanModeEngine) checkReadPaths(negSpec chatCommon.INegotiationSpec, spec chatCommon.Spec, rules toolexecutor.ToolConfigRules, workRoot string) (string, error) {
+	for _, readPath := range negSpec.ReadPaths(spec) {
+		if strings.TrimSpace(readPath) == pCommon.BlankString {
+			continue
+		}
+
+		if _, err := rules.CheckReadPath(readPath, workRoot); err != nil {
+			return readPath, err
 		}
 	}
 
-	return npa.GenerateDocumentNo(projectDir, "NPA")
+	return pCommon.BlankString, nil
 }

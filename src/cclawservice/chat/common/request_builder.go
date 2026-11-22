@@ -2,7 +2,7 @@
 * 定义构建http request函数
 **/
 
-package chat
+package common
 
 import (
 	"bytes"
@@ -22,9 +22,9 @@ const (
 	LlmProviderEndpoint = "/chat/completions" // LLM API 请求时的访问端点URL
 )
 
-// 将 chat 的请求翻译成协议请求
+// BuildChatCompletionRequestWithToolChoice 将 chat 的请求翻译成协议请求
 // 职责边界:消息序列的 **内容** 由 chat/装配器决定,该函数只补 “协议必需品”
-func buildChatCompletionRequestWithToolChoice(p Provider, req llmproto.LlmRequest, stream bool) llmproto.ChatCompletionRequest {
+func BuildChatCompletionRequestWithToolChoice(p Provider, req llmproto.LlmRequest, stream bool) llmproto.ChatCompletionRequest {
 	r := llmproto.ChatCompletionRequest{
 		Model:      p.Llm.GetModelName(),
 		Messages:   req.Messages,
@@ -68,7 +68,7 @@ func buildChatCompletionRequestWithToolChoice(p Provider, req llmproto.LlmReques
 	return r
 }
 
-func buildChatCompletionRequestWithString(llm dataobject.TLlm, messages []llmproto.ChatMessage, maxTokens int, stream bool) llmproto.ChatCompletionRequest {
+func BuildChatCompletionRequestWithString(llm dataobject.TLlm, messages []llmproto.ChatMessage, maxTokens int, stream bool) llmproto.ChatCompletionRequest {
 	req := llmproto.ChatCompletionRequest{
 		Model:     llm.GetModelName(),
 		Messages:  messages,
@@ -89,7 +89,7 @@ func buildChatCompletionRequestWithString(llm dataobject.TLlm, messages []llmpro
 	return req
 }
 
-func buildHttpRequest(ctx context.Context, p Provider, req llmproto.ChatCompletionRequest) (*http.Request, error) {
+func BuildHttpRequest(ctx context.Context, p Provider, req llmproto.ChatCompletionRequest) (*http.Request, error) {
 	if strings.TrimSpace(req.Model) == pCommon.BlankString {
 		return nil, fmt.Errorf("blank model")
 	}

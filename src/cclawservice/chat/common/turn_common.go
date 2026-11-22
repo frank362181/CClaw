@@ -2,7 +2,7 @@
 * 一轮对话状态的生命周期管理
 **/
 
-package chat
+package common
 
 import (
 	"context"
@@ -127,7 +127,7 @@ func (t *TurnState) Messages() []llmproto.ChatMessage {
 }
 
 func (t *TurnState) AppendAssistant(r llmproto.LlmReply) {
-	t.messages = append(t.messages, buildAssistantMessage(r.Content, r.ToolCalls))
+	t.messages = append(t.messages, BuildAssistantMessage(r.Content, r.ToolCalls))
 }
 
 func (t *TurnState) AppendToolResult(callId string, body string) error {
@@ -136,7 +136,7 @@ func (t *TurnState) AppendToolResult(callId string, body string) error {
 			t.Scoped(), len(t.VisibleTools), pCommon.TruncateRunes(body, 200, cCommon.TruncatedMarker),
 		)
 	}
-	t.messages = append(t.messages, buildToolMessage(callId, body))
+	t.messages = append(t.messages, BuildToolMessage(callId, body))
 	return nil
 }
 

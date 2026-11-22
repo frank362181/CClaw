@@ -3,9 +3,6 @@ package npa
 import (
 	"fmt"
 	"regexp"
-	"strings"
-
-	pCommon "my.favorite/platformutility/common"
 )
 
 // 单字段保留的上限长度:超长字段进registry没有意义,还会撑爆日志
@@ -29,34 +26,6 @@ const (
 		" - 唯一必需的信息是**材料目录**;档案号由系统生成，不要询问、也不要编造。\n" + " - 材料目录里没有任何pdf/doc/docx/xlsx/jpg时，不要执行。\n" +
 		" - 定位不到目录时,先用fs_list探测，仍不确定就追问用户，**不要用默认工作区**。\n\n"
 )
-
-// ReportSpec 需求规约
-type ReportSpec struct {
-	ProjectDir string // 需求目录
-	ArchiveNo  string // 需求档案号
-	ReportKind string
-	Today      string
-	OCR        string
-}
-
-// Fields 供模版渲染使用(键名即 ${spec.<key>}
-func (r ReportSpec) Fields() map[string]string {
-	return map[string]string{
-		"project_dir": r.ProjectDir,
-		"archive_no":  r.ArchiveNo,
-		"report_kind": r.ReportKind,
-		"today":       r.Today,
-		"ocr":         r.OCR,
-	}
-}
-
-func (r ReportSpec) Validate() error {
-	if pCommon.BlankString == strings.TrimSpace(r.ProjectDir) {
-		return fmt.Errorf("project_dir is blank")
-	}
-
-	return nil
-}
 
 // ToolArtifact 抽取出的产物不应包含SOP,避免cycle import
 type ToolArtifact struct {

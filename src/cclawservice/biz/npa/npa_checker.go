@@ -37,10 +37,10 @@ type Finding struct {
 func MaterialsManifestChecker(fields map[string]string) []Finding {
 	findings := make([]Finding, 0, 2)
 
-	if needOCR := strings.TrimSpace(fields["summary.files_need_ocr"]); needOCR != "" {
+	if needOCR := strings.TrimSpace(fields["summary.files_need_ocr"]); needOCR != pCommon.BlankString {
 		findings = append(findings, Finding{
 			Code:   "ocr_required",
-			Detail: "OCR required" + pCommon.TruncateRunes(needOCR, 200, cCommon.TruncatedMarker),
+			Detail: "OCR required: " + pCommon.TruncateRunes(needOCR, 200, cCommon.TruncatedMarker),
 		})
 	}
 

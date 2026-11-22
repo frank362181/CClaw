@@ -2,28 +2,28 @@
 * 定义消息构建函数
 **/
 
-package chat
+package common
 
 import (
 	"my.favorite/cclawservice/common/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
 )
 
-func buildUserMessage(content string) llmproto.ChatMessage {
+func BuildUserMessage(content string) llmproto.ChatMessage {
 	return llmproto.ChatMessage{
 		Role:    "user",
 		Content: content,
 	}
 }
 
-func buildSimpleAssistantMessage(content string) llmproto.ChatMessage {
+func BuildSimpleAssistantMessage(content string) llmproto.ChatMessage {
 	return llmproto.ChatMessage{
 		Role:    hCommon.RoleAssistant,
 		Content: content,
 	}
 }
 
-func buildAssistantMessage(content string, calls []llmproto.ToolCall) llmproto.ChatMessage {
+func BuildAssistantMessage(content string, calls []llmproto.ToolCall) llmproto.ChatMessage {
 	return llmproto.ChatMessage{
 		Role:      hCommon.RoleAssistant,
 		Content:   content,
@@ -31,7 +31,7 @@ func buildAssistantMessage(content string, calls []llmproto.ToolCall) llmproto.C
 	}
 }
 
-func buildToolMessage(callID, content string) llmproto.ChatMessage {
+func BuildToolMessage(callID, content string) llmproto.ChatMessage {
 	return llmproto.ChatMessage{
 		Role:       hCommon.RoleTool,
 		ToolCallID: callID,
@@ -39,8 +39,8 @@ func buildToolMessage(callID, content string) llmproto.ChatMessage {
 	}
 }
 
-// 构建基于文本的ChatMessage
-func buildSimpleChatMessage(sysMsg, userMsg string) []llmproto.ChatMessage {
+// BuildSimpleChatMessage 构建基于文本的ChatMessage
+func BuildSimpleChatMessage(sysMsg, userMsg string) []llmproto.ChatMessage {
 	return []llmproto.ChatMessage{
 		{Role: hCommon.RoleSystem, Content: sysMsg},
 		{Role: hCommon.RoleUser, Content: userMsg},

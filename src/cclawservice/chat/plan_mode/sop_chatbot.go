@@ -11,6 +11,7 @@ package plan_mode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -112,6 +113,7 @@ func (e *PlanChatBotRunner) Run(ctx context.Context, req PlanRequest) (PlanResul
 	resumeArtifact(artifactRepo, state)
 
 	if err := e.planStorage.SavePlan(ctx, req.TurnID, req.SessionID, req.PlanMem, req.Spec); err != nil {
+		// plan保存失败就返回,即缺失审计
 		return PlanResult{}, fmt.Errorf("executor:failed to save:%w", err)
 	}
 
@@ -151,7 +153,7 @@ func (e *PlanChatBotRunner) Run(ctx context.Context, req PlanRequest) (PlanResul
 				Name: "sop-task-" + current.ID,
 				Fn: func(runCtx context.Context) error {
 					e.runTask(runCtx, req, current, state, stateMu, artifactRepo)
-					return nil
+					return runCtx.Err()
 				},
 			}); err != nil {
 				e.mark(stateMu, state, current, PlanTaskState{
@@ -165,15 +167,23 @@ func (e *PlanChatBotRunner) Run(ctx context.Context, req PlanRequest) (PlanResul
 			dispatched = append(dispatched, current)
 		}
 
-		waitCtx, cancel := context.WithTimeout(context.Background(), e.tasksWait)
+		waitCtx, cancel := context.WithTimeout(context.Background(), e.waveWait(waveTasks))
 		waitErr := scope.Wait(waitCtx)
 		cancel()
 		scope.Cancel()
 		if waitErr != nil {
 			//波次没收敛:把仍然在跑的任务标记超时,并且停止后续波次(依赖链已断)
-			aborted = e.markNotFinish(dispatched, waitErr, state, stateMu, req, artifactRepo)
+			if errors.Is(waitErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+				aborted = e.markInterrupt(dispatched, state, stateMu, req, artifactRepo)
+			} else {
+				aborted = e.markNotFinish(dispatched, waitErr, state, stateMu, req, artifactRepo)
+			}
 		}
 	}
+
+	// 给从未调度的任务补上状态;否则TaskState缺项,汇总会把共N步计划报成"已执行 2 个步骤"
+	// 审计上也看不出这些步骤是"没跑"而不是"不存在"
+	e.markUnreached(req, state, stateMu, artifactRepo, aborted)
 
 	return PlanResult{
 		State: state,
@@ -284,6 +294,25 @@ func (e *PlanChatBotRunner) runToolTask(ctx context.Context, req PlanRequest, pl
 		return
 	}
 
+	// 跨步契约自检: extractor 产出的产物名必须等于计划声明的 Procedures
+	// 两者不一致时,下游 missingNeeds 只会得到 "blocked",找不出原因,所以在源头上直接失败并给出问题可读原因
+	if declared := strings.TrimSpace(planTask.Produces); declared != pCommon.BlankString && artifact.Name != declared {
+		err := fmt.Errorf("artifact name mismatch:plan declares %q, extractor produced %q", declared, artifact.Name)
+		e.mark(stateMu, planState, planTask, PlanTaskState{
+			TaskID: planTask.ID,
+			Status: StatusFailed,
+			Err:    err.Error(),
+		}, req, artifactsRepo)
+		e.addGaps(stateMu, planState, []Gap{{
+			Code:     CodeTaskGateExtractFailed,
+			TaskID:   planTask.ID,
+			Section:  planTask.Section,
+			Detail:   err.Error(),
+			Severity: SeverityFail,
+		}}, req)
+		return
+	}
+
 	artifactsRepo.Put(artifact)
 
 	// 任务执行结果检查:每步执行完立即判断(纯函数,可在任务写成内跑)
@@ -335,11 +364,15 @@ func (e *PlanChatBotRunner) runMergeTask(planTask PlanTask, planState *PlanState
 		parts = append(parts, text)
 	}
 
+	content := strings.Join(parts, "\n\n")
 	artifact := Artifact{
 		Name:         planTask.Produces,
-		ArtifactKind: "text",
-		AbsolutePath: strings.Join(parts, "\n\n"),
-		Fields:       map[string]string{"parts": fmt.Sprintf("%d", len(parts))},
+		ArtifactKind: ArtifactKindText,
+		Context:      content,
+		Fields: map[string]string{
+			"parts":  fmt.Sprintf("%d", len(parts)),
+			"length": fmt.Sprintf("%d", len([]rune(content))),
+		},
 	}
 	artifactRepo.Put(artifact)
 
@@ -353,17 +386,68 @@ func (e *PlanChatBotRunner) runMergeTask(planTask PlanTask, planState *PlanState
 		Artifact: artifact.Name,
 		GatePass: true,
 	}, req, artifactRepo)
+
+	// merge产物必须落库,否则中断续跑时 draft 缺失,save/verify 直接blocked
+	_ = e.planStorage.SaveArtifact(context.Background(), req.TurnID, artifact)
+}
+
+const llmTaskWait = 600 * time.Second
+
+// waveWait 波次收敛上限:波内只要有 llm 步就按 llmTaskWait 放宽,
+// 否则用默认 tasksWait。避免因为时间过短而被判定为中断
+func (e *PlanChatBotRunner) waveWait(tasks []PlanTask) time.Duration {
+	wait := e.tasksWait
+	for _, task := range tasks {
+		if task.Kind == PlanTaskLLM && wait < llmTaskWait {
+			wait = llmTaskWait
+		}
+	}
+
+	return wait
 }
 
 func (e *PlanChatBotRunner) mark(stateMu *sync.Mutex, planState *PlanState, task PlanTask, taskState PlanTaskState, req PlanRequest,
 	artifacts *ArtifactMgr) {
 	stateMu.Lock()
+	taskState.Tries = planState.Round + 1
 	planState.TaskStates[task.ID] = taskState
 	stateMu.Unlock()
 
 	req.Sink.OnTask(task, taskState)
 
 	_ = e.planStorage.SaveTask(context.Background(), req.TurnID, task, taskState, getToolDigest(task, artifacts))
+}
+
+// 为本轮未进入 TaskState 的任务补终态
+// - 条件任务未被激活 -> skilled 不算失败
+// - 其余任务 -> canceled(波次中断/依赖链已断)
+func (e *PlanChatBotRunner) markUnreached(req PlanRequest, planState *PlanState, stateMu *sync.Mutex, artifacts *ArtifactMgr, aborted bool) {
+	for _, task := range req.PlanMem.Tasks {
+		stateMu.Lock()
+		_, seen := planState.TaskStates[task.ID]
+		stateMu.Unlock()
+
+		if seen {
+			continue
+		}
+
+		status := StatusCanceled
+		reason := "canceled: user interrupted or wave aborted"
+		if task.Conditional {
+			status = StatusSkipped
+			reason = "conditional task not activated:" + task.When
+		} else if !aborted {
+			// 未中断却没跑:说明上游产物缺失导致整链阻塞
+			status = StatusBlocked
+			reason = "not scheduled: upstream artifacts unavailable"
+		}
+
+		e.mark(stateMu, planState, task, PlanTaskState{
+			TaskID: task.ID,
+			Status: status,
+			Err:    reason,
+		}, req, artifacts)
+	}
 }
 
 func (e *PlanChatBotRunner) addGaps(stateMu *sync.Mutex, planState *PlanState, gaps []Gap, req PlanRequest) {
@@ -379,6 +463,27 @@ func (e *PlanChatBotRunner) addGaps(stateMu *sync.Mutex, planState *PlanState, g
 	req.Sink.OnGate(PlanTask{ID: gaps[0].TaskID}, gaps)
 
 	_ = e.planStorage.SaveGaps(context.Background(), req.TurnID, round, gaps)
+}
+
+func (e *PlanChatBotRunner) markInterrupt(planTasks []PlanTask, planState *PlanState, stateMu *sync.Mutex,
+	req PlanRequest, artifacts *ArtifactMgr) bool {
+	for _, task := range planTasks {
+		stateMu.Lock()
+		curState, ok := planState.TaskStates[task.ID]
+		stateMu.Unlock()
+
+		if ok && IsTerminal(curState.Status) {
+			continue
+		}
+
+		e.mark(stateMu, planState, task, PlanTaskState{
+			TaskID: task.ID,
+			Status: StatusCanceled,
+			Err:    "canceled: user interrupted",
+		}, req, artifacts)
+	}
+
+	return true
 }
 
 // 波次超时:把未终态任务标记为超时 timeout,返回"是否应终止任务"
@@ -427,14 +532,11 @@ func getSchedulableAt(tasks []PlanTask, wave int, state *PlanState, stateMu *syn
 	out := make([]PlanTask, 0, 4)
 
 	for _, task := range tasks {
-		if task.Conditional || task.Depth != wave {
+		if task.Depth != wave {
 			continue
 		}
 
-		stateMu.Lock()
-		current, ok := state.TaskStates[task.ID]
-		stateMu.Unlock()
-		if ok && current.Status == StatusSucceeded {
+		if task.Conditional && !conditionMet(task, tasks, state, stateMu) {
 			continue // 已成功,不重跑
 		}
 
@@ -442,6 +544,28 @@ func getSchedulableAt(tasks []PlanTask, wave int, state *PlanState, stateMu *syn
 	}
 
 	return out
+}
+
+func conditionMet(task PlanTask, tasks []PlanTask, planState *PlanState, stateMu *sync.Mutex) bool {
+	gate := parseGateFailedOf(task.When)
+	if gate == pCommon.BlankString {
+		return false
+	}
+
+	stateMu.Lock()
+	defer stateMu.Unlock()
+
+	for _, candidate := range tasks {
+		if candidate.Conditional || candidate.Gate != gate {
+			continue
+		}
+
+		if st, ok := planState.TaskStates[candidate.ID]; ok && st.Status == StatusFailed {
+			return true
+		}
+	}
+
+	return false
 }
 
 // 返回尚未产出的依赖产物

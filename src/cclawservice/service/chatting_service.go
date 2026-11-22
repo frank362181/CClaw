@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"my.favorite/cclawservice/biz"
-	"my.favorite/cclawservice/biz/npa"
 	"my.favorite/cclawservice/chat"
+	chatCommon "my.favorite/cclawservice/chat/common"
 	"my.favorite/cclawservice/chat/plan_mode"
 	"my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/config"
@@ -45,9 +45,9 @@ const (
 // 用于service的判断
 type planModeResult struct {
 	Decision planModeDecision
-	Plan     plan_mode.Plan // planModeRun时有效
-	Spec     npa.ReportSpec // planModeRun时有效
-	Answer   string         // planModeHandled 时作为本轮文本
+	Plan     plan_mode.Plan  // planModeRun时有效
+	Spec     chatCommon.Spec //npa.ReportSpec // planModeRun时有效
+	Answer   string          // planModeHandled 时作为本轮文本
 }
 
 // ChattingService 只做编排
@@ -59,18 +59,18 @@ type ChattingService struct {
 
 	memoryService *ctxmgr.MemoryService
 
-	preparer  chat.ITurnPreparer
-	assembler chat.IContextAssembler
+	preparer  chatCommon.ITurnPreparer
+	assembler chatCommon.IContextAssembler
 
-	transport   chat.ITransportClient
+	transport   chatCommon.ITransportClient
 	syncLooper  *chat.ToolLoop
 	asyncLooper *chat.ToolLoop
 
-	journal          chat.IMemoryJournal
-	memoryMaintainer chat.IMemoryMaintainer
+	journal          chatCommon.IMemoryJournal
+	memoryMaintainer chatCommon.IMemoryMaintainer
 	agentConcurrent  concurrency.IConcurrencyController // 按照Agent维度的并发控制器
-	turnRegistrator  chat.ITurnRegistrator
-	turnReporter     chat.ITurnReporter
+	turnRegistrator  chatCommon.ITurnRegistrator
+	turnReporter     chatCommon.ITurnReporter
 
 	toolConfiguredRules toolexecutor.ToolConfigRules
 
@@ -127,7 +127,7 @@ func GetChattingService(db core.IBaseDatabase, chattingConfig config.ChatConfig,
 
 	chattingService.planModeEngine = plan_mode.NewPlanModeEngine(plan_mode.PlanModeEngineParams{
 		Config:     chattingService.chattingConfig,
-		Negotiator: chat.NewIntentionNegotiator(chattingService.transport, chattingService.chattingConfig),
+		Negotiator: plan_mode.NewIntentionNegotiator(chattingService.transport, chattingService.chattingConfig),
 		Storage:    core2.GetOrchestratorStorage(orchestratorAccessor),
 		ConGate:    chattingService.agentConcurrent,
 		Extractors: extractors,
@@ -162,7 +162,7 @@ func (s *ChattingService) GetSessionTurns(sessionId string, loginName string, li
 	}
 
 	// 越权保护:只允许读取当前登录用户自己的会话
-	if sender := strings.TrimSpace(session.Sender); len(sender) > 0 && sender != loginName {
+	if sender := strings.TrimSpace(session.Sender); len(sender) > 0 && !strings.EqualFold(sender, strings.TrimSpace(loginName)) {
 		return nil, myException.PermissionDeniedKind.Newf("session %s does not belong to current user", sessionId)
 	}
 
@@ -212,11 +212,11 @@ func (s *ChattingService) GetSessionTurns(sessionId string, loginName string, li
 	return views, nil
 }
 
-func (s *ChattingService) Send(ctx context.Context, cmd chat.Command) (chat.Reply, error) {
+func (s *ChattingService) Send(ctx context.Context, cmd chatCommon.Command) (chatCommon.Reply, error) {
 	return s.chat(ctx, cmd, common.NopSink{})
 }
 
-func (s *ChattingService) Stream(ctx context.Context, cmd chat.Command, sink common.ISink) (out chat.Reply, err error) {
+func (s *ChattingService) Stream(ctx context.Context, cmd chatCommon.Command, sink common.ISink) (out chatCommon.Reply, err error) {
 	if sink == nil {
 		sink = common.NopSink{}
 	}
@@ -235,7 +235,7 @@ func (s *ChattingService) Interrupt(sender, turnId string) error {
 // ============================= private functions ===================================
 
 // 编排模版
-func (s *ChattingService) chat(ctx context.Context, cmd chat.Command, sink common.ISink) (out chat.Reply, err error) {
+func (s *ChattingService) chat(ctx context.Context, cmd chatCommon.Command, sink common.ISink) (out chatCommon.Reply, err error) {
 	start := pCommon.GetDatetimeUtilityInstance().GetNow()
 	tmpCtx, tTiming := s.turnReporter.Begin(ctx, cmd)
 	var firstVisibleMs int64
@@ -244,7 +244,7 @@ func (s *ChattingService) chat(ctx context.Context, cmd chat.Command, sink commo
 	// 1. 准备(路由/provider/技能/prompt/工具预算)
 	turn, err := s.preparer.Prepare(tmpCtx, cmd)
 	if err != nil {
-		return chat.Reply{}, err
+		return chatCommon.Reply{}, err
 	}
 
 	if pt := turn.Timing; pt != nil {
@@ -268,7 +268,7 @@ func (s *ChattingService) chat(ctx context.Context, cmd chat.Command, sink commo
 }
 
 // 根据用户的问题判断是否执行plan mode模式:技能激活 -> mode -> 协商 -> spec校验
-func (s *ChattingService) isPlanMode(ctx context.Context, turn *chat.TurnState, sink common.ISink) planModeResult {
+func (s *ChattingService) isPlanMode(ctx context.Context, turn *chatCommon.TurnState, sink common.ISink) planModeResult {
 	if turn == nil || s.chattingConfig.Chat.Mode == common.PlanModeOff {
 		return planModeResult{Decision: planModeDecisionSkip}
 	}
@@ -302,6 +302,7 @@ func (s *ChattingService) isPlanMode(ctx context.Context, turn *chat.TurnState, 
 		WorkRoot:  turn.WorkRoot,
 		SkillID:   activeSkillId,
 		SkillDoc:  activeSkillDoc,
+		NegSpec:   biz.GetNegotiationSpec(activeSkillId, activeSkillDoc.FrontMatter, s.chattingConfig),
 		Sink:      sink,
 		Rules:     s.toolConfiguredRules,
 	})
@@ -323,8 +324,8 @@ func (s *ChattingService) isPlanMode(ctx context.Context, turn *chat.TurnState, 
 	return planModeResult{Decision: planModeDecisionRun, Plan: plan, Spec: outcome.Spec}
 }
 
-func (s *ChattingService) finishNegotiation(ctx context.Context, turn *chat.TurnState, sink common.ISink,
-	answer string, start time.Time, firstVisibleMs *int64) (chat.Reply, error) {
+func (s *ChattingService) finishNegotiation(ctx context.Context, turn *chatCommon.TurnState, sink common.ISink,
+	answer string, start time.Time, firstVisibleMs *int64) (chatCommon.Reply, error) {
 	_ = ctx
 
 	if strings.TrimSpace(answer) == pCommon.BlankString {
@@ -334,7 +335,7 @@ func (s *ChattingService) finishNegotiation(ctx context.Context, turn *chat.Turn
 	sink.OnDelta(answer)
 	*firstVisibleMs = time.Since(start).Milliseconds()
 
-	return chat.Reply{
+	return chatCommon.Reply{
 		SessionID:    turn.Cmd.SessionId,
 		TurnID:       turn.Cmd.TurnID,
 		Content:      answer,
@@ -347,7 +348,7 @@ func (s *ChattingService) finishNegotiation(ctx context.Context, turn *chat.Turn
 // 为何用OnDelta 而非 OnNotice:
 //   - OnNotice 是 "收尾提示"(banner),不进入消息正文
 //   - 追问需要作为一条正常回答出现在会话里,前端才会渲染成气泡
-func (s *ChattingService) runSimpleMode(ctx context.Context, turn *chat.TurnState, sink common.ISink, start time.Time, firstVisibleMs *int64) (chat.Reply, error) {
+func (s *ChattingService) runSimpleMode(ctx context.Context, turn *chatCommon.TurnState, sink common.ISink, start time.Time, firstVisibleMs *int64) (chatCommon.Reply, error) {
 	// 执行单元:并发控制 -> 中断登记 -> 超时 -> 建档 -> 装配 -> 生成 -> 收尾记账
 	simpleChatBot := chat.NewTurnRunner(chat.TurnRunnerParams{
 		Assembler:   chattingService.assembler,
@@ -361,10 +362,10 @@ func (s *ChattingService) runSimpleMode(ctx context.Context, turn *chat.TurnStat
 		Rules:       chattingService.toolConfiguredRules,
 	})
 
-	res, err := simpleChatBot.Run(ctx, chat.TurnRequest{
+	res, err := simpleChatBot.Run(ctx, chatCommon.TurnRequest{
 		Cmd:         turn.Cmd,
 		Turn:        turn,
-		Role:        chat.TurnRoleRoot,
+		Role:        chatCommon.TurnRoleRoot,
 		Sink:        sink,
 		AllowRecord: true,
 		StartAt:     start,
@@ -376,15 +377,15 @@ func (s *ChattingService) runSimpleMode(ctx context.Context, turn *chat.TurnStat
 }
 
 // 执行计划
-func (s *ChattingService) runPlanMode(ctx context.Context, turn *chat.TurnState, plan plan_mode.Plan, arg npa.ReportSpec,
-	sink common.ISink, start time.Time, firstVisibleMs *int64) (chat.Reply, error) {
+func (s *ChattingService) runPlanMode(ctx context.Context, turn *chatCommon.TurnState, plan plan_mode.Plan, arg chatCommon.Spec,
+	sink common.ISink, start time.Time, firstVisibleMs *int64) (chatCommon.Reply, error) {
 	if sink == nil {
 		sink = common.NopSink{}
 	}
 
 	release, err := s.agentConcurrent.TryAcquire(ctx, turn.Agent.AgentId, turn.Agent.MaxConcurrents)
 	if err != nil {
-		return chat.Reply{}, err
+		return chatCommon.Reply{}, err
 	}
 	defer release()
 
@@ -412,12 +413,12 @@ func (s *ChattingService) runPlanMode(ctx context.Context, turn *chat.TurnState,
 		StartAt:   start,
 	})
 	if runErr != nil {
-		return chat.Reply{}, runErr
+		return chatCommon.Reply{}, runErr
 	}
 
 	// 收尾 + 结果映射
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-		return chat.Reply{}, myException.ChatRunTimeoutKind.Newf("plan executor run after %d seconds", int(timeout.Seconds()))
+		return chatCommon.Reply{}, myException.ChatRunTimeoutKind.Newf("plan executor run after %d seconds", int(timeout.Seconds()))
 	}
 
 	if outcome.Answer != pCommon.BlankString {
@@ -425,7 +426,7 @@ func (s *ChattingService) runPlanMode(ctx context.Context, turn *chat.TurnState,
 	}
 
 	*firstVisibleMs = time.Since(start).Milliseconds()
-	return chat.Reply{
+	return chatCommon.Reply{
 		SessionID:    turn.Cmd.SessionId,
 		TurnID:       turn.Cmd.TurnID,
 		Content:      outcome.Answer,
