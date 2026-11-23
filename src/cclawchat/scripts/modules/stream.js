@@ -33,6 +33,8 @@ export const StreamEngine = {
             }
             ChatPage.setInputEnabled(true);
             ChatPage.updateSendButton();
+            // 流结束/出错/中断时清掉可能残留的审批条(用户一直没点、后端超时的情况)
+            ChatPage.clearPlanApproval(msgId);
             return true;
         };
 
@@ -89,6 +91,12 @@ export const StreamEngine = {
                 request.statusText = status?.text || '';
                 State.updateMessageStatus(convId, msgId, request.statusText);
                 ChatPage.updateStreamingStatus(msgId, status?.text);
+
+                // 计划待审批:在气泡内渲染"执行 / 取消"。
+                // 注意不能在这里结束流 —— 用户点"执行"后,同一个 SSE 连接会继续推送执行事件。
+                if (status?.status === 'plan.approval') {
+                    ChatPage.showPlanApproval(msgId, turnId);
+                }
             },
             delta => {
                 // 思考过程(reasoning_content)增量:实时展示思考过程(不写入 content)

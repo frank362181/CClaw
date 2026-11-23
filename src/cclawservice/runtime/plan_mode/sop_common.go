@@ -75,6 +75,17 @@ const (
 	StatusTimeout   = "timeout"
 )
 
+// 计划(t_plan.status)级状态。与任务级 Status* 分开:
+// 任务 succeeded 不等于计划 succeeded(计划可能只跑了一半)。
+const (
+	PlanStatusPendingReview = "pending_review" // 计划已展开, 等人工审批, 一步都没跑
+	PlanStatusApproved      = "approved"       // 审批通过(试运行模式下到此为止, 未执行)
+	PlanStatusRunning       = "running"
+	PlanStatusSucceeded     = "succeeded"
+	PlanStatusFailed        = "failed"
+	PlanStatusCanceled      = "canceled"
+)
+
 // PlanTask 一个可执行任务(按章节展开,一节一个任务)
 type PlanTask struct {
 	ID       string                  `json:"id"` // 计划内唯一:compose#basic_info
@@ -253,6 +264,13 @@ type PlanState struct {
 	TaskStates map[string]PlanTaskState
 	Artifacts  map[string]Artifact
 	Gaps       []Gap
+
+	// 本轮真正派发出去的任务数
+	// 用途:区分计划已展开但一步没跑(先看DAG再做决定,不会在plan_state中留痕迹)与跑了几步后中断
+	Dispatched int
+
+	// 终止原因,用于汇总与审计
+	AbortReason string
 }
 
 func NewPlanState(turnID, sessionId, skillId string, spec chatCommon.Spec) *PlanState {
@@ -294,6 +312,7 @@ type PlanResumer struct {
 // IPlanStorage 计划的存储器,可以为空,方便于测试
 type IPlanStorage interface {
 	SavePlan(ctx context.Context, turnID, sessionID string, plan Plan, spec chatCommon.Spec) error
+	MarkPlanStatus(ctx context.Context, turnID, sessionID string, status string) error
 	SaveTask(ctx context.Context, turnID string, planTask PlanTask, state PlanTaskState, inputDigest string) error
 	SaveGaps(ctx context.Context, turnID string, round int, gaps []Gap) error
 	SaveArtifact(ctx context.Context, turnID string, artifact Artifact) error
@@ -308,6 +327,10 @@ func NewNoPlanStorage() *NopPlanStorage {
 }
 
 func (NopPlanStorage) SavePlan(ctx context.Context, turnID, sessionID string, plan Plan, spec chatCommon.Spec) error {
+	return nil
+}
+
+func (NopPlanStorage) MarkPlanStatus(ctx context.Context, turnID, sessionID string, status string) error {
 	return nil
 }
 

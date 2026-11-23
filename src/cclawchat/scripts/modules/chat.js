@@ -7,6 +7,7 @@
  */
 
 import { State } from './state.js';
+import { API } from './api.js';
 import { getInitials, formatTime, formatDate, truncate, escapeHtml } from '../utils/helper.js';
 
 // 发送/中断按钮图标:使用内联 SVG 而非文本字形(➤/⏹ + 变体选择符),
@@ -350,6 +351,63 @@ export const ChatPage = {
             bubble.appendChild(this._makeCursor());
         }
         this.scrollToBottom();
+    },
+
+    // 计划待审批:在气泡内插入"执行 / 取消"操作条。
+    // 后端在 status=plan.approval 之后阻塞等待 /chat/approve,超时(approvalTimeout 秒)后自行取消。
+    showPlanApproval(msgId, turnId) {
+        const container = this.els.messageList;
+        const msgEl = container.querySelector(`.message[data-msg-id="${msgId}"]`);
+        if (!msgEl) return;
+
+        const bubble = msgEl.querySelector('.bubble');
+        if (!bubble) return;
+
+        // 幂等:重复的 status 事件 / 重连不会重复插入
+        if (bubble.querySelector('.plan-approval')) return;
+
+        const bar = document.createElement('div');
+        bar.className = 'plan-approval';
+        bar.innerHTML = `
+            <span class="plan-approval__hint">计划已生成，是否按该 DAG 执行？</span>
+            <button type="button" class="plan-approval__btn plan-approval__btn--ok">执行</button>
+            <button type="button" class="plan-approval__btn plan-approval__btn--cancel">取消</button>
+        `;
+
+        const decide = async (approved) => {
+            // 先禁用按钮:避免连点导致第二次 approve 命中"无待审批轮次"
+            bar.querySelectorAll('button').forEach(btn => { btn.disabled = true; });
+
+            try {
+                await API.approveChat(turnId, approved, State.user?.token);
+                bar.remove();
+                this.updateStreamingStatus(msgId, approved ? '已确认，开始执行…' : '已取消执行');
+            } catch (err) {
+                // 典型原因:审批已超时 / 已被中断 —— 后端没有待审批的轮次
+                bar.remove();
+                this.updateStreamingStatus(msgId, `审批未生效：${err.message}`);
+            }
+        };
+
+        bar.querySelector('.plan-approval__btn--ok')
+            .addEventListener('click', () => decide(true));
+        bar.querySelector('.plan-approval__btn--cancel')
+            .addEventListener('click', () => decide(false));
+
+        bubble.appendChild(bar);
+        this.scrollToBottom();
+    },
+
+    // 流结束/出错/中断时清理残留的审批条
+    clearPlanApproval(msgId) {
+        const container = this.els.messageList;
+        const msgEl = container.querySelector(`.message[data-msg-id="${msgId}"]`);
+        if (!msgEl) return;
+
+        const bar = msgEl.querySelector('.bubble .plan-approval');
+        if (bar) {
+            bar.remove();
+        }
     },
 
     // 内容开始前,实时展示模型思考过程(reasoning_content)增量文本。

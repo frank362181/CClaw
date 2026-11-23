@@ -43,6 +43,8 @@ type IPermissionHandler interface {
 	Handle(ctx context.Context, req *ToolCallRequest, tool IBaseTool) (*Decision, error)
 	SetNext(next IPermissionHandler) IPermissionHandler
 	Next() IPermissionHandler
+
+	GetContext() context.Context
 }
 
 // IBaseTool 为所有的工具必须实现的接口契约
@@ -119,4 +121,6 @@ type ToolCallRequest struct {
 
 type BaseHandler struct {
 	next IPermissionHandler
+
+	ctx context.Context
 }

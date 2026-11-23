@@ -32,3 +32,9 @@ type ChatResponse struct {
 	Reply       string `json:"reply"`       //AI 回复内容(由 LLM 引擎返回的真实回复)
 	RespTime    int64  `json:"respTime"`    //消息响应的时间
 }
+
+// ChatApprovalRequest 审批的决策参数
+type ChatApprovalRequest struct {
+	TurnId   string `json:"turnId"`
+	Approved bool   `json:"approved"`
+}

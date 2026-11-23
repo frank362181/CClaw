@@ -58,3 +58,8 @@ type IStreamedSink interface {
 	// Streamed 返回截止当前已通过OnDelta下发的正文(不包含思考过程)
 	Streamed() string
 }
+
+// IApprovalAwareSink 感知正在等待审批的sink
+type IApprovalAwareSink interface {
+	SetAwaitingApproval(awaiting bool)
+}

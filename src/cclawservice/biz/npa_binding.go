@@ -25,7 +25,7 @@ import (
 type TypeName string
 
 const (
-	TypeNameNPA TypeName = "nap-report"
+	TypeNameNPA TypeName = "npa-report"
 )
 
 func GetNegotiationSpec(skillId string, fm hCommon.SkillFrontMatter, chattingConfig config.ChatConfig) chatCommon.INegotiationSpec {

@@ -163,10 +163,36 @@ func (engine *PlanModeEngine) PreviewPlan(turnID, skillID string, doc hCommon.Sk
 	}
 
 	// 计划必须对人可见,用户才能判断"是否该跑"
+	verb := "计划就绪"
+	if engine.chatConfig.Negotiation.RequireApproval {
+		verb = "计划待确认"
+	}
 	sink.OnStatus("plan.preview", fmt.Sprintf(
-		"计划就绪:%s, %d 个步骤 / %d 个波次 / 预计 %d tokens", spec.Brief(), plan.TaskCount, plan.WaveCount, plan.EstTokens))
+		"%s:%s, %d 个步骤 / %d 个波次 / 预计 %d tokens", verb, spec.Brief(), plan.TaskCount, plan.WaveCount, plan.EstTokens))
 
 	return plan, true
+}
+
+// SaveDraft 只落计划、不执行:审批通过前留一份可审计的快照
+// 此函数不会产生重复行,真正执行时会被同一条记录覆盖
+func (engine *PlanModeEngine) SaveDraft(ctx context.Context, turnID, sessionID string, plan Plan, spec chatCommon.Spec) error {
+	if engine.storage == nil {
+		return nil
+	}
+
+	if err := engine.storage.SavePlan(ctx, turnID, sessionID, plan, spec); err != nil {
+		return err
+	}
+
+	return engine.storage.MarkPlanStatus(ctx, turnID, sessionID, StatusPending)
+}
+
+func (engine *PlanModeEngine) MarkPlanStatus(ctx context.Context, turnID string, sessionID string, status string) error {
+	if engine.storage == nil {
+		return nil
+	}
+
+	return engine.storage.MarkPlanStatus(ctx, turnID, sessionID, status)
 }
 
 // ============================= private functions & methods ===============================
@@ -216,7 +242,7 @@ func (engine *PlanModeEngine) negotiateSpec(ctx context.Context, input Negotiati
 			SOPSteps:  GetSOPStepSummary(input.SkillDoc.FrontMatter.SOPOutLines),
 			WorkRoot:  input.WorkRoot,
 			Rules:     input.Rules,
-			NegSpec:   input.NegSpec, //npa.NewNPANegotiationSpec(input.SkillDoc.FrontMatter),
+			NegSpec:   input.NegSpec,
 			Feedback:  feedback,
 		})
 

@@ -250,6 +250,46 @@ func (cc *ChatController) ChatStream(c *gin.Context) {
 	presenter.Done()
 }
 
+// ApproveChat 审批决策
+//
+//	@Summary		审批决策
+//	@Description	对审批流程进行审批
+//	@Tags			审批决策
+//	@Accept			json
+//	@Produce		json
+//	@Param			AUTHORIZATION	header		string	true	"Login成功返回后得到的token"
+//	@Param			NONCE			query		string	true	"盐"
+//	@Param			TIMESTAMP		query		string	true	"数值,表示请求端请求的时间(秒数)"
+//	@Param			SIGNATURE		query		string	true	"对请求内容的签名秒数"
+//	@Param			body		body		request.ChatApprovalRequest	true	"决策参数"
+//	@Success		200			{object}	basic.CommonResponse
+//	@Failure		400			{object}	basic.CommonResponse
+//	@Router			/api/chat/approve [post]
+func (cc *ChatController) ApproveChat(c *gin.Context) {
+	chatService, ok := cc.getChattingService(c)
+	if !ok {
+		return
+	}
+
+	loginSession, ok := getAuthentication(c)
+	if !ok {
+		return
+	}
+
+	var req request.ChatApprovalRequest
+	if err := c.ShouldBindBodyWithJSON(&req); err != nil || strings.TrimSpace(req.TurnId) == common.BlankString {
+		respondKind(c, myException.ChatParameterKind)
+		return
+	}
+
+	if err := chatService.Approve(loginSession.LoginName, req.TurnId, req.Approved); err != nil {
+		respondChatError(c, err)
+		return
+	}
+
+	basic.GetBaseResponser().Success(c, http.StatusOK, basic.ConstSuccessCode, basic.ConstSuccess, nil)
+}
+
 // InterruptChat 中断进行中的流式聊天
 //
 //	@Summary		中断流式聊天

@@ -21,6 +21,7 @@ import (
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/common/hash"
 	"my.favorite/platformutility/concurrency"
+	"my.favorite/platformutility/logging"
 )
 
 // Extractors 按照工具名索引的抽取器
@@ -117,10 +118,25 @@ func (e *PlanChatBotRunner) Run(ctx context.Context, req PlanRequest) (PlanResul
 		return PlanResult{}, fmt.Errorf("executor:failed to save:%w", err)
 	}
 
+	// 必须在SavePlan之后
+	_ = e.planStorage.MarkPlanStatus(ctx, req.TurnID, req.SessionID, StatusRunning)
+
 	stateMu := &sync.Mutex{}
 	aborted := false
+	dispatchedTotal := 0
 
 	for wave := 0; wave < req.PlanMem.Waves && !aborted; wave++ {
+		if aborted {
+			break
+		}
+
+		// 取消的唯一可靠点
+		if ctErr := ctx.Err(); ctErr != nil {
+			aborted = true
+			state.AbortReason = getAbortReason(ctErr)
+			logging.LogErrorF("plan executor:wave %d skipped,turn=%s,reason=%s", wave, req.TurnID, state.AbortReason)
+			break
+		}
 		waveTasks := getSchedulableAt(req.PlanMem.Tasks, wave, state, stateMu)
 		if len(waveTasks) == 0 {
 			continue
@@ -130,6 +146,11 @@ func (e *PlanChatBotRunner) Run(ctx context.Context, req PlanRequest) (PlanResul
 		dispatched := make([]PlanTask, 0, len(waveTasks))
 		for _, task := range waveTasks {
 			current := task
+
+			// 取消后不再派发任务
+			if ctx.Err() != nil {
+				break
+			}
 
 			// 上游产物缺失 -> 本步 blocked,且不在派发(否则依赖约束形同虚设)
 			if missing := missingNeeds(current, artifactRepo); len(missing) > 0 {
@@ -165,6 +186,11 @@ func (e *PlanChatBotRunner) Run(ctx context.Context, req PlanRequest) (PlanResul
 			}
 
 			dispatched = append(dispatched, current)
+			dispatchedTotal++
+		}
+
+		if len(dispatched) == 0 {
+			continue
 		}
 
 		waitCtx, cancel := context.WithTimeout(context.Background(), e.waveWait(waveTasks))
@@ -173,17 +199,22 @@ func (e *PlanChatBotRunner) Run(ctx context.Context, req PlanRequest) (PlanResul
 		scope.Cancel()
 		if waitErr != nil {
 			//波次没收敛:把仍然在跑的任务标记超时,并且停止后续波次(依赖链已断)
-			if errors.Is(waitErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-				aborted = e.markInterrupt(dispatched, state, stateMu, req, artifactRepo)
-			} else {
-				aborted = e.markNotFinish(dispatched, waitErr, state, stateMu, req, artifactRepo)
-			}
+			aborted = e.markNotFinish(dispatched, waitErr, state, stateMu, req, artifactRepo)
+			state.AbortReason = "timeout:" + waitErr.Error() // 波次超时
+		}
+
+		// 波次收敛后 ctx已取消,立刻停止,不再进入下一波
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			aborted = true
+			state.AbortReason = getAbortReason(ctxErr)
 		}
 	}
 
-	// 给从未调度的任务补上状态;否则TaskState缺项,汇总会把共N步计划报成"已执行 2 个步骤"
-	// 审计上也看不出这些步骤是"没跑"而不是"不存在"
-	e.markUnreached(req, state, stateMu, artifactRepo, aborted)
+	state.Dispatched = dispatchedTotal
+	e.finishUnreached(req, state, stateMu, artifactRepo, aborted)
+
+	// 终态写入,必须在finishUnreached之后
+	_ = e.planStorage.MarkPlanStatus(ctx, req.TurnID, req.SessionID, getPlanStatus(aborted, state.AbortReason, state))
 
 	return PlanResult{
 		State: state,
@@ -259,6 +290,15 @@ func (e *PlanChatBotRunner) runToolTask(ctx context.Context, req PlanRequest, pl
 
 	raw, err := req.Tool.Invoke(ctx, planTask.Action, args)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			// ctx已取消时工具根本没启动,如果直接跳过记录到表中会造成统计失真
+			e.mark(stateMu, planState, planTask, PlanTaskState{
+				TaskID: planTask.ID,
+				Status: StatusCanceled,
+				Err:    "canceled: " + ctxErr.Error(),
+			}, req, artifactsRepo)
+			return
+		}
 		e.mark(stateMu, planState, planTask, PlanTaskState{
 			TaskID: planTask.ID,
 			Status: StatusFailed,
@@ -418,10 +458,14 @@ func (e *PlanChatBotRunner) mark(stateMu *sync.Mutex, planState *PlanState, task
 	_ = e.planStorage.SaveTask(context.Background(), req.TurnID, task, taskState, getToolDigest(task, artifacts))
 }
 
-// 为本轮未进入 TaskState 的任务补终态
-// - 条件任务未被激活 -> skilled 不算失败
-// - 其余任务 -> canceled(波次中断/依赖链已断)
-func (e *PlanChatBotRunner) markUnreached(req PlanRequest, planState *PlanState, stateMu *sync.Mutex, artifacts *ArtifactMgr, aborted bool) {
+// 给计划里有、本轮没跑的任务补状态
+// 任务没派发就一个都不写,即dispatched == 0的条件 == true
+// 否则统计信息会失真
+func (e *PlanChatBotRunner) finishUnreached(req PlanRequest, planState *PlanState, stateMu *sync.Mutex, artifacts *ArtifactMgr, aborted bool) {
+	if planState.Dispatched == 0 {
+		return
+	}
+
 	for _, task := range req.PlanMem.Tasks {
 		stateMu.Lock()
 		_, seen := planState.TaskStates[task.ID]
@@ -433,10 +477,12 @@ func (e *PlanChatBotRunner) markUnreached(req PlanRequest, planState *PlanState,
 
 		status := StatusCanceled
 		reason := "canceled: user interrupted or wave aborted"
-		if task.Conditional {
+		switch {
+		case task.Conditional:
+			// 条件任务未激活:是信息不是失败
 			status = StatusSkipped
 			reason = "conditional task not activated:" + task.When
-		} else if !aborted {
+		case !aborted:
 			// 未中断却没跑:说明上游产物缺失导致整链阻塞
 			status = StatusBlocked
 			reason = "not scheduled: upstream artifacts unavailable"
@@ -593,4 +639,40 @@ func getToolDigest(task PlanTask, repo *ArtifactMgr) string {
 
 	result, _ := hash.SHA256(task.Action + "|" + pCommon.JoinStringFromMap(args))
 	return result
+}
+
+func getAbortReason(ctxErr error) string {
+	if errors.Is(ctxErr, context.DeadlineExceeded) {
+		return "timeout:" + ctxErr.Error()
+	}
+
+	return "canceled:" + ctxErr.Error()
+}
+
+func getPlanStatus(aborted bool, abortReason string, state *PlanState) string {
+	switch {
+	case strings.HasPrefix(abortReason, "cancel:"):
+		return StatusCanceled
+	case strings.HasPrefix(abortReason, "timeout:"):
+		return StatusFailed
+	case aborted:
+		return StatusCanceled
+	}
+
+	for _, gap := range state.Gaps {
+		if gap.Severity == SeverityFail {
+			return StatusFailed
+		}
+	}
+
+	for _, taskState := range state.TaskStates {
+		switch taskState.Status {
+		case StatusFailed, StatusTimeout:
+			return StatusFailed
+		case StatusCanceled:
+			return StatusCanceled
+		}
+	}
+
+	return StatusSucceeded
 }

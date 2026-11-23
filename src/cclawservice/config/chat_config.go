@@ -61,6 +61,7 @@ type ChatConfig struct {
 		ArgRetry        int    // 校验失败回灌次数
 		ArgTimeout      int    // 协商总超时
 		RequireApproval bool   // 是否需要审批
+		ApprovalTimeout int    // 审批等待的时间,unit=second
 		Hint            bool   // 是否注入启发式提示
 		Model           string // 预留:协商用更便宜的模型
 
@@ -111,6 +112,7 @@ func LoadChatConfig(helper *pConfig.ConfigurationHelper) (ChatConfig, error) {
 	c.Negotiation.ArgRetry, _ = helper.GetIntValueDefault("negotiation", "argRetry", 1)
 	c.Negotiation.ArgTimeout, _ = helper.GetIntValueDefault("negotiation", "argTimeout", 20)
 	c.Negotiation.RequireApproval, _ = helper.GetBoolValueDefault("negotiation", "requireApproval", false)
+	c.Negotiation.ApprovalTimeout, _ = helper.GetIntValueDefault("negotiation", "approvalTimeout", 120)
 	c.Negotiation.Model, _ = helper.GetStringValueDefault("negotiation", "model", "")
 	c.Negotiation.ProjectDir, _ = helper.GetStringValueDefault("negotiation", "projectDir", "")
 

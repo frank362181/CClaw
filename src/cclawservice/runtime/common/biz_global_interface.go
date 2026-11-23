@@ -1,5 +1,6 @@
 /**
 * 面向所有业务开放的接口
+* 仅对需要应用plan mode生效,单轮对话或简单工具调用不需要
 **/
 
 package common
@@ -10,6 +11,7 @@ import (
 	hCommon "my.favorite/cclawservice/harness/common"
 )
 
+// Spec 所有的业务SKILL解析参数时需要实现的接口
 type Spec interface {
 	Fields() map[string]string
 

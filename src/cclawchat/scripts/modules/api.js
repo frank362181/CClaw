@@ -253,6 +253,35 @@ export const API = {
         return json;
     },
 
+    /**
+     * 审批已就绪的计划：POST /api/chat/approve。
+     * - 后端在 SSE 下发 status=plan.approval 后阻塞等待本接口（最长 approvalTimeout 秒）；
+     * - 必须用**本轮**的 turnId 调用，且只有发起该轮的用户能审批；
+     * - approved=true 后，同一个 SSE 连接会继续推送执行事件，**不要在此关闭流**。
+     * @param {string} turnId 本轮标识
+     * @param {boolean} approved true=执行 false=取消
+     * @param {string} token 登录令牌（AUTHORIZATION 请求头）
+     */
+    async approveChat(turnId, approved, token) {
+        if (!turnId) throw new Error('缺少轮次标识，无法审批');
+
+        const body = { turnId, approved: !!approved };
+        const TIMESTAMP = String(Math.floor(Date.now() / 1000));
+        const NONCE = getRandomNonce();
+        const SIGNATURE = await HmacSHA256Hex(CONFIG.SIGN_KEY, JSON.stringify(body) + TIMESTAMP + NONCE);
+
+        const json = await http.post('/chat/approve', body, {
+            params: { TIMESTAMP, NONCE, SIGNATURE },
+            headers: { AUTHORIZATION: token || '' },
+            timeout: 5000,
+        });
+
+        if (json && typeof json.respCode === 'number' && json.respCode !== 0) {
+            throw new Error(json.respMsg || '审批请求失败');
+        }
+        return json;
+    },
+
     async login(username, password) {
         try {
             // 请求体：签名基于实际发送的 JSON 字符串计算

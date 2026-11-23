@@ -3227,3 +3227,57 @@ body {
     white-space: pre-wrap;
     word-break: break-all;
 }
+
+/* ============================================================
+ * 计划审批操作条(plan mode 审批闸门)
+ * 后端在 SSE 下发 status=plan.approval 后阻塞等待 /api/chat/approve
+ * ============================================================ */
+.plan-approval {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: var(--color-bg-page);
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-primary, #2f6feb);
+    border-radius: var(--radius-sm);
+}
+
+.plan-approval__hint {
+    flex: 1 1 auto;
+    min-width: 160px;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-primary);
+}
+
+.plan-approval__btn {
+    flex: 0 0 auto;
+    padding: 5px 14px;
+    font-size: var(--font-size-xs);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text-primary);
+    cursor: pointer;
+}
+
+.plan-approval__btn:hover:not(:disabled) {
+    background: var(--color-bg-hover, rgba(0, 0, 0, 0.04));
+}
+
+.plan-approval__btn--ok {
+    border-color: var(--color-primary, #2f6feb);
+    background: var(--color-primary, #2f6feb);
+    color: #fff;
+}
+
+.plan-approval__btn--ok:hover:not(:disabled) {
+    filter: brightness(0.94);
+}
+
+.plan-approval__btn:disabled {
+    opacity: 0.55;
+    cursor: default;
+}

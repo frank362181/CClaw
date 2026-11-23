@@ -24,6 +24,7 @@ type IOrchestratorAccessor interface {
 	CheckSchema() error
 
 	SavePlan(plan *dataobject.TPlan) error
+	UpdatePlanStatus(sessionId, turnId, status string) error
 	GetPlan(turnId string) (*dataobject.TPlan, error)
 	RemovePlan(turnId string) error
 
@@ -91,6 +92,24 @@ func (db *OrchestratorAccessor) SavePlan(plan *dataobject.TPlan) error {
 
 	if result.RowsAffected == 0 {
 		return exception2.DatabaseExecErrEx2("OrchestratorAccessor:turn_id owned by another session,refuse to overwrite,turn=%s,sessionId=%s", plan.TurnId, plan.SessionId)
+	}
+
+	return nil
+}
+
+func (db *OrchestratorAccessor) UpdatePlanStatus(sessionId, turnId string, status string) error {
+	if strings.TrimSpace(turnId) == pCommon.BlankString {
+		return exception.ParameterEmptyErrorEx("OrchestratorAccessor:empty turnId")
+	}
+
+	err := db.gormDb.Model(&dataobject.TPlan{}).
+		Where("session_id = ? AND turn_id = ?", sessionId, turnId).
+		Updates(map[string]any{
+			"status":     status,
+			"updated_at": pCommon.GetDatetimeUtilityInstance().GetNow().Unix(),
+		}).Error
+	if err != nil {
+		return exception2.DatabaseExecErrEx2("OrchestratorAccessor:update platter status error:%s", err.Error())
 	}
 
 	return nil

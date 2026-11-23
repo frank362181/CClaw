@@ -201,20 +201,41 @@ func (o *OrchestratorStorage) SavePlan(ctx context.Context, turnID, sessionID st
 	})
 }
 
+func (o *OrchestratorStorage) MarkPlanStatus(ctx context.Context, turnID, sessionID string, status string) error {
+	if !o.Ready() || strings.TrimSpace(turnID) == pCommon.BlankString {
+		return nil
+	}
+	
+	if err := o.accessor.UpdatePlanStatus(sessionID, turnID, status); err != nil {
+		logging.LogWarnF("OrchestratorStorage:mark platter status(%s) error:%s", status, err.Error())
+	}
+
+	return nil
+}
+
 func (o *OrchestratorStorage) SaveTask(ctx context.Context, turnID string, planTask plan_mode.PlanTask, state plan_mode.PlanTaskState, inputDigest string) error {
 	if !o.Ready() {
 		return nil
 	}
 
-	now := pCommon.GetDatetimeUtilityInstance().GetNow().Unix()
-	o.lock.Lock()
 	key := turnID + "|" + planTask.ID
-	startedAt, seen := o.firstSee[key]
-	if !seen {
-		startedAt = now
-		o.firstSee[key] = now
+	startedAt := int64(0)
+	now := pCommon.GetDatetimeUtilityInstance().GetNow().Unix()
+
+	// 真正进入过状态才需要登记
+	if state.Status == plan_mode.StatusRunning ||
+		state.Status == plan_mode.StatusSucceeded ||
+		state.Status == plan_mode.StatusFailed ||
+		state.Status == plan_mode.StatusTimeout {
+		o.lock.Lock()
+		if seen, ok := o.firstSee[key]; ok {
+			startedAt = seen
+		} else {
+			startedAt = now
+			o.firstSee[key] = now
+		}
+		o.lock.Unlock()
 	}
-	o.lock.Unlock()
 
 	endedAt := int64(0)
 	if plan_mode.IsTerminal(state.Status) {

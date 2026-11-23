@@ -61,7 +61,7 @@ func (s *taskScope) Wait(ctx context.Context) error {
 
 	select {
 	case <-done:
-		return nil
+		return nil // 这里会丢弃Fn返回的error
 	case <-ctx.Done():
 		return &DrainTimeoutError{
 			Timeout: s.taskMgr.taskConfig.drainTimeout(),

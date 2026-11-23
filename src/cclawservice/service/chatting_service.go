@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	myException "my.favorite/cclawservice/exception"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/ctxmgr"
+	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/harness/toolexecutor"
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
@@ -224,7 +226,25 @@ func (s *ChattingService) Stream(ctx context.Context, cmd chatCommon.Command, si
 	return s.chat(ctx, cmd, sink)
 }
 
+func (s *ChattingService) Approve(sender, turnId string, approved bool) error {
+	sender = strings.TrimSpace(sender)
+	turnId = strings.TrimSpace(turnId)
+
+	if len(sender) == 0 || len(turnId) == 0 {
+		return pException.ParameterEmptyErrorEx("chattingService.Approve: empty chatId")
+	}
+
+	if !security.GetApprovalRegistry().Decide(sender, turnId, approved) {
+		return myException.ChatNotActiveKind.Newf("chattingService.Approve: no pending approval:%s", turnId)
+	}
+
+	return nil
+}
+
 func (s *ChattingService) Interrupt(sender, turnId string) error {
+	// 中断之后取消在等待的审批
+	security.GetApprovalRegistry().Cancel(sender, turnId)
+
 	if !s.turnRegistrator.Cancel(sender, turnId) {
 		return myException.ChatNotActiveKind.Newf("chat stream not active: %s", turnId)
 	}
@@ -372,7 +392,6 @@ func (s *ChattingService) runSimpleMode(ctx context.Context, turn *chatCommon.Tu
 	})
 
 	*firstVisibleMs = res.FirstVisibleMs
-
 	return res.TurnReply, err
 }
 
@@ -383,13 +402,7 @@ func (s *ChattingService) runPlanMode(ctx context.Context, turn *chatCommon.Turn
 		sink = common.NopSink{}
 	}
 
-	release, err := s.agentConcurrent.TryAcquire(ctx, turn.Agent.AgentId, turn.Agent.MaxConcurrents)
-	if err != nil {
-		return chatCommon.Reply{}, err
-	}
-	defer release()
-
-	// 中断登记
+	// 1.中断登记
 	streamCtx := ctx
 	if sink.IsStreamed() {
 		var done func()
@@ -397,6 +410,30 @@ func (s *ChattingService) runPlanMode(ctx context.Context, turn *chatCommon.Turn
 		defer done()
 	}
 
+	// 2.这里可以插入审批闸门
+	if s.chattingConfig.Negotiation.RequireApproval {
+		if !s.awaitApproval(streamCtx, turn, plan, arg, sink) && sink.IsStreamed() {
+			answer := "已取消执行。如需执行,请重新发起请求。"
+			sink.OnDelta(answer)
+			*firstVisibleMs = time.Since(start).Milliseconds()
+			return chatCommon.Reply{
+				SessionID:    turn.Cmd.SessionId,
+				TurnID:       turn.Cmd.TurnID,
+				Content:      answer,
+				FinishReason: "stop",
+				At:           pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,
+			}, nil
+		}
+	}
+
+	// 3. 并发控制
+	release, err := s.agentConcurrent.TryAcquire(ctx, turn.Agent.AgentId, turn.Agent.MaxConcurrents)
+	if err != nil {
+		return chatCommon.Reply{}, err
+	}
+	defer release()
+
+	// 4. 执行超时
 	timeout := time.Duration(pCommon.GetEnvIntDefault(hCommon.ChatRunTimeout, hCommon.AgentRunTimeout)) * time.Second
 	runCtx, cancel := context.WithTimeout(streamCtx, timeout)
 	defer cancel()
@@ -413,11 +450,14 @@ func (s *ChattingService) runPlanMode(ctx context.Context, turn *chatCommon.Turn
 		StartAt:   start,
 	})
 	if runErr != nil {
+		_ = s.planModeEngine.MarkPlanStatus(runCtx, turn.Cmd.TurnID, turn.Cmd.SessionId, plan_mode.StatusFailed)
 		return chatCommon.Reply{}, runErr
 	}
 
 	// 收尾 + 结果映射
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+		// 覆盖是为了兜住 run 提前返回、状态还没写的窗口
+		_ = s.planModeEngine.MarkPlanStatus(runCtx, turn.Cmd.TurnID, turn.Cmd.SessionId, plan_mode.StatusFailed)
 		return chatCommon.Reply{}, myException.ChatRunTimeoutKind.Newf("plan executor run after %d seconds", int(timeout.Seconds()))
 	}
 
@@ -433,4 +473,51 @@ func (s *ChattingService) runPlanMode(ctx context.Context, turn *chatCommon.Turn
 		FinishReason: "stop",
 		At:           pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,
 	}, nil
+}
+
+// 阻塞等待审批,true=放行;false=拒绝/超时/被中断
+func (s *ChattingService) awaitApproval(ctx context.Context, turn *chatCommon.TurnState, plan plan_mode.Plan, spec chatCommon.Spec, sink common.ISink) bool {
+	decision, cleanup := security.GetApprovalRegistry().Register(turn.Cmd.Sender, turn.Cmd.TurnID)
+	defer cleanup()
+
+	// 1. 让看门狗知道"这段静默是与其行为"
+	if aware, ok := sink.(common.IApprovalAwareSink); ok {
+		aware.SetAwaitingApproval(true)
+		defer aware.SetAwaitingApproval(false)
+	}
+
+	// 2.保存草稿,即使失败仅仅记录警告
+	if err := s.planModeEngine.SaveDraft(ctx, turn.Cmd.TurnID, turn.Cmd.SessionId, plan, spec); err != nil {
+		logging.LogWarnF("plan mode: save draft for approval failed, turn=%s,error=%s", turn.Cmd.TurnID, err.Error())
+	}
+
+	// 3. 前端据 status 代码渲染 执行/取消 按钮
+	sink.OnStatus("plan.approval", fmt.Sprintf("计划已就绪(%d 步 / %d 波次),请确认是否执行", plan.TaskCount, plan.WaveCount))
+
+	// 4.登记确认页面超时时间
+	approvalTimeout := time.Duration(s.chattingConfig.Negotiation.ApprovalTimeout) * time.Second
+	approvalTimer := time.NewTimer(approvalTimeout)
+	defer approvalTimer.Stop()
+
+	// 4. 等待前端页面确认/取消
+	approved := false
+	select {
+	case approved = <-decision:
+		if !approved {
+			sink.OnNotice(common.ChatNoticeIncomplete, "已取消执行")
+		}
+	case <-approvalTimer.C:
+		approved = false
+		sink.OnNotice(common.ChatNoticeIncomplete, "确认超时,已取消执行")
+	case <-ctx.Done():
+		// 用户点了"停止"或客户端断开
+		approved = false
+	}
+
+	// [单点收敛] 拒绝/超时/中断都必须把计划状态收敛为 canceled
+	if !approved {
+		_ = s.planModeEngine.MarkPlanStatus(ctx, turn.Cmd.TurnID, turn.Cmd.SessionId, plan_mode.StatusCanceled)
+	}
+
+	return approved
 }

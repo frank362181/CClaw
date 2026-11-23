@@ -31,6 +31,10 @@ func (b *BaseHandler) Next() IPermissionHandler {
 	return b.next
 }
 
+func (b *BaseHandler) GetContext() context.Context {
+	return b.ctx
+}
+
 // 将决策沿着链路传递:Next 则调用下一个 Handle
 // 否则短路返回
 func (b *BaseHandler) propagate(ctx context.Context, req *ToolCallRequest, tool IBaseTool, d *Decision, err error) (*Decision, error) {

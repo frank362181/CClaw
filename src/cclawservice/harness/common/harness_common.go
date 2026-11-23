@@ -93,6 +93,10 @@ const (
 	ChatThinkingLimitTimeout       = 90  // 只是思考无正文内容的最大超时时间
 	ChatStallLimitTimeout          = 300 // 工具执行硬性兜底停止时间:工具卡死/上游静默
 
+	// PlanRunDryRun 计划执行试运行开关(环境变量名):1 = 审批通过后只确认 DAG,
+	// 不进入 agentConcurrent.TryAcquire 与后续执行。用于审批闸门冒烟与"只看 DAG"场景。
+	PlanRunDryRun = "PLAN_RUN_DRYRUN"
+
 	ToolCallingHeartbeatInterval = 3 //工具调用超时时间，unit = second,用于区分是长时间挂起还是工具在执行
 
 	MaxDegradeRounds = 2 // 降级重试的次数,第一次正常,第2次开始才降级

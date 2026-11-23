@@ -23,6 +23,7 @@ type TPlan struct {
 	EstTokens    int64  `gorm:"column:est_tokens" json:"EstTokens"`
 	EstLatencyMs int64  `gorm:"column:est_latency_ms" json:"EstLatencyMs"`
 	LintOk       bool   `gorm:"column:lint_ok" json:"LintOk"`
+	Status       string `gorm:"column:status" json:"Status"`
 	CreatedAt    int64  `gorm:"column:created_at" json:"CreatedAt"`
 	UpdatedAt    int64  `gorm:"column:updated_at" json:"UpdatedAt"`
 }

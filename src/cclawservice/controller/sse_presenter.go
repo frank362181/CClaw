@@ -57,6 +57,8 @@ type SSEPresenter struct {
 	sseHeartbeatScope concurrency.IRoutineScope
 
 	closeOnce sync.Once
+
+	awaitingApproval bool // 正在等人工审批:期间不判定"思考卡住"
 }
 
 func NewSSEPresenter(gc *gin.Context, turnID string, interrupt func(turnID string)) (*SSEPresenter, bool) {
@@ -86,6 +88,18 @@ func NewSSEPresenter(gc *gin.Context, turnID string, interrupt func(turnID strin
 	presenter.startHeartbeat()
 
 	return presenter, true
+}
+
+// SetAwaitingApproval 进入/退出审批等待
+// 进入时重置 lastProgressAt,避免"审批提前已经思考了 80s"直接将额度耗尽
+func (p *SSEPresenter) SetAwaitingApproval(awaiting bool) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	p.awaitingApproval = awaiting
+	if awaiting {
+		p.lastProgressAt = pCommon.GetDatetimeUtilityInstance().GetNow()
+	}
 }
 
 func (p *SSEPresenter) IsStreamed() bool {
@@ -240,7 +254,9 @@ func (p *SSEPresenter) Close() {
 // 串行写出一个SSE事件
 func (p *SSEPresenter) emit(name string, payload any) {
 	p.lock.Lock()
-	if p.dead {
+	if p.dead || p.timedOut {
+		// timeout 之后已经发过 [DONE],再写任何事件都会被前端丢弃
+		// 只会造成"日志显示已回复、用户看到超时"的错觉
 		p.lock.Unlock()
 		return
 	}
@@ -335,6 +351,7 @@ func (p *SSEPresenter) heartbeatLoop(ctx context.Context, interval time.Duration
 			p.lock.Lock()
 			idle, dead := now.Sub(p.lastAt), p.dead
 			lastProgress, timedOut := p.lastProgressAt, p.timedOut
+			awaitingApproval := p.awaitingApproval
 			runningToolLength := len(p.runningTools)
 			p.lock.Unlock()
 
@@ -342,9 +359,9 @@ func (p *SSEPresenter) heartbeatLoop(ctx context.Context, interval time.Duration
 				return
 			}
 
-			// 看门狗必须放在idle判断之前,否则会被下面的continue跳过
+			// 看门狗必须放在idle判断之前,否则会被下面的continue跳过,等待审批期间跳过思考
 			// writing不走idle:思考不停刷新 lastAt,idle永远 < interval
-			if !first {
+			if !first && !awaitingApproval {
 				stalled := now.Sub(lastProgress)
 
 				stallLimit := time.Duration(hCommon.ChatThinkingLimitTimeout) * time.Second
@@ -371,3 +388,4 @@ func (p *SSEPresenter) heartbeatLoop(ctx context.Context, interval time.Duration
 
 // compile assert
 var _ cCommon.ISink = (*SSEPresenter)(nil)
+var _ cCommon.IApprovalAwareSink = (*SSEPresenter)(nil)

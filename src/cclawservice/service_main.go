@@ -244,6 +244,7 @@ func (m *ServiceMain) SetupChatController() error {
 	urlFunMap := make(map[string]gin.HandlerFunc)
 	urlFunMap[cCommon.RelativeChatUrl] = chatController.Chat
 	urlFunMap[cCommon.RelativeChatStreamUrl] = chatController.ChatStream
+	urlFunMap[cCommon.RelativeChatApprovalUrl] = chatController.ApproveChat
 	urlFunMap[cCommon.RelativeChatInterruptUrl] = chatController.InterruptChat
 	urlFunMap[cCommon.RelativeGetSessions] = chatController.GetSessions
 	urlFunMap[cCommon.RelativeGetSessionTurns] = chatController.GetSessionTurns
