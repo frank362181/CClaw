@@ -7,9 +7,6 @@ import (
 	"time"
 
 	"my.favorite/cclawservice/biz"
-	"my.favorite/cclawservice/chat"
-	chatCommon "my.favorite/cclawservice/chat/common"
-	"my.favorite/cclawservice/chat/plan_mode"
 	"my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/config"
 	myException "my.favorite/cclawservice/exception"
@@ -19,6 +16,9 @@ import (
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
 	"my.favorite/cclawservice/model/repo"
+	"my.favorite/cclawservice/runtime"
+	chatCommon "my.favorite/cclawservice/runtime/common"
+	"my.favorite/cclawservice/runtime/plan_mode"
 	core2 "my.favorite/cclawservice/service/core"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/concurrency"
@@ -63,8 +63,8 @@ type ChattingService struct {
 	assembler chatCommon.IContextAssembler
 
 	transport   chatCommon.ITransportClient
-	syncLooper  *chat.ToolLoop
-	asyncLooper *chat.ToolLoop
+	syncLooper  *runtime.ToolLoop
+	asyncLooper *runtime.ToolLoop
 
 	journal          chatCommon.IMemoryJournal
 	memoryMaintainer chatCommon.IMemoryMaintainer
@@ -79,7 +79,7 @@ type ChattingService struct {
 
 var chattingService = pCommon.GetSingleton(func() *ChattingService {
 	return &ChattingService{
-		turnRegistrator: chat.GetChatTurnRegistrator(), //流式聊天的轮次注册器,用户用户在UI界面上的中断使用
+		turnRegistrator: runtime.GetChatTurnRegistrator(), //流式聊天的轮次注册器,用户用户在UI界面上的中断使用
 	}
 }).Instance()
 
@@ -101,22 +101,22 @@ func GetChattingService(db core.IBaseDatabase, chattingConfig config.ChatConfig,
 	chattingService.chattingConfig = chattingConfig // 设置chatting configurations
 
 	// 1. 传输层
-	transport := chat.NewTransportClient(hCommon.NonStreamResponseTimeout)
+	transport := runtime.NewTransportClient(hCommon.NonStreamResponseTimeout)
 
 	// 2. 装配器
 	chattingService.memoryService = ctxmgr.GetMemoryService(db, chattingService.chattingConfig.Chat.SessionRecord)
-	assembler := chat.GetAssembler(chattingService.memoryService)
+	assembler := runtime.GetAssembler(chattingService.memoryService)
 
-	chattingService.preparer = chat.GetChatPreparer(agentRepo, chattingService.chattingConfig.ToolRule.FunctionCalling, transport.SimpleComplete)
+	chattingService.preparer = runtime.GetChatPreparer(agentRepo, chattingService.chattingConfig.ToolRule.FunctionCalling, transport.SimpleComplete)
 	chattingService.agentConcurrent = concurrency.GetConcurrentAdvance()
 	chattingService.assembler = assembler
 	chattingService.transport = transport
-	chattingService.syncLooper = chat.NewToolLoop(transport, assembler, false) // 同步执行
-	chattingService.asyncLooper = chat.NewToolLoop(transport, assembler, true) // 异步执行
-	chattingService.memoryMaintainer = chat.GetMemoryMaintainer(chattingService.memoryService, transport)
-	chattingService.journal = chat.GetMemoryJournal(chattingService.memoryService)
-	chattingService.turnRegistrator = chat.GetChatTurnRegistrator()
-	chattingService.turnReporter = chat.GetTurnReporter()
+	chattingService.syncLooper = runtime.NewToolLoop(transport, assembler, false) // 同步执行
+	chattingService.asyncLooper = runtime.NewToolLoop(transport, assembler, true) // 异步执行
+	chattingService.memoryMaintainer = runtime.GetMemoryMaintainer(chattingService.memoryService, transport)
+	chattingService.journal = runtime.GetMemoryJournal(chattingService.memoryService)
+	chattingService.turnRegistrator = runtime.GetChatTurnRegistrator()
+	chattingService.turnReporter = runtime.GetTurnReporter()
 
 	chattingService.toolConfiguredRules = toolRules
 
@@ -350,7 +350,7 @@ func (s *ChattingService) finishNegotiation(ctx context.Context, turn *chatCommo
 //   - 追问需要作为一条正常回答出现在会话里,前端才会渲染成气泡
 func (s *ChattingService) runSimpleMode(ctx context.Context, turn *chatCommon.TurnState, sink common.ISink, start time.Time, firstVisibleMs *int64) (chatCommon.Reply, error) {
 	// 执行单元:并发控制 -> 中断登记 -> 超时 -> 建档 -> 装配 -> 生成 -> 收尾记账
-	simpleChatBot := chat.NewTurnRunner(chat.TurnRunnerParams{
+	simpleChatBot := runtime.NewTurnRunner(runtime.TurnRunnerParams{
 		Assembler:   chattingService.assembler,
 		Journal:     chattingService.journal,
 		Maintainer:  chattingService.memoryMaintainer,
@@ -409,7 +409,7 @@ func (s *ChattingService) runPlanMode(ctx context.Context, turn *chatCommon.Turn
 		Plan:      plan,
 		Spec:      arg,
 		Sink:      sink,
-		Tool:      chat.NewSOPTurnToolInvoker(turn, sink, s.toolConfiguredRules),
+		Tool:      runtime.NewSOPTurnToolInvoker(turn, sink, s.toolConfiguredRules),
 		StartAt:   start,
 	})
 	if runErr != nil {

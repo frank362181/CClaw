@@ -11,7 +11,7 @@ import "fmt"
 //   - ForRecord: 写历史/旁路记录 --- 完整原文(DB 的 256 rune 截断由 journal 负责)
 //   - ForModel : 回填给模型 --- 截断到 maxRunes(总长含省略号)
 //
-// ForModel 是"回填策略",属于编排层的投影,不在本包实现(见 chat.ForModel)。
+// ForModel 是"回填策略",属于编排层的投影,不在本包实现(见 runtime.ForModel)。
 type ToolOutcome struct {
 	Seq    int
 	CallID string

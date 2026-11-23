@@ -14,8 +14,8 @@ import (
 	"fmt"
 	"strings"
 
-	chatCommon "my.favorite/cclawservice/chat/common"
 	hCommon "my.favorite/cclawservice/harness/common"
+	chatCommon "my.favorite/cclawservice/runtime/common"
 	pCommon "my.favorite/platformutility/common"
 )
 

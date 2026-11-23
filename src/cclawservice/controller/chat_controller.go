@@ -6,11 +6,11 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"my.favorite/cclawservice/chat"
-	chatCommon "my.favorite/cclawservice/chat/common"
 	cCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/request"
+	"my.favorite/cclawservice/runtime"
+	chatCommon "my.favorite/cclawservice/runtime/common"
 	"my.favorite/cclawservice/service"
 	"my.favorite/platformutility/common"
 	"my.favorite/platformutility/concurrency"
@@ -306,7 +306,7 @@ func (cc *ChatController) bind(c *gin.Context) (*chatCommon.Command, bool) {
 		return nil, false
 	}
 
-	cmd, err := chat.NewCommand(login.ComCode, login.LoginName, &req)
+	cmd, err := runtime.NewCommand(login.ComCode, login.LoginName, &req)
 	if err != nil {
 		respondChatError(c, myException.ChatParameterKind)
 		return nil, false

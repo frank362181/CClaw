@@ -19,11 +19,11 @@ import (
 	"sync"
 
 	"my.favorite/cclawservice/biz/npa"
-	chatCommon "my.favorite/cclawservice/chat/common"
-	"my.favorite/cclawservice/chat/plan_mode"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
+	chatCommon "my.favorite/cclawservice/runtime/common"
+	"my.favorite/cclawservice/runtime/plan_mode"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging"
 )

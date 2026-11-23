@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	chatCommon "my.favorite/cclawservice/chat/common"
+	chatCommon "my.favorite/cclawservice/runtime/common"
 	pCommon "my.favorite/platformutility/common"
 )
 

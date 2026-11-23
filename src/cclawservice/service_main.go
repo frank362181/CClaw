@@ -14,7 +14,6 @@ import (
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
-	"my.favorite/cclawservice/chat"
 	selfconfig "my.favorite/cclawservice/config"
 	selfController "my.favorite/cclawservice/controller"
 	hCommon "my.favorite/cclawservice/harness/common"
@@ -22,6 +21,7 @@ import (
 	"my.favorite/cclawservice/harness/observatory"
 	selfInterceptor "my.favorite/cclawservice/interceptor"
 	"my.favorite/cclawservice/model/repo"
+	"my.favorite/cclawservice/runtime"
 	"my.favorite/cclawservice/service"
 	core2 "my.favorite/cclawservice/service/core"
 	pCommon "my.favorite/platformutility/common"
@@ -293,9 +293,9 @@ func (m *ServiceMain) Destroy() {
 	}
 	_ = concurrency.GetTaskManager().Close(nil)
 
-	chat.GetTransportPool().Close()              // 彻底关闭所有链接
+	runtime.GetTransportPool().Close()           // 彻底关闭所有链接
 	concurrency.GetConcurrentAdvance().Destroy() //释放agent gate
-	chat.GetToolsSearch().Destroy()              //释放工具仓库
+	runtime.GetToolsSearch().Destroy()           //释放工具仓库
 
 	if m.agentRepo != nil {
 		m.agentRepo.Destroy()
