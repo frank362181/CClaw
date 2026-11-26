@@ -11,14 +11,14 @@ import (
 	hCommon "my.favorite/cclawservice/harness/common"
 )
 
-// Spec 所有的业务SKILL解析参数时需要实现的接口
-type Spec interface {
+// ISpec 所有的业务SKILL解析参数时需要实现的接口
+type ISpec interface {
 	Fields() map[string]string
 
 	// WithField 返回副本并写入一个字段
 	// 用途:系统生成的字段(如 archive_no)在协商之后才能确定
 	// 而Spec是接口值,不能直接改字段
-	WithField(key, value string) Spec
+	WithField(key, value string) ISpec
 
 	Brief() string
 }
@@ -37,20 +37,20 @@ type INegotiationSpec interface {
 	DecodeParams(raw json.RawMessage) (any, error)
 
 	// ToSpec 把协商出来的参数收敛成Spec
-	ToSpec(raw any, fm hCommon.SkillFrontMatter) (Spec, bool)
+	ToSpec(raw any, fm hCommon.SkillFrontMatter) (ISpec, bool)
 
 	// Validate 业务约束校验;返回可读的问题,空 = 通过
-	Validate(spec Spec, fm hCommon.SkillFrontMatter) []string
+	Validate(spec ISpec, fm hCommon.SkillFrontMatter) []string
 
 	// Default force模式使用缺省的spec
-	Default(fm hCommon.SkillFrontMatter) (Spec, []string)
+	Default(fm hCommon.SkillFrontMatter) (ISpec, []string)
 
 	FormatIssues(issues []string) string
 	FormatIssuesForUser(issues []string) string
 
 	// EnsureID 补齐由系统生成的业务字段
-	EnsureID(spec Spec, persisted map[string]string) Spec
+	EnsureID(spec ISpec, persisted map[string]string) ISpec
 
 	// ReadPaths 返回该spec 工具将要读取的路径
-	ReadPaths(spec Spec) []string
+	ReadPaths(spec ISpec) []string
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +16,69 @@ import (
 	"my.favorite/platformutility/concurrency"
 	"my.favorite/platformutility/logging"
 )
+
+// SystemToolRoot 返回系统工具目录
+func SystemToolRoot() string {
+	return filepath.Join(pCommon.GetExecutableDir(), hCommon.AgentBootstrapDir, hCommon.SystemToolDirRoot)
+}
+
+// BuildSystemToolSpec 把t_tool 的一行组装成可执行的ToolSpec
+// 目标布局:
+// - <root>/<toolName><schemaFile> eg. .../systemtool/read/read.json
+// - <root>/<toolName><scriptFile> eg. .../system/tool/read/scripts/read.py
+func BuildSystemToolSpec(toolName, schemaFile, scriptFile string) (ToolSpec, error) {
+	toolName = filepath.Base(filepath.Clean(strings.TrimSpace(toolName))) // 防../
+	if toolName == pCommon.BlankString || toolName == "." || toolName == string(filepath.Separator) {
+		return ToolSpec{}, fmt.Errorf("system tool:invalid name")
+	}
+
+	base := filepath.Join(SystemToolRoot(), toolName)
+
+	schemaPath, err := pCommon.SafeJoinWithRoot(base, filepath.Join(toolName, schemaFile))
+	if err != nil {
+		return ToolSpec{}, fmt.Errorf("system tool %s: invalid schema file: %w", toolName, err)
+	}
+
+	scriptPath, err := pCommon.SafeJoinWithRoot(base, filepath.Join(toolName, scriptFile))
+	if err != nil {
+		return ToolSpec{}, fmt.Errorf("system tool %s: invalid script file: %w", toolName, err)
+	}
+
+	// 防目录穿越: 两个文件都必须在 base 之下
+	for _, tmpPath := range []string{schemaPath, schemaFile} {
+		rel, err := filepath.Rel(base, tmpPath)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return ToolSpec{}, fmt.Errorf("system tool %s: path escapes base: %s", toolName, tmpPath)
+		}
+	}
+
+	rawSchema, err := os.ReadFile(schemaPath)
+	if err != nil {
+		return ToolSpec{}, fmt.Errorf("system tool %s: invalid schema file: %w", toolName, err)
+	}
+
+	if info, err := os.Stat(scriptPath); err != nil || info.IsDir() {
+		return ToolSpec{}, fmt.Errorf("system tool %s: invalid script file: %s", toolName, scriptPath)
+	}
+
+	schema := make(map[string]any, 4)
+	if err := pCommon.UnmarshalJson(string(rawSchema), &schema); err != nil {
+		return ToolSpec{}, fmt.Errorf("system tool %s: parse schema: %w", toolName, err)
+	}
+
+	// 只读画像: 复用系统工具的固定画像(glob -> ReadOnly + PathFields:[path]
+	profile := LookupSystemToolProfile(toolName)
+
+	return ToolSpec{
+		Name:       toolName,
+		Script:     scriptPath,
+		Schema:     schema,
+		ReadOnly:   profile.ReadOnly,
+		Sandboxed:  profile.Sandboxed,
+		PathFields: profile.PathFields,
+		Shelled:    profile.Shelled,
+	}, nil
+}
 
 // 归一化 工具调用收敛分层
 func normalizeToolRoundTiming(t ToolRoundTiming) ToolRoundTiming {

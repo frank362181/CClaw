@@ -27,7 +27,7 @@ type parallelExecutor struct {
 	buf int //允许覆盖
 }
 
-func NewRoundExecutorParallel(runner IScriptRunner) IToolRoundExecutor {
+func NewRoundExecutorParallel(runner IScriptRunner) IToolExecutedWrapper {
 	if runner == nil {
 		panic("function calling: parallel executor requires a non-nil IToolScriptRunner")
 	}
@@ -40,7 +40,7 @@ func NewRoundExecutorParallel(runner IScriptRunner) IToolRoundExecutor {
 }
 
 func (pe *parallelExecutor) RunAll(ctx context.Context, env ToolEnv, invocations []ToolInvocation,
-	sink cCommon.IToolEventSink, ledger ToolLedger) []ToolOutcome {
+	sink cCommon.IToolEventSink, ledger IToolLedger) []ToolOutcome {
 
 	if len(invocations) == 0 {
 		return nil
@@ -136,7 +136,7 @@ func (pe *parallelExecutor) RunAll(ctx context.Context, env ToolEnv, invocations
 }
 
 // 执行一个工具,并保证"无论怎么都留下一条自洽的outcome"
-func (pe *parallelExecutor) runOne(ctx context.Context, env ToolEnv, invocation ToolInvocation, ledger ToolLedger, lines chan<- cCommon.ToolEvent, assign func(outcome ToolOutcome)) {
+func (pe *parallelExecutor) runOne(ctx context.Context, env ToolEnv, invocation ToolInvocation, ledger IToolLedger, lines chan<- cCommon.ToolEvent, assign func(outcome ToolOutcome)) {
 	hb := startHeartbeat(ctx, lines, invocation.Seq, invocation.Name(), pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp)
 	defer hb.Stop()
 

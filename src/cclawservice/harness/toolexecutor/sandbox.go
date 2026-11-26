@@ -13,7 +13,7 @@ import (
 	"runtime"
 	"strings"
 
-	"my.favorite/cclawservice/harness/security"
+	"my.favorite/cclawservice/harness/toolcontract"
 	pCommon "my.favorite/platformutility/common"
 )
 
@@ -30,7 +30,7 @@ type ISandBox interface {
 
 // ISandboxedBuilder 对原有的沙箱规格进行修改,从工具输入构建原始命令,返回 *exec.Cmd 尚未被沙箱包装
 type ISandboxedBuilder interface {
-	BuildCommand(ctx context.Context, input map[string]any, cc security.CallContext) (*exec.Cmd, error)
+	BuildCommand(ctx context.Context, input map[string]any, cc toolcontract.CallContext) (*exec.Cmd, error)
 }
 
 // SandBoxSpec 沙箱执行隔离策略

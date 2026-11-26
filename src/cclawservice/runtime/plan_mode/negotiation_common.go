@@ -13,9 +13,10 @@ import (
 	"context"
 	"time"
 
+	bizCommon "my.favorite/cclawservice/biz/common"
+	"my.favorite/cclawservice/common/llmproto"
 	"my.favorite/cclawservice/harness/toolexecutor"
 	"my.favorite/cclawservice/model/dataobject"
-	chatCommon "my.favorite/cclawservice/runtime/common"
 )
 
 type NegotiationDecision string // 协商结论
@@ -25,6 +26,11 @@ const (
 	DecisionNotApplicable  NegotiationDecision = "not_applicable"     // 仅询问本技能/工具的用法,不需要走plan mode
 	DecisionValidateFailed NegotiationDecision = "validate_failed"    // 校验多次失败
 	DecisionFailed         NegotiationDecision = "negotiation_failed" // 协商本轮失败(超时/未表态/上游错误)
+)
+
+const (
+	NegotiationResultNoReasonProvide = "no reason provider" // 未提供原因
+	NegotiationResultRoundsExhausted = "negotiation rounds exhausted"
 )
 
 func (d NegotiationDecision) Valid() bool {
@@ -39,6 +45,8 @@ func (d NegotiationDecision) Valid() bool {
 
 // NegotiationRequest 协商请求
 type NegotiationRequest struct {
+	TurnID    string
+	SessionID string
 	Provider  dataobject.TLlm // LLM Provider
 	Question  string
 	SkillId   string
@@ -51,11 +59,20 @@ type NegotiationRequest struct {
 	Rules    toolexecutor.ToolConfigRules
 
 	// 业务侧实现:参数 schema / 解析 / 判定说明
-	NegSpec chatCommon.INegotiationSpec
+	NegSpec bizCommon.INegotiationSpec
+
+	// 协商阶段能够使用的工具,包含SKILL.md中定义的工具,以及t_tool
+	SystemTools []llmproto.Tool
+
+	// 调用系统工具时需要注入到system prompt时的额外参数
+	SystemToolExtraFacts map[string]string
 
 	Feedback  string // 上一次校验失败的说明(重试时回灌给模型)
 	MaxRounds int
 	Timeout   time.Duration
+
+	// 系统工具执行的入口
+	SystemToolInvoker ISopToolInvoker
 }
 
 // NegotiationResult 一次协商的结果
@@ -63,6 +80,9 @@ type NegotiationResult struct {
 	Decision NegotiationDecision
 	Reason   string
 	Missing  []string
+
+	Targets  []NegotiationTarget
+	Warnings []string
 
 	// 业务参数,有INegotiationSpec.DecodeParams产出
 	Arg any

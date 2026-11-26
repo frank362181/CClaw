@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"my.favorite/cclawservice/harness/security"
+	"my.favorite/cclawservice/harness/toolcontract"
 	pCommon "my.favorite/platformutility/common"
 )
 
@@ -84,7 +84,7 @@ func defaultDeniedReadPaths() []string {
 	}
 }
 
-func getSandboxSpecFromCallContext(toolName string, cc security.CallContext) *SandBoxSpec {
+func getSandboxSpecFromCallContext(toolName string, cc toolcontract.CallContext) *SandBoxSpec {
 	spec := &SandBoxSpec{
 		Enabled:    enabledSandboxFromContext(cc), // 与调用方判断一致
 		ToolName:   toolName,
@@ -112,9 +112,9 @@ func getSandboxSpecFromCallContext(toolName string, cc security.CallContext) *Sa
 	return spec
 }
 
-func inferAllowedNetworkFromMode(mode security.PermissionMode) bool {
+func inferAllowedNetworkFromMode(mode toolcontract.PermissionMode) bool {
 	switch mode {
-	case security.PermissionModeBypass:
+	case toolcontract.PermissionModeBypass:
 		return true
 	default:
 		return false
@@ -123,13 +123,13 @@ func inferAllowedNetworkFromMode(mode security.PermissionMode) bool {
 
 // 根据请求上下文中判断沙箱是否启用
 // 显式配置最高优先级;根据permissionMode推导
-func enabledSandboxFromContext(cc security.CallContext) bool {
+func enabledSandboxFromContext(cc toolcontract.CallContext) bool {
 	if cc.SandboxConfig != nil && cc.SandboxConfig.Enabled != nil {
 		return *cc.SandboxConfig.Enabled
 	}
 
 	switch cc.Permission {
-	case security.PermissionModeBypass, security.PermissionModeDefault, security.PermissionModePlan, security.PermissionModeAccept:
+	case toolcontract.PermissionModeBypass, toolcontract.PermissionModeDefault, toolcontract.PermissionModePlan, toolcontract.PermissionModeAccept:
 		return true
 	default:
 		return true

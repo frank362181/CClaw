@@ -7,11 +7,12 @@ package plan_mode
 import (
 	"time"
 
+	bizCommon "my.favorite/cclawservice/biz/common"
 	cCommon "my.favorite/cclawservice/common"
+	"my.favorite/cclawservice/common/llmproto"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/toolexecutor"
 	"my.favorite/cclawservice/model/dataobject"
-	chatCommon "my.favorite/cclawservice/runtime/common"
 )
 
 // NegotiationInput 协商的3，4道闸门的输入参数(协商 + spec校验 + 计划展开)
@@ -25,10 +26,15 @@ type NegotiationInput struct {
 	SkillID  string
 	SkillDoc hCommon.SkillDocument
 
-	NegSpec chatCommon.INegotiationSpec // 由service层注入
+	SystemTools          []llmproto.Tool
+	SystemToolExtraFacts map[string]string
+
+	NegSpec bizCommon.INegotiationSpec // 由service层注入
 
 	Sink  cCommon.ISink
 	Rules toolexecutor.ToolConfigRules
+
+	SystemToolInvoker ISopToolInvoker
 }
 
 // NegotiationOutput 三态语义:
@@ -38,10 +44,14 @@ type NegotiationInput struct {
 //	两者都是false -> 未进入 / 不适用 / 协商失败,调用方落回单轮直聊
 type NegotiationOutput struct {
 	Ready bool
-	Spec  chatCommon.Spec
+	Spec  bizCommon.ISpec
 
 	End    bool   //表示协商是否终结
 	Answer string // End = true 时作为本轮正文
+
+	// 多目标明细
+	Targets  []NegotiationTarget
+	Warnings []string
 }
 
 // PlanModeEngineInput 计划执行的输入
@@ -52,7 +62,7 @@ type PlanModeEngineInput struct {
 	SessionID string
 
 	Plan Plan
-	Spec chatCommon.Spec
+	Spec bizCommon.ISpec
 
 	Sink cCommon.ISink
 	Tool ISopToolInvoker // 由service层的NewSOPTurnToolInvoker创建注入

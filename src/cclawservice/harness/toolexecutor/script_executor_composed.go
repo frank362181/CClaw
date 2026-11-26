@@ -15,13 +15,14 @@ import (
 
 	"my.favorite/cclawservice/exception"
 	"my.favorite/cclawservice/harness/security"
+	"my.favorite/cclawservice/harness/toolcontract"
 	pCommon "my.favorite/platformutility/common"
 	pException "my.favorite/platformutility/exception"
 )
 
 type ComposedScriptExecutor struct {
 	pipeline *security.PermissionPipeline
-	toolList map[string]security.IBaseTool //存放注册进来的工具,就是待执行的工具
+	toolList map[string]toolcontract.IBaseTool //存放注册进来的工具,就是待执行的工具
 
 	SandboxEnabled bool //是否激活了沙箱
 	sandboxMgr     *SandBoxMgr
@@ -30,7 +31,7 @@ type ComposedScriptExecutor struct {
 var toolExecutor = pCommon.GetSingleton(func() *ComposedScriptExecutor {
 	toolExecutor := &ComposedScriptExecutor{
 		pipeline: security.GetPermissionPipeline(), // singleton,default permission pipeline
-		toolList: make(map[string]security.IBaseTool),
+		toolList: make(map[string]toolcontract.IBaseTool),
 
 		sandboxMgr:     GetSandboxMgr(), // singleton,
 		SandboxEnabled: false,
@@ -44,7 +45,7 @@ func GetExecutor(sandboxEnabled bool) *ComposedScriptExecutor {
 	return toolExecutor
 }
 
-func (e *ComposedScriptExecutor) Register(baseTool security.IBaseTool) {
+func (e *ComposedScriptExecutor) Register(baseTool toolcontract.IBaseTool) {
 	if baseTool == nil {
 		return
 	}
@@ -56,7 +57,7 @@ func (e *ComposedScriptExecutor) Register(baseTool security.IBaseTool) {
 	e.toolList[toolName] = baseTool
 }
 
-func (e *ComposedScriptExecutor) Execute(ctx context.Context, req *security.ToolCallRequest) (any, error) {
+func (e *ComposedScriptExecutor) Execute(ctx context.Context, req *toolcontract.ToolCallRequest) (any, error) {
 	tmpTool, ok := e.toolList[req.ToolName]
 	if !ok {
 		return nil, pException.ParameterEmptyErrorEx2("unknown tool %s", req.ToolName)
@@ -70,13 +71,13 @@ func (e *ComposedScriptExecutor) Execute(ctx context.Context, req *security.Tool
 
 	// step 2:根据决策执行
 	switch decision.Behavior {
-	case security.Allow:
+	case toolcontract.Allow:
 		// 权限 pipeline 放行 -> 执行工具
-	case security.Ask:
+	case toolcontract.Ask:
 		// Ask决策意味着 InterActiveConfirmHandle 之前就返回了
 		// 在实际系统中,这里应处罚用户确认流程,但 InteractiveConfirmHandle 已经作为链尾处理了Ask情况
 		return nil, exception.PermissionDeniedKind.Newf("ask decision not resolved:tool name=%s,reason=%s", req.ToolName, decision.Reason)
-	case security.Deny:
+	case toolcontract.Deny:
 		return nil, exception.PermissionDeniedKind.Newf("denied by %s,reason:%s", req.ToolName, decision.Reason)
 	default:
 		return nil, pException.RuntimeErr2("unexpected decision %s", decision.Behavior)
@@ -91,14 +92,14 @@ func (e *ComposedScriptExecutor) Execute(ctx context.Context, req *security.Tool
 	return tmpTool.Call(ctx, req.Input, req.Context)
 }
 
-func (e *ComposedScriptExecutor) enabledSandbox(req *security.ToolCallRequest, d *security.Decision) bool {
+func (e *ComposedScriptExecutor) enabledSandbox(req *toolcontract.ToolCallRequest, d *toolcontract.Decision) bool {
 	if !e.SandboxEnabled {
 		return false
 	}
 
 	//只读工具跳过沙箱
 	if tmpTool, ok := e.toolList[req.ToolName]; ok {
-		if tmpTool.IsReadOnly(req.Input) {
+		if tmpTool.IsReadOnly() {
 			return false
 		}
 	}
@@ -120,7 +121,7 @@ func (e *ComposedScriptExecutor) enabledSandbox(req *security.ToolCallRequest, d
 	}
 }
 
-func (e *ComposedScriptExecutor) executeSandboxed(ctx context.Context, req *security.ToolCallRequest, baseTool security.IBaseTool) (any, error) {
+func (e *ComposedScriptExecutor) executeSandboxed(ctx context.Context, req *toolcontract.ToolCallRequest, baseTool toolcontract.IBaseTool) (any, error) {
 	// 如果实现了ToolBuilder接口
 	cb, ok := baseTool.(ISandboxedBuilder)
 	if !ok {

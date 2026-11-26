@@ -8,9 +8,9 @@ package toolexecutor
 import (
 	"context"
 
-	"my.favorite/cclawservice/harness/security"
+	"my.favorite/cclawservice/harness/toolcontract"
 )
 
 type ISandboxSpecAware interface {
-	SandboxSpec(ctx context.Context, input map[string]any, cc security.CallContext) *SandBoxSpec
+	SandboxSpec(ctx context.Context, input map[string]any, cc toolcontract.CallContext) *SandBoxSpec
 }

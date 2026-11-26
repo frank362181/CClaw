@@ -7,7 +7,7 @@
 package plan_mode
 
 import (
-	chatCommon "my.favorite/cclawservice/runtime/common"
+	bizCommon "my.favorite/cclawservice/biz/common"
 	pCommon "my.favorite/platformutility/common"
 )
 
@@ -16,7 +16,7 @@ type TaskBarrierInput struct {
 	Task   PlanTask
 	Output Artifact
 	Lookup func(name string) (Artifact, bool) // 只读产物表
-	Spec   chatCommon.Spec
+	Spec   bizCommon.ISpec
 }
 
 // Barrie 任务执行结果检查函数:返回空表示通过

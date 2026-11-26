@@ -21,9 +21,9 @@ import (
 	"strings"
 	"time"
 
+	bizCommon "my.favorite/cclawservice/biz/common"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
-	chatCommon "my.favorite/cclawservice/runtime/common"
 )
 
 // 校验规则编号
@@ -126,11 +126,23 @@ type PlanTaskState struct {
 	Err      string
 }
 
+// PlanTarget 计划里面的执行目标
+type PlanTarget struct {
+	Name       string `json:"name"`
+	ProjectDir string `json:"projectDir,omitempty"`
+	Found      bool   `json:"found"`
+	Primary    bool   `json:"primary,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+}
+
 // Plan 展开后的完整计划
 type Plan struct {
 	SkillID string     `json:"skillId"`
 	Tasks   []PlanTask `json:"tasks"`
 	Waves   int        `json:"waves"` // 可调度任务的最大深度 + 1
+
+	Targets  []PlanTarget `json:"targets,omitempty"`
+	Warnings []string     `json:"warnings,omitempty"`
 
 	PlanPayload
 
@@ -143,7 +155,7 @@ type PlanRequest struct {
 	TurnID    string
 	SessionID string
 	PlanMem   Plan
-	Spec      chatCommon.Spec //npa.ReportSpec
+	Spec      bizCommon.ISpec //npa.ReportSpec
 	Sink      IPlanEventSink
 
 	Tool ISopToolInvoker // 工具执行器
@@ -257,7 +269,7 @@ type PlanState struct {
 	SessionID string
 	SkillID   string
 
-	Spec chatCommon.Spec
+	Spec bizCommon.ISpec
 
 	Wave       int
 	Round      int
@@ -273,7 +285,7 @@ type PlanState struct {
 	AbortReason string
 }
 
-func NewPlanState(turnID, sessionId, skillId string, spec chatCommon.Spec) *PlanState {
+func NewPlanState(turnID, sessionId, skillId string, spec bizCommon.ISpec) *PlanState {
 	return &PlanState{
 		TurnID:     turnID,
 		SessionID:  sessionId,
@@ -296,6 +308,9 @@ func (p PlanState) SortedArtifacts() []string {
 
 // ISopToolInvoker 执行一次工具调用,返回原始的JSON文本
 type ISopToolInvoker interface {
+	// InvokeRaw 直接透传模型给的参数JSON
+	InvokeRaw(ctx context.Context, toolName, argsJson string) (string, error)
+
 	Invoke(ctx context.Context, toolName string, args map[string]string) (string, error)
 }
 
@@ -311,7 +326,7 @@ type PlanResumer struct {
 
 // IPlanStorage 计划的存储器,可以为空,方便于测试
 type IPlanStorage interface {
-	SavePlan(ctx context.Context, turnID, sessionID string, plan Plan, spec chatCommon.Spec) error
+	SavePlan(ctx context.Context, turnID, sessionID string, plan Plan, spec bizCommon.ISpec) error
 	MarkPlanStatus(ctx context.Context, turnID, sessionID string, status string) error
 	SaveTask(ctx context.Context, turnID string, planTask PlanTask, state PlanTaskState, inputDigest string) error
 	SaveGaps(ctx context.Context, turnID string, round int, gaps []Gap) error
@@ -326,7 +341,7 @@ func NewNoPlanStorage() *NopPlanStorage {
 	return &NopPlanStorage{}
 }
 
-func (NopPlanStorage) SavePlan(ctx context.Context, turnID, sessionID string, plan Plan, spec chatCommon.Spec) error {
+func (NopPlanStorage) SavePlan(ctx context.Context, turnID, sessionID string, plan Plan, spec bizCommon.ISpec) error {
 	return nil
 }
 

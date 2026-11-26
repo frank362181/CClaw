@@ -22,6 +22,22 @@ import (
 	pException "my.favorite/platformutility/exception"
 )
 
+const (
+	// RunDryRun 控制临时运行的环境常量名称
+	RunDryRun = "RUN_DRY_RUN"
+)
+
+// IsDryRun 调用该函数控制临时调试或测试运行到某一段代码为止,true表示运行调用处为止
+// 不要去设置该环境变量
+func IsDryRun() bool {
+	dryRun := pCommon.GetEnvIntDefault(RunDryRun, 0)
+	if dryRun == 0 {
+		return true
+	}
+
+	return false
+}
+
 func FallbackText(value, fallback string) string {
 	if strings.TrimSpace(value) == pCommon.BlankString {
 		return fallback

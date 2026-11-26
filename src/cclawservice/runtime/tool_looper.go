@@ -29,7 +29,7 @@ import (
 type ToolLoop struct {
 	transport chatCommon.ITransportClient
 
-	toolExecutor toolexecutor.IToolRoundExecutor
+	toolExecutor toolexecutor.IToolExecutedWrapper
 	assembler    chatCommon.IContextAssembler //上下文组装器
 
 	loopGuardFn func() chatCommon.ILoopGuard
@@ -39,7 +39,7 @@ type ToolLoop struct {
 }
 
 func NewToolLoop(transport chatCommon.ITransportClient, asm chatCommon.IContextAssembler, streaming bool) *ToolLoop {
-	var exec toolexecutor.IToolRoundExecutor
+	var exec toolexecutor.IToolExecutedWrapper
 	if streaming {
 		//并行
 		exec = toolexecutor.NewRoundExecutorParallel(toolexecutor.GetSimpleScriptExecutor())

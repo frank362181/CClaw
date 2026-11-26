@@ -11,21 +11,28 @@
 package security
 
 import (
+	"strings"
 	"sync"
 
 	"my.favorite/cclawservice/common"
 	pCommon "my.favorite/platformutility/common"
 )
 
+// ApprovalResponse 用户在UI界面上的审批结论
+type ApprovalResponse struct {
+	Approval bool   // true -> 确认/执行;false= 取消
+	Value    string // 非空 = 用户改写
+}
+
 type ApprovalRegistry struct {
 	lock sync.Mutex
 
-	waiters map[string]chan bool
+	waiters map[string]chan ApprovalResponse
 }
 
 var approvalRegistry = pCommon.GetSingleton(func() *ApprovalRegistry {
 	return &ApprovalRegistry{
-		waiters: make(map[string]chan bool, 8),
+		waiters: make(map[string]chan ApprovalResponse, 8),
 	}
 }).Instance()
 
@@ -33,9 +40,12 @@ func GetApprovalRegistry() *ApprovalRegistry {
 	return approvalRegistry
 }
 
-func (r *ApprovalRegistry) Register(sender, turnId string) (<-chan bool, func()) {
-	decision := make(chan bool, 1)
-	key := sender + "|" + common.NormalizeCompactId(turnId)
+func (r *ApprovalRegistry) Register(sender, turnId string, kind InteractiveApprovalType) (<-chan ApprovalResponse, func()) {
+	decision := make(chan ApprovalResponse, 1)
+	if strings.TrimSpace(string(kind)) == pCommon.BlankString {
+		kind = InteractiveApprovalPlan
+	}
+	key := GenerateApprovalWaiterKey(sender, common.NormalizeCompactId(turnId), kind) //sender + "|" + common.NormalizeCompactId(turnId)
 
 	r.lock.Lock()
 	r.waiters[key] = decision
@@ -60,8 +70,11 @@ func (r *ApprovalRegistry) Register(sender, turnId string) (<-chan bool, func())
 }
 
 // Decide 前端提交审批结论; false = 没有正在等待的轮次(超时 / 已结束 / 已被中断)
-func (r *ApprovalRegistry) Decide(sender, turnId string, approval bool) bool {
-	key := sender + "|" + common.NormalizeCompactId(turnId)
+func (r *ApprovalRegistry) Decide(sender, turnId string, kind InteractiveApprovalType, reply ApprovalResponse) bool {
+	if strings.TrimSpace(string(kind)) == pCommon.BlankString {
+		kind = InteractiveApprovalPlan
+	}
+	key := GenerateApprovalWaiterKey(sender, common.NormalizeCompactId(turnId), kind)
 
 	r.lock.Lock()
 	decision, ok := r.waiters[key] // 一次决策仅生效一次
@@ -75,7 +88,7 @@ func (r *ApprovalRegistry) Decide(sender, turnId string, approval bool) bool {
 	}
 
 	select {
-	case decision <- approval:
+	case decision <- reply:
 	default: // 已有结论,幂等
 	}
 
@@ -83,21 +96,21 @@ func (r *ApprovalRegistry) Decide(sender, turnId string, approval bool) bool {
 }
 
 func (r *ApprovalRegistry) Cancel(sender, turnId string) {
-	key := sender + "|" + common.NormalizeCompactId(turnId)
+	prefix := strings.TrimSpace(sender) + "|" + common.NormalizeCompactId(turnId) + "|"
 
 	r.lock.Lock()
-	decision, ok := r.waiters[key]
-	if ok {
-		delete(r.waiters, key)
+	pending := make([]chan ApprovalResponse, 0, 2)
+	for key, ch := range r.waiters {
+		if strings.HasPrefix(key, prefix) {
+			pending = append(pending, ch)
+			delete(r.waiters, key)
+		}
 	}
 	r.lock.Unlock()
 
-	if !ok {
-		return
-	}
-
-	select {
-	case decision <- false:
-	default:
+	for _, ch := range pending {
+		select {
+		case ch <- ApprovalResponse{Approval: false}:
+		}
 	}
 }

@@ -14,8 +14,8 @@ import (
 	"fmt"
 	"strings"
 
+	myCommon "my.favorite/cclawservice/biz/common"
 	hCommon "my.favorite/cclawservice/harness/common"
-	chatCommon "my.favorite/cclawservice/runtime/common"
 	pCommon "my.favorite/platformutility/common"
 )
 
@@ -32,16 +32,18 @@ type negotiationArgument struct {
 type DdNegotiationSpec struct {
 	fm                hCommon.SkillFrontMatter
 	defaultProjectDir string // force模式下缺省材料目录
+	workRoot          string
 }
 
-func NewNPANegotiationSpec(fm hCommon.SkillFrontMatter, projectDir string) *DdNegotiationSpec {
+func NewNPANegotiationSpec(fm hCommon.SkillFrontMatter, projectDir string, workRoot string) *DdNegotiationSpec {
 	return &DdNegotiationSpec{
 		fm:                fm,
 		defaultProjectDir: projectDir,
+		workRoot:          workRoot,
 	}
 }
 
-var _ chatCommon.INegotiationSpec = (*DdNegotiationSpec)(nil)
+var _ myCommon.INegotiationSpec = (*DdNegotiationSpec)(nil)
 
 func (sn *DdNegotiationSpec) ParamsSchema() map[string]any {
 	properties := map[string]any{
@@ -95,16 +97,16 @@ func (sn *DdNegotiationSpec) DecodeParams(raw json.RawMessage) (any, error) {
 	}, nil
 }
 
-func (sn *DdNegotiationSpec) ToSpec(raw any, fm hCommon.SkillFrontMatter) (chatCommon.Spec, bool) {
+func (sn *DdNegotiationSpec) ToSpec(raw any, fm hCommon.SkillFrontMatter) (myCommon.ISpec, bool) {
 	decoded, ok := raw.(ReportSpec)
 	if !ok {
 		return nil, false
 	}
 
-	return NormalizeReportSpec(decoded, fm), true
+	return NormalizeReportSpec(decoded.NormalizePaths(sn.workRoot), fm), true
 }
 
-func (sn *DdNegotiationSpec) Validate(spec chatCommon.Spec, fm hCommon.SkillFrontMatter) []string {
+func (sn *DdNegotiationSpec) Validate(spec myCommon.ISpec, fm hCommon.SkillFrontMatter) []string {
 	reportSpec, ok := spec.(ReportSpec)
 	if !ok {
 		return []string{"内部错误:需求规约类型不匹配"}
@@ -123,12 +125,12 @@ func (sn *DdNegotiationSpec) Validate(spec chatCommon.Spec, fm hCommon.SkillFron
 	return lines
 }
 
-func (sn *DdNegotiationSpec) Default(fm hCommon.SkillFrontMatter) (chatCommon.Spec, []string) {
+func (sn *DdNegotiationSpec) Default(fm hCommon.SkillFrontMatter) (myCommon.ISpec, []string) {
 	candidate := NormalizeReportSpec(ReportSpec{
 		ProjectDir: sn.defaultProjectDir,
 		ReportKind: DefaultReportKind,
 		OCR:        DefaultOCRMode,
-	}, fm)
+	}.NormalizePaths(sn.workRoot), fm)
 
 	issues := ValidateReportSpec(candidate, fm)
 	if len(issues) == 0 {
@@ -173,7 +175,7 @@ func (sn *DdNegotiationSpec) FormatIssuesForUser(issues []string) string {
 	return strings.Join(lines, "\n")
 }
 
-func (sn *DdNegotiationSpec) EnsureID(spec chatCommon.Spec, persisted map[string]string) chatCommon.Spec {
+func (sn *DdNegotiationSpec) EnsureID(spec myCommon.ISpec, persisted map[string]string) myCommon.ISpec {
 	reportSpec, ok := spec.(ReportSpec)
 	if !ok {
 		return spec
@@ -190,7 +192,7 @@ func (sn *DdNegotiationSpec) EnsureID(spec chatCommon.Spec, persisted map[string
 	return reportSpec.WithField(SpecFieldArchiveNo, GenerateDocumentNo(reportSpec.ProjectDir, "NPA"))
 }
 
-func (sn *DdNegotiationSpec) ReadPaths(spec chatCommon.Spec) []string {
+func (sn *DdNegotiationSpec) ReadPaths(spec myCommon.ISpec) []string {
 	reportSpec, ok := spec.(ReportSpec)
 	if !ok {
 		return nil

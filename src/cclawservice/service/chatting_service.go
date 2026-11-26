@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"my.favorite/cclawservice/biz"
+	bizCommon "my.favorite/cclawservice/biz/common"
 	"my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/config"
 	myException "my.favorite/cclawservice/exception"
@@ -47,9 +49,10 @@ const (
 // 用于service的判断
 type planModeResult struct {
 	Decision planModeDecision
-	Plan     plan_mode.Plan  // planModeRun时有效
-	Spec     chatCommon.Spec //npa.ReportSpec // planModeRun时有效
-	Answer   string          // planModeHandled 时作为本轮文本
+	Plan     plan_mode.Plan                // planModeRun时有效
+	Spec     bizCommon.ISpec               //npa.ReportSpec // planModeRun时有效
+	Answer   string                        // planModeHandled 时作为本轮文本
+	Targets  []plan_mode.NegotiationTarget // 多目标,供展示/审计
 }
 
 // ChattingService 只做编排
@@ -234,7 +237,8 @@ func (s *ChattingService) Approve(sender, turnId string, approved bool) error {
 		return pException.ParameterEmptyErrorEx("chattingService.Approve: empty chatId")
 	}
 
-	if !security.GetApprovalRegistry().Decide(sender, turnId, approved) {
+	if !security.GetApprovalRegistry().Decide(sender, turnId,
+		security.InteractiveApprovalPlan, security.ApprovalResponse{Approval: approved}) {
 		return myException.ChatNotActiveKind.Newf("chattingService.Approve: no pending approval:%s", turnId)
 	}
 
@@ -313,6 +317,10 @@ func (s *ChattingService) isPlanMode(ctx context.Context, turn *chatCommon.TurnS
 		return planModeResult{Decision: planModeDecisionSkip}
 	}
 
+	materialsPath := pCommon.ResolveRealPath(filepath.Join(pCommon.GetExecutableDir(), hCommon.AgentServiceWorkspaceDirName))
+	probeRules := s.toolConfiguredRules
+	detectedPath := pCommon.DetectAbsolutePath(turn.Cmd.Message)
+	probeRules.ReadRoots = plan_mode.GetNegotiationReadPath(materialsPath, detectedPath)
 	// 闸门 3:协商 + spec校验(force 分支、重试、回灌机制在 plan_mode内)
 	outcome := s.planModeEngine.NegotiateArgument(ctx, plan_mode.NegotiationInput{
 		SessionID: turn.Cmd.SessionId,
@@ -322,9 +330,18 @@ func (s *ChattingService) isPlanMode(ctx context.Context, turn *chatCommon.TurnS
 		WorkRoot:  turn.WorkRoot,
 		SkillID:   activeSkillId,
 		SkillDoc:  activeSkillDoc,
-		NegSpec:   biz.GetNegotiationSpec(activeSkillId, activeSkillDoc.FrontMatter, s.chattingConfig),
+		NegSpec:   biz.GetNegotiationSpec(activeSkillId, activeSkillDoc.FrontMatter, s.chattingConfig, turn.WorkRoot),
 		Sink:      sink,
 		Rules:     s.toolConfiguredRules,
+
+		SystemTools: toolexecutor.GetReadOnlyTools(turn.VisibleTools), // 不传全量工具
+		SystemToolExtraFacts: map[string]string{
+			"materials_root": materialsPath,
+			"detected_path":  detectedPath,
+		},
+
+		// 系统工具调用的入口,与当前框架内SKILL.md中定义的工具函数调用保持一致
+		SystemToolInvoker: runtime.NewSOPTurnToolInvoker(turn, sink, probeRules),
 	})
 
 	if outcome.End {
@@ -336,12 +353,12 @@ func (s *ChattingService) isPlanMode(ctx context.Context, turn *chatCommon.TurnS
 	}
 
 	// 闸门 4:计划展开 + 预览(展开失败降级单轮)
-	plan, ok := s.planModeEngine.PreviewPlan(turn.Cmd.TurnID, activeSkillId, activeSkillDoc, outcome.Spec, sink)
+	plan, ok := s.planModeEngine.PreviewPlan(turn.Cmd.TurnID, activeSkillId, activeSkillDoc, outcome.Spec, outcome.Targets, sink)
 	if !ok {
 		return planModeResult{Decision: planModeDecisionSkip}
 	}
 
-	return planModeResult{Decision: planModeDecisionRun, Plan: plan, Spec: outcome.Spec}
+	return planModeResult{Decision: planModeDecisionRun, Plan: plan, Spec: outcome.Spec, Targets: outcome.Targets}
 }
 
 func (s *ChattingService) finishNegotiation(ctx context.Context, turn *chatCommon.TurnState, sink common.ISink,
@@ -396,7 +413,7 @@ func (s *ChattingService) runSimpleMode(ctx context.Context, turn *chatCommon.Tu
 }
 
 // 执行计划
-func (s *ChattingService) runPlanMode(ctx context.Context, turn *chatCommon.TurnState, plan plan_mode.Plan, arg chatCommon.Spec,
+func (s *ChattingService) runPlanMode(ctx context.Context, turn *chatCommon.TurnState, plan plan_mode.Plan, arg bizCommon.ISpec,
 	sink common.ISink, start time.Time, firstVisibleMs *int64) (chatCommon.Reply, error) {
 	if sink == nil {
 		sink = common.NopSink{}
@@ -424,6 +441,15 @@ func (s *ChattingService) runPlanMode(ctx context.Context, turn *chatCommon.Turn
 				At:           pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,
 			}, nil
 		}
+	}
+
+	if common.IsDryRun() {
+		return chatCommon.Reply{
+			SessionID: turn.Cmd.SessionId,
+			TurnID:    turn.Cmd.TurnID,
+			Content:   "测试所需,运行到这里",
+			At:        pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,
+		}, nil
 	}
 
 	// 3. 并发控制
@@ -476,8 +502,8 @@ func (s *ChattingService) runPlanMode(ctx context.Context, turn *chatCommon.Turn
 }
 
 // 阻塞等待审批,true=放行;false=拒绝/超时/被中断
-func (s *ChattingService) awaitApproval(ctx context.Context, turn *chatCommon.TurnState, plan plan_mode.Plan, spec chatCommon.Spec, sink common.ISink) bool {
-	decision, cleanup := security.GetApprovalRegistry().Register(turn.Cmd.Sender, turn.Cmd.TurnID)
+func (s *ChattingService) awaitApproval(ctx context.Context, turn *chatCommon.TurnState, plan plan_mode.Plan, spec bizCommon.ISpec, sink common.ISink) bool {
+	decision, cleanup := security.GetApprovalRegistry().Register(turn.Cmd.Sender, turn.Cmd.TurnID, security.InteractiveApprovalPlan)
 	defer cleanup()
 
 	// 1. 让看门狗知道"这段静默是与其行为"
@@ -492,7 +518,14 @@ func (s *ChattingService) awaitApproval(ctx context.Context, turn *chatCommon.Tu
 	}
 
 	// 3. 前端据 status 代码渲染 执行/取消 按钮
-	sink.OnStatus("plan.approval", fmt.Sprintf("计划已就绪(%d 步 / %d 波次),请确认是否执行", plan.TaskCount, plan.WaveCount))
+	approvalText := fmt.Sprintf("计划已就绪(%d 步 / %d 波次),请确认是否执行", plan.TaskCount, plan.WaveCount)
+	if summary := plan.PlanSummary(); summary != pCommon.BlankString {
+		approvalText += "\n" + summary
+	}
+	if len(plan.Warnings) > 0 {
+		approvalText += "\n注意:" + strings.Join(plan.Warnings, ";")
+	}
+	sink.OnStatus("plan.approval", approvalText)
 
 	// 4.登记确认页面超时时间
 	approvalTimeout := time.Duration(s.chattingConfig.Negotiation.ApprovalTimeout) * time.Second
@@ -502,7 +535,8 @@ func (s *ChattingService) awaitApproval(ctx context.Context, turn *chatCommon.Tu
 	// 4. 等待前端页面确认/取消
 	approved := false
 	select {
-	case approved = <-decision:
+	case reply := <-decision:
+		approved = reply.Approval
 		if !approved {
 			sink.OnNotice(common.ChatNoticeIncomplete, "已取消执行")
 		}

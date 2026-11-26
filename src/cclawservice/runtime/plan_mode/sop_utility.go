@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"strings"
 
-	chatCommon "my.favorite/cclawservice/runtime/common"
+	bizCommon "my.favorite/cclawservice/biz/common"
+	cCommon "my.favorite/cclawservice/common"
+	"my.favorite/cclawservice/common/llmproto"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/common/hash"
 )
@@ -109,7 +111,7 @@ func GetSOPChatResultSummary(result PlanResult, total int) string {
 	return strings.Join(lines, "\n")
 }
 
-func SpecFieldsChanged(before, after chatCommon.Spec) bool {
+func SpecFieldsChanged(before, after bizCommon.ISpec) bool {
 	if before == nil || after == nil {
 		return (before == nil) != (after == nil)
 	}
@@ -126,4 +128,25 @@ func SpecFieldsChanged(before, after chatCommon.Spec) bool {
 	}
 
 	return false
+}
+
+// 将工具调用列表压成扁的string,方便日志输出
+func DescribeToolCalls(calls []llmproto.ToolCall) string {
+	if len(calls) == 0 {
+		return pCommon.BlankString
+	}
+
+	var builder strings.Builder
+	for i, call := range calls {
+		if i > 0 {
+			builder.WriteString(";")
+		}
+
+		builder.WriteString(call.Function.Name)
+		builder.WriteString("(")
+		builder.WriteString(pCommon.TruncateRunes(call.Function.Arguments, 512, cCommon.TruncatedMarker))
+		builder.WriteString(")")
+	}
+
+	return builder.String()
 }

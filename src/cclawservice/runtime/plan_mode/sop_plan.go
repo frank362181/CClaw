@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
+	bizCommon "my.favorite/cclawservice/biz/common"
 	hCommon "my.favorite/cclawservice/harness/common"
-	chatCommon "my.favorite/cclawservice/runtime/common"
 	pCommon "my.favorite/platformutility/common"
 )
 
@@ -31,6 +31,81 @@ const (
 	defaultRoundP95   = 8 * time.Second // 无观测数据时的单轮耗时假设
 	mergeTaskIDSuffix = "_merge"
 )
+
+// PlanSummary 一行摘要,用户 UI 对计划进行审批时展示
+func (p Plan) PlanSummary() string {
+	if len(p.Targets) == 0 {
+		return pCommon.BlankString
+	}
+
+	parts := make([]string, 0, len(p.Targets))
+	for _, t := range p.Targets {
+		switch {
+		case !t.Found:
+			reason := strings.TrimSpace(t.Reason)
+			if reason == "" {
+				reason = "未找到材料目录"
+			}
+			parts = append(parts, "⚠️ "+t.Name+"("+reason+")")
+		case t.Primary:
+			parts = append(parts, "✅ "+t.Name+"(主)")
+		default:
+			parts = append(parts, "✅ "+t.Name)
+		}
+	}
+
+	return fmt.Sprintf("共 %d 个目标:%s", len(p.Targets), strings.Join(parts, " / "))
+}
+
+// BuildPlanTargetGap 未命中 / 未执行目标 -> 计划缺口
+func BuildPlanTargetGap(targets []PlanTarget) []Gap {
+	gaps := make([]Gap, 0, len(targets))
+	for _, t := range targets {
+		name := strings.TrimSpace(t.Name)
+		if name == pCommon.BlankString || t.Primary {
+			continue
+		}
+
+		reason := strings.TrimSpace(t.Reason)
+		code := "target_missing:" + name
+		if t.Found {
+			code = "target_skipped:" + name
+			if reason == pCommon.BlankString {
+				reason = "材料已找到,本轮不执行"
+			}
+		} else if reason == pCommon.BlankString {
+			reason = "未找到材料目录"
+		}
+
+		gaps = append(gaps, Gap{
+			Code:     code,
+			Section:  "target",
+			Detail:   name + ": " + reason,
+			Severity: SeverityWarning,
+		})
+	}
+
+	return gaps
+}
+
+func ToPlanTargets(targets []NegotiationTarget) []PlanTarget {
+	if len(targets) == 0 {
+		return nil
+	}
+
+	out := make([]PlanTarget, 0, len(targets))
+	for _, t := range targets {
+		out = append(out, PlanTarget{
+			Name:       t.Name,
+			ProjectDir: t.ProjectDir,
+			Found:      t.Found,
+			Primary:    t.Primary,
+			Reason:     t.Reason,
+		})
+	}
+
+	return out
+}
 
 // 模版引用:${spec.archive_no} / ${parsed_context.path}
 var templateRefPattern = regexp.MustCompile(`\$\{([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)}`)
@@ -65,7 +140,7 @@ func (args PlanArguments) normalize() PlanArguments {
 }
 
 // BuildPlanFromSkillSOPOutline 把SKILL.md的SOP outline展开成可执行的计划
-func BuildPlanFromSkillSOPOutline(skillId string, sopSteps []hCommon.SkillSOPStep, spec chatCommon.Spec, args PlanArguments) (Plan, error) {
+func BuildPlanFromSkillSOPOutline(skillId string, sopSteps []hCommon.SkillSOPStep, spec bizCommon.ISpec, args PlanArguments) (Plan, error) {
 	args = args.normalize()
 
 	// 0.工具集是L3的唯一依据;没有传的话就返回错误
@@ -216,7 +291,7 @@ func getWaves(tasks []PlanTask) int {
 }
 
 // 构建已知的 ${spec.*};${artifact.field}留给运行期
-func buildArgs(args hCommon.SOPStepArgs, spec chatCommon.Spec) map[string]string {
+func buildArgs(args hCommon.SOPStepArgs, spec bizCommon.ISpec) map[string]string {
 	if len(args) == 0 {
 		return nil
 	}

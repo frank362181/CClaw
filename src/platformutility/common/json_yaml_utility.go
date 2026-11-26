@@ -63,6 +63,28 @@ func FlattenJSON(prefix string, value interface{}, maxLength int, out map[string
 	}
 }
 
+// ExtractJsonObjectFromString 从纯文本中"最后一个完整的JSON对象"
+func ExtractJsonObjectFromString(text string) (string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == BlankString {
+		return BlankString, false
+	}
+
+	begin := strings.Index(trimmed, "{")
+	end := strings.LastIndex(trimmed, "}")
+	if begin < 0 || end <= begin {
+		return BlankString, false
+	}
+
+	candidate := trimmed[begin : end+1]
+	var probe map[string]any
+	if err := UnmarshalJson(candidate, &probe); err != nil {
+		return BlankString, false
+	}
+
+	return candidate, true
+}
+
 /// ========================== YAML ===============================
 
 // YamlToJsonMap 把 yaml 解析出的参数结构递归转换为可被 json.Marshal 的 map[string]any。

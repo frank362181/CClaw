@@ -11,7 +11,7 @@ type serialExecutor struct {
 	core executorCore
 }
 
-func NewRoundExecutorSerial(runner IScriptRunner) IToolRoundExecutor {
+func NewRoundExecutorSerial(runner IScriptRunner) IToolExecutedWrapper {
 	if runner == nil {
 		panic("function calling: serial executor requires a non-nil IToolScriptRunner")
 	}
@@ -24,7 +24,7 @@ func NewRoundExecutorSerial(runner IScriptRunner) IToolRoundExecutor {
 }
 
 func (se *serialExecutor) RunAll(ctx context.Context, env ToolEnv, invocations []ToolInvocation,
-	sink cCommon.IToolEventSink, ledger ToolLedger) []ToolOutcome {
+	sink cCommon.IToolEventSink, ledger IToolLedger) []ToolOutcome {
 
 	out := make([]ToolOutcome, 0, len(invocations))
 	for _, invocation := range invocations {

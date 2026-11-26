@@ -27,6 +27,7 @@ trigger-keywords:
   - 解析
   - 指标
 user-invocable: false
+disallowed-tools: ["bash"]
 os:
   - darwin
   - linux
@@ -181,7 +182,7 @@ sop-out-lines:
 ## 环境与路径约定（先读，很重要）
 
 - **本环境没有通用 shell / Bash / exec / Read / Write 工具**。禁止在回复里编造或原样输出未注册的工具调用（例如 `<invoke name="exec">…</invoke>`、`bash -c …`）。读取文件、提取指标、落盘报告，一律通过下方已注册的 tools（npa_ingest / npa_extract_metrics / npa_save_report）完成；看不到的内容不要假装执行过。
-- 路径写法（服务已自动兜底，勿纠结前缀）：推荐绝对路径,或相对服务进程启动目录的 `bin/workspace/10罗勇兴`（本仓库 = `src/bin/workspace/10罗勇兴`）。npa_ingest 会先按原样解析,找不到再依次尝试 `<bin>/workspace/<path>` → `<cwd>/workspace/<path>`，所以 `workspace/10罗勇兴` 也会被自动补全。仍定位不到时：先调 npa_ingest 探测，再向用户要绝对路径。
+- 路径写法：**协商阶段必须给出绝对路径**（plan_mode 的 `project_dir` 由校验器强制 `IsAbs`）。相对路径只在 `npa_ingest` 脚本内部有 workspace 兜底，**不会**被协商阶段接受；拿不准就先调 `fs_list`，把它返回的 `path` 原样填进 `spec.project_dir`。
 - 本案目录常含：pdf/jpg、`借款合同/`、`保证合同/`、`债务人基础资料/` 等子目录。
 
 ## 运行契约（必读：决定你何时才能结束）

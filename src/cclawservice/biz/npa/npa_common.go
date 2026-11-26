@@ -22,9 +22,10 @@ const (
 	MaterialsScanDepth = 2  // 材料扫描的深度
 	MaterialScanLimit  = 32 // 材料扫描上限
 
-	IntentionGuard = "本技能处理的事\"个贷不良资产材料->尽调报告\"" + "\n" + " - 用户只能在询问工具参数、流程说明或概念时，不要执行流程。\n" +
-		" - 唯一必需的信息是**材料目录**;档案号由系统生成，不要询问、也不要编造。\n" + " - 材料目录里没有任何pdf/doc/docx/xlsx/jpg时，不要执行。\n" +
-		" - 定位不到目录时,先用fs_list探测，仍不确定就追问用户，**不要用默认工作区**。\n\n"
+	IntentionGuard = " - 材料位置的两种写法：①材料目录绝对路径；②债务人姓名(如 罗勇兴、10罗勇兴)。\n" +
+		" - 只给姓名时：用 glob 查材料，参数 path=<材料根目录>、pattern=\"*<姓名>*/**\"；\n" +
+		"   命中一个目录就用它的绝对路径填 project_dir；命中多个就 need_more_info 让用户选；\n" +
+		"   一个都没有就追问准确姓名或要绝对路径。\n"
 )
 
 // ToolArtifact 抽取出的产物不应包含SOP,避免cycle import

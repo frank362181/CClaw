@@ -27,7 +27,7 @@ type SopTurnToolInvoker struct {
 	root         *chatCommon.TurnState
 	sink         cCommon.ISink
 	rules        toolexecutor.ToolConfigRules
-	toolExecutor toolexecutor.IToolRoundExecutor
+	toolExecutor toolexecutor.IToolExecutedWrapper
 	seq          atomic.Int64
 }
 
@@ -45,12 +45,7 @@ func NewSOPTurnToolInvoker(root *chatCommon.TurnState, sink cCommon.ISink, rules
 	}
 }
 
-func (v *SopTurnToolInvoker) Invoke(ctx context.Context, toolName string, args map[string]string) (string, error) {
-	payload, err := pCommon.MarshalJson(args)
-	if err != nil {
-		return pCommon.BlankString, fmt.Errorf("tool invoker: marshal json payload fail: %w", err)
-	}
-
+func (v *SopTurnToolInvoker) InvokeRaw(ctx context.Context, toolName, argsJson string) (string, error) {
 	seq := int(v.seq.Add(1))
 	outcomes := v.toolExecutor.RunAll(ctx, v.root.NewToolEnv(v.rules), []toolexecutor.ToolInvocation{{
 		Seq: seq,
@@ -59,12 +54,15 @@ func (v *SopTurnToolInvoker) Invoke(ctx context.Context, toolName string, args m
 			Type: "function",
 			Function: llmproto.ToolCallFunction{
 				Name:      toolName,
-				Arguments: payload,
+				Arguments: argsJson,
 			},
 		},
 	}}, v.sink, v.root.Ledger)
 
 	if len(outcomes) == 0 {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return pCommon.BlankString, fmt.Errorf("tool invoker:%s not executed: %w", toolName, ctxErr)
+		}
 		return pCommon.BlankString, fmt.Errorf("tool invoker: no outcomes: %v", outcomes)
 	}
 
@@ -72,7 +70,20 @@ func (v *SopTurnToolInvoker) Invoke(ctx context.Context, toolName string, args m
 		return pCommon.BlankString, truncateFailure(outcomes[0])
 	}
 
+	if strings.TrimSpace(outcomes[0].Full) == pCommon.BlankString {
+		return pCommon.BlankString, fmt.Errorf("tool invoker: %s produce no outcome", toolName)
+	}
+
 	return outcomes[0].Full, nil
+}
+
+func (v *SopTurnToolInvoker) Invoke(ctx context.Context, toolName string, args map[string]string) (string, error) {
+	payload, err := pCommon.MarshalJson(args)
+	if err != nil {
+		return pCommon.BlankString, fmt.Errorf("tool invoker: failed to marshal args: %w", err)
+	}
+
+	return v.InvokeRaw(ctx, toolName, payload)
 }
 
 func truncateFailure(outcome toolexecutor.ToolOutcome) error {

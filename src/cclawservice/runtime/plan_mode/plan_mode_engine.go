@@ -11,12 +11,12 @@ import (
 	"fmt"
 	"strings"
 
+	bizCommon "my.favorite/cclawservice/biz/common"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/config"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/toolexecutor"
 	"my.favorite/cclawservice/model/dataobject"
-	chatCommon "my.favorite/cclawservice/runtime/common"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/concurrency"
 	"my.favorite/platformutility/logging"
@@ -147,7 +147,7 @@ func (engine *PlanModeEngine) Run(ctx context.Context, engineInput PlanModeEngin
 
 // PreviewPlan 把SOP大纲展开成计划,并向用户播报预览
 // 展开失败不会回退为错误,而是降级为单轮(返回 ok = false)
-func (engine *PlanModeEngine) PreviewPlan(turnID, skillID string, doc hCommon.SkillDocument, spec chatCommon.Spec, sink cCommon.ISink) (Plan, bool) {
+func (engine *PlanModeEngine) PreviewPlan(turnID, skillID string, doc hCommon.SkillDocument, spec bizCommon.ISpec, targets []NegotiationTarget, sink cCommon.ISink) (Plan, bool) {
 	if sink == nil {
 		sink = cCommon.NopSink{}
 	}
@@ -162,26 +162,47 @@ func (engine *PlanModeEngine) PreviewPlan(turnID, skillID string, doc hCommon.Sk
 		return Plan{}, false
 	}
 
+	// 多目标
+	plan.Targets = ToPlanTargets(targets)
+	plan.Warnings = BuildTargetWarnings(targets, spec.Fields()["project_dir"])
+
 	// 计划必须对人可见,用户才能判断"是否该跑"
 	verb := "计划就绪"
 	if engine.chatConfig.Negotiation.RequireApproval {
 		verb = "计划待确认"
 	}
-	sink.OnStatus("plan.preview", fmt.Sprintf(
-		"%s:%s, %d 个步骤 / %d 个波次 / 预计 %d tokens", verb, spec.Brief(), plan.TaskCount, plan.WaveCount, plan.EstTokens))
+	preview := fmt.Sprintf("%s:%s, %d 个步骤 / %d 个波次 / 预计 %d tokens", verb, spec.Brief(), plan.TaskCount, plan.WaveCount, plan.EstTokens)
+	if summary := plan.PlanSummary(); summary != pCommon.BlankString {
+		preview += "\n" + summary
+	}
+	sink.OnStatus("plan.preview", preview)
+
+	if len(plan.Targets) > 0 {
+		// 结构化明细:前端渲染
+		if payload, err := pCommon.MarshalJson(plan.Targets); err == nil {
+			sink.OnStatus("plan.targets", payload)
+		}
+	}
 
 	return plan, true
 }
 
 // SaveDraft 只落计划、不执行:审批通过前留一份可审计的快照
 // 此函数不会产生重复行,真正执行时会被同一条记录覆盖
-func (engine *PlanModeEngine) SaveDraft(ctx context.Context, turnID, sessionID string, plan Plan, spec chatCommon.Spec) error {
+func (engine *PlanModeEngine) SaveDraft(ctx context.Context, turnID, sessionID string, plan Plan, spec bizCommon.ISpec) error {
 	if engine.storage == nil {
 		return nil
 	}
 
 	if err := engine.storage.SavePlan(ctx, turnID, sessionID, plan, spec); err != nil {
 		return err
+	}
+
+	// 多目标
+	if gaps := BuildPlanTargetGap(plan.Targets); len(gaps) > 0 {
+		if err := engine.storage.SaveGaps(ctx, turnID, 0, gaps); err != nil {
+			logging.LogWarnF("plan mode:save target gaps failed,turn=%s,count=%d,error=%s", turnID, len(gaps), err.Error())
+		}
 	}
 
 	return engine.storage.MarkPlanStatus(ctx, turnID, sessionID, StatusPending)
@@ -234,16 +255,21 @@ func (engine *PlanModeEngine) negotiateSpec(ctx context.Context, input Negotiati
 	feedback := pCommon.BlankString
 	for attempt := 0; attempt <= retry; attempt++ {
 		result, err := engine.negotiator.Negotiate(ctx, NegotiationRequest{
-			Provider:  input.Provider,
-			Question:  input.Message,
-			SkillId:   input.SkillID,
-			SkillName: input.SkillDoc.FrontMatter.Name,
-			SkillDesc: input.SkillDoc.FrontMatter.Description,
-			SOPSteps:  GetSOPStepSummary(input.SkillDoc.FrontMatter.SOPOutLines),
-			WorkRoot:  input.WorkRoot,
-			Rules:     input.Rules,
-			NegSpec:   input.NegSpec,
-			Feedback:  feedback,
+			TurnID:               input.TurnID,
+			SessionID:            input.SessionID,
+			Provider:             input.Provider,
+			Question:             input.Message,
+			SkillId:              input.SkillID,
+			SkillName:            input.SkillDoc.FrontMatter.Name,
+			SkillDesc:            input.SkillDoc.FrontMatter.Description,
+			SOPSteps:             GetSOPStepSummary(input.SkillDoc.FrontMatter.SOPOutLines),
+			WorkRoot:             input.WorkRoot,
+			Rules:                input.Rules,
+			NegSpec:              input.NegSpec,
+			SystemTools:          input.SystemTools,          // 添加进系统工具
+			SystemToolExtraFacts: input.SystemToolExtraFacts, // 添加进系统工具额外注入到system prompt的数据
+			Feedback:             feedback,
+			SystemToolInvoker:    input.SystemToolInvoker, // 系统工具执行入口
 		})
 
 		if err != nil {
@@ -252,6 +278,13 @@ func (engine *PlanModeEngine) negotiateSpec(ctx context.Context, input Negotiati
 
 		switch result.Decision {
 		case DecisionProceed:
+			if len(result.Targets) > 0 && len(UsableTargets(result.Targets)) == 0 && attempt < retry {
+				// 有targets但无任何可用目标 -> 按need_more_info打回
+				feedback = DemoteProceedFeedback()
+				logging.LogWarnF("plan mode:proceed without usable target,turn=%s,attempt=%d,targets=%d", input.TurnID, attempt+1, len(result.Targets))
+				continue
+			}
+
 			decoded, ok := input.NegSpec.ToSpec(result.Arg, input.SkillDoc.FrontMatter)
 			if !ok {
 				// proceed 却没有可用参数:按协商失败处理,不要带着空 spec 去建计划
@@ -267,8 +300,10 @@ func (engine *PlanModeEngine) negotiateSpec(ctx context.Context, input Negotiati
 					logging.LogWarnF("plan mode: path denied,path=%s,turn=%s,dir=%s,error=%s", deniedPath, input.TurnID, projectDir, deniedErr.Error())
 					continue
 				}
+				targets := MarkPrimaryTarget(result.Targets, projectDir)
+
 				engine.reportDecision(ctx, input.TurnID, input.SkillID, string(DecisionProceed), result)
-				return NegotiationOutput{Ready: true, Spec: decoded}
+				return NegotiationOutput{Ready: true, Spec: decoded, Targets: targets, Warnings: BuildTargetWarnings(targets, projectDir)}
 			}
 
 			feedback = input.NegSpec.FormatIssues(issues)
@@ -278,8 +313,14 @@ func (engine *PlanModeEngine) negotiateSpec(ctx context.Context, input Negotiati
 			logging.LogWarnF("plan mode:spec rejected,turn=%s,attempt=%d,issues=%d", input.TurnID, attempt+1, len(issues))
 			continue
 		case DecisionNeedMoreInfo:
+			if usable := UsableTargets(result.Targets); len(usable) > 0 && attempt < retry {
+				// 确保只要存在一个就退回proceed,而非need_more_info
+				feedback = PromptNeedMoreInfoFeedback(usable[0])
+				logging.LogWarnF("plan mode:need_more_info promoted,usable=%d,turn=%s,attempt=%d", len(usable), input.TurnID, attempt+1)
+				continue
+			}
 			engine.reportDecision(ctx, input.TurnID, input.SkillID, string(DecisionNeedMoreInfo), result)
-			return NegotiationOutput{End: true, Answer: NeedMoreInfoText(result.Missing)}
+			return NegotiationOutput{End: true, Answer: NeedMoreInfoText(result)}
 		case DecisionNotApplicable:
 			engine.reportDecision(ctx, input.TurnID, input.SkillID, string(DecisionNotApplicable), result)
 			logging.LogInfoF("plan mode:not applicable,turn=%s,reason=%s", input.TurnID, result.Reason)
@@ -287,7 +328,14 @@ func (engine *PlanModeEngine) negotiateSpec(ctx context.Context, input Negotiati
 		default:
 			engine.reportDecision(ctx, input.TurnID, input.SkillID, string(DecisionFailed), result)
 			logging.LogInfoF("plan mode:negotiate failed,turn=%s,reason=%s", input.TurnID, result.Reason)
-			return NegotiationOutput{} // 协商失败(超时、未表态、上游错误):降级为单轮解决问题
+
+			if input.Sink != nil {
+				input.Sink.OnNotice(cCommon.ChatNoticeIncomplete, fmt.Sprintf("%s ( %s ) ", cCommon.ConstChatNoticeNegotiationStopped, result.Reason))
+			}
+			return NegotiationOutput{
+				End:    true,
+				Answer: "没生成执行计划:" + result.Reason + "。\n请补充材料目录的绝对路径（或债务人姓名），我再重试。",
+			} // 协商失败(超时、未表态、上游错误):降级为单轮解决问题
 		}
 	}
 
@@ -349,7 +397,7 @@ func (engine *PlanModeEngine) loadSpecFields(ctx context.Context, sessionId, tur
 	return resumer.SpecFields
 }
 
-func (engine *PlanModeEngine) checkReadPaths(negSpec chatCommon.INegotiationSpec, spec chatCommon.Spec, rules toolexecutor.ToolConfigRules, workRoot string) (string, error) {
+func (engine *PlanModeEngine) checkReadPaths(negSpec bizCommon.INegotiationSpec, spec bizCommon.ISpec, rules toolexecutor.ToolConfigRules, workRoot string) (string, error) {
 	for _, readPath := range negSpec.ReadPaths(spec) {
 		if strings.TrimSpace(readPath) == pCommon.BlankString {
 			continue

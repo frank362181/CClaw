@@ -122,9 +122,10 @@ const (
 	ChatToolEventDone     = "done"     // 执行成功
 	ChatToolEventError    = "error"    // 执行失败
 
-	ChatNoticeTruncated     = "truncated"      // finish_reason=length:回答达到输出长度上限
-	ChatNoticeContentFilter = "content_filter" // finish_reason=content_filter:回答被内容安全策略拦截
-	ChatNoticeIncomplete    = "incomplete"     // 流中途中断(已输出部分内容):回答可能不完整
+	ChatNoticeTruncated          = "truncated"           // finish_reason=length:回答达到输出长度上限
+	ChatNoticeContentFilter      = "content_filter"      // finish_reason=content_filter:回答被内容安全策略拦截
+	ChatNoticeIncomplete         = "incomplete"          // 流中途中断(已输出部分内容):回答可能不完整
+	ChatNoticeNegotiationDegrade = "negotiation_degrade" //协商降级,从plan mode -> simple
 
 	// ChatNoticeError 需显式提醒用户的错误(欠费/密钥无效/未开通/内容合规/超时等):以独立
 	// 告警提示下发,不覆盖已输出内容,也不降级为"可能不完整";文案取自错误的 Kind.Msg。
@@ -143,9 +144,10 @@ const (
 	// ChatNoticeLevelError 通知级别:错误级(前端用醒目样式渲染,如红色图标与描边)。
 	ChatNoticeLevelError = "error"
 
-	ConstChatNoticeTruncatedMsg     = "回答已达长度上限,可能不完整"
-	ConstChatNoticeContentFilterMsg = "回答未通过模型内容安全审核,可能不完整"
-	ConstChatNoticeIncompleteMsg    = "回答生成中断,可能不完整"
+	ConstChatNoticeTruncatedMsg       = "回答已达长度上限,可能不完整"
+	ConstChatNoticeContentFilterMsg   = "回答未通过模型内容安全审核,可能不完整"
+	ConstChatNoticeIncompleteMsg      = "回答生成中断,可能不完整"
+	ConstChatNoticeNegotiationStopped = "未能确认执行参数,已停止执行计划"
 
 	// ConstChatNoticeNotRecordedMsg 会话归属校验失败的提示话术:说明"这轮不进历史"并给出可行动作。
 	ConstChatNoticeNotRecordedMsg = "本轮未记入会话历史(该会话不属于当前用户);如需保留历史,请新建会话"

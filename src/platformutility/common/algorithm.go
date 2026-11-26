@@ -1,5 +1,19 @@
 package common
 
+// Unique 确保数组中每个元素仅出现一次,并以原来数组的数据类型
+func Unique[T comparable](s []T) []T {
+	seen := make(map[T]struct{}, len(s))
+	result := make([]T, 0, len(s))
+	for _, v := range s {
+		if _, ok := seen[v]; !ok {
+			seen[v] = struct{}{}
+			result = append(result, v)
+		}
+	}
+
+	return result
+}
+
 // AllSame 用来判断数组中所有元素都相同
 // 这里要注意的是：T的成员必须支持 ==/!=的判断操作
 func AllSame[T comparable](a []T) bool {

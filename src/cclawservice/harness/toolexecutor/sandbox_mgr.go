@@ -4,7 +4,7 @@ import (
 	"runtime"
 	"strings"
 
-	"my.favorite/cclawservice/harness/security"
+	"my.favorite/cclawservice/harness/toolcontract"
 	pCommon "my.favorite/platformutility/common"
 )
 
@@ -25,7 +25,7 @@ func GetSandboxMgr() *SandBoxMgr {
 	return sandboxMgr
 }
 
-func (mgr *SandBoxMgr) SelectSandbox(cc security.CallContext) ISandBox {
+func (mgr *SandBoxMgr) SelectSandbox(cc toolcontract.CallContext) ISandBox {
 	if cc.SandboxConfig != nil && len(cc.SandboxConfig.Backend) > 0 {
 		for _, b := range mgr.backends {
 			if b == nil {

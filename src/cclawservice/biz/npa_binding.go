@@ -13,10 +13,10 @@ package biz
 import (
 	"strings"
 
+	myCommon "my.favorite/cclawservice/biz/common"
 	"my.favorite/cclawservice/biz/npa"
 	"my.favorite/cclawservice/config"
 	hCommon "my.favorite/cclawservice/harness/common"
-	chatCommon "my.favorite/cclawservice/runtime/common"
 	"my.favorite/cclawservice/runtime/plan_mode"
 	pCommon "my.favorite/platformutility/common"
 )
@@ -28,10 +28,10 @@ const (
 	TypeNameNPA TypeName = "npa-report"
 )
 
-func GetNegotiationSpec(skillId string, fm hCommon.SkillFrontMatter, chattingConfig config.ChatConfig) chatCommon.INegotiationSpec {
+func GetNegotiationSpec(skillId string, fm hCommon.SkillFrontMatter, chattingConfig config.ChatConfig, workRoot string) myCommon.INegotiationSpec {
 	switch strings.ToLower(strings.TrimSpace(skillId)) {
 	case string(TypeNameNPA):
-		return npa.NewNPANegotiationSpec(fm, chattingConfig.Negotiation.ProjectDir)
+		return npa.NewNPANegotiationSpec(fm, chattingConfig.Negotiation.ProjectDir, workRoot)
 	default:
 		return nil
 	}
@@ -43,17 +43,17 @@ func RegistryNPABuiltin(extractors *plan_mode.Extractors, barriers *plan_mode.Ba
 		return
 	}
 
-	extractors.RegisterExtractor(npa.ToolNameIngest, npaExtract)
-	extractors.RegisterExtractor(npa.ToolNameExtractMetrics, npaExtract)
-	extractors.RegisterExtractor(npa.ToolNameSaveOK, npaExtract)
+	extractors.RegisterExtractor(npa.ToolNameIngest, getExtractSchema)
+	extractors.RegisterExtractor(npa.ToolNameExtractMetrics, getExtractSchema)
+	extractors.RegisterExtractor(npa.ToolNameSaveOK, getExtractSchema)
 
-	barriers.Registry(npa.CheckerNameMaterialsManifest, npaBarrie(npa.MaterialsManifestChecker))
-	barriers.Registry(npa.CheckerNameMetricsReconciled, npaBarrie(npa.MetricsReconciledChecker))
-	barriers.Registry(npa.CheckNameSaveOK, npaBarrie(npa.SaveOKChecker))
+	barriers.Registry(npa.CheckerNameMaterialsManifest, getBarrieSchema(npa.MaterialsManifestChecker))
+	barriers.Registry(npa.CheckerNameMetricsReconciled, getBarrieSchema(npa.MetricsReconciledChecker))
+	barriers.Registry(npa.CheckNameSaveOK, getBarrieSchema(npa.SaveOKChecker))
 }
 
 // 工具输出 -> Artifact
-func npaExtract(planTask plan_mode.PlanTask, raw string) (plan_mode.Artifact, error) {
+func getExtractSchema(planTask plan_mode.PlanTask, raw string) (plan_mode.Artifact, error) {
 	extracted, err := npa.ExtractToolArtifact(planTask.Action, raw)
 	if err != nil {
 		return plan_mode.Artifact{}, err
@@ -72,7 +72,7 @@ func npaExtract(planTask plan_mode.PlanTask, raw string) (plan_mode.Artifact, er
 	}, nil
 }
 
-func npaBarrie(barrie func(fields map[string]string) []npa.Finding) plan_mode.Barrie {
+func getBarrieSchema(barrie func(fields map[string]string) []npa.Finding) plan_mode.Barrie {
 	return func(in plan_mode.TaskBarrierInput) []plan_mode.Gap {
 		findings := barrie(in.Output.Fields)
 		if len(findings) == 0 {

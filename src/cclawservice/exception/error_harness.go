@@ -38,12 +38,13 @@ const (
 	codeChatLLMRateLimit
 	codeChatLLMContentFilter
 	codeAgentFileUnavailable
+	codeChatToolExecutionConfig
 	codeChatToolArgInvalid
 	codeSandboxExecutorError
 	codeChatToolLoopGuard
 	codeChatToolLoopExceeded
 	codeChatToolExecutionMisMatched
-	codeChatToolExecutionConfig
+	codeChatToolExecutionNoResult
 	codeChatResponseTooLarge
 	codeSessionOwnershipConflict // 新码一律追加在末尾,避免后移已发布的码值
 )
@@ -219,6 +220,16 @@ var (
 		Msg:        "启动文件不可用(文件过大或读取失败)",
 	})
 
+	ToolExecutionConfigKind = apperr.Register(apperr.Kind{
+		Name:       "harness.tool_execution_config",
+		Code:       codeChatToolExecutionConfig,
+		HTTPStatus: http.StatusOK,
+		Msg:        "工具调用被配置安全策略拒绝",
+		Retryable:  false,
+		Silent:     false,
+		Notify:     true,
+	})
+
 	ToolArgInvalidKind = apperr.Register(apperr.Kind{
 		Name:       "harness.tool_arg_invalid",
 		Code:       codeChatToolArgInvalid,
@@ -247,13 +258,11 @@ var (
 		Msg:        "工具调用返回结果不匹配",
 	})
 
-	ToolExecutionConfigKind = apperr.Register(apperr.Kind{
-		Name:       "harness.tool_execution_config",
-		Code:       codeChatToolExecutionConfig,
+	ToolExecutionNoResultKind = apperr.Register(apperr.Kind{
+		Name:       "harness.tool_execution_no_result",
+		Code:       codeChatToolExecutionNoResult,
 		HTTPStatus: http.StatusOK,
-		Msg:        "工具调用被配置安全策略拒绝",
-		Retryable:  false,
-		Silent:     false,
+		Msg:        "工具未产生执行结果",
 		Notify:     true,
 	})
 

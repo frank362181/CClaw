@@ -18,11 +18,11 @@ import (
 	"strings"
 	"sync"
 
+	bizCommon "my.favorite/cclawservice/biz/common"
 	"my.favorite/cclawservice/biz/npa"
 	cCommon "my.favorite/cclawservice/common"
 	"my.favorite/cclawservice/model/dataaccessor"
 	"my.favorite/cclawservice/model/dataobject"
-	chatCommon "my.favorite/cclawservice/runtime/common"
 	"my.favorite/cclawservice/runtime/plan_mode"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging"
@@ -164,7 +164,7 @@ func (o *OrchestratorStorage) Load(ctx context.Context, sessionId, turnId string
 	}, nil
 }
 
-func (o *OrchestratorStorage) SavePlan(ctx context.Context, turnID, sessionID string, plan plan_mode.Plan, spec chatCommon.Spec) error {
+func (o *OrchestratorStorage) SavePlan(ctx context.Context, turnID, sessionID string, plan plan_mode.Plan, spec bizCommon.ISpec) error {
 	if !o.Ready() {
 		return nil
 	}
@@ -205,7 +205,7 @@ func (o *OrchestratorStorage) MarkPlanStatus(ctx context.Context, turnID, sessio
 	if !o.Ready() || strings.TrimSpace(turnID) == pCommon.BlankString {
 		return nil
 	}
-	
+
 	if err := o.accessor.UpdatePlanStatus(sessionID, turnID, status); err != nil {
 		logging.LogWarnF("OrchestratorStorage:mark platter status(%s) error:%s", status, err.Error())
 	}

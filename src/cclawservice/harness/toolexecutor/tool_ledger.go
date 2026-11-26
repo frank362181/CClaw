@@ -8,9 +8,14 @@
 
 package toolexecutor
 
-// ToolLedger 两阶段留痕:先登记"已发起",执行完再回填结果。
+// IToolLedger 两阶段留痕:先登记"已发起",执行完再回填结果。
 // 用户中断时后续代码可能走不到,所以 Start 必须早于任何可能失败的动作。
-type ToolLedger interface {
+type IToolLedger interface {
 	Start(name string, at int64) int
 	Finish(index int, at int64, content string)
 }
+
+type NopToolLedger struct{}
+
+func (NopToolLedger) Start(name string, at int64) int            { return -1 }
+func (NopToolLedger) Finish(index int, at int64, content string) {}

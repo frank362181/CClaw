@@ -600,6 +600,18 @@ func ValidateUrl(rawUrl string, whiteList []string) bool {
 	return true
 }
 
+// 从一段话中通过正则表达式探测是否存在绝对路径,若有直接抽取
+var absolutePathDetect = regexp.MustCompile(`(?:^|[^A-Za-z0-9._~\-/])(/[A-Za-z0-9._~%+\-@\p{Han}][A-Za-z0-9._~%+\-@/\p{Han}]* )?`)
+
+func DetectAbsolutePath(question string) string {
+	match := absolutePathDetect.FindStringSubmatch(strings.TrimSpace(question))
+	if len(match) < 2 {
+		return BlankString
+	}
+
+	return strings.TrimRight(strings.TrimSpace(match[1]), ".,;:，。；：")
+}
+
 // =================================== member of object ======================
 
 func (o *OSUtility) GetHostName() string {

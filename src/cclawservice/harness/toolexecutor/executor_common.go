@@ -45,14 +45,14 @@ const (
 	scriptMaxInputJSON = 64 * 1024         // 传入参数 JSON 上限
 )
 
-// IToolRoundExecutor 工具执行策略:同步接口串行、流式接口同轮并行 + 进度汇集
+// IToolExecutedWrapper 工具执行策略:同步接口串行、流式接口同轮并行 + 进度汇集
 // 这是 runToolLoop 与 streamToolLoop 之间唯一的差异,故抽成可替换的策略对象。
-type IToolRoundExecutor interface {
+type IToolExecutedWrapper interface {
 	// RunAll 执行本轮模型声明的全部工具调用
 	// 契约:
 	//   - 返回的 outcome **顺序**必须与 invocations 一致
 	//   - 返回条数 <= len(invocations):只有 ctx 已取消时才能缺条
-	RunAll(ctx context.Context, env ToolEnv, invocations []ToolInvocation, sink common.IToolEventSink, ledger ToolLedger) []ToolOutcome
+	RunAll(ctx context.Context, env ToolEnv, invocations []ToolInvocation, sink common.IToolEventSink, ledger IToolLedger) []ToolOutcome
 }
 
 // ScriptArgument 工具脚本执行的参数
