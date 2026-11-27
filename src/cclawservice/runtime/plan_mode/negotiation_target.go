@@ -10,6 +10,7 @@
 package plan_mode
 
 import (
+	"path/filepath"
 	"strings"
 
 	pCommon "my.favorite/platformutility/common"
@@ -43,7 +44,7 @@ func UsableTargets(targets []NegotiationTarget) []NegotiationTarget {
 // MarkPrimaryTarget 标记主目标(与spec.project_dir一致即是)
 // 审批页能回答本地要跑哪个
 func MarkPrimaryTarget(targets []NegotiationTarget, projectDir string) []NegotiationTarget {
-	primaryDir := strings.TrimSpace(projectDir)
+	primaryDir := filepath.Clean(strings.TrimSpace(projectDir))
 	if len(targets) == 0 && primaryDir == "" {
 		return nil
 	}
@@ -51,23 +52,38 @@ func MarkPrimaryTarget(targets []NegotiationTarget, projectDir string) []Negotia
 	out := make([]NegotiationTarget, 0, len(targets)+1)
 	out = append(out, targets...)
 
+	if primaryDir == "." || primaryDir == pCommon.BlankString {
+		return out
+	}
+
 	for i := range out {
-		if primaryDir != pCommon.BlankString && strings.EqualFold(strings.TrimSpace(out[i].ProjectDir), projectDir) {
+		dir := strings.TrimSpace(out[i].ProjectDir)
+		if dir == pCommon.BlankString {
+			continue
+		}
+
+		if filepath.Clean(dir) == projectDir {
 			out[i].Found, out[i].Primary = true, true
 			return out
 		}
 	}
 
-	if primaryDir != pCommon.BlankString {
-		out = append(out, NegotiationTarget{
-			Name:       projectDir,
+	return out
+}
+
+func MarkPrimaryTargetWithDefault(targets []NegotiationTarget, projectDir string) []NegotiationTarget {
+	targets = MarkPrimaryTarget(targets, projectDir)
+	if len(targets) == 0 {
+		return []NegotiationTarget{{
+			Name:       fallbackTargetName(projectDir), // 使用目录名
 			ProjectDir: projectDir,
 			Found:      true,
 			Primary:    true,
-		})
+			Reason:     "本轮执行",
+		}}
 	}
 
-	return out
+	return targets
 }
 
 // BuildTargetWarnings 面向用户展示非阻塞的告警
@@ -111,4 +127,13 @@ func PromptNeedMoreInfoFeedback(usable NegotiationTarget) string {
 func DemoteProceedFeedback() string {
 	return "targets 里没有任何可用目标(全部 found=false)。\n" +
 		"若确实都没有材料,请用 decision=need_more_info 重新提交,missing 里逐条列出追问项或候选绝对路径。"
+}
+
+func fallbackTargetName(dir string) string {
+	name := filepath.Base(filepath.Clean(strings.TrimSpace(dir)))
+	if name == pCommon.BlankString || name == "." || name == string(filepath.Separator) {
+		return "未命名目标"
+	}
+
+	return name
 }

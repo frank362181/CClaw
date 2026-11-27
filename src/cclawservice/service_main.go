@@ -105,7 +105,7 @@ func (m *ServiceMain) Init() error {
 	// 并发闸上限(ini [server],<=0 用默认):全局并发限制 + 流式并发限制
 	m.serviceConfig, _ = selfconfig.LoadServiceConfig(m.configHelper)
 	m.storageConfig, _ = config.LoadDataStorageConfig(m.configHelper)
-	m.concurrent = concurrency.GetConcurrentController(m.serviceConfig.Server.MaxChatConcurrency) //serviceCore.GetStreamConcurrencyGate(maxStreams)
+	m.concurrent = concurrency.GetConcurrentController(m.serviceConfig.Server.MaxChatConcurrency)
 
 	// 3. initialize the app
 	m.memoryDB = memory_db.CreateMemoryDb(m.storageConfig)

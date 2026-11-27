@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	cCommon "my.favorite/cclawservice/common"
 	myException "my.favorite/cclawservice/exception"
+	"my.favorite/cclawservice/harness/security"
 	"my.favorite/cclawservice/request"
 	"my.favorite/cclawservice/runtime"
 	chatCommon "my.favorite/cclawservice/runtime/common"
@@ -282,7 +283,7 @@ func (cc *ChatController) ApproveChat(c *gin.Context) {
 		return
 	}
 
-	if err := chatService.Approve(loginSession.LoginName, req.TurnId, req.Approved); err != nil {
+	if err := chatService.Approve(loginSession.LoginName, req.TurnId, security.InteractiveApprovalPlan, req.Approved); err != nil {
 		respondChatError(c, err)
 		return
 	}

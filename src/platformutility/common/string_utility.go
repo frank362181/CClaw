@@ -89,6 +89,25 @@ func TrimFloat(value float64) string {
 	return text
 }
 
+// SanitizeCode 目标可能包含':','/'等,将其压成全字符
+func SanitizeCode(code string) string {
+	var builder strings.Builder
+	for _, r := range code {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+			builder.WriteRune(r)
+		default:
+			builder.WriteRune('_')
+		}
+	}
+
+	if builder.Len() == 0 {
+		return "target"
+	}
+
+	return builder.String()
+}
+
 // NormalizeFact 事实的规范化形式:去空白、去标点差异、小写。
 // 目的:同一事实的不同措辞(空格/标点/大小写)不应被重复写入。
 func NormalizeFact(fact string) string {

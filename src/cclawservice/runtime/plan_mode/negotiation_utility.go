@@ -96,6 +96,7 @@ func BuildIntentionSystemPrompt(req NegotiationRequest) string {
 	builder.WriteString("   (3) 未找到的目标**不得阻断执行**，也不要 proceed 到不存在的目录：写进 targets(found=false)+reason；\n")
 	builder.WriteString("   (4) 其余有材料但本轮不执行的目标也写进 targets(found=true)，reason 写“本轮不执行（可作为下一次请求）”；\n")
 	builder.WriteString("   (5) 只有**全部**目标都没有材料时，才 decision=need_more_info，missing 里逐条列出候选绝对路径或追问项。\n")
+	builder.WriteString("   (6) 能一次查完就一次查完：多目标可合并成一次 glob，例如 pattern=\"*{罗勇兴,张三,李四}*/**\"，避免逐个人探测。\n")
 	builder.WriteString("4. 探测到目标目录里没有 schema 声明的材料扩展名(.pdf/.docx/.xlsx/.csv/.jpg/.png/.tif…)时，\n")
 	builder.WriteString("   必须 decision=need_more_info，**不要 proceed**。\n")
 	builder.WriteString("5. project_dir 必须是**绝对路径**，且与探测结果/已知事实完全一致(直接照抄,不要改写、不要补尾斜杠)。\n")
@@ -155,21 +156,35 @@ func GetTaskLabel(task PlanTask) string {
 }
 
 // GetNegotiationReadPath 根据原始材料目录、目标探测的目录得到系统工具读取的目录列表
+// detectedPath 必须在 materialsRoot目录范围内
 func GetNegotiationReadPath(materialsRoot, detectedPath string) []string {
 	roots := make([]string, 0, 2)
-	if dir := strings.TrimSpace(materialsRoot); dir != "" {
-		roots = append(roots, dir)
+
+	root := strings.TrimSpace(materialsRoot)
+	if root != pCommon.BlankString {
+		roots = append(roots, filepath.Clean(root))
 	}
 
-	if dir := strings.TrimSpace(detectedPath); dir != "" {
-		if info, err := os.Stat(dir); err == nil {
-			if info.IsDir() {
-				roots = append(roots, dir)
-			} else {
-				roots = append(roots, filepath.Dir(dir))
-			}
-		}
+	dir := strings.TrimSpace(detectedPath)
+	if dir == pCommon.BlankString || root == pCommon.BlankString {
+		return roots
 	}
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		return roots // 不存在：不需要探测
+	}
+
+	if !info.IsDir() {
+		dir = filepath.Dir(dir)
+	}
+
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(dir))
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return roots // 目录越权
+	}
+
+	roots = append(roots, filepath.Clean(dir))
 
 	return roots
 }

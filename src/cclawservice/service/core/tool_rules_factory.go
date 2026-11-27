@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	config2 "my.favorite/cclawservice/config"
+	"my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/toolexecutor"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/logging"
@@ -40,7 +41,16 @@ func GetToolConfigRules(chattingConfig config2.ChatConfig) toolexecutor.ToolConf
 	rules.AutoAllowBashIfSandboxed = chattingConfig.ToolRule.AutoAllowBashIfSandboxed
 
 	rules.ReadRoots = normalizeAbsoluteRoots(ToolConfiguredRuleKeyReadRoots, chattingConfig.ToolRule.ReadRoots)
+	// 添加系统默认的,当前的工作目录和临时目录
+	tmpDir, _ := pCommon.SafeJoin(pCommon.GetExecutableDir(), common.AgentServiceWorkspaceDirName)
+	rules.ReadRoots = append(rules.ReadRoots, tmpDir)
+	tmpDir, _ = pCommon.SafeJoin(pCommon.GetExecutableDir(), "temp")
+	rules.ReadRoots = append(rules.ReadRoots, tmpDir)
+
 	rules.WriteRoots = normalizeAbsoluteRoots(ToolConfiguredRuleKeyWriteRoots, chattingConfig.ToolRule.WriteRoots)
+	tmpDir, _ = pCommon.SafeJoin(pCommon.GetExecutableDir(), "temp")
+	rules.WriteRoots = append(rules.WriteRoots, tmpDir)
+
 	rules.DenyRoots = normalizeDenyRoots(chattingConfig.ToolRule.DenyRoots)
 
 	if rules.AutoAllowBashIfSandboxed && (!rules.SandboxEnabled || !toolexecutor.GetSandboxMgr().Available()) {

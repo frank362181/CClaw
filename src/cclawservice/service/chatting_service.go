@@ -229,7 +229,7 @@ func (s *ChattingService) Stream(ctx context.Context, cmd chatCommon.Command, si
 	return s.chat(ctx, cmd, sink)
 }
 
-func (s *ChattingService) Approve(sender, turnId string, approved bool) error {
+func (s *ChattingService) Approve(sender, turnId string, kind security.InteractiveApprovalType, approved bool) error {
 	sender = strings.TrimSpace(sender)
 	turnId = strings.TrimSpace(turnId)
 
@@ -237,9 +237,9 @@ func (s *ChattingService) Approve(sender, turnId string, approved bool) error {
 		return pException.ParameterEmptyErrorEx("chattingService.Approve: empty chatId")
 	}
 
-	if !security.GetApprovalRegistry().Decide(sender, turnId,
-		security.InteractiveApprovalPlan, security.ApprovalResponse{Approval: approved}) {
-		return myException.ChatNotActiveKind.Newf("chattingService.Approve: no pending approval:%s", turnId)
+	reply := security.ApprovalResponse{Approval: approved}
+	if !security.GetApprovalRegistry().Decide(sender, turnId, kind, reply) {
+		return myException.ChatNotActiveKind.Newf("chattingService.Approve: no pending approval:%s(%s)", turnId, kind)
 	}
 
 	return nil
@@ -278,7 +278,29 @@ func (s *ChattingService) chat(ctx context.Context, cmd chatCommon.Command, sink
 	turn.Timing = tTiming
 
 	// 四道闸门:技能激活 -> mode -> 协商 -> 校验; 任一不通过都落回下面的单轮路径
-	switch result := s.isPlanMode(tmpCtx, turn, sink); result.Decision {
+	// 协商最可能在argTimeout内完成,协商结束就将结束操作给释放掉
+	negotiateCtx := tmpCtx
+	releaseNegotiate := func() {}
+	if sink.IsStreamed() && s.turnRegistrator != nil {
+		negotiateCtx, releaseNegotiate = s.turnRegistrator.Register(tmpCtx, cmd)
+	}
+	result := s.isPlanMode(negotiateCtx, turn, sink)
+	interrupted := negotiateCtx.Err() != nil
+	releaseNegotiate() //释放
+
+	if interrupted {
+		answer := "已中断"
+		sink.OnDelta(answer)
+
+		firstVisibleMs = time.Since(start).Milliseconds()
+		return chatCommon.Reply{
+			SessionID:    turn.Cmd.SessionId,
+			TurnID:       turn.Cmd.TurnID,
+			FinishReason: "stop",
+			At:           pCommon.GetDatetimeUtilityInstance().GetCurrentDatetime().Timestamp,
+		}, nil
+	}
+	switch result.Decision {
 	case planModeDecisionRun:
 		// 执行plan mode模式
 		return s.runPlanMode(tmpCtx, turn, result.Plan, result.Spec, sink, start, &firstVisibleMs)
@@ -296,6 +318,16 @@ func (s *ChattingService) isPlanMode(ctx context.Context, turn *chatCommon.TurnS
 	if turn == nil || s.chattingConfig.Chat.Mode == common.PlanModeOff {
 		return planModeResult{Decision: planModeDecisionSkip}
 	}
+
+	// 0. 确保同一个用户的请求为串行
+	release, ok := concurrency.GetSerializerLimiter().TryEnter(turn.Cmd.Sender)
+	if !ok {
+		if sink != nil {
+			sink.OnNotice(common.ChatNoticeIncomplete, "上一个请求还在确认中,请稍后...")
+		}
+		return planModeResult{Decision: planModeDecisionHandled, Answer: "上一个请求还在确认中,请稍后再发。"}
+	}
+	defer release()
 
 	// 1. 获取当前活跃且有sop的skill document
 	var activeSkillId string
@@ -550,7 +582,13 @@ func (s *ChattingService) awaitApproval(ctx context.Context, turn *chatCommon.Tu
 
 	// [单点收敛] 拒绝/超时/中断都必须把计划状态收敛为 canceled
 	if !approved {
-		_ = s.planModeEngine.MarkPlanStatus(ctx, turn.Cmd.TurnID, turn.Cmd.SessionId, plan_mode.StatusCanceled)
+		// 此时ctx已经取消了,ctx写库会静默失败,因此重新用一个context
+		persistCtx, cancelPersist := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancelPersist()
+		err := s.planModeEngine.MarkPlanStatus(persistCtx, turn.Cmd.TurnID, turn.Cmd.SessionId, plan_mode.StatusCanceled)
+		if err != nil {
+			logging.LogWarnF("plan mode:mark canceled failed,turn=%s,error=%s", turn.Cmd.TurnID, err.Error())
+		}
 	}
 
 	return approved

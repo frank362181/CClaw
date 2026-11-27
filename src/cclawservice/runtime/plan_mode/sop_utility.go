@@ -49,8 +49,14 @@ func UnmarshalPlanFromJson(text string) (Plan, error) {
 	return writeFormat.Plan, nil
 }
 
+// GetFingerprintOfPlan 这里要去掉Targets/Warnings(包含LLM生成的reason文案,会有较大的幻觉)
+// 若计入指纹,同一turn重新展开时很有可能导致plan不一致
 func GetFingerprintOfPlan(plan Plan) string {
-	text, err := MarshalPlanToJson(plan)
+	executable := plan
+	executable.Targets = nil
+	executable.Warnings = nil
+
+	text, err := MarshalPlanToJson(executable)
 	if err != nil {
 		return pCommon.BlankString
 	}
@@ -130,7 +136,7 @@ func SpecFieldsChanged(before, after bizCommon.ISpec) bool {
 	return false
 }
 
-// 将工具调用列表压成扁的string,方便日志输出
+// DescribeToolCalls 将工具调用列表压成扁的string,方便日志输出
 func DescribeToolCalls(calls []llmproto.ToolCall) string {
 	if len(calls) == 0 {
 		return pCommon.BlankString

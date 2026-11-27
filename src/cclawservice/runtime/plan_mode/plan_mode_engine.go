@@ -295,12 +295,19 @@ func (engine *PlanModeEngine) negotiateSpec(ctx context.Context, input Negotiati
 			issues := input.NegSpec.Validate(decoded, input.SkillDoc.FrontMatter)
 			if len(issues) == 0 {
 				projectDir := decoded.Fields()["project_dir"]
+				materialsRoot := input.SystemToolExtraFacts["materials_root"]
 				if deniedPath, deniedErr := engine.checkReadPaths(input.NegSpec, decoded, input.Rules, input.WorkRoot); deniedErr != nil {
 					feedback = "材料目录不可用:" + deniedErr.Error() + "\n请向用户确认目录,或改用可访问的路径。"
 					logging.LogWarnF("plan mode: path denied,path=%s,turn=%s,dir=%s,error=%s", deniedPath, input.TurnID, projectDir, deniedErr.Error())
 					continue
 				}
-				targets := MarkPrimaryTarget(result.Targets, projectDir)
+
+				if !pCommon.WithinRoots(projectDir, []string{materialsRoot}) {
+					feedback = "材料目录必须位于材料根目录内:" + materialsRoot + "\n请确认目录,或改用材料根下的子目录。"
+					logging.LogWarnF("plan mode:project dir outside materials root,turn=%s,dir=%s,root=%s",
+						input.TurnID, projectDir, materialsRoot)
+				}
+				targets := MarkPrimaryTargetWithDefault(result.Targets, projectDir)
 
 				engine.reportDecision(ctx, input.TurnID, input.SkillID, string(DecisionProceed), result)
 				return NegotiationOutput{Ready: true, Spec: decoded, Targets: targets, Warnings: BuildTargetWarnings(targets, projectDir)}
@@ -335,7 +342,7 @@ func (engine *PlanModeEngine) negotiateSpec(ctx context.Context, input Negotiati
 			return NegotiationOutput{
 				End:    true,
 				Answer: "没生成执行计划:" + result.Reason + "。\n请补充材料目录的绝对路径（或债务人姓名），我再重试。",
-			} // 协商失败(超时、未表态、上游错误):降级为单轮解决问题
+			}
 		}
 	}
 

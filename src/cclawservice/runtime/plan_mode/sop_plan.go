@@ -60,16 +60,18 @@ func (p Plan) PlanSummary() string {
 // BuildPlanTargetGap 未命中 / 未执行目标 -> 计划缺口
 func BuildPlanTargetGap(targets []PlanTarget) []Gap {
 	gaps := make([]Gap, 0, len(targets))
+	index := 0
 	for _, t := range targets {
 		name := strings.TrimSpace(t.Name)
 		if name == pCommon.BlankString || t.Primary {
 			continue
 		}
 
+		index++
 		reason := strings.TrimSpace(t.Reason)
-		code := "target_missing:" + name
+		code := fmt.Sprintf("target_missing:%d:%s", index, pCommon.SanitizeCode(name))
 		if t.Found {
-			code = "target_skipped:" + name
+			code = fmt.Sprintf("target_skipped:%d:%s", index, pCommon.SanitizeCode(name))
 			if reason == pCommon.BlankString {
 				reason = "材料已找到,本轮不执行"
 			}

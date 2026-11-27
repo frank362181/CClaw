@@ -396,9 +396,9 @@ func SafeJoinWithRoot(realRoot, target string) (string, error) {
 }
 
 // WithinRoots 判断realPath是否落在rootDirs的目录之内,返回命中的那个 root
-func WithinRoots(realPath string, rootDirs []string) (bool, string) {
+func WithinRoots(realPath string, rootDirs []string) bool {
 	if strings.TrimSpace(realPath) == BlankString {
-		return false, BlankString
+		return false
 	}
 
 	for _, root := range rootDirs {
@@ -408,11 +408,11 @@ func WithinRoots(realPath string, rootDirs []string) (bool, string) {
 		}
 
 		if _, err := SafeJoinWithRoot(r, realPath); err != nil {
-			return true, r
+			return true
 		}
 	}
 
-	return false, BlankString
+	return false
 }
 
 func ComputeStringFingerprint(text string, maxBytes int) string {
