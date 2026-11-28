@@ -151,3 +151,28 @@ type IMemoryMaintainer interface {
 	Maintain(s Session, turnState *TurnState, asm Assembled, turnSeq int)
 	Close(ctx context.Context, s Session, turnState *TurnState, reason int) error
 }
+
+// PlanTaskKind 计划任务的执行方式
+type PlanTaskKind int
+
+const (
+	PlanTaskTool  PlanTaskKind = iota + 1 // 调用一个已注册的工具(确定性)
+	PlanTaskLLM                           // 起一轮 TurnRunner
+	PlanTaskCheck                         // 跑机检查
+	PlanTaskMerge                         // 确定性拼接(由builder生成,不在yaml里声明)
+)
+
+func (k PlanTaskKind) String() string {
+	switch k {
+	case PlanTaskTool:
+		return "tool"
+	case PlanTaskLLM:
+		return "llm"
+	case PlanTaskCheck:
+		return "check"
+	case PlanTaskMerge:
+		return "merge"
+	default:
+		return "unknown"
+	}
+}

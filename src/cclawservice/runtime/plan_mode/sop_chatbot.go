@@ -18,6 +18,7 @@ import (
 	"time"
 
 	cCommon "my.favorite/cclawservice/common"
+	chatCommon "my.favorite/cclawservice/runtime/common"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/common/hash"
 	"my.favorite/platformutility/concurrency"
@@ -229,11 +230,11 @@ func (e *PlanChatBotRunner) runTask(ctx context.Context, req PlanRequest, planTa
 	planState *PlanState, stateMu *sync.Mutex, artifactRepo *ArtifactMgr) {
 
 	switch planTask.Kind {
-	case PlanTaskTool:
+	case chatCommon.PlanTaskTool:
 		e.runToolTask(ctx, req, planTask, planState, stateMu, artifactRepo)
-	case PlanTaskMerge:
+	case chatCommon.PlanTaskMerge:
 		e.runMergeTask(planTask, planState, stateMu, artifactRepo, req)
-	case PlanTaskCheck, PlanTaskLLM:
+	case chatCommon.PlanTaskCheck, chatCommon.PlanTaskLLM:
 		e.mark(stateMu, planState, planTask, PlanTaskState{
 			TaskID: planTask.ID,
 			Status: StatusSkipped,
@@ -438,7 +439,7 @@ const llmTaskWait = 600 * time.Second
 func (e *PlanChatBotRunner) waveWait(tasks []PlanTask) time.Duration {
 	wait := e.tasksWait
 	for _, task := range tasks {
-		if task.Kind == PlanTaskLLM && wait < llmTaskWait {
+		if task.Kind == chatCommon.PlanTaskLLM && wait < llmTaskWait {
 			wait = llmTaskWait
 		}
 	}
@@ -628,7 +629,7 @@ func missingNeeds(task PlanTask, artifactRepo *ArtifactMgr) []string {
 }
 
 func getToolDigest(task PlanTask, repo *ArtifactMgr) string {
-	if task.Kind != PlanTaskTool {
+	if task.Kind != chatCommon.PlanTaskTool {
 		return ""
 	}
 

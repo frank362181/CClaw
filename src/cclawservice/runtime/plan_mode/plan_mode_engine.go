@@ -17,6 +17,7 @@ import (
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/harness/toolexecutor"
 	"my.favorite/cclawservice/model/dataobject"
+	"my.favorite/cclawservice/runtime/cost"
 	pCommon "my.favorite/platformutility/common"
 	"my.favorite/platformutility/concurrency"
 	"my.favorite/platformutility/logging"
@@ -152,8 +153,12 @@ func (engine *PlanModeEngine) PreviewPlan(turnID, skillID string, doc hCommon.Sk
 		sink = cCommon.NopSink{}
 	}
 
+	projectDir := spec.Fields()["project_dir"]
+	scale := cost.ScanMaterialScale(projectDir)
+
 	defaultPlanArgs := DefaultPlanArguments()
 	defaultPlanArgs.KnownTools = hCommon.ConvertBasicTools2Map(doc.FrontMatter)
+	defaultPlanArgs.ScaleSnapshot = scale
 
 	plan, err := BuildPlanFromSkillSOPOutline(skillID, doc.FrontMatter.SOPOutLines, spec, defaultPlanArgs)
 	if err != nil {
@@ -171,9 +176,16 @@ func (engine *PlanModeEngine) PreviewPlan(turnID, skillID string, doc hCommon.Sk
 	if engine.chatConfig.Negotiation.RequireApproval {
 		verb = "计划待确认"
 	}
-	preview := fmt.Sprintf("%s:%s, %d 个步骤 / %d 个波次 / 预计 %d tokens", verb, spec.Brief(), plan.TaskCount, plan.WaveCount, plan.EstTokens)
-	if summary := plan.PlanSummary(); summary != pCommon.BlankString {
-		preview += "\n" + summary
+	preview := fmt.Sprintf("%s:%s, %d 个步骤 / %d 个波次 / 预计 ~%d tokens", verb, spec.Brief(), plan.TaskCount, plan.WaveCount, plan.EstTokens)
+	if scale.Scanned && scale.Files > 0 {
+		suffix := pCommon.BlankString
+		if scale.Truncated {
+			// 如果超过 500份材料被截断,明确标注
+			suffix = "+"
+		}
+		preview += fmt.Sprintf("（材料 %d%s 份 / %.1f MB，其中材料正文约 %d tokens）",
+			scale.Files, suffix, float64(scale.Bytes)/(1024*1024),
+			cost.EstimateMaterialsToken(scale, defaultPlanArgs.ScaleSnapshot.MaterialTokensPerFile, defaultPlanArgs.ScaleSnapshot.MaterialTokensCapacity))
 	}
 	sink.OnStatus("plan.preview", preview)
 
@@ -306,6 +318,7 @@ func (engine *PlanModeEngine) negotiateSpec(ctx context.Context, input Negotiati
 					feedback = "材料目录必须位于材料根目录内:" + materialsRoot + "\n请确认目录,或改用材料根下的子目录。"
 					logging.LogWarnF("plan mode:project dir outside materials root,turn=%s,dir=%s,root=%s",
 						input.TurnID, projectDir, materialsRoot)
+					continue
 				}
 				targets := MarkPrimaryTargetWithDefault(result.Targets, projectDir)
 

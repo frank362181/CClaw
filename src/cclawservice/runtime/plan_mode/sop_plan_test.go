@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v2"
+	chatCommon "my.favorite/cclawservice/runtime/common"
 
 	"my.favorite/cclawservice/biz/npa"
 	hCommon "my.favorite/cclawservice/harness/common"
@@ -59,7 +60,7 @@ func TestBuildPlanExpandsSectionsAndMerge(t *testing.T) {
 	sections, merges := 0, 0
 
 	for _, task := range plan.Tasks {
-		if task.ParentID == "compose" && task.Kind == PlanTaskLLM {
+		if task.ParentID == "compose" && task.Kind == chatCommon.PlanTaskLLM {
 			// 回归:章节任务必须有独立 ID,否则落库/UI/修复回路无法定位
 			if want := "compose#" + task.Section; task.ID != want {
 				t.Fatalf("章节任务 ID 应为 %q, got %q", want, task.ID)
@@ -68,7 +69,7 @@ func TestBuildPlanExpandsSectionsAndMerge(t *testing.T) {
 			sections++
 		}
 
-		if task.Kind == PlanTaskMerge {
+		if task.Kind == chatCommon.PlanTaskMerge {
 			merges++
 
 			if task.Produces != "draft" || len(task.Needs) != 3 {

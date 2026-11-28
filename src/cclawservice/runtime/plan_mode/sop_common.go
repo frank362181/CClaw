@@ -24,6 +24,8 @@ import (
 	bizCommon "my.favorite/cclawservice/biz/common"
 	hCommon "my.favorite/cclawservice/harness/common"
 	"my.favorite/cclawservice/model/dataobject"
+	chatCommon "my.favorite/cclawservice/runtime/common"
+	"my.favorite/cclawservice/runtime/cost"
 )
 
 // 校验规则编号
@@ -37,31 +39,6 @@ const (
 	RuleContractAbsent = "L7"
 	RuleReviewerField  = "L8"
 )
-
-// PlanTaskKind 计划任务的执行方式
-type PlanTaskKind int
-
-const (
-	PlanTaskTool  PlanTaskKind = iota + 1 // 调用一个已注册的工具(确定性)
-	PlanTaskLLM                           // 起一轮 TurnRunner
-	PlanTaskCheck                         // 跑机检查
-	PlanTaskMerge                         // 确定性拼接(由builder生成,不在yaml里声明)
-)
-
-func (k PlanTaskKind) String() string {
-	switch k {
-	case PlanTaskTool:
-		return "tool"
-	case PlanTaskLLM:
-		return "llm"
-	case PlanTaskCheck:
-		return "check"
-	case PlanTaskMerge:
-		return "merge"
-	default:
-		return "unknown"
-	}
-}
 
 // 任务运行状态(与 t_turn_task.status 一致)
 const (
@@ -91,7 +68,7 @@ type PlanTask struct {
 	ID       string                  `json:"id"` // 计划内唯一:compose#basic_info
 	ParentID string                  `json:"parentId,omitempty"`
 	Section  string                  `json:"section,omitempty"` // 章节名
-	Kind     PlanTaskKind            `json:"kind"`
+	Kind     chatCommon.PlanTaskKind `json:"kind"`
 	Action   string                  `json:"action"`          // tool名 / role名 / check集合名 / merge目标
 	Needs    []string                `json:"needs,omitempty"` // 依赖的产物名
 	Produces string                  `json:"produces,omitempty"`
@@ -144,9 +121,9 @@ type Plan struct {
 	Targets  []PlanTarget `json:"targets,omitempty"`
 	Warnings []string     `json:"warnings,omitempty"`
 
-	PlanPayload
-
 	Conditional int `json:"conditional"` // 条件模版
+
+	cost.PlanPayload
 }
 
 // PlanRequest 表示一次执行任务的请求
@@ -180,14 +157,8 @@ type PlanArguments struct {
 	RoundP95           time.Duration
 	SequentialSections bool                // 章节串行(结论引用前文)
 	KnownTools         map[string]struct{} // 必填:SKILL.md中outline含tool必须给出工具名称
-}
 
-// PlanPayload  计划规模:只服务预算与canDelegate
-type PlanPayload struct {
-	TaskCount  int           `json:"taskCount"`
-	WaveCount  int           `json:"waveCount"`
-	EstTokens  int64         `json:"estTokens"`
-	EstLatency time.Duration `json:"estLatency"` // 纳秒
+	ScaleSnapshot cost.MaterialScaleSnapshot // 材料规模由调用方注入;0 值表示未扫描,退化为原来的常量口径
 }
 
 // Severity 缺口级别

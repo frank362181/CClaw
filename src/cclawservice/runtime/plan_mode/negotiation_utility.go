@@ -91,7 +91,7 @@ func BuildIntentionSystemPrompt(req NegotiationRequest) string {
 	builder.WriteString("2. 用户已给出绝对路径时：直接用它作为 project_dir，**不需要任何探测**。\n")
 	builder.WriteString("3. 只给债务人姓名时：用 glob 在【已知事实 materials_root】下按 pattern=\"*<姓名>*/**\" 找**一次**；\n")
 	builder.WriteString("3.1 用户一次点名**多个目标**（如“罗勇兴、张三等多个债务人”）时：\n")
-	builder.WriteString("   (1) 每个目标各探测**一次**，结果写进 targets（name / project_dir / found / reason）；\n")
+	builder.WriteString("   (1) 每个目标各探测**一次**，结果写进 targets（name / project_dir / found / reason）：name必须是**债务人姓名**（如罗勇兴），不是目录名（10罗勇兴）；\n")
 	builder.WriteString("   (2) **只要至少一个目标有材料**，就 decision=proceed，spec.project_dir 填**第一个可用目标**的绝对路径；\n")
 	builder.WriteString("   (3) 未找到的目标**不得阻断执行**，也不要 proceed 到不存在的目录：写进 targets(found=false)+reason；\n")
 	builder.WriteString("   (4) 其余有材料但本轮不执行的目标也写进 targets(found=true)，reason 写“本轮不执行（可作为下一次请求）”；\n")

@@ -9,6 +9,7 @@ import (
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
@@ -23,6 +24,15 @@ func MD5(input string) string {
 	h := md5.Sum([]byte(input))
 	output := fmt.Sprintf("%x", h)
 	return output
+}
+
+func Sha1Sum(input string, length int) string {
+	sum := sha1.Sum([]byte(input))
+	if length%2 != 0 {
+		length++
+	}
+
+	return hex.EncodeToString(sum[:length])
 }
 
 func SHA256(input string) (string, error) {

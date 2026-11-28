@@ -75,7 +75,7 @@ func MarkPrimaryTargetWithDefault(targets []NegotiationTarget, projectDir string
 	targets = MarkPrimaryTarget(targets, projectDir)
 	if len(targets) == 0 {
 		return []NegotiationTarget{{
-			Name:       fallbackTargetName(projectDir), // 使用目录名
+			Name:       fallbackTargetName(projectDir), // 使用去掉前导和后导的目录名,很可能是债务人
 			ProjectDir: projectDir,
 			Found:      true,
 			Primary:    true,
@@ -129,10 +129,25 @@ func DemoteProceedFeedback() string {
 		"若确实都没有材料,请用 decision=need_more_info 重新提交,missing 里逐条列出追问项或候选绝对路径。"
 }
 
+// 目录名 -> 人名兜底:去掉前导编号/分隔符,只保留主体
 func fallbackTargetName(dir string) string {
 	name := filepath.Base(filepath.Clean(strings.TrimSpace(dir)))
 	if name == pCommon.BlankString || name == "." || name == string(filepath.Separator) {
 		return "未命名目标"
+	}
+
+	// 删除 name 的前导符号
+	trimmed := strings.TrimLeftFunc(name, func(r rune) bool {
+		return r == '_' || r == '-' || r == '.' || (r >= '0' && r <= '9')
+	})
+
+	// 删除 name 的后导符号
+	trimmed = strings.TrimRightFunc(trimmed, func(r rune) bool {
+		return r == '_' || r == '-' || r == '.' || (r >= '0' && r <= '9')
+	})
+
+	if trimmed = strings.TrimSpace(trimmed); trimmed != pCommon.BlankString {
+		return trimmed
 	}
 
 	return name

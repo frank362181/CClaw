@@ -20,7 +20,10 @@ import (
 
 	bizCommon "my.favorite/cclawservice/biz/common"
 	hCommon "my.favorite/cclawservice/harness/common"
+	chatCommon "my.favorite/cclawservice/runtime/common"
+	"my.favorite/cclawservice/runtime/cost"
 	pCommon "my.favorite/platformutility/common"
+	"my.favorite/platformutility/common/hash"
 )
 
 const (
@@ -69,9 +72,9 @@ func BuildPlanTargetGap(targets []PlanTarget) []Gap {
 
 		index++
 		reason := strings.TrimSpace(t.Reason)
-		code := fmt.Sprintf("target_missing:%d:%s", index, pCommon.SanitizeCode(name))
+		code := fmt.Sprintf("target_missing:%d:%s", index, hash.Sha1Sum(name, 4))
 		if t.Found {
-			code = fmt.Sprintf("target_skipped:%d:%s", index, pCommon.SanitizeCode(name))
+			code = fmt.Sprintf("target_skipped:%d:%s", index, hash.Sha1Sum(name, 4))
 			if reason == pCommon.BlankString {
 				reason = "材料已找到,本轮不执行"
 			}
@@ -120,6 +123,8 @@ func DefaultPlanArguments() PlanArguments {
 		ToolReplyTokens:    defaultToolReplyTokens,
 		RoundP95:           defaultRoundP95,
 		SequentialSections: true,
+
+		ScaleSnapshot: cost.DefaultScaleSnapShot(),
 	}
 }
 
@@ -195,7 +200,7 @@ func BuildPlanFromSkillSOPOutline(skillId string, sopSteps []hCommon.SkillSOPSte
 		}
 
 		// kind = llm
-		if kind == PlanTaskLLM && len(step.Sections) > 0 {
+		if kind == chatCommon.PlanTaskLLM && len(step.Sections) > 0 {
 			tasks = append(tasks, expandSections(planTask, step.Sections, args)...)
 			if merged, ok := buildMergeTasks(step); ok {
 				tasks = append(tasks, merged)
@@ -231,30 +236,30 @@ func BuildPlanFromSkillSOPOutline(skillId string, sopSteps []hCommon.SkillSOPSte
 
 // ======================== private functions & methods ========================
 
-func getActionFromSkillSOP(kind PlanTaskKind, step hCommon.SkillSOPStep) string {
+func getActionFromSkillSOP(kind chatCommon.PlanTaskKind, step hCommon.SkillSOPStep) string {
 	switch kind {
-	case PlanTaskTool:
+	case chatCommon.PlanTaskTool:
 		return strings.TrimSpace(step.Tool)
-	case PlanTaskLLM:
+	case chatCommon.PlanTaskLLM:
 		if role := strings.TrimSpace(step.Role); role != pCommon.BlankString {
 			return role
 		}
 		return "analyst"
-	case PlanTaskCheck:
+	case chatCommon.PlanTaskCheck:
 		return "check"
 	default:
 		return pCommon.BlankString
 	}
 }
 
-func getPlanTaskByStepKind(kind string) PlanTaskKind {
+func getPlanTaskByStepKind(kind string) chatCommon.PlanTaskKind {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case hCommon.SOPStepKindTool:
-		return PlanTaskTool
+		return chatCommon.PlanTaskTool
 	case hCommon.SOPStepKindLLM:
-		return PlanTaskLLM
+		return chatCommon.PlanTaskLLM
 	case hCommon.SOPStepKindCheck:
-		return PlanTaskCheck
+		return chatCommon.PlanTaskCheck
 	default:
 		return 0
 	}
@@ -269,8 +274,8 @@ func getContractFromSkillSOP(sopStep hCommon.SkillSOPStep) hCommon.SOPStepContra
 }
 
 // 工具步允许重试(SOP 契约):最多 2 次;LLM /check 一次为佳
-func getMaxTries(kind PlanTaskKind, maxTries int) int {
-	if kind == PlanTaskTool {
+func getMaxTries(kind chatCommon.PlanTaskKind, maxTries int) int {
+	if kind == chatCommon.PlanTaskTool {
 		if maxTries > 0 {
 			return maxTries
 		}
@@ -345,7 +350,7 @@ func buildMergeTasks(step hCommon.SkillSOPStep) (PlanTask, bool) {
 	merged := PlanTask{
 		ID:       parentID + mergeTaskIDSuffix,
 		ParentID: parentID,
-		Kind:     PlanTaskMerge,
+		Kind:     chatCommon.PlanTaskMerge,
 		Action:   produces,
 		Needs:    needs,
 		Produces: produces,
@@ -356,7 +361,7 @@ func buildMergeTasks(step hCommon.SkillSOPStep) (PlanTask, bool) {
 	merged.Gate = strings.TrimSpace(step.Gate)
 	merged.Policy = strings.TrimSpace(step.Policy)
 	merged.OnFail = normalizeOnFail(step.OnFail)
-	merged.MaxRounds = normalizeRepairRounds(PlanTaskMerge, step.MaxRounds)
+	merged.MaxRounds = normalizeRepairRounds(chatCommon.PlanTaskMerge, step.MaxRounds)
 
 	return merged, true
 }
@@ -530,23 +535,32 @@ func validateTemplate(planTasks []PlanTask) error {
 	return nil
 }
 
-func estimatePlanPayload(planTasks []PlanTask, waves int, planArgs PlanArguments) PlanPayload {
-	workPayload := PlanPayload{TaskCount: len(planTasks), WaveCount: waves}
-	tokens := 0
+func estimatePlanPayload(planTasks []PlanTask, waves int, planArgs PlanArguments) cost.PlanPayload {
+	workPayload := cost.PlanPayload{
+		TaskCount: len(planTasks),
+		WaveCount: waves,
+
+		// 本次估算基于多少材料/多少字节
+		MaterialFiles: planArgs.ScaleSnapshot.Files,
+		MaterialBytes: planArgs.ScaleSnapshot.Bytes,
+	}
+	tokens := int64(0)
 
 	for _, planTask := range planTasks {
 		switch planTask.Kind {
-		case PlanTaskLLM:
-			tokens += planArgs.ChapterTokens
-		case PlanTaskTool:
-			tokens += planArgs.ToolReplyTokens
-		case PlanTaskMerge, PlanTaskCheck:
+		case chatCommon.PlanTaskLLM:
+			tokens += int64(planArgs.ChapterTokens)
+		case chatCommon.PlanTaskTool:
+			tokens += int64(planArgs.ToolReplyTokens)
+		case chatCommon.PlanTaskMerge, chatCommon.PlanTaskCheck:
 			//
 		}
 	}
 
-	workPayload.EstTokens = int64(tokens)
-	workPayload.EstLatency = time.Duration(waves) * planArgs.RoundP95
+	tokens += cost.EstimateMaterialsToken(planArgs.ScaleSnapshot, planArgs.ScaleSnapshot.MaterialTokensPerFile, planArgs.ScaleSnapshot.MaterialTokensCapacity)
+	workPayload.EstTokens = tokens
+	workPayload.EstLatency = time.Duration(waves)*planArgs.RoundP95 +
+		cost.EstimateMaterialLatency(planArgs.ScaleSnapshot, planArgs.ScaleSnapshot.MaterialIngestTimeoutPerFile)
 
 	return workPayload
 }
@@ -563,8 +577,8 @@ func normalizeOnFail(onFail string) string {
 }
 
 // 上限次数为 3，防止烧钱
-func normalizeRepairRounds(kind PlanTaskKind, rounds int) int {
-	if kind != PlanTaskLLM && kind != PlanTaskCheck {
+func normalizeRepairRounds(kind chatCommon.PlanTaskKind, rounds int) int {
+	if kind != chatCommon.PlanTaskLLM && kind != chatCommon.PlanTaskCheck {
 		return 0
 	}
 

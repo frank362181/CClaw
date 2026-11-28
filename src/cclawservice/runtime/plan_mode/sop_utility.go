@@ -53,8 +53,14 @@ func UnmarshalPlanFromJson(text string) (Plan, error) {
 // 若计入指纹,同一turn重新展开时很有可能导致plan不一致
 func GetFingerprintOfPlan(plan Plan) string {
 	executable := plan
+
+	// 展示/估算字段不参与指纹计算
 	executable.Targets = nil
 	executable.Warnings = nil
+	executable.EstTokens = 0
+	executable.EstLatency = 0
+	executable.MaterialFiles = 0
+	executable.MaterialBytes = 0
 
 	text, err := MarshalPlanToJson(executable)
 	if err != nil {

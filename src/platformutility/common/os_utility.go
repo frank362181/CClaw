@@ -397,9 +397,16 @@ func SafeJoinWithRoot(realRoot, target string) (string, error) {
 
 // WithinRoots 判断realPath是否落在rootDirs的目录之内,返回命中的那个 root
 func WithinRoots(realPath string, rootDirs []string) bool {
-	if strings.TrimSpace(realPath) == BlankString {
+	realPath = strings.TrimSpace(realPath)
+	if realPath == BlankString {
 		return false
 	}
+
+	realPathAbs, err := filepath.Abs(realPath)
+	if err != nil {
+		return false
+	}
+	realTarget := ResolveRealPath(filepath.Clean(realPathAbs))
 
 	for _, root := range rootDirs {
 		r := strings.TrimSpace(root)
@@ -407,7 +414,13 @@ func WithinRoots(realPath string, rootDirs []string) bool {
 			continue
 		}
 
-		if _, err := SafeJoinWithRoot(r, realPath); err != nil {
+		realRoot := ResolveRealPath(filepath.Clean(r))
+		if realRoot == realTarget {
+			return true
+		}
+
+		// 必须带分隔符,避免 /a/bc被判为在 /a/b之内
+		if strings.HasPrefix(realTarget, realRoot+string(filepath.Separator)) {
 			return true
 		}
 	}
